@@ -12,48 +12,62 @@
 # - a workflow sets top-level "permissions:";
 # - no "permissions:" value, top-level or in a job, is write-all;
 # - every job sets "timeout-minutes:" at job level (any indentation).
-# The lint reads YAML one line at a time, so it fails closed: a form it
-# cannot read reliably is a finding. That covers flow mappings ({ ... }, but
-# an empty {} is fine), a flow sequence holding a mapping, YAML tags (!!str),
-# anchors (&a), aliases (*a), merge keys (<<:), explicit keys (? key), a
-# line that starts with ":", a backslash escape in a double-quoted key or
-# value, and a block scalar as the value of permissions, uses or
-# timeout-minutes. Keys may be quoted, and a value may sit on the next,
-# deeper line. Text inside a block scalar (run: |) is not read. A UTF-8
-# byte-order mark at the start of a file is ignored.
+#
+# It reads YAML one line at a time, so it accepts only plain YAML whose
+# meaning a line reader can be sure of, and every other line is a finding.
+# Outside a block scalar (run: |), each line must be blank, a comment, or
+#   (indent)(- )KEY:        KEY made of letters, digits, _ . and -
+#   (indent)(- )KEY: VALUE
+#   (indent)- VALUE
+# where VALUE is a plain scalar, a block scalar indicator (| or >), a quoted
+# scalar closed on the same line (double quotes without backslashes), {} or
+# [], or a one-line [list] of plain or quoted scalars, each optionally
+# followed by a comment. Anything else (flow mappings, quoted or explicit
+# keys, tags, anchors, aliases, escapes, values over several lines, line
+# breaks other than LF) is reported, not guessed at. A UTF-8 byte-order mark
+# at the start of a file is ignored, and "---" may open a file.
 use strict;
 use warnings;
 
 # Prints one line of output. Control characters taken from file names or
 # content (also UTF-8 C1 controls) are shown as \xNN, and the CI runner's
-# command forms (## [ anywhere, :: at the start after spaces) are broken up,
-# so text from a file can never start a new line of output, move the cursor
-# or reach the CI runner as a command.
+# old command form (## [) is broken up, so text from a file cannot start a
+# new line of output, move the cursor or reach the CI runner as a command.
 sub say_line {
   my ($s) = @_;
   $s =~ s/([\x00-\x1F\x7F])/sprintf('\\x%02X', ord $1)/ge;
   $s =~ s/\xC2([\x80-\x9F])/sprintf('\\xC2\\x%02X', ord $1)/ge;
   $s =~ s/##\[/#\\x23[/g;
-  $s =~ s/^(\s*):(?=:)/$1\\x3A/;
   print "$s\n";
 }
+
+my $key_re = qr/[A-Za-z0-9_][A-Za-z0-9_.-]*/;
+# a plain scalar: no indicator first, no ": " or " #" inside, no ":" at the end
+my $plain_re = qr/(?:[^\s\-?:,\[\]{}#&*!|>'"%@`]|[-?:](?=\S))(?:[^:#]|:(?!\s|$)|(?<!\s)#)*(?<![\s:])/;
+my $single_re = qr/'(?:[^']|'')*'/;
+my $double_re = qr/"[^"\\]*"/;
+my $flow_item_re = qr/(?:[^\s\[\]{},:'"#&*!|>%@`][^\[\]{},:'"#]*?|$single_re|$double_re)/;
+my $flow_seq_re = qr/\[\s*(?:$flow_item_re\s*(?:,\s*$flow_item_re\s*)*)?\]/;
+my $comment_re = qr/(?:\s+#.*)?/;
+my $value_re = qr/(?:$plain_re|[|>][-+0-9]*|$single_re|$double_re|\{\}|$flow_seq_re)$comment_re/;
 
 # A scalar value without its comment and quotes.
 sub clean {
   my ($v) = @_;
   $v = '' unless defined $v;
-  $v =~ s/(?:^|\s+)#.*$//;
+  $v =~ s/\s+#.*$// unless $v =~ /^["']/;
+  $v =~ s/^(["'])(.*?)\1(?:\s+#.*)?$/$2/;
   $v =~ s/^\s+|\s+$//g;
-  $v =~ s/^(["'])(.*)\1$/$2/;
   return $v;
 }
 
 my ($examined, $actions, $bad) = (0, 0, 0);
 for my $file (@ARGV) {
-  open my $fh, '<', $file or do { say_line("workflows: cannot read $file"); $bad++; next };
-  my @lines = map { my $l = $_; $l =~ s/\r?\n\z//; $l } <$fh>;
+  open my $fh, '<:raw', $file or do { say_line("workflows: cannot read $file"); $bad++; next };
+  my $text = do { local $/; <$fh> };
   close $fh;
-  $lines[0] =~ s/^\xEF\xBB\xBF// if @lines;    # a byte-order mark
+  $text = '' unless defined $text;
+  $text =~ s/^\xEF\xBB\xBF//;    # a byte-order mark
   my $is_workflow = $file =~ m{(?:^|/)\.github/workflows/[^/]+\.ya?ml$};
   if ($is_workflow) { $examined++ } else { $actions++ }
   my $problem = sub {
@@ -61,89 +75,70 @@ for my $file (@ARGV) {
     $bad++;
   };
 
+  my @lines = split /\n/, $text, -1;
+  pop @lines if @lines && $lines[-1] eq '';
   my ($has_permissions, $in_jobs, $job_indent, $job, $child_indent) = (0, 0, undef, undef, undef);
   my (%timeout, @order);
   my $block_indent;    # set while inside a block scalar (run: |)
   for (my $i = 0; $i < @lines; $i++) {
     my $l = $lines[$i];
     my $n = $i + 1;
-    next if $l =~ /^\s*(?:#|$)/;
+    $l =~ s/\r\z//;    # CRLF is the line-endings check's business
+    # YAML also ends a line at CR, NEL, LS and PS; a reader that splits on LF
+    # alone would see two lines as one.
+    if ($l =~ /\r|\xC2\x85|\xE2\x80[\xA8\xA9]/) {
+      $problem->($n, 'a line break other than LF (a CR, NEL, LS or PS) cannot be read; use LF');
+      next;
+    }
+    next if $l =~ /^\s*(?:#.*)?$/;
     my ($lead) = $l =~ /^( *)/;
     my $ind = length $lead;
     if (defined $block_indent) {
       next if $ind > $block_indent;
       undef $block_indent;
     }
+    next if $n == 1 && $l =~ /^---\s*$/;
 
-    # key: value, with an optional list dash and an optional quoted key
+    # (the parts are copied out before the value is tested, because a second
+    # match resets $1, $2 and $3)
     my ($dash, $key, $value);
-    if ($l =~ /^\s*(-\s+)?(["']?)([A-Za-z0-9_<-]+)\2\s*:(?:\s+(.*))?$/) {
-      ($dash, $key, $value) = ($1, $3, defined $4 ? $4 : '');
-    } elsif ($l =~ /^\s*-\s+(.*)$/) {
-      $value = $1;
+    my @kv = $l =~ /^ *((?:- +)*)($key_re):(?: +(.*))?$/;
+    $kv[2] = undef if @kv && defined $kv[2] && $kv[2] =~ /^#/;    # KEY:  # a comment
+    my @item = $l =~ /^ *((?:- +)+)(.*)$/;
+    if (@kv && (!defined $kv[2] || $kv[2] =~ /^$value_re$/)) {
+      ($dash, $key, $value) = ($kv[0], $kv[1], defined $kv[2] ? $kv[2] : '');
+    } elsif (@item && $item[1] =~ /^$value_re$/) {
+      ($dash, $value) = @item;
     } else {
-      $value = '';
+      $problem->($n, 'this line is not plain YAML this check can read (a flow mapping, a quoted or explicit key, a tag, an anchor, an escape, or a value over several lines); write it as key: value on one line');
+      next;
     }
     my $v = clean($value);
-    # the value as written (quotes kept), without its comment and without
-    # ${{ }} expressions, which are not YAML structure
-    (my $plain = $value) =~ s/(?:^|\s+)#.*$//;
-    $plain =~ s/\$\{\{.*?\}\}//g;
-    $plain =~ s/^\s+|\s+$//g;
-
-    # a value on the next, deeper line belongs to this key
-    my $next_value = sub {
-      for (my $j = $i + 1; $j < @lines; $j++) {
-        next if $lines[$j] =~ /^\s*(?:#|$)/;
-        my ($nl) = $lines[$j] =~ /^( *)/;
-        return undef if length($nl) <= $ind;
-        return $lines[$j] =~ /^\s*[^\s:#][^:#]*$/ ? clean($lines[$j]) : undef;
-      }
-      return undef;
-    };
-
-    # fail closed on forms a line reader cannot follow
-    (my $unquoted = $plain) =~ s/"(?:[^"\\]|\\.)*"|'[^']*'//g;    # flow text outside quotes
-    if (($plain =~ /^\{/ && $plain !~ /^\{\s*\}$/) || $l =~ /^\s*(?:-\s+)?\{(?!\s*\}\s*(?:#.*)?$)/
-      || ($plain =~ /^\[/ && $unquoted =~ /\{|:(?:\s|$)/)) {
-      $problem->($n, 'a flow mapping ({ ... }) cannot be checked; write it in block style');
-    }
-    if ($plain =~ /^[!&*]/ || (defined $key && $key eq '<<')) {
-      $problem->($n, 'YAML tags, anchors, aliases and merge keys cannot be checked; write the value out');
-    }
-    if ($l =~ /^\s*(?:-\s+)?[?:](?:\s|$)/) {
-      $problem->($n, 'an explicit key (? key) or a line starting with ":" cannot be checked; write key: value');
-    }
-    if ($l =~ /^\s*(?:-\s+)?"(?:[^"\\]|\\.)*\\/ || $plain =~ /^"(?:[^"\\]|\\.)*\\/) {
-      $problem->($n, 'a backslash escape in a double-quoted key or value cannot be checked; write it plainly');
-    }
-    if ($v =~ /^[|>][-+0-9]*$/) {
+    if ($value =~ /^[|>]/) {
       $problem->($n, "a block scalar as the value of $key cannot be checked; write it on one line")
         if defined $key && $key =~ /^(?:permissions|uses|timeout-minutes)$/;
       # the block's text is everything indented deeper than this key
-      $block_indent = $ind + (defined $dash ? length $dash : 0);
+      $block_indent = $ind + length($dash);
     }
 
     next unless defined $key;
     if ($key eq 'uses') {
-      my $ref = length $v ? $v : $next_value->();
-      if (!defined $ref || !length $ref) {
-        $problem->($n, 'a "uses:" without a value this lint can read');
-      } elsif ($ref =~ m{^\./}) {
+      if (!length $v) {
+        $problem->($n, 'a "uses:" without a value');
+      } elsif ($v =~ m{^\./}) {
         # a local action: its own action file is checked
-      } elsif ($ref =~ m{^docker://}) {
-        $problem->($n, "'$ref' is not pinned to an \@sha256 digest") unless $ref =~ /\@sha256:[0-9a-f]{64}$/;
-      } elsif ($ref !~ /^[^\s@]+\@[0-9a-f]{40}$/) {
-        $problem->($n, "'$ref' is not pinned to a commit SHA");
+      } elsif ($v =~ m{^docker://}) {
+        $problem->($n, "'$v' is not pinned to an \@sha256 digest") unless $v =~ /\@sha256:[0-9a-f]{64}$/;
+      } elsif ($v !~ /^[^\s@]+\@[0-9a-f]{40}$/) {
+        $problem->($n, "'$v' is not pinned to a commit SHA");
       }
     }
     next unless $is_workflow;
     if ($key eq 'permissions') {
-      $has_permissions = 1 if $ind == 0 && !$dash;
-      my $p = length $v ? $v : $next_value->();
-      $problem->($n, 'permissions are write-all; grant only what is needed') if defined $p && $p eq 'write-all';
+      $has_permissions = 1 if $ind == 0 && !length $dash;
+      $problem->($n, 'permissions are write-all; grant only what is needed') if $v eq 'write-all';
     }
-    if ($ind == 0) {
+    if ($ind == 0 && !length $dash) {
       $in_jobs = $key eq 'jobs';
       ($job_indent, $job) = (undef, undef);
       next;
@@ -159,7 +154,7 @@ for my $file (@ARGV) {
     }
     next unless defined $job && $ind > $job_indent;
     $child_indent = $ind unless defined $child_indent;
-    $timeout{$job} = 1 if $ind == $child_indent && $key eq 'timeout-minutes' && (length $v || defined $next_value->());
+    $timeout{$job} = 1 if $ind == $child_indent && $key eq 'timeout-minutes' && length $v;
   }
   next unless $is_workflow;
   $problem->(undef, 'no top-level permissions:') unless $has_permissions;

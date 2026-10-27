@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Fails when a tracked text file has CRLF, mixed or CR-only line endings, in
-# the index or in the working tree. Only .cmd and .bat files may use CRLF.
+# the index or in the working tree. Only .cmd and .bat files, and files that
+# .gitattributes marks binary, may hold CR.
 # Checks what a fresh clone gets (tracked files), not untracked local files.
-# git calls a file binary (-text) when it holds a NUL byte or a lone CR. Such a
-# file, in the index or in the working tree, is read here directly unless
-# .gitattributes marks it binary: if it has no NUL byte and holds a CR, it
-# fails, so a lone CR cannot hide CRLF lines from this check.
+# The staged copy and the working copy are judged separately. git calls a
+# copy binary (-text) when it holds a NUL byte or a lone CR; such a copy is
+# read here directly, and fails if it holds a CR and no NUL byte, so a lone
+# CR cannot hide CRLF lines from this check.
 set -u
 
 root=$(git rev-parse --show-toplevel 2>/dev/null) || {
@@ -13,11 +14,13 @@ root=$(git rev-parse --show-toplevel 2>/dev/null) || {
   exit 2
 }
 cd "$root" || exit 2
+# Pathspecs below must mean what they say, whatever the caller's settings.
+unset GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS
 
 # Shows a path with control characters (also UTF-8 C1 controls) as \xNN and
-# the CI runner's command forms broken up.
+# the CI runner's old command form (## [) broken up.
 esc() {
-  printf '%s' "$1" | perl -pe 's/([\x00-\x1F\x7F])/sprintf("\\x%02X", ord $1)/ge; s/\xC2([\x80-\x9F])/sprintf("\\xC2\\x%02X", ord $1)/ge; s/##\[/#\\x23[/g; s/::/:\\x3A/g'
+  printf '%s' "$1" | perl -pe 's/([\x00-\x1F\x7F])/sprintf("\\x%02X", ord $1)/ge; s/\xC2([\x80-\x9F])/sprintf("\\xC2\\x%02X", ord $1)/ge; s/##\[/#\\x23[/g'
 }
 
 # cr_not_binary: standard input holds a CR and no NUL byte.
@@ -45,34 +48,33 @@ while IFS= read -r -d '' line; do
   read -r index_eol worktree_eol attr <<EOF
 $info
 EOF
-  if [ "$index_eol" = "i/-text" ] || [ "$worktree_eol" = "w/-text" ]; then
-    case "$attr" in
-      *-text*) continue ;; # marked binary in .gitattributes
-    esac
-    found=""
-    if [ "$index_eol" = "i/-text" ] && staged_blob "$path" | cr_not_binary; then
-      found="the staged copy"
-    fi
-    if [ "$worktree_eol" = "w/-text" ] && [ -f "$path" ] && cr_not_binary <"./$path"; then
-      found="${found:+$found and }the working copy"
-    fi
-    if [ -n "$found" ]; then
-      examined=$((examined + 1))
-      echo "line-endings: CR in $(esc "$path") ($found, which git reads as binary because of a lone CR)"
-      bad=$((bad + 1))
-      continue
-    fi
-    case "$index_eol" in
-      i/-text) continue ;; # binary in the index: nothing more to check
+  case "$attr" in
+    *-text*) continue ;; # marked binary in .gitattributes
+  esac
+  crlf=""
+  lone=""
+  case "$index_eol" in
+    i/crlf | i/mixed) crlf=1 ;;
+    i/-text) staged_blob "$path" | cr_not_binary && lone="the staged copy" ;;
+  esac
+  case "$worktree_eol" in
+    w/crlf | w/mixed) crlf=1 ;;
+    w/-text) [ -f "$path" ] && cr_not_binary <"./$path" && lone="${lone:+$lone and }the working copy" ;;
+  esac
+  if [ -n "$crlf" ]; then
+    examined=$((examined + 1))
+    echo "line-endings: CRLF in $(esc "$path") ($index_eol $worktree_eol)"
+    bad=$((bad + 1))
+  elif [ -n "$lone" ]; then
+    examined=$((examined + 1))
+    echo "line-endings: CR in $(esc "$path") ($lone, which git reads as binary because of a lone CR)"
+    bad=$((bad + 1))
+  else
+    case "$index_eol $worktree_eol" in
+      "i/-text w/-text" | "i/-text w/") ;; # binary, and nothing to check
+      *) examined=$((examined + 1)) ;;
     esac
   fi
-  examined=$((examined + 1))
-  case "$index_eol $worktree_eol" in
-    *crlf* | *mixed*)
-      echo "line-endings: CRLF in $(esc "$path") ($index_eol $worktree_eol)"
-      bad=$((bad + 1))
-      ;;
-  esac
 done < <(git ls-files -z --eol)
 
 if [ "$listed" -eq 0 ] || [ "$examined" -eq 0 ]; then

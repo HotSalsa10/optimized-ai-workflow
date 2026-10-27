@@ -11,7 +11,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 
 echo "tests: .gitignore"
 
-must_ignore="sub/.claude/settings.local.json .claude/settings.local.json prod.env .envrc .env.local cert.pem server.key store.p12 store.pfx id_rsa id_ed25519 .npmrc .netrc .pypirc .git-credentials credentials-prod.json .credentials.json client_secret_web.json my-service-account-key.json .aws/credentials prod.tfvars terraform.tfstate terraform.tfstate.backup id_dsa app.jks app.keystore key.ppk .pgpass .vault-token .docker/config.json .kube/config kubeconfig"
+must_ignore="sub/.claude/settings.local.json .claude/settings.local.json prod.env .envrc .env.local cert.pem server.key store.p12 store.pfx id_rsa id_ed25519 .npmrc .netrc .pypirc .git-credentials credentials-prod.json .credentials.json client_secret_web.json my-service-account-key.json .aws/credentials prod.tfvars terraform.tfstate terraform.tfstate.backup id_dsa app.jks app.keystore key.ppk .pgpass .vault-token .docker/config.json .kube/config sub/.docker/config.json sub/.kube/config kubeconfig"
 must_keep=".env.example planted.env.example scripts/dev/scan-secrets.sh .claude/settings.json prod.tfvars.example"
 
 # ignore_problems DIR: prints each path whose ignore status in DIR is wrong.

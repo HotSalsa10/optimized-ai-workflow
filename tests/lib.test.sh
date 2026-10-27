@@ -103,9 +103,11 @@ else
 fi
 rm -rf "$link_parent" "$src_repo/tmp-inside"
 
-# 6. a symlink that points outside the repo fails the sandbox, so no plant can
-#    write through it
-ln -s /tmp "$src_repo/abs-link" 2>/dev/null
+# 6. a symlink that points outside the repo, or whose target ln would read as
+#    an option, fails the sandbox, so no plant can write through it. The
+#    targets do not exist, so a system that copies instead of linking (Git
+#    Bash) copies nothing and the test is skipped.
+ln -s /nonexistent-sandbox-test/x "$src_repo/abs-link" 2>/dev/null
 ln -s ../outside "$src_repo/up-link" 2>/dev/null
 if [ -L "$src_repo/abs-link" ] && [ -L "$src_repo/up-link" ]; then
   out=$(cd "$src_repo" && make_sandbox)
@@ -125,6 +127,17 @@ if [ -L "$src_repo/abs-link" ] && [ -L "$src_repo/up-link" ]; then
     fail "make_sandbox fails on a symlink that climbs out with ..: exit $code, made '$out'"
     [ -n "$out" ] && drop_sandbox "$out"
   fi
+  rm -f "$src_repo/up-link"
+  ln -s -- -tnowhere "$src_repo/dash-link"
+  out=$(cd "$src_repo" && make_sandbox)
+  code=$?
+  if [ "$code" -ne 0 ] && [ -z "$out" ] && [ ! -e "$src_repo/nowhere" ]; then
+    pass "make_sandbox fails on a symlink whose target starts with -"
+  else
+    fail "make_sandbox fails on a symlink whose target starts with -: exit $code, made '$out'"
+    [ -n "$out" ] && drop_sandbox "$out"
+  fi
+  rm -f "$src_repo/dash-link"
 else
   skip "symlinks that point outside: this system cannot make symlinks"
 fi

@@ -39,8 +39,8 @@ id_dsa*
 *.ppk
 .pgpass
 .vault-token
-.docker/config.json
-.kube/config
+**/.docker/config.json
+**/.kube/config
 kubeconfig
 
 # Editors and operating systems

@@ -45,9 +45,9 @@ new_sandbox_dir() {
 # tracked and untracked (not ignored) file. Fails, and leaves nothing behind,
 # if any file could not be copied. Files deleted from the working tree are
 # left out, as they would be from a commit. A symlink is copied as a link
-# only when its target is relative and does not climb out with "..";
-# otherwise the sandbox fails, so no plant can write through a link to a
-# place outside the sandbox.
+# only when its target is relative, does not climb out with ".." and does
+# not start with "-" (which ln would read as an option); otherwise the
+# sandbox fails, so no plant can write through a link to a place outside.
 make_sandbox() {
   src=$(repo_root) || return 1
   dir=$(new_sandbox_dir) || return 1
@@ -60,8 +60,8 @@ make_sandbox() {
     if [ -L "$src/$f" ]; then
       target=$(readlink "$src/$f")
       case "$target" in
-        /* | .. | ../* | */.. | */../*) copy_failed=1 ;;
-        *) mkdir -p "$to" && ln -s "$target" "$dir/$f" || copy_failed=1 ;;
+        /* | -* | .. | ../* | */.. | */../*) copy_failed=1 ;;
+        *) mkdir -p "$to" && ln -s -- "$target" "$dir/$f" || copy_failed=1 ;;
       esac
     elif [ -f "$src/$f" ]; then
       mkdir -p "$to" && cp -p "$src/$f" "$dir/$f" || copy_failed=1

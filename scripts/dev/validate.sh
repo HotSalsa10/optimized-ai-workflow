@@ -42,8 +42,10 @@ run_check() {
 }
 
 # names: no tracked file name may hold a control character (a newline, an
-# escape); such a name could split or steer any tool's output.
-bad_names=$(git ls-files -z | perl -0ne 'chomp; next unless /[\x00-\x1F\x7F]/; s/([\x00-\x1F\x7F])/sprintf("\\x%02X", ord $1)/ge; s/::/:\\x3A/g; s/##\[/#\\x23[/g; print "$_\n"')
+# escape, or a UTF-8 C1 control); such a name could split or steer any tool's
+# output. The same byte-level test keeps such names away from the tools below.
+control_re='[\x00-\x1F\x7F]|\xC2[\x80-\x9F]'
+bad_names=$(git ls-files -z | CONTROL=$control_re perl -0ne 'chomp; next unless /$ENV{CONTROL}/; s/([\x00-\x1F\x7F])/sprintf("\\x%02X", ord $1)/ge; s/\xC2([\x80-\x9F])/sprintf("\\xC2\\x%02X", ord $1)/ge; s/##\[/#\\x23[/g; print "$_\n"')
 if [ -n "$bad_names" ]; then
   failed=$((failed + 1))
   failed_names="$failed_names names"
@@ -54,12 +56,10 @@ else
   echo "names: PASS - no tracked file name holds a control character"
 fi
 
-# plain_name NAME: the name holds no control character (tab, newline, escape).
-plain_name() {
-  case "$1" in
-    *[[:cntrl:]]*) return 1 ;;
-  esac
-  return 0
+# tracked_plain PATTERN: tracked files whose names match the perl PATTERN and
+# hold no control character, NUL-separated.
+tracked_plain() {
+  git ls-files -z | CONTROL=$control_re WANT=$1 perl -0ne 'chomp; print "$_\0" if /$ENV{WANT}/ && !/$ENV{CONTROL}/'
 }
 
 run_check line-endings bash scripts/dev/check-line-endings.sh
@@ -73,10 +73,8 @@ run_check workflows bash scripts/dev/lint-workflows.sh
 # Only the file, line and the start of each message are shown.
 pl_files=()
 while IFS= read -r -d '' f; do
-  case "$f" in
-    scripts/*.pl) [ -f "$f" ] && plain_name "$f" && pl_files+=("./$f") ;;
-  esac
-done < <(git ls-files -z)
+  [ -f "$f" ] && pl_files+=("./$f")
+done < <(tracked_plain '^scripts/.*\.pl\z')
 if [ "${#pl_files[@]}" -eq 0 ]; then
   failed=$((failed + 1))
   failed_names="$failed_names perl-syntax"
@@ -102,17 +100,17 @@ fi
 # The shellcheck tool is optional locally, and required where REQUIRE_SHELLCHECK=1.
 # It runs at its default severity, so unquoted variables (SC2086) are caught,
 # and in its one-line format, which does not quote source lines. It ignores
-# .shellcheckrc files (--norc), so a config file cannot switch it off. An
-# older version without --norc does not read those files either.
+# .shellcheckrc files (--norc), so a config file cannot switch it off (an
+# older version without --norc does not read those files either), and
+# SHELLCHECK_OPTS, so the environment cannot either.
+unset SHELLCHECK_OPTS
 if command -v shellcheck >/dev/null 2>&1; then
   norc=""
   shellcheck --help 2>&1 | grep -q -- --norc && norc="--norc"
   scripts=()
   while IFS= read -r -d '' f; do
-    case "$f" in
-      *.sh) [ -f "$f" ] && plain_name "$f" && scripts+=("./$f") ;;
-    esac
-  done < <(git ls-files -z)
+    [ -f "$f" ] && scripts+=("./$f")
+  done < <(tracked_plain '\.sh\z')
   if [ "${#scripts[@]}" -eq 0 ]; then
     failed=$((failed + 1))
     failed_names="$failed_names shellcheck"

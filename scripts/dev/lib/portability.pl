@@ -20,15 +20,14 @@ use warnings;
 
 # Prints one line of output. Control characters taken from file names or
 # content (also UTF-8 C1 controls) are shown as \xNN, and the CI runner's
-# command forms (## [ anywhere, :: at the start after spaces) are broken up,
-# so text from a file can never start a new line of output, move the cursor
-# or reach the CI runner as a command.
+# old command form (## [) is broken up, so text from a file cannot start a
+# new line of output, move the cursor or reach the CI runner as a command.
+# (Every line starts with this check's name, so it never starts with "::".)
 sub say_line {
   my ($s) = @_;
   $s =~ s/([\x00-\x1F\x7F])/sprintf('\\x%02X', ord $1)/ge;
   $s =~ s/\xC2([\x80-\x9F])/sprintf('\\xC2\\x%02X', ord $1)/ge;
   $s =~ s/##\[/#\\x23[/g;
-  $s =~ s/^(\s*):(?=:)/$1\\x3A/;
   print "$s\n";
 }
 

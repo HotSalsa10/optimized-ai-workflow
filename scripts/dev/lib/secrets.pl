@@ -44,7 +44,8 @@ sub esc {
 }
 sub say_line {
   my $s = esc($_[0]);
-  $s =~ s/^(\s*):(?=:)/$1\\x3A/;
+  # the runner trims Unicode spaces too (no-break space, LS, PS, ideographic)
+  $s =~ s/^((?:\s|\xC2\xA0|\xE1\x9A\x80|\xE2\x80[\x80-\x8A\xA8\xA9\xAF]|\xE2\x81\x9F|\xE3\x80\x80)*):(?=:)/$1\\x3A/;
   print "$s\n";
 }
 
@@ -179,25 +180,32 @@ sub mask {
   return "***($len chars)";
 }
 
+# mask_text TEXT: TEXT with every key, credential, personal email address,
+# phone number and IBAN masked. The whole text is masked first; then each
+# piece between escapes, because a check's output is already escaped and an
+# escape such as \x09 ends a word without leaving a space.
+sub mask_pass {
+  my ($s) = @_;
+  for my $r (@token_rules) { $s =~ s/($r->[0])/mask($1, 1)/ge }
+  $s =~ s/$quoted_cred/$1 . mask($3, 0)/ge;
+  $s =~ s/$env_cred/$1 . mask($3, 0)/e;
+  $s =~ s/($email_re)/email_ok($1) ? $1 : mask($1, 0)/ge;
+  for my $p (phone_hits($s)) { $s =~ s/\Q$p\E/mask($p, 0)/ge }
+  @iban_written = ();
+  iban_hits($s);
+  for my $w (@iban_written) { $s =~ s/\Q$w\E/mask($w, 0)/ge }
+  return $s;
+}
+sub mask_text {
+  my $s = mask_pass($_[0]);
+  return join '', map { /^\\x[0-9A-F]{2}$/ ? $_ : mask_pass($_) } split /(\\x[0-9A-F]{2})/, $s;
+}
+
 # --mask: a filter for other tools' output.
 if ($mask_mode) {
   while (my $line = <STDIN>) {
     $line =~ s/\r?\n\z//;
-    # A check's own output is already escaped; an escape such as \x09 ends a
-    # word, so each piece between escapes is masked on its own.
-    my @parts = split /(\\x[0-9A-F]{2})/, $line;
-    for my $part (@parts) {
-      next if $part =~ /^\\x[0-9A-F]{2}$/;
-      for my $r (@token_rules) { $part =~ s/($r->[0])/mask($1, 1)/ge }
-      $part =~ s/$quoted_cred/$1 . mask($3, 0)/ge;
-      $part =~ s/$env_cred/$1 . mask($3, 0)/e;
-      $part =~ s/($email_re)/email_ok($1) ? $1 : mask($1, 0)/ge;
-      for my $p (phone_hits($part)) { $part =~ s/\Q$p\E/mask($p, 0)/ge }
-      @iban_written = ();
-      iban_hits($part);
-      for my $w (@iban_written) { $part =~ s/\Q$w\E/mask($w, 0)/ge }
-    }
-    say_line('  ' . join('', @parts));
+    say_line('  ' . mask_text($line));
   }
   exit 0;
 }
@@ -344,7 +352,7 @@ sub classify {
 }
 
 sub scan_content {
-  my ($path, $label, $bytes) = @_;
+  my ($path, $label, $bytes) = @_;    # LABEL is the file name as shown, masked
   my ($text, $kind, $raw) = classify($bytes);
   my %seen;
   if ($kind eq 'binary') {
@@ -372,11 +380,20 @@ sub read_raw {
   return defined $bytes ? $bytes : '';
 }
 
+# A file name is shown masked, so a key or an email in a name is never
+# printed in full, and the name itself is scanned as text.
+my %name_done;
+sub scan_name {
+  my ($path) = @_;
+  return if $name_done{$path}++;
+  scan_line($path, 'a tracked file name (' . mask_text($path) . ')', $path, {}, 0);
+}
+
 for my $file (@ARGV) {
-  scan_line($file, "$file (file name)", $file, {}, 0);
+  scan_name($file);
   my $bytes = read_raw($file);
-  if (!defined $bytes) { say_line("secrets: cannot read $file"); $bad++; next; }
-  scan_content($file, $file, $bytes);
+  if (!defined $bytes) { say_line('secrets: cannot read ' . mask_text($file)); $bad++; next; }
+  scan_content($file, mask_text($file), $bytes);
 }
 
 # Staged copies that differ from the working tree.
@@ -415,8 +432,9 @@ if ($staged) {
       binmode $c;
       my $bytes = <$c>;
       close $c or die "secrets: git cat-file failed\n";
+      scan_name($path);
       my $before = $examined;
-      scan_content($path, "$path (staged)", defined $bytes ? $bytes : '');
+      scan_content($path, mask_text($path) . ' (staged)', defined $bytes ? $bytes : '');
       $staged_examined += $examined - $before;
     }
   }
