@@ -84,8 +84,10 @@ sb=$(make_sandbox) || abort_sandbox
 printf '#!/usr/bin/env bash\r\necho hi\r\n' >"$sb/planted-crlf-index.sh"
 # hash-object --no-filters stores the bytes as they are, so the index gets CRLF
 (cd "$sb" && oid=$(git hash-object -w --no-filters planted-crlf-index.sh) && git update-index --add --cacheinfo "100644,$oid,planted-crlf-index.sh" && git commit -q -m plant)
+# the working copy goes back to LF, so only the index holds CRLF
+printf '#!/usr/bin/env bash\necho hi\n' >"$sb/planted-crlf-index.sh"
 if expect_landed "line-endings plant 2" crlf_in_index "$sb" planted-crlf-index.sh; then
-  expect_red "line-endings red on a CRLF file committed to the index" "$sb" "CRLF in planted-crlf-index.sh (i/crlf" bash scripts/dev/check-line-endings.sh
+  expect_red "line-endings red on a CRLF file committed to the index" "$sb" "CRLF in planted-crlf-index.sh (i/crlf w/lf)" bash scripts/dev/check-line-endings.sh
 fi
 drop_sandbox "$sb"
 
