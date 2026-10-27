@@ -6,8 +6,9 @@
 # "SKIPPED n" and "SKIPPED_NAMES ...".
 #
 # Text in UTF-16 (with or without a byte-order mark) is decoded first.
-# Binary files are not read as text, but their printable runs are still
-# searched for keys and tokens, so a key cannot hide behind one NUL byte.
+# Binary files are not read as text. In every file that holds a NUL byte
+# (binary, or text guessed to be UTF-16), the runs of printable bytes are
+# also searched for keys and tokens, so a key cannot hide behind NUL bytes.
 use strict;
 use warnings;
 
@@ -166,11 +167,28 @@ sub read_text {
   return (utf16(substr($bytes, 2), 'BE'), 'text', undef) if $bytes =~ /^\xFE\xFF/;
   if (index($bytes, "\0") >= 0) {
     my $head = substr($bytes, 0, 4096);
-    return (utf16($bytes, 'LE'), 'text', undef) if share_nul($head, 1) > 0.9;
-    return (utf16($bytes, 'BE'), 'text', undef) if share_nul($head, 0) > 0.9;
+    return (utf16($bytes, 'LE'), 'text', $bytes) if share_nul($head, 1) > 0.9;
+    return (utf16($bytes, 'BE'), 'text', $bytes) if share_nul($head, 0) > 0.9;
     return (undef, 'binary', $bytes);
   }
   return ($bytes, 'text', undef);
+}
+
+# Keys and tokens in the printable runs of raw bytes; a match already
+# reported for this file is not reported again.
+sub scan_runs {
+  my ($file, $raw, $seen) = @_;
+  my $found = 0;
+  for my $run ($raw =~ /([\x20-\x7E]{16,})/g) {
+    for my $r (@token_rules) {
+      while ($run =~ /($r->[0])/g) {
+        next if $allowed{$1} || $seen->{$1}++;
+        print "secrets: $file (binary): $r->[1]: " . mask($1) . "\n";
+        $found++;
+      }
+    }
+  }
+  return $found;
 }
 
 my ($examined, $bad, $skipped) = (0, 0, 0);
@@ -182,24 +200,18 @@ for my $file (@ARGV) {
     $skipped++;
     push @skipped_names, $file;
     print "NOTE skipped binary file $file\n";
-    for my $run ($raw =~ /([\x20-\x7E]{16,})/g) {
-      for my $r (@token_rules) {
-        while ($run =~ /($r->[0])/g) {
-          next if $allowed{$1};
-          print "secrets: $file (binary): $r->[1]: " . mask($1) . "\n";
-          $bad++;
-        }
-      }
-    }
+    $bad += scan_runs($file, $raw, {});
     next;
   }
   $examined++;
+  my %seen;
   my $n = 0;
   for my $line (split /\n/, $text) {
     $n++;
     for my $r (@token_rules) {
       while ($line =~ /($r->[0])/g) {
         next if $allowed{$1};
+        $seen{$1}++;
         print "secrets: $file:$n: $r->[1]: " . mask($1) . "\n";
         $bad++;
       }
@@ -234,5 +246,6 @@ for my $file (@ARGV) {
       $bad++;
     }
   }
+  $bad += scan_runs($file, $raw, \%seen) if defined $raw;
 }
 print "EXAMINED $examined\nBAD $bad\nSKIPPED $skipped\nSKIPPED_NAMES " . join(', ', @skipped_names[0 .. ($#skipped_names < 4 ? $#skipped_names : 4)]) . ($skipped > 5 ? ', ...' : '') . "\n";

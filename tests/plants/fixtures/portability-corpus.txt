@@ -39,6 +39,26 @@ if true; then
 fi
 where="`readlink -f x`" #RED
 msg="`date -d yesterday`" #RED
+age=$(( $(date +%s) - $(date -d "$when" +%s) )) #RED
+jobs=$(( $(nproc) * 2 )) #RED
+n=$(( $(grep -cP 'x' f) + 1 )) #RED
+x=$(case "$y" in a) echo 1 ;; esac) #RED
+ext="$(case "$f" in *.md) echo doc ;; *) echo other ;; esac)" #RED
+kind=$(case "$f" in *.sh) echo shell ;; #RED
+esac)
+declare -n ref=x #RED
+mapfile -t lines <f #RED
+echo "${x@Q}" #RED
+echo "${arr[-1]}" #RED
+cmd |& tee log #RED
+cmd &>>log #RED
+coproc cat #RED
+wait -n #RED
+echo {1..10..2} #RED
+echo "$EPOCHSECONDS" #RED
+read -r -i default x #RED
+stat -c %Y f #RED
+find . -printf '%p\n' #RED
 x=$( #RED
 cat <<END
 it's here (open
@@ -74,3 +94,13 @@ cat <<YAML
     timeout-minutes: 5
 YAML
 now="`date -u +%s`"
+find . -name '*.tmp' -print0 | xargs -0 rm -rf
+xargs grep -rn foo <list
+find . -name '*.md' -exec sed -n '1p' {} \; -print
+t=${timeout:-30}
+echo ${md5sum:-none}
+tools=(md5sum shasum)
+{ timeout=5; }
+y=$(case "$z" in (a) echo 1 ;; esac)
+x=$(echo case)
+v=${!timeout}

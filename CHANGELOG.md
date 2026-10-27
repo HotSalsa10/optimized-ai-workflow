@@ -13,5 +13,5 @@ Nothing yet. Release 1 is being built.
 - Repo skeleton: records (SPEC, ROADMAP, TASKS, DECISIONS, RISKS, TESTS), MIT licence, pinned line endings, a research summary.
 - Rule map with every rule from the original method and the research, and where each one lives.
 - Repo checks: line endings, bash 3.2 and BSD portability, secrets and personal data, rule map, workflow hygiene, perl syntax, shellcheck.
-- Planted-defect tests: 44 cases, including a 72-line corpus for the portability lint, showing each check goes red for its stated reason and stays green on clean copies and look-alikes.
+- Planted-defect tests: 46 cases, including a 102-line corpus for the portability lint that covers every rule, showing each check goes red for its stated reason and stays green on clean copies and look-alikes.
 - CI: Linux on every change; Windows and macOS on release tags and on demand.

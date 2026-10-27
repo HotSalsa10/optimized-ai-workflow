@@ -10,18 +10,48 @@
 # Each line is read through a small scanner that produces:
 #   raw       the line as written
 #   nosingle  single-quoted text blanked (single quotes do not expand)
-#   code      quoted literal text, arithmetic $(( )) and comments blanked, with
+#   code      quoted literal text, arithmetic text and comments blanked, with
 #             the contents of $( ) and backticks kept as code even inside
-#             double quotes
-# and reports whether a $( ) is left open at the end of the line.
+#             double quotes or arithmetic $(( ))
+# and reports whether a $( ) is left open at the end of the line, and whether
+# a $( ) on the line closes inside a case statement.
 use strict;
 use warnings;
+
+# Command words that start a command: at the start of a line (indented or
+# not), after ; & | ! ` ( { and $(, and after shell keywords. A ( or { right
+# after $ or = is a parameter or an array, not a command start.
+my $cmd_start = qr/(?:^\s*|[;&|`]\s*|(?<!\{)!\s*|(?<![\$=])[({]\s*|\$\(\s*|\b(?:if|elif|while|until|then|do|else|time|command|exec|xargs)\s+)/;
+
+# Arithmetic text is blanked, but a $( ) inside it is scanned as code.
+sub arith_code {
+  my ($inner) = @_;
+  my @c = split //, $inner;
+  my $out = '';
+  for (my $i = 0; $i < @c; $i++) {
+    if ($c[$i] eq '$' && ($c[$i + 1] // '') eq '(') {
+      my ($depth, $j) = (0, $i + 1);
+      for (; $j < @c; $j++) {
+        $depth++ if $c[$j] eq '(';
+        $depth-- if $c[$j] eq ')';
+        last if $depth == 0;
+      }
+      $j = $#c if $j > $#c;
+      my (undef, $sub) = scan_line(join '', @c[$i .. $j]);
+      $out .= $sub;
+      $i = $j;
+      next;
+    }
+    $out .= ' ';
+  }
+  return $out;
+}
 
 sub scan_line {
   my ($line) = @_;
   chomp $line;
   my @c = split //, $line;
-  my ($code, $in_s, $in_d, $in_bq, $bq_d) = ('', 0, 0, 0, 0);
+  my ($code, $in_s, $in_d, $in_bq, $bq_d, $case_split) = ('', 0, 0, 0, 0, 0);
   my @stack;    # entries: [type, in_d_before, start_in_code]
   for (my $i = 0; $i < @c; $i++) {
     my $ch = $c[$i];
@@ -29,7 +59,11 @@ sub scan_line {
       if ($ch eq "'") { $in_s = 0; $code .= "'" } else { $code .= ' ' }
       next;
     }
-    if ($ch eq '\\') { $code .= '  '; $i++; next; }
+    if ($ch eq '\\') {    # an escaped character is text; \; still ends a find -exec
+      $code .= ' ' . (!$in_d && ($c[$i + 1] // '') eq ';' ? ';' : ' ');
+      $i++;
+      next;
+    }
     if ($ch eq "'" && !$in_d) { $in_s = 1; $code .= "'"; next; }
     if ($ch eq '`') {    # backticks: their contents are code, also inside double quotes
       if ($in_bq) { $in_bq = 0; $in_d = $bq_d } else { $in_bq = 1; $bq_d = $in_d; $in_d = 0 }
@@ -38,7 +72,7 @@ sub scan_line {
     }
     if ($ch eq '"') { $in_d = !$in_d; $code .= '"'; next; }
     if ($ch eq '$' && ($c[$i + 1] // '') eq '(') {
-      if (($c[$i + 2] // '') eq '(') {    # arithmetic $(( )): blank it
+      if (($c[$i + 2] // '') eq '(') {    # arithmetic $(( )): blank the text, scan any $( ) inside
         my $depth = 0;
         my $j = $i + 1;
         for (; $j < @c; $j++) {
@@ -46,7 +80,10 @@ sub scan_line {
           $depth-- if $c[$j] eq ')';
           last if $depth == 0;
         }
-        $code .= '$((' . (' ' x ($j - $i - 4 > 0 ? $j - $i - 4 : 0)) . '))';
+        my $closed = $j < @c;
+        my $end = $closed ? $j - 2 : $#c;
+        my $inner = $end >= $i + 3 ? join('', @c[$i + 3 .. $end]) : '';
+        $code .= '$((' . arith_code($inner) . ($closed ? '))' : '');
         $i = $j;
         next;
       }
@@ -61,7 +98,13 @@ sub scan_line {
     if ($ch eq '(') { push @stack, ['paren', 0, 0]; $code .= '('; next; }
     if ($ch eq ')') {
       my $top = pop @stack;
-      $in_d = $top->[1] if $top && $top->[0] eq 'sub';
+      if ($top && $top->[0] eq 'sub') {
+        # bash 3.2 ends $( ) at the first unmatched ), so a case pattern such
+        # as "a)" closes it early: the $( ) then holds a case with no esac.
+        my $body = substr($code, $top->[2]);
+        $case_split = 1 if $body =~ /${cmd_start}case\s.*?\sin\b/ && $body !~ /\besac\b/;
+        $in_d = $top->[1];
+      }
       $code .= ')';
       next;
     }
@@ -70,12 +113,8 @@ sub scan_line {
   my @open = grep { $_->[0] eq 'sub' } @stack;
   my $open_tail = @open ? substr($code, $open[0][2]) : undef;
   (my $nosingle = $line) =~ s/'[^']*'/''/g;
-  return ($nosingle, $code, $open_tail);
+  return ($nosingle, $code, $open_tail, $case_split);
 }
-
-# Command words that start a command: at the start of a line (indented or
-# not), after ; & | ( ! { ` and $(, and after shell keywords.
-my $cmd_start = qr/(?:^\s*|[;&|(!{`]\s*|\$\(\s*|\b(?:if|elif|while|until|then|do|else|time|command|exec|xargs)\s+)/;
 
 my @rules = (
   # bash 4 and later
@@ -107,12 +146,13 @@ my @rules = (
   ['code', qr/\breadlink\b[^|;&]*\s-[a-zA-Z]*f/, 'readlink -f is missing on older macOS'],
   ['code', qr/\bdate\b[^|;&]*\s(?:-d|--date)/, 'date -d is GNU only'],
   ['code', qr/\bstat\b[^|;&]*\s(?:-c|--format|--printf)/, 'stat -c is GNU only'],
-  ['code', qr/\bxargs\b[^|;&]*\s(?:-[a-zA-Z0-9]*r|--no-run-if-empty)/, 'xargs -r is GNU only'],
+  # xargs: only its own options, before the command it runs (xargs -0 rm -rf is fine)
+  ['code', qr/\bxargs(?:\s+(?:-[nILPsEd]\s+\S+|-[^\s-]\S*|--[a-z-]+(?:=\S*)?))*?\s+(?:-[a-zA-Z0-9]*r[a-zA-Z0-9]*|--no-run-if-empty)(?=\s|$)/, 'xargs -r is GNU only'],
   ['code', qr/\bfind\b[^|;&]*\s-printf\b/, 'find -printf is GNU only'],
   ['code', qr/\bsort\b[^|;&]*\s(?:-[a-zA-Z0-9,]*V|--version-sort)/, 'sort -V is GNU only'],
   ['code', qr/\bbase64\b[^|;&]*\s-w/, 'base64 -w is GNU only'],
   ['code', qr/\b(?:head|tail)\b[^|;&]*\s-n\s*-\d/, 'a negative head/tail count is GNU only'],
-  ['code', qr/${cmd_start}(?:tac|sha256sum|sha1sum|md5sum|timeout|nproc)(?![\w-])/, 'this command is missing on macOS by default'],
+  ['code', qr/${cmd_start}(?:tac|sha256sum|sha1sum|md5sum|timeout|nproc)(?![\w=-])/, 'this command is missing on macOS by default'],
 );
 
 my ($examined, $bad) = (0, 0);
@@ -128,7 +168,7 @@ for my $file (@ARGV) {
   for my $line (@lines) {
     $n++;
     next if $line =~ /^\s*#/;
-    my ($nosingle, $code, $open_tail) = scan_line($line);
+    my ($nosingle, $code, $open_tail, $case_split) = scan_line($line);
     my %view = (raw => $line, nosingle => $nosingle, code => $code);
     for my $r (@rules) {
       if ($view{$r->[0]} =~ $r->[1]) {
@@ -138,7 +178,7 @@ for my $file (@ARGV) {
     }
     # bash 3.2 reads $( ) by matching brackets and quotes, not by parsing, so
     # a $( ) that runs onto later lines can break, worst with a here-doc or a
-    # case statement inside. Keep every $( ) on one line.
+    # case statement inside. Keep every $( ) on one line, without a case.
     if (defined $open_tail) {
       if ($open_tail =~ /(?<!<)<<(?!<)/) {
         print "portability: $file:$n: a here-doc inside \$( ) can fail to parse on bash 3.2; move the text to a file\n";
@@ -147,6 +187,9 @@ for my $file (@ARGV) {
       } else {
         print "portability: $file:$n: a \$( ) that continues onto the next line can fail to parse on bash 3.2; keep it on one line\n";
       }
+      $bad++;
+    } elsif ($case_split) {
+      print "portability: $file:$n: a case statement inside \$( ) can fail to parse on bash 3.2; write the patterns as (a) or move the case into a function\n";
       $bad++;
     }
   }
