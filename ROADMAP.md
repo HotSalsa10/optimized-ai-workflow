@@ -7,6 +7,7 @@ Each track has one exit criterion and one named blocker. Take the next action fr
 Steps, each reviewed in a fresh context and committed with a verdict trailer:
 
 1. Repo skeleton, this repo's own records, rule map, CI with planted defects.
+1b. Fixes from step 1's security check (TASKS.md), before step 2. The owner chose this.
 2. JSON helper, verdict vocabulary, review packet.
 3. run-checks.sh and status.sh.
 4. done-check.sh and the mutation wrapper.
@@ -31,6 +32,7 @@ Blocker: an API key from the owner's Max plan credits, scoped to the test runs (
 Migration prompt; `/setup` for the owner; one ERPNext project first, then the second; every rule from the old AGENTS.md mapped, none dropped silently.
 
 Exit: both projects run on the method with 0 rules dropped without a recorded decision.
+Before the import: the secret scan's known credential misses are closed and a second scanner runs (TESTS.md Known limits).
 Blocker: cleaned copies of the owner's status.sh, review packet, verdict file, prompts, agent files and settings ([CREDENTIAL]-free, owner).
 
 ## Track 4: later

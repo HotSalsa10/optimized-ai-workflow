@@ -6,9 +6,9 @@ Each risk says what could go wrong, what reduces it, and what is left.
 
 2. Guards that match shell commands can be bypassed by a model that is set on it. Reduced by checks that run outside the agent (CI, hashes of locked files, receipts bound to the exact version). Left: CI checks that receipts are consistent, not that they are authentic.
 
-3. A Claude Code update renames a setting or changes behaviour. Reduced by a minimum version check, the hook test harness and a compatibility check in every `/research-update` and before every release. Left: breakage between checks.
+3. A Claude Code update renames a setting or changes behaviour. To be reduced by a minimum version check, the hook test harness (step 5) and a compatibility check in every `/research-update` and before every release; none of these exists yet. Left: breakage between checks.
 
-4. The repo is private. Without a paid GitHub plan, GitHub does not enforce branch protection, so the merge button works even when checks are red. Reduced by the guard hook refusing merges by Claude and by the owner's release stop.
+4. The repo is private. Without a paid GitHub plan, GitHub does not enforce branch protection, so the merge button works even when checks are red. To be reduced by the guard hook refusing merges by Claude (step 5) and by the owner's release stop. Until step 5, nothing in the repo stops a merge; only Claude Code's permission prompts and the owner do.
 
 5. Some research was read only through search summaries, because the cloud environment blocks many sites. The main conclusions rest on sources read in full; details may move. Reduced by `/research-update`.
 
@@ -20,4 +20,4 @@ Each risk says what could go wrong, what reduces it, and what is left.
 
 9. While the Actions minutes are used up (risk 8), CI proves nothing: every run ends in about 3 seconds with no machine and no logs. The same checks pass locally on Linux, but nothing has run on macOS or Windows yet.
 
-10. The secret scan reads the current files, not git history, so a secret added and removed within one push is not seen. A history scan is planned for Release 2.
+10. The secret scan reads the current files, not git history (a by-hand scan of the whole history during step 1 was clean), so a secret added and removed within one push is not seen. A history scan is planned for Release 2.
