@@ -23,19 +23,23 @@ Current phase: Release 1, step 1b (security fixes). Step 1 is closed except the 
 
 Each item that changes a check gets a planted defect that turns it red; config-only items get a test. Severity is the one the verifying agent gave.
 
-- [ ] (medium) A file name holding a newline and the text "BAD 0" makes secrets, portability and workflows print PASS and exit 0. Treat a count that is not a plain number as a failure, or use exit codes, and escape file names in all output.
-- [ ] (low) File names reach tools as options: validate.sh's perl -c can run code from a file name, and a file name can switch shellcheck off. Pass names after `--` or with a `./` prefix.
-- [ ] (low) validate.sh prints a key in full through shellcheck's source lines, perl -c errors and allowlist errors, which the secret scan itself masks. Mask or drop those lines.
-- [ ] (low) mask() shows the first 6 characters, which is most of a short password and part of an email. Show less.
-- [ ] (low) Control characters, and `::` at the start of a line, in file names or content reach the terminal and the CI log, where the runner reads `::` lines as workflow commands. Escape them.
-- [ ] (low) scan-allow.txt: one entry hides that text in every file, the allowlist stores the secret itself, and allowed hits are not reported. Allow by file and hash, and print how many hits were allowed.
-- [ ] (low) The secret scan misses keys in a UTF-16 file followed by ASCII text, and in files with CR-only line ends.
-- [ ] (low) The secret scan reads the working tree, not the index, so a staged secret passes before commit. Read the index; fix the scan-secrets.sh header wording.
-- [ ] (low) .gitignore ignores .claude/settings.local.json only at the root, and no common secret file names.
-- [ ] (low) The line-endings check skips a CRLF file that also holds a lone CR or a NUL, and fails correct .bat and .cmd files with non-ASCII names.
-- [ ] (low) The workflow lint reads one line at a time, so a quoted `uses` key, a flow mapping, a `uses` value on the next line, a docker:// tag, an unpinned action inside a local composite action, write-all on the line after `permissions:`, and a flow-style job with no timeout all pass. Make it fail closed and scan action.yml files.
-- [ ] (low) CI: a manual run and a push run on the same branch share a concurrency group and cancel each other.
-- [ ] (info) The plants ignore a failed make_sandbox, and an empty sandbox path would run plant commands in the working tree. Stop when make_sandbox fails; make it fail when a file is not copied.
+- [x] (medium) A file name holding a newline and the text "BAD 0" makes secrets, portability and workflows print PASS and exit 0. Treat a count that is not a plain number as a failure, or use exit codes, and escape file names in all output.
+- [x] (low) File names reach tools as options: validate.sh's perl -c can run code from a file name, and a file name can switch shellcheck off. Pass names after `--` or with a `./` prefix.
+- [x] (low) validate.sh prints a key in full through shellcheck's source lines, perl -c errors and allowlist errors, which the secret scan itself masks. Mask or drop those lines.
+- [x] (low) mask() shows the first 6 characters, which is most of a short password and part of an email. Show less.
+- [x] (low) Control characters, and `::` at the start of a line, in file names or content reach the terminal and the CI log, where the runner reads `::` lines as workflow commands. Escape them.
+- [x] (low) scan-allow.txt: one entry hides that text in every file, the allowlist stores the secret itself, and allowed hits are not reported. Allow by file and hash, and print how many hits were allowed.
+- [x] (low) The secret scan misses keys in a UTF-16 file followed by ASCII text, and in files with CR-only line ends.
+- [x] (low) The secret scan reads the working tree, not the index, so a staged secret passes before commit. Read the index; fix the scan-secrets.sh header wording.
+- [x] (low) .gitignore ignores .claude/settings.local.json only at the root, and no common secret file names.
+- [x] (low) The line-endings check skips a CRLF file that also holds a lone CR or a NUL, and fails correct .bat and .cmd files with non-ASCII names.
+- [x] (low) The workflow lint reads one line at a time, so a quoted `uses` key, a flow mapping, a `uses` value on the next line, a docker:// tag, an unpinned action inside a local composite action, write-all on the line after `permissions:`, and a flow-style job with no timeout all pass. Make it fail closed and scan action.yml files.
+- [x] (low) CI: a manual run and a push run on the same branch share a concurrency group and cancel each other.
+- [x] (info) The plants ignore a failed make_sandbox, and an empty sandbox path would run plant commands in the working tree. Stop when make_sandbox fails; make it fail when a file is not copied.
+- [x] Checked: 81 test cases in 3 files pass; each new guard was removed once in a throwaway copy and the right test went red (36 of 38; the other 2 removals change no behaviour); step 1's guards were re-run the same way (all caught).
+- [x] Records updated: TESTS.md, CHANGELOG.md, this file.
+- [x] Found while working: the first draft of tests/lib.test.sh loaded its helpers from a wrong path, kept running, and ran its setup in the real repo (a local commit and a test git identity; nothing pushed). Undone at once. Every test file now stops if tests/lib.sh does not load, and new tests run in a throwaway copy first.
+- [ ] Fresh-context review and security check of step 1b; closing commit with the verdict trailer, push
 
 ## Fixed elsewhere
 

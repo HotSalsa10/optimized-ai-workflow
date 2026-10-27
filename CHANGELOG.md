@@ -15,3 +15,14 @@ Nothing yet. Release 1 is being built.
 - Repo checks: line endings, bash 3.2 and BSD portability, secrets and personal data, rule map, workflow hygiene, perl syntax, shellcheck.
 - Planted-defect tests: 46 cases, including a 102-line corpus for the portability lint that covers every rule, showing each check goes red for its stated reason and stays green on clean copies and look-alikes.
 - CI: Linux on every change; Windows and macOS on release tags and on demand.
+
+### Changed (step 1b, from the step 1 security check)
+
+- The checks can no longer be fooled by odd file names: output is escaped, counts are read strictly, and file names never reach a tool as an option.
+- Check output never shows a key in full, and a finding shows only its kind and length.
+- The secret scan also reads staged copies, files with CR-only line ends and plain text after UTF-16 text. Its allowlist names one text in one file by an id, never the text itself.
+- The line-endings check reads files git calls binary because of a lone CR, and handles non-ASCII names.
+- The workflow lint treats any YAML form it cannot read as a finding, checks local action files, and wants docker images pinned by digest.
+- CI ignores workflow commands in its own output, and manual runs no longer cancel push runs.
+- .gitignore keeps local settings and common credential files out of commits in any folder.
+- Tests: safe sandbox helpers with their own tests, a .gitignore test, and 81 test cases in all.
