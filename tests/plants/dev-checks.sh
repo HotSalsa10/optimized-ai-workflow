@@ -709,15 +709,15 @@ fi
 drop_sandbox "$sb"
 
 # 50. the mask filter that validate sends other tools' output through
-out=$(printf 'tool said %s\n::warning::spoof\nan escape %s[2K here ##[error]x\n' "$key" "$esc_char" | perl "$(repo_root)/scripts/dev/lib/secrets.pl" --mask)
-if printf '%s\n' "$out" | grep -F -q -- "$key"; then
-  fail "the mask filter printed a key in full" "$out"
-elif printf '%s\n' "$out" | grep -q '^[[:space:]]*::' || printf '%s\n' "$out" | grep -F -q '##[' || printf '%s\n' "$out" | grep -q "$esc_char"; then
+out=$(printf 'tool said %s\n::warning::spoof\nan escape %s[2K here ##[error]x\ncall %s today\na C1 control \302\233 here\n' "$key" "$esc_char" "+41"" 79 123 45 67" | perl "$(repo_root)/scripts/dev/lib/secrets.pl" --mask)
+if printf '%s\n' "$out" | grep -F -q -e "$key" -e "79 123 45 67"; then
+  fail "the mask filter printed a key or a phone number in full" "$out"
+elif printf '%s\n' "$out" | grep -q '^[[:space:]]*::' || printf '%s\n' "$out" | grep -F -q -e '##[' -e "$esc_char" -e "$(printf '\302\233')"; then
   fail "the mask filter let a :: line, a ##[ command or a raw control character through" "$out"
-elif printf '%s\n' "$out" | grep -F -q 'sk-a...(' && printf '%s\n' "$out" | grep -F -q '\x1B[2K'; then
-  pass "the mask filter masks keys, escapes control characters and indents every line"
+elif printf '%s\n' "$out" | grep -F -q 'sk-a...(' && printf '%s\n' "$out" | grep -F -q -e '\x1B[2K' && printf '%s\n' "$out" | grep -F -q '\xC2\x9B'; then
+  pass "the mask filter masks keys and phone numbers, escapes control characters and indents every line"
 else
-  fail "the mask filter masks keys, escapes control characters and indents every line" "$out"
+  fail "the mask filter masks keys and phone numbers, escapes control characters and indents every line" "$out"
 fi
 
 # 51. a helper whose result cannot be read is a failure, never a pass
@@ -797,6 +797,7 @@ printf 'name: t\non: push\npermissions: >-\n  write-all\njobs:\n  b:\n    runs-o
   wf_head
   printf '      - if: |\n          github.ref == 1\n        uses: evil/action@main\n'
 } >"$wf/f-dashblock.yml"
+printf '\357\273\277jobs:\n  b:\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\nname: t\non: push\npermissions:\n  contents: read\n' >"$wf/f-bom.yml"
 mkdir -p "$sb/act"
 printf 'runs:\n  using: composite\n  steps:\n    - uses: actions/setup-python@main\n' >"$sb/act/action.yml"
 {
@@ -823,13 +824,14 @@ if expect_landed "workflows plant 9" grep -q "setup-python@main" "$sb/act/action
     "f-explicit.yml:10: an explicit key" \
     "f-escaped.yml:10: a backslash escape" \
     "f-blockperm.yml:3: a block scalar as the value of permissions" \
-    "f-dashblock.yml:12: 'evil/action@main' is not pinned"; do
+    "f-dashblock.yml:12: 'evil/action@main' is not pinned" \
+    "f-bom.yml: job 'b' has no timeout-minutes"; do
     printf '%s\n' "$out" | grep -F -q -- "$want" || missing="$missing [$want]"
   done
   if [ "$code" -eq 1 ] && [ -z "$missing" ] && ! printf '%s\n' "$out" | grep -q "g-lookalikes.yml"; then
-    pass "workflows flag 12 forms a line reader cannot follow, and not the valid look-alikes"
+    pass "workflows flag 13 forms a line reader cannot follow, and not the valid look-alikes"
   else
-    fail "workflows flag 12 forms a line reader cannot follow, and not the valid look-alikes: exit $code; missing:${missing:- none}" "$out"
+    fail "workflows flag 13 forms a line reader cannot follow, and not the valid look-alikes: exit $code; missing:${missing:- none}" "$out"
   fi
 fi
 drop_sandbox "$sb"
