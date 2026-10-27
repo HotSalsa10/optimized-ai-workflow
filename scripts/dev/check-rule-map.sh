@@ -30,11 +30,22 @@ bad=$(printf '%s\n' "$out" | sed -n 's/^BAD //p')
 summary=$(printf '%s\n' "$out" | sed -n 's/^SUMMARY //p')
 printf '%s\n' "$out" | grep -v -e '^ROWS ' -e '^BAD ' -e '^SUMMARY '
 
-if [ "${rows:-0}" -eq 0 ]; then
+# Each count must be one plain number. Anything else means the output could
+# not be trusted, which is a failure, never a pass.
+for n in "$rows" "$bad"; do
+  case "$n" in
+    '' | *[!0-9]*)
+      echo "rule-map: FAIL - could not read the check's result"
+      exit 2
+      ;;
+  esac
+done
+
+if [ "$rows" -eq 0 ]; then
   echo "rule-map: FAIL - found 0 rules in $map; nothing was checked"
   exit 1
 fi
-if [ "${bad:-0}" -gt 0 ]; then
+if [ "$bad" -gt 0 ]; then
   echo "rule-map: FAIL - $bad problem(s) in $rows rules"
   exit 1
 fi

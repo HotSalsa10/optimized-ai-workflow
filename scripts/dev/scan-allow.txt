@@ -1,3 +1,5 @@
 # Known false positives for scan-secrets.sh, one per line:
-# <exact text><TAB><reason>
+# <path><TAB><id><TAB><reason>
+# The id names one text in one file and does not hold the text itself; get it
+# with: bash scripts/dev/scan-secrets.sh --ids
 # Every entry needs a reason. Keep this list short.

@@ -32,11 +32,22 @@ examined=$(printf '%s\n' "$out" | sed -n 's/^EXAMINED //p')
 bad=$(printf '%s\n' "$out" | sed -n 's/^BAD //p')
 printf '%s\n' "$out" | grep -v -e '^EXAMINED ' -e '^BAD '
 
-if [ "${examined:-0}" -eq 0 ]; then
+# Each count must be one plain number. Anything else means the output could
+# not be trusted, which is a failure, never a pass.
+for n in "$examined" "$bad"; do
+  case "$n" in
+    '' | *[!0-9]*)
+      echo "portability: FAIL - could not read the check's result"
+      exit 2
+      ;;
+  esac
+done
+
+if [ "$examined" -eq 0 ]; then
   echo "portability: FAIL - examined 0 shell scripts; nothing was checked"
   exit 1
 fi
-if [ "${bad:-0}" -gt 0 ]; then
+if [ "$bad" -gt 0 ]; then
   echo "portability: FAIL - $bad problem(s) in $examined shell scripts"
   exit 1
 fi

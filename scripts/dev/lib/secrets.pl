@@ -1,30 +1,51 @@
 #!/usr/bin/env perl
 # Scans files for secrets and personal data. Called by scripts/dev/scan-secrets.sh.
-# Usage: perl secrets.pl ALLOW_FILE FILE...
-# Prints one line per finding (masked, never in full), one "NOTE skipped
-# binary file X" line per binary file, then "EXAMINED n", "BAD n",
-# "SKIPPED n" and "SKIPPED_NAMES ...".
 #
-# Text in UTF-16 (with or without a byte-order mark) is decoded first.
-# Binary files are not read as text. In every file that holds a NUL byte
-# (binary, or text guessed to be UTF-16), the runs of printable bytes are
-# also searched for keys and tokens, so a key cannot hide behind NUL bytes.
+# Usage:
+#   perl secrets.pl [--staged] [--ids] ALLOW_FILE FILE...
+#       Scans each FILE. With --staged (run from the repo root), also scans the
+#       staged copy of every tracked file whose staged copy differs from the
+#       working tree, so a secret that is staged but no longer on disk is seen.
+#       With --ids, each finding also shows the ID to put in ALLOW_FILE.
+#       Prints one line per finding (masked, never in full), "NOTE ..." lines,
+#       then "EXAMINED n", "STAGED n", "BAD n", "ALLOWED n", "SKIPPED n", "SKIPPED_NAMES ...".
+#   perl secrets.pl --mask
+#       Copies standard input to standard output with keys, credentials and
+#       personal email addresses masked, control characters escaped and every
+#       line indented by two spaces. validate.sh sends other tools' output
+#       through it, so a key a tool quotes is not printed in full either.
+#
+# ALLOW_FILE lines are PATH<TAB>ID<TAB>REASON. The ID is the first 12
+# characters of git's object ID for "PATH", a NUL byte and the matched text,
+# so an entry covers one text in one file and does not hold the text itself.
+#
+# Text in UTF-16 is decoded first: with a byte-order mark always, without one
+# when most of it is ASCII. Lines may end in LF, CRLF or a lone CR. Binary
+# files are not read as text. In every file that holds a NUL byte, the runs
+# of printable bytes are also searched: for keys and tokens in binary files,
+# and for everything in files decoded as UTF-16 (text added after the UTF-16
+# part, for example).
 use strict;
 use warnings;
+use IPC::Open2;
 
-my $allow_file = shift @ARGV;
-my %allowed;
-if (-f $allow_file) {
-  open my $a, '<', $allow_file or die "cannot read $allow_file\n";
-  while (my $l = <$a>) {
-    chomp $l;
-    $l =~ s/\r$//;
-    next if $l =~ /^\s*(?:#|$)/;
-    my ($text, $reason) = split /\t/, $l, 2;
-    die "scan-allow.txt: every entry needs a reason after a tab: $text\n"
-      unless defined $reason && $reason =~ /\S/;
-    $allowed{$text} = 1;
-  }
+# Prints one line of output. Control characters taken from file names or
+# content are shown as \xNN, so text from a file can never start a new line
+# of output, move the cursor or reach the CI runner as a command.
+sub esc {
+  my ($s) = @_;
+  $s =~ s/([\x00-\x1F\x7F])/sprintf('\\x%02X', ord $1)/ge;
+  return $s;
+}
+sub say_line { print esc($_[0]), "\n" }
+
+my ($staged, $show_ids, $mask_mode) = (0, 0, 0);
+while (@ARGV && $ARGV[0] =~ /^--/) {
+  my $opt = shift @ARGV;
+  if ($opt eq '--staged') { $staged = 1 }
+  elsif ($opt eq '--ids') { $show_ids = 1 }
+  elsif ($opt eq '--mask') { $mask_mode = 1 }
+  else { die "secrets: unknown option " . esc($opt) . "\n" }
 }
 
 # Keys and tokens with a recognisable shape.
@@ -42,9 +63,10 @@ my @token_rules = (
 # Credentials assigned to a name that contains a credential word, also as
 # part of a longer name (DB_PASSWORD, client_secret). Names are capped at 64
 # characters and must start at a name boundary, so long lines stay fast.
+# Groups: 1 the text before the value, 2 the name, 3 the value.
 my $kw = qr/password|passwd|pwd|secret|api_?key|apikey|access_?token|auth_?token|private_?key|client_?secret|secret_?key/i;
-my $quoted_cred = qr/(?<![A-Za-z0-9_.-])([A-Za-z0-9_.-]{0,64}?(?:$kw)[A-Za-z0-9_.-]{0,64})["']?\s*[:=]\s*["']([^"'\s]{8,})["']/;
-my $env_cred = qr/^\s*(?:export\s+)?([A-Za-z0-9_]{0,64}?(?:$kw|(?i:token))[A-Za-z0-9_]{0,64})\s*=\s*([^\s#"']{8,})/;
+my $quoted_cred = qr/((?<![A-Za-z0-9_.-])([A-Za-z0-9_.-]{0,64}?(?:$kw)[A-Za-z0-9_.-]{0,64})["']?\s*[:=]\s*["'])([^"'\s]{8,})(?=["'])/;
+my $env_cred = qr/^(\s*(?:export\s+)?([A-Za-z0-9_]{0,64}?(?:$kw|(?i:token))[A-Za-z0-9_]{0,64})\s*=\s*)([^\s#"']{8,})/;
 
 # A name that points at a secret (a path, a file, a helper command) is not
 # a secret itself, and neither is a value that is a path or a file name.
@@ -135,9 +157,124 @@ sub iban_hits {
   return @hits;
 }
 
+# A finding is shown by its kind and length only. A key or token of 20 or
+# more characters also keeps its first 4, which name the kind (sk-a, ghp_,
+# AKIA) without giving the key away.
 sub mask {
-  my ($s) = @_;
-  return length($s) <= 6 ? '***' : substr($s, 0, 6) . '...(' . length($s) . ' chars)';
+  my ($s, $is_token) = @_;
+  my $len = length $s;
+  return substr($s, 0, 4) . "...($len chars)" if $is_token && $len >= 20;
+  return "***($len chars)";
+}
+
+# --mask: a filter for other tools' output.
+if ($mask_mode) {
+  while (my $line = <STDIN>) {
+    $line =~ s/\r?\n\z//;
+    for my $r (@token_rules) { $line =~ s/($r->[0])/mask($1, 1)/ge }
+    $line =~ s/$quoted_cred/$1 . mask($3, 0)/ge;
+    $line =~ s/$env_cred/$1 . mask($3, 0)/e;
+    $line =~ s/($email_re)/email_ok($1) ? $1 : mask($1, 0)/ge;
+    say_line("  $line");
+  }
+  exit 0;
+}
+
+my $allow_file = shift @ARGV;
+die "secrets: usage: secrets.pl [--staged] [--ids] ALLOW_FILE FILE...\n" unless defined $allow_file;
+
+# The allowlist: PATH<TAB>ID<TAB>REASON. Errors name the line, never its text.
+my (%allow, @allow_lines);
+if (-f $allow_file) {
+  open my $a, '<', $allow_file or die "secrets: cannot read $allow_file\n";
+  my $ln = 0;
+  while (my $l = <$a>) {
+    $ln++;
+    $l =~ s/\r?\n\z//;
+    next if $l =~ /^\s*(?:#|$)/;
+    my ($path, $id, $reason) = split /\t/, $l, 3;
+    die "secrets: $allow_file line $ln is not PATH<TAB>ID<TAB>REASON with a 12-character ID and a reason\n"
+      unless defined $reason && $reason =~ /\S/ && $id =~ /^[0-9a-f]{12}$/ && length $path;
+    $allow{$path}{$id} = $ln;
+    push @allow_lines, [$ln, $path, $id];
+  }
+}
+my %allow_used;
+
+# The ID of TEXT found in PATH: the start of git's object ID for
+# "PATH\0TEXT". git hash-object reads it from a pipe, so the text never
+# touches the disk.
+my %id_cache;
+sub allow_id {
+  my ($path, $text) = @_;
+  my $key = "$path\0$text";
+  return $id_cache{$key} if exists $id_cache{$key};
+  my $pid = open2(my $out, my $in, 'git', 'hash-object', '--stdin');
+  binmode $in;
+  print $in $key;
+  close $in;
+  my $oid = <$out>;
+  close $out;
+  waitpid $pid, 0;
+  die "secrets: git hash-object did not run\n" unless defined $oid && $oid =~ /^([0-9a-f]{12})/;
+  return $id_cache{$key} = $1;
+}
+
+my ($examined, $bad, $allowed_hits, $skipped, $staged_examined) = (0, 0, 0, 0, 0);
+my @skipped_names;
+
+# report PATH WHERE KIND TEXT IS_TOKEN SEEN SKIP_SEEN
+sub report {
+  my ($path, $where, $kind, $text, $is_token, $seen, $skip_seen) = @_;
+  return if $skip_seen && $seen->{$text};
+  $seen->{$text} = 1;
+  if ($allow{$path}) {
+    my $id = allow_id($path, $text);
+    if (exists $allow{$path}{$id}) {
+      $allow_used{"$path\t$id"} = 1;
+      $allowed_hits++;
+      return;
+    }
+  }
+  my $tail = $show_ids ? ' [id ' . allow_id($path, $text) . ']' : '';
+  say_line("secrets: $where: $kind: " . mask($text, $is_token) . $tail);
+  $bad++;
+}
+
+# Every rule on one line of text.
+sub scan_line {
+  my ($path, $where, $line, $seen, $skip_seen) = @_;
+  for my $r (@token_rules) {
+    while ($line =~ /($r->[0])/g) { report($path, $where, $r->[1], $1, 1, $seen, $skip_seen) }
+  }
+  while ($line =~ /$quoted_cred/g) {
+    my ($name, $value) = ($2, $3);
+    report($path, $where, 'hard-coded credential', $value, 0, $seen, $skip_seen) if cred_is_real($name, $value);
+  }
+  if ($line =~ /$env_cred/) {
+    my ($name, $value) = ($2, $3);
+    report($path, $where, 'credential in an env-style assignment', $value, 0, $seen, $skip_seen) if cred_is_real($name, $value);
+  }
+  while ($line =~ /($email_re)/g) {
+    my $e = $1;
+    report($path, $where, 'email address (personal data)', $e, 0, $seen, $skip_seen) unless email_ok($e);
+  }
+  report($path, $where, 'phone number (personal data)', $_, 0, $seen, $skip_seen) for phone_hits($line);
+  report($path, $where, 'bank account number (IBAN)', $_, 0, $seen, $skip_seen) for iban_hits($line);
+}
+
+# The runs of printable bytes in raw content, with every rule or keys only.
+sub scan_runs {
+  my ($path, $label, $raw, $seen, $all_rules) = @_;
+  for my $run ($raw =~ /([\x20-\x7E]{16,})/g) {
+    if ($all_rules) {
+      scan_line($path, "$label (raw bytes)", $run, $seen, 1);
+      next;
+    }
+    for my $r (@token_rules) {
+      while ($run =~ /($r->[0])/g) { report($path, "$label (binary)", $r->[1], $1, 1, $seen, 1) }
+    }
+  }
 }
 
 sub share_nul {
@@ -156,96 +293,96 @@ sub utf16 {
   return join '', map { chr } unpack($order eq 'LE' ? 'v*' : 'n*', $bytes);
 }
 
-sub read_text {
-  my ($file) = @_;
-  open my $fh, '<:raw', $file or return (undef, 'unreadable', undef);
-  local $/;
-  my $bytes = <$fh>;
-  close $fh;
-  $bytes = '' unless defined $bytes;
-  return (utf16(substr($bytes, 2), 'LE'), 'text', undef) if $bytes =~ /^\xFF\xFE/;
-  return (utf16(substr($bytes, 2), 'BE'), 'text', undef) if $bytes =~ /^\xFE\xFF/;
-  if (index($bytes, "\0") >= 0) {
+# Returns (text, kind, raw): raw is set whenever the bytes hold a NUL.
+sub classify {
+  my ($bytes) = @_;
+  my $raw = index($bytes, "\0") >= 0 ? $bytes : undef;
+  return (utf16(substr($bytes, 2), 'LE'), 'text', $raw) if $bytes =~ /^\xFF\xFE/;
+  return (utf16(substr($bytes, 2), 'BE'), 'text', $raw) if $bytes =~ /^\xFE\xFF/;
+  if (defined $raw) {
     my $head = substr($bytes, 0, 4096);
-    return (utf16($bytes, 'LE'), 'text', $bytes) if share_nul($head, 1) > 0.9;
-    return (utf16($bytes, 'BE'), 'text', $bytes) if share_nul($head, 0) > 0.9;
-    return (undef, 'binary', $bytes);
+    return (utf16($bytes, 'LE'), 'text', $raw) if share_nul($head, 1) > 0.9;
+    return (utf16($bytes, 'BE'), 'text', $raw) if share_nul($head, 0) > 0.9;
+    return (undef, 'binary', $raw);
   }
   return ($bytes, 'text', undef);
 }
 
-# Keys and tokens in the printable runs of raw bytes; a match already
-# reported for this file is not reported again.
-sub scan_runs {
-  my ($file, $raw, $seen) = @_;
-  my $found = 0;
-  for my $run ($raw =~ /([\x20-\x7E]{16,})/g) {
-    for my $r (@token_rules) {
-      while ($run =~ /($r->[0])/g) {
-        next if $allowed{$1} || $seen->{$1}++;
-        print "secrets: $file (binary): $r->[1]: " . mask($1) . "\n";
-        $found++;
-      }
-    }
-  }
-  return $found;
-}
-
-my ($examined, $bad, $skipped) = (0, 0, 0);
-my @skipped_names;
-for my $file (@ARGV) {
-  my ($text, $kind, $raw) = read_text($file);
-  if ($kind eq 'unreadable') { print "secrets: cannot read $file\n"; $bad++; next; }
+sub scan_content {
+  my ($path, $label, $bytes) = @_;
+  my ($text, $kind, $raw) = classify($bytes);
+  my %seen;
   if ($kind eq 'binary') {
     $skipped++;
-    push @skipped_names, $file;
-    print "NOTE skipped binary file $file\n";
-    $bad += scan_runs($file, $raw, {});
-    next;
+    push @skipped_names, $label;
+    say_line("NOTE skipped binary file $label");
+    scan_runs($path, $label, $raw, \%seen, 0);
+    return;
   }
   $examined++;
-  my %seen;
   my $n = 0;
-  for my $line (split /\n/, $text) {
+  for my $line (split /\r\n|\r|\n/, $text) {
     $n++;
-    for my $r (@token_rules) {
-      while ($line =~ /($r->[0])/g) {
-        next if $allowed{$1};
-        $seen{$1}++;
-        print "secrets: $file:$n: $r->[1]: " . mask($1) . "\n";
-        $bad++;
-      }
+    scan_line($path, "$label:$n", $line, \%seen, 0);
+  }
+  scan_runs($path, $label, $raw, \%seen, 1) if defined $raw;
+}
+
+sub read_raw {
+  my ($file) = @_;
+  open my $fh, '<:raw', $file or return undef;
+  local $/;
+  my $bytes = <$fh>;
+  close $fh;
+  return defined $bytes ? $bytes : '';
+}
+
+for my $file (@ARGV) {
+  my $bytes = read_raw($file);
+  if (!defined $bytes) { say_line("secrets: cannot read $file"); $bad++; next; }
+  scan_content($file, $file, $bytes);
+}
+
+# Staged copies that differ from the working tree.
+if ($staged) {
+  my %differs;
+  {
+    local $/ = "\0";
+    open my $d, '-|', 'git', 'diff', '--name-only', '-z' or die "secrets: git diff did not run\n";
+    while (my $p = <$d>) { chomp $p; $differs{$p} = 1 }
+    close $d or die "secrets: git diff failed\n";
+  }
+  if (%differs) {
+    local $/ = "\0";
+    open my $l, '-|', 'git', 'ls-files', '-s', '-z' or die "secrets: git ls-files did not run\n";
+    my @blobs;
+    while (my $e = <$l>) {
+      chomp $e;
+      my ($meta, $path) = split /\t/, $e, 2;
+      my ($mode, $oid) = split / /, $meta;
+      push @blobs, [$path, $oid] if $differs{$path} && $mode ne '160000';
     }
-    while ($line =~ /$quoted_cred/g) {
-      my ($name, $value) = ($1, $2);
-      next if !cred_is_real($name, $value) || $allowed{$value};
-      print "secrets: $file:$n: hard-coded credential: " . mask($value) . "\n";
-      $bad++;
-    }
-    if ($line =~ /$env_cred/) {
-      my ($name, $value) = ($1, $2);
-      if (cred_is_real($name, $value) && !$allowed{$value}) {
-        print "secrets: $file:$n: credential in an env-style assignment: " . mask($value) . "\n";
-        $bad++;
-      }
-    }
-    while ($line =~ /($email_re)/g) {
-      my $e = $1;
-      next if email_ok($e) || $allowed{$e};
-      print "secrets: $file:$n: email address (personal data): " . mask($e) . "\n";
-      $bad++;
-    }
-    for my $p (phone_hits($line)) {
-      next if $allowed{$p};
-      print "secrets: $file:$n: phone number (personal data): " . mask($p) . "\n";
-      $bad++;
-    }
-    for my $i (iban_hits($line)) {
-      next if $allowed{$i};
-      print "secrets: $file:$n: bank account number (IBAN): " . mask($i) . "\n";
-      $bad++;
+    close $l or die "secrets: git ls-files failed\n";
+    for my $b (@blobs) {
+      my ($path, $oid) = @$b;
+      local $/;
+      open my $c, '-|', 'git', 'cat-file', 'blob', $oid or die "secrets: git cat-file did not run\n";
+      binmode $c;
+      my $bytes = <$c>;
+      close $c or die "secrets: git cat-file failed\n";
+      my $before = $examined;
+      scan_content($path, "$path (staged)", defined $bytes ? $bytes : '');
+      $staged_examined += $examined - $before;
     }
   }
-  $bad += scan_runs($file, $raw, \%seen) if defined $raw;
 }
-print "EXAMINED $examined\nBAD $bad\nSKIPPED $skipped\nSKIPPED_NAMES " . join(', ', @skipped_names[0 .. ($#skipped_names < 4 ? $#skipped_names : 4)]) . ($skipped > 5 ? ', ...' : '') . "\n";
+
+for my $e (@allow_lines) {
+  my ($ln, $path, $id) = @$e;
+  say_line("NOTE $allow_file line $ln matched nothing; remove it if the text is gone") unless $allow_used{"$path\t$id"};
+}
+
+my @shown = map { esc($_) } @skipped_names[0 .. ($#skipped_names < 4 ? $#skipped_names : 4)];
+$examined -= $staged_examined;
+print "EXAMINED $examined\nSTAGED $staged_examined\nBAD $bad\nALLOWED $allowed_hits\nSKIPPED $skipped\nSKIPPED_NAMES "
+  . join(', ', @shown) . ($skipped > 5 ? ', ...' : '') . "\n";

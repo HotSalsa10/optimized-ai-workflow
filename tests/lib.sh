@@ -14,18 +14,53 @@ repo_root() {
   git rev-parse --show-toplevel
 }
 
-# make_sandbox: prints the path of a new sandbox repo.
+# new_sandbox_dir: makes an empty, marked folder outside the repo and prints
+# the path of the "repo" folder inside it. The marker sits next to "repo", so
+# drop_sandbox can tell a sandbox from any other folder.
+new_sandbox_dir() {
+  src=$(repo_root) || return 1
+  base=${TMPDIR:-/tmp}
+  case "$base" in
+    /*) ;;
+    *) base=/tmp ;; # a relative TMPDIR would put the sandbox inside the repo
+  esac
+  parent=$(mktemp -d "${base%/}/sandbox.XXXXXX") || return 1
+  case "$parent/" in
+    "$src"/*)
+      rm -rf "$parent"
+      return 1
+      ;;
+  esac
+  if ! { : >"$parent/.sandbox-marker" && mkdir "$parent/repo"; }; then
+    rm -rf "$parent"
+    return 1
+  fi
+  printf '%s\n' "$parent/repo"
+}
+
+# make_sandbox: prints the path of a new sandbox repo holding a copy of every
+# tracked and untracked (not ignored) file. Fails, and leaves nothing behind,
+# if any file could not be copied. Files deleted from the working tree are
+# left out, as they would be from a commit.
 make_sandbox() {
   src=$(repo_root) || return 1
-  dir=$(mktemp -d 2>/dev/null || mktemp -d -t sandbox) || return 1
-  (
-    cd "$src" || exit 1
-    git ls-files -z -co --exclude-standard | while IFS= read -r -d '' f; do
-      [ -f "$f" ] || continue
-      mkdir -p "$dir/$(dirname "$f")"
-      cp -p "$f" "$dir/$f"
-    done
-  ) || return 1
+  dir=$(new_sandbox_dir) || return 1
+  copy_failed=0
+  while IFS= read -r -d '' f; do
+    case "$f" in
+      */*) to="$dir/${f%/*}" ;;
+      *) to=$dir ;;
+    esac
+    if [ -L "$src/$f" ]; then
+      mkdir -p "$to" && ln -s "$(readlink "$src/$f")" "$dir/$f" || copy_failed=1
+    elif [ -f "$src/$f" ]; then
+      mkdir -p "$to" && cp -p "$src/$f" "$dir/$f" || copy_failed=1
+    fi
+  done < <(cd "$src" && git ls-files -z -co --exclude-standard)
+  if [ "$copy_failed" -ne 0 ]; then
+    drop_sandbox "$dir"
+    return 1
+  fi
   (
     cd "$dir" || exit 1
     git init -q
@@ -35,15 +70,29 @@ make_sandbox() {
     git config commit.gpgsign false
     git add -A
     git commit -q -m "sandbox base"
-  ) || return 1
+  ) || {
+    drop_sandbox "$dir"
+    return 1
+  }
   printf '%s\n' "$dir"
 }
 
+# drop_sandbox DIR: removes a sandbox made above, and refuses anything else.
 drop_sandbox() {
   case "$1" in
-    "" | /) return 1 ;;
+    /*/repo) ;;
+    *) return 1 ;;
   esac
-  rm -rf "$1"
+  parent=${1%/repo}
+  [ -f "$parent/.sandbox-marker" ] || return 1
+  rm -rf "$parent"
+}
+
+# abort_sandbox: a plant could not get a sandbox. Stop the whole file, so no
+# plant command runs in the real working tree instead.
+abort_sandbox() {
+  fail "could not make a sandbox; stopping here"
+  exit 1
 }
 
 pass() {

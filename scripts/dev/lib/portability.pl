@@ -18,6 +18,15 @@
 use strict;
 use warnings;
 
+# Prints one line of output. Control characters taken from file names or
+# content are shown as \xNN, so text from a file can never start a new line
+# of output, move the cursor or reach the CI runner as a command.
+sub say_line {
+  my ($s) = @_;
+  $s =~ s/([\x00-\x1F\x7F])/sprintf('\\x%02X', ord $1)/ge;
+  print "$s\n";
+}
+
 # Command words that start a command: at the start of a line (indented or
 # not), after ; & | ! ` ( { and $(, and after shell keywords. A ( or { right
 # after $ or = is a parameter or an array, not a command start.
@@ -157,7 +166,7 @@ my @rules = (
 
 my ($examined, $bad) = (0, 0);
 for my $file (@ARGV) {
-  open my $fh, '<', $file or do { print "portability: cannot read $file\n"; $bad++; next };
+  open my $fh, '<', $file or do { say_line("portability: cannot read $file"); $bad++; next };
   my @lines = <$fh>;
   close $fh;
   next unless @lines;
@@ -172,7 +181,7 @@ for my $file (@ARGV) {
     my %view = (raw => $line, nosingle => $nosingle, code => $code);
     for my $r (@rules) {
       if ($view{$r->[0]} =~ $r->[1]) {
-        print "portability: $file:$n: $r->[2]\n";
+        say_line("portability: $file:$n: $r->[2]");
         $bad++;
       }
     }
@@ -181,15 +190,15 @@ for my $file (@ARGV) {
     # case statement inside. Keep every $( ) on one line, without a case.
     if (defined $open_tail) {
       if ($open_tail =~ /(?<!<)<<(?!<)/) {
-        print "portability: $file:$n: a here-doc inside \$( ) can fail to parse on bash 3.2; move the text to a file\n";
+        say_line("portability: $file:$n: a here-doc inside \$( ) can fail to parse on bash 3.2; move the text to a file");
       } elsif ($open_tail =~ /\bcase\b/) {
-        print "portability: $file:$n: a case statement inside \$( ) can fail to parse on bash 3.2\n";
+        say_line("portability: $file:$n: a case statement inside \$( ) can fail to parse on bash 3.2");
       } else {
-        print "portability: $file:$n: a \$( ) that continues onto the next line can fail to parse on bash 3.2; keep it on one line\n";
+        say_line("portability: $file:$n: a \$( ) that continues onto the next line can fail to parse on bash 3.2; keep it on one line");
       }
       $bad++;
     } elsif ($case_split) {
-      print "portability: $file:$n: a case statement inside \$( ) can fail to parse on bash 3.2; write the patterns as (a) or move the case into a function\n";
+      say_line("portability: $file:$n: a case statement inside \$( ) can fail to parse on bash 3.2; write the patterns as (a) or move the case into a function");
       $bad++;
     }
   }

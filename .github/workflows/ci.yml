@@ -12,10 +12,15 @@ on:
 permissions:
   contents: read
 
+# A manual run and a push run on the same branch get different groups, so one
+# never cancels the other; a newer push still cancels an older one.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Each step first stops the runner from reading workflow commands (lines
+# starting with ::) in its output, so text from a file in the repo cannot
+# fake an annotation or hide later output.
 jobs:
   linux:
     name: Linux
@@ -27,9 +32,13 @@ jobs:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Repo checks
-        run: bash scripts/dev/validate.sh
+        run: |
+          echo "::stop-commands::stop-$RANDOM$RANDOM$RANDOM"
+          bash scripts/dev/validate.sh
       - name: Tests and planted defects
-        run: bash tests/run.sh
+        run: |
+          echo "::stop-commands::stop-$RANDOM$RANDOM$RANDOM"
+          bash tests/run.sh
 
   other-systems:
     name: ${{ matrix.os }}
@@ -47,6 +56,10 @@ jobs:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Repo checks
-        run: bash scripts/dev/validate.sh
+        run: |
+          echo "::stop-commands::stop-$RANDOM$RANDOM$RANDOM"
+          bash scripts/dev/validate.sh
       - name: Tests and planted defects
-        run: bash tests/run.sh
+        run: |
+          echo "::stop-commands::stop-$RANDOM$RANDOM$RANDOM"
+          bash tests/run.sh

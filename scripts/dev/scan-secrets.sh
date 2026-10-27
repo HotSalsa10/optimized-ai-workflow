@@ -5,11 +5,23 @@
 # format, and bank account numbers (IBANs that pass their checksum).
 # Matches are shown masked, never in full. Binary files are named, and only
 # searched for keys and tokens.
-# Known limit: only the current commit is scanned, not history.
+# It reads the working-tree copy of every tracked file, plus the staged copy
+# of any file whose staged copy differs. It does not read git history.
 # Known false positives go in scripts/dev/scan-allow.txt, one per line:
-#   <exact text><TAB><reason>
+#   <path><TAB><id><TAB><reason>
+# Run "bash scripts/dev/scan-secrets.sh --ids" to see each finding's id.
 # The rules live in scripts/dev/lib/secrets.pl.
 set -u
+
+ids=""
+case "${1:-}" in
+  --ids) ids="--ids" ;;
+  "") ;;
+  *)
+    echo "secrets: FAIL - unknown option (only --ids is accepted)"
+    exit 2
+    ;;
+esac
 
 root=$(git rev-parse --show-toplevel 2>/dev/null) || {
   echo "secrets: FAIL - not inside a git repository"
@@ -30,28 +42,46 @@ if [ "${#files[@]}" -eq 0 ]; then
   exit 1
 fi
 
-out=$(perl scripts/dev/lib/secrets.pl scripts/dev/scan-allow.txt "${files[@]}" 2>&1) || {
+out=$(perl scripts/dev/lib/secrets.pl --staged $ids scripts/dev/scan-allow.txt "${files[@]}" 2>&1) || {
   printf '%s\n' "$out"
   echo "secrets: FAIL - the scan itself did not run"
   exit 2
 }
 examined=$(printf '%s\n' "$out" | sed -n 's/^EXAMINED //p')
+staged_copies=$(printf '%s\n' "$out" | sed -n 's/^STAGED //p')
 bad=$(printf '%s\n' "$out" | sed -n 's/^BAD //p')
+allowed=$(printf '%s\n' "$out" | sed -n 's/^ALLOWED //p')
 skipped=$(printf '%s\n' "$out" | sed -n 's/^SKIPPED //p')
 skipped_names=$(printf '%s\n' "$out" | sed -n 's/^SKIPPED_NAMES //p')
-printf '%s\n' "$out" | grep -v -e '^EXAMINED ' -e '^BAD ' -e '^SKIPPED ' -e '^SKIPPED_NAMES ' | sed 's/^NOTE /secrets: note - /'
+printf '%s\n' "$out" | grep -v -e '^EXAMINED ' -e '^STAGED ' -e '^BAD ' -e '^ALLOWED ' -e '^SKIPPED ' -e '^SKIPPED_NAMES ' | sed 's/^NOTE /secrets: note - /'
 
-if [ "${examined:-0}" -eq 0 ]; then
+# Each count must be one plain number. Anything else means the output could
+# not be trusted, which is a failure, never a pass.
+for n in "$examined" "$staged_copies" "$bad" "$allowed" "$skipped"; do
+  case "$n" in
+    '' | *[!0-9]*)
+      echo "secrets: FAIL - could not read the scan's result"
+      exit 2
+      ;;
+  esac
+done
+
+if [ "$examined" -eq 0 ]; then
   echo "secrets: FAIL - examined 0 tracked text files; nothing was checked"
   exit 1
 fi
-if [ "${bad:-0}" -gt 0 ]; then
+if [ "$bad" -gt 0 ]; then
   echo "secrets: FAIL - $bad finding(s) in $examined tracked text files"
   exit 1
 fi
-if [ "${skipped:-0}" -gt 0 ]; then
-  skip_note=" (skipped $skipped binary, searched for keys only: $skipped_names)"
-else
-  skip_note=""
+notes=""
+if [ "$staged_copies" -gt 0 ]; then
+  notes="$notes (and $staged_copies staged copies that differ from the working tree)"
 fi
-echo "secrets: PASS - examined $examined tracked text files$skip_note, no secrets or personal data found"
+if [ "$skipped" -gt 0 ]; then
+  notes="$notes (skipped $skipped binary, searched for keys only: $skipped_names)"
+fi
+if [ "$allowed" -gt 0 ]; then
+  notes="$notes ($allowed allowed by scan-allow.txt)"
+fi
+echo "secrets: PASS - examined $examined tracked text files$notes, no secrets or personal data found"

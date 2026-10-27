@@ -1,6 +1,6 @@
 # TASKS
 
-Current phase: Release 1, step 1 closed (one owner item open). Next: step 1b, when the owner says go.
+Current phase: Release 1, step 1b (security fixes). Step 1 is closed except the owner's CI item.
 
 ## Step 1: repo skeleton, records, rule map, CI with planted defects
 
@@ -21,7 +21,7 @@ Current phase: Release 1, step 1 closed (one owner item open). Next: step 1b, wh
 
 ## Step 1b: fixes from the step 1 security check
 
-Each item gets a planted defect that turns its check red. Severity is the one the verifying agent gave.
+Each item that changes a check gets a planted defect that turns it red; config-only items get a test. Severity is the one the verifying agent gave.
 
 - [ ] (medium) A file name holding a newline and the text "BAD 0" makes secrets, portability and workflows print PASS and exit 0. Treat a count that is not a plain number as a failure, or use exit codes, and escape file names in all output.
 - [ ] (low) File names reach tools as options: validate.sh's perl -c can run code from a file name, and a file name can switch shellcheck off. Pass names after `--` or with a `./` prefix.
@@ -58,4 +58,4 @@ Each item gets a planted defect that turns its check red. Severity is the one th
 
 ## Next
 
-Step 1b starts only when the owner says so; step 2 follows it.
+Step 2 starts only when the owner says so.

@@ -5,6 +5,15 @@
 use strict;
 use warnings;
 
+# Prints one line of output. Control characters taken from file names or
+# content are shown as \xNN, so text from a file can never start a new line
+# of output, move the cursor or reach the CI runner as a command.
+sub say_line {
+  my ($s) = @_;
+  $s =~ s/([\x00-\x1F\x7F])/sprintf('\\x%02X', ord $1)/ge;
+  print "$s\n";
+}
+
 my $map = shift @ARGV;
 open my $fh, '<', $map or die "cannot read $map\n";
 my (%seen, %by_status);
@@ -20,24 +29,24 @@ while (my $line = <$fh>) {
   shift @c;
   my ($id, $rule, $source, $home, $status) = @c;
   if (!defined $status || $status eq '' || !defined $home || $home eq '') {
-    print "rule-map: line $n has missing columns\n"; $bad++; next;
+    say_line("rule-map: line $n has missing columns"); $bad++; next;
   }
-  if ($id !~ /^M\d{3}$/) { print "rule-map: line $n has a malformed rule ID '$id'\n"; $bad++; next; }
-  if ($seen{$id}++) { print "rule-map: $id appears more than once\n"; $bad++; }
-  if ($status !~ /^(?:done|step \d+|R2|later)$/) { print "rule-map: $id has unknown status '$status'\n"; $bad++; next; }
+  if ($id !~ /^M\d{3}$/) { say_line("rule-map: line $n has a malformed rule ID '$id'"); $bad++; next; }
+  if ($seen{$id}++) { say_line("rule-map: $id appears more than once"); $bad++; }
+  if ($status !~ /^(?:done|step \d+|R2|later)$/) { say_line("rule-map: $id has unknown status '$status'"); $bad++; next; }
   my $key = $status =~ /^step/ ? 'planned for a later step' : $status;
   $by_status{$key}++;
   next unless $status eq 'done';
   my ($file, $token) = split /\s+@/, $home, 2;
   $token = $id unless defined $token && length $token;
   1 while $file =~ s{(^|/)\./}{$1};    # ./docs/x.md and docs/./x.md name docs/x.md
-  if ($file eq $map) { print "rule-map: $id names the rule map itself as its home; a rule needs a real home\n"; $bad++; next; }
-  if (!-f $file) { print "rule-map: $id is marked done but its home $file does not exist\n"; $bad++; next; }
-  open my $h, '<', $file or do { print "rule-map: cannot read $file\n"; $bad++; next };
+  if ($file eq $map) { say_line("rule-map: $id names the rule map itself as its home; a rule needs a real home"); $bad++; next; }
+  if (!-f $file) { say_line("rule-map: $id is marked done but its home $file does not exist"); $bad++; next; }
+  open my $h, '<', $file or do { say_line("rule-map: cannot read $file"); $bad++; next };
   local $/;
   my $text = <$h>;
   close $h;
-  if (index($text, $token) < 0) { print "rule-map: $id is marked done but '$token' is not in $file\n"; $bad++; }
+  if (index($text, $token) < 0) { say_line("rule-map: $id is marked done but '$token' is not in $file"); $bad++; }
 }
 close $fh;
 my $summary = join ', ', map { "$by_status{$_} $_" } sort keys %by_status;
