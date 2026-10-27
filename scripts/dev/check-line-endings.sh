@@ -47,7 +47,7 @@ if [ "$examined" -eq 0 ]; then
   exit 1
 fi
 if [ "$bad" -gt 0 ]; then
-  echo "line-endings: FAIL - $bad of $examined tracked text files have CRLF line endings (fix: git add --renormalize .)"
+  printf "%s\n" "line-endings: FAIL - $bad of $examined tracked text files have CRLF line endings (fix: convert each file to LF, for example perl -pi -e 's/\\r\$//' FILE, then git add FILE)"
   exit 1
 fi
 echo "line-endings: PASS - examined $examined tracked text files, none with CRLF"

@@ -21,7 +21,7 @@ run_check() {
   shift
   if out=$("$@" 2>&1); then
     passed=$((passed + 1))
-    printf '%s\n' "$out" | tail -n 1
+    printf '%s\n' "$out" | grep -v -e '^secrets: note - ' | tail -n 1
   else
     failed=$((failed + 1))
     failed_names="$failed_names $name"
@@ -35,24 +35,56 @@ run_check secrets bash scripts/dev/scan-secrets.sh
 run_check rule-map bash scripts/dev/check-rule-map.sh
 run_check workflows bash scripts/dev/lint-workflows.sh
 
+# perl syntax: every tracked .pl file must compile.
+pl_files=()
+while IFS= read -r -d '' f; do
+  case "$f" in
+    *.pl) [ -f "$f" ] && pl_files+=("$f") ;;
+  esac
+done < <(git ls-files -z)
+if [ "${#pl_files[@]}" -eq 0 ]; then
+  failed=$((failed + 1))
+  failed_names="$failed_names perl-syntax"
+  echo "perl-syntax: FAIL - found 0 perl files; nothing was checked"
+else
+  pl_bad=0
+  for f in "${pl_files[@]}"; do
+    if ! msg=$(perl -c "$f" 2>&1); then
+      pl_bad=$((pl_bad + 1))
+      printf '%s\n' "$msg"
+    fi
+  done
+  if [ "$pl_bad" -gt 0 ]; then
+    failed=$((failed + 1))
+    failed_names="$failed_names perl-syntax"
+    echo "perl-syntax: FAIL - $pl_bad of ${#pl_files[@]} perl files do not compile"
+  else
+    passed=$((passed + 1))
+    echo "perl-syntax: PASS - all ${#pl_files[@]} perl files compile"
+  fi
+fi
+
 # The shellcheck tool is optional locally, and required where REQUIRE_SHELLCHECK=1.
+# It runs at its default severity, so unquoted variables (SC2086) are caught.
 if command -v shellcheck >/dev/null 2>&1; then
   scripts=()
   while IFS= read -r -d '' f; do
-    [ -f "$f" ] && scripts+=("$f")
-  done < <(git ls-files -z -- '*.sh')
+    case "$f" in
+      *.sh) [ -f "$f" ] && scripts+=("$f") ;;
+    esac
+  done < <(git ls-files -z)
   if [ "${#scripts[@]}" -eq 0 ]; then
     failed=$((failed + 1))
     failed_names="$failed_names shellcheck"
     echo "shellcheck: FAIL - found 0 shell scripts; nothing was checked"
-  elif out=$(shellcheck -x -S warning "${scripts[@]}" 2>&1); then
+  elif out=$(shellcheck -x "${scripts[@]}" 2>&1); then
     passed=$((passed + 1))
-    echo "shellcheck: PASS - examined ${#scripts[@]} shell scripts, no warnings"
+    echo "shellcheck: PASS - examined ${#scripts[@]} shell scripts, no findings"
   else
     failed=$((failed + 1))
     failed_names="$failed_names shellcheck"
     printf '%s\n' "$out"
-    echo "shellcheck: FAIL - warnings in shell scripts"
+    echo "shellcheck: FAIL - findings in shell scripts"
   fi
 elif [ "${REQUIRE_SHELLCHECK:-0}" = "1" ]; then
   failed=$((failed + 1))

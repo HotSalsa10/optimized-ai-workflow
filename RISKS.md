@@ -17,3 +17,7 @@ Each risk says what could go wrong, what reduces it, and what is left.
 7. The method itself grows until checking costs more than the work (the owner's 20-line rename incident). Reduced by tiers, context budgets enforced by tests, and pruning rules that no longer earn their place.
 
 8. CI minutes on a private repo run out. Reduced by running Windows and macOS only before releases and on demand.
+
+9. The first CI run on GitHub never got a machine (no logs, finished in 3 seconds), which points to the account's Actions settings or billing. Until it runs, CI proves nothing; the same checks pass locally. Owner to check.
+
+10. The secret scan reads the current files, not git history, so a secret added and removed within one push is not seen. A history scan is planned for Release 2.

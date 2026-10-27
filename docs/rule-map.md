@@ -116,7 +116,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M108 | A branch must be up to date with main before it merges | research: merge queue | method/scripts/method/done-check.sh | step 4 |
 | M109 | A person is accountable for every change that ships | research: Claude Code team | method/.claude/rules/method/method.md | step 6 |
 | M110 | Improvement by hand: /research, /research-update every 2 to 4 weeks, a model-release checklist, pruning | decision A21 | method/.claude/skills/research-update/SKILL.md | later |
-| M111 | Every rule records its reason and its one home | incident: same rule twice | docs/rule-map.md | done |
+| M111 | Every rule records its reason and its one home | incident: same rule twice | scripts/dev/check-rule-map.sh | done |
 | M112 | The review packet leaves out noise (lockfiles, generated and minified files) and always keeps migrations | research: Cloudflare | method/scripts/method/review-packet.sh | step 2 |
 | M113 | Packet separators are escaped so file content cannot fake a section or a verdict | research: Cloudflare | method/scripts/method/review-packet.sh | step 2 |
 | M114 | Checking agents get a "do not flag" list: unchanged code, far-fetched risks, style, "consider library X" | research: Cloudflare | method/.claude/agents/method/reviewer.md | step 6 |
