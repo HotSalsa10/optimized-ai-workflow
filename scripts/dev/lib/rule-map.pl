@@ -11,7 +11,8 @@ my (%seen, %by_status);
 my ($rows, $bad, $n) = (0, 0, 0);
 while (my $line = <$fh>) {
   $n++;
-  next unless $line =~ /^\|/;
+  next unless $line =~ /^\s*\|/;           # a table row, even if indented
+  $line =~ s/^\s+//;
   next if $line =~ /^\|\s*ID\s*\|/;          # header row
   next if $line =~ /^\|[\s:|-]+\|\s*$/;      # separator row
   $rows++;
@@ -29,6 +30,7 @@ while (my $line = <$fh>) {
   next unless $status eq 'done';
   my ($file, $token) = split /\s+@/, $home, 2;
   $token = $id unless defined $token && length $token;
+  1 while $file =~ s{(^|/)\./}{$1};    # ./docs/x.md and docs/./x.md name docs/x.md
   if ($file eq $map) { print "rule-map: $id names the rule map itself as its home; a rule needs a real home\n"; $bad++; next; }
   if (!-f $file) { print "rule-map: $id is marked done but its home $file does not exist\n"; $bad++; next; }
   open my $h, '<', $file or do { print "rule-map: cannot read $file\n"; $bad++; next };

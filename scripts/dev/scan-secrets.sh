@@ -3,7 +3,8 @@
 # personal data: API keys and tokens, private keys, credentials assigned in
 # code or env files, personal email addresses, phone numbers in international
 # format, and bank account numbers (IBANs that pass their checksum).
-# Matches are shown masked, never in full. Binary files are skipped and named.
+# Matches are shown masked, never in full. Binary files are named, and only
+# searched for keys and tokens.
 # Known limit: only the current commit is scanned, not history.
 # Known false positives go in scripts/dev/scan-allow.txt, one per line:
 #   <exact text><TAB><reason>
@@ -37,7 +38,8 @@ out=$(perl scripts/dev/lib/secrets.pl scripts/dev/scan-allow.txt "${files[@]}" 2
 examined=$(printf '%s\n' "$out" | sed -n 's/^EXAMINED //p')
 bad=$(printf '%s\n' "$out" | sed -n 's/^BAD //p')
 skipped=$(printf '%s\n' "$out" | sed -n 's/^SKIPPED //p')
-printf '%s\n' "$out" | grep -v -e '^EXAMINED ' -e '^BAD ' -e '^SKIPPED ' | sed 's/^NOTE /secrets: note - /'
+skipped_names=$(printf '%s\n' "$out" | sed -n 's/^SKIPPED_NAMES //p')
+printf '%s\n' "$out" | grep -v -e '^EXAMINED ' -e '^BAD ' -e '^SKIPPED ' -e '^SKIPPED_NAMES ' | sed 's/^NOTE /secrets: note - /'
 
 if [ "${examined:-0}" -eq 0 ]; then
   echo "secrets: FAIL - examined 0 tracked text files; nothing was checked"
@@ -47,4 +49,9 @@ if [ "${bad:-0}" -gt 0 ]; then
   echo "secrets: FAIL - $bad finding(s) in $examined tracked text files"
   exit 1
 fi
-echo "secrets: PASS - examined $examined tracked text files (skipped ${skipped:-0} binary), no secrets or personal data found"
+if [ "${skipped:-0}" -gt 0 ]; then
+  skip_note=" (skipped $skipped binary, searched for keys only: $skipped_names)"
+else
+  skip_note=""
+fi
+echo "secrets: PASS - examined $examined tracked text files$skip_note, no secrets or personal data found"

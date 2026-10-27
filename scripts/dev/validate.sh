@@ -21,7 +21,7 @@ run_check() {
   shift
   if out=$("$@" 2>&1); then
     passed=$((passed + 1))
-    printf '%s\n' "$out" | grep -v -e '^secrets: note - ' | tail -n 1
+    printf '%s\n' "$out" | tail -n 1
   else
     failed=$((failed + 1))
     failed_names="$failed_names $name"
