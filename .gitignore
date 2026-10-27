@@ -1,0 +1,23 @@
+# Claude Code files that stay on one machine
+.claude/settings.local.json
+CLAUDE.local.md
+
+# Method runtime state (logs, usage), never committed
+.method/local/
+
+# Test scratch
+tests/.tmp/
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

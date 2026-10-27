@@ -1,0 +1,3 @@
+# Known false positives for scan-secrets.sh, one per line:
+# <exact text><TAB><reason>
+# Every entry needs a reason. Keep this list short.
