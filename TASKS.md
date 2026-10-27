@@ -14,7 +14,7 @@ Current phase: Release 1, step 1.
 - [x] Review round 1: REQUEST CHANGES, 4 blocking findings and 5 notes, all addressed in repair loop 1
 - [x] Review round 2: REQUEST CHANGES, 4 blocking findings (portability regressions, a one-line-only $( ) rule, a macOS-only plant failure, missed personal emails) and 5 notes, all addressed in repair loop 2
 - [ ] Review round 3 (the last under the 3-round cap) on the changes since round 2, commit with the verdict trailer, push
-- [ ] CI green on GitHub ([CREDENTIAL], owner: GitHub Actions did not start a machine for the first run; the owner checks the repo's Actions settings and the account's billing)
+- [ ] CI green on GitHub ([CREDENTIAL], owner: the account's Actions minutes are used up, so GitHub starts no machine; waits for the minutes to renew)
 - [ ] Windows and macOS CI run once by hand (needs the item above)
 
 ## Next
