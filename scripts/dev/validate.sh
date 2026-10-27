@@ -8,7 +8,9 @@
 # filter: keys and credentials a tool quotes are masked, control characters
 # are escaped and each line is indented, so no line can start with text taken
 # from a file. File names reach tools as ./NAME, so a name that starts with
-# "-" is never read as an option.
+# "-" is never read as an option. A tracked file name that holds a control
+# character fails the "names" check and is kept away from the tools, whose
+# output it could split into lines.
 set -u
 
 root=$(git rev-parse --show-toplevel 2>/dev/null) || {
@@ -39,6 +41,27 @@ run_check() {
   fi
 }
 
+# names: no tracked file name may hold a control character (a newline, an
+# escape); such a name could split or steer any tool's output.
+bad_names=$(git ls-files -z | perl -0ne 'chomp; next unless /[\x00-\x1F\x7F]/; s/([\x00-\x1F\x7F])/sprintf("\\x%02X", ord $1)/ge; s/::/:\\x3A/g; s/##\[/#\\x23[/g; print "$_\n"')
+if [ -n "$bad_names" ]; then
+  failed=$((failed + 1))
+  failed_names="$failed_names names"
+  printf '%s\n' "$bad_names" | sed 's/^/  names: /'
+  echo "names: FAIL - tracked file names hold control characters; rename them"
+else
+  passed=$((passed + 1))
+  echo "names: PASS - no tracked file name holds a control character"
+fi
+
+# plain_name NAME: the name holds no control character (tab, newline, escape).
+plain_name() {
+  case "$1" in
+    *[[:cntrl:]]*) return 1 ;;
+  esac
+  return 0
+}
+
 run_check line-endings bash scripts/dev/check-line-endings.sh
 run_check portability bash scripts/dev/lint-portability.sh
 run_check secrets bash scripts/dev/scan-secrets.sh
@@ -51,7 +74,7 @@ run_check workflows bash scripts/dev/lint-workflows.sh
 pl_files=()
 while IFS= read -r -d '' f; do
   case "$f" in
-    scripts/*.pl) [ -f "$f" ] && pl_files+=("./$f") ;;
+    scripts/*.pl) [ -f "$f" ] && plain_name "$f" && pl_files+=("./$f") ;;
   esac
 done < <(git ls-files -z)
 if [ "${#pl_files[@]}" -eq 0 ]; then
@@ -78,19 +101,23 @@ fi
 
 # The shellcheck tool is optional locally, and required where REQUIRE_SHELLCHECK=1.
 # It runs at its default severity, so unquoted variables (SC2086) are caught,
-# and in its one-line format, which does not quote source lines.
+# and in its one-line format, which does not quote source lines. It ignores
+# .shellcheckrc files (--norc), so a config file cannot switch it off. An
+# older version without --norc does not read those files either.
 if command -v shellcheck >/dev/null 2>&1; then
+  norc=""
+  shellcheck --help 2>&1 | grep -q -- --norc && norc="--norc"
   scripts=()
   while IFS= read -r -d '' f; do
     case "$f" in
-      *.sh) [ -f "$f" ] && scripts+=("./$f") ;;
+      *.sh) [ -f "$f" ] && plain_name "$f" && scripts+=("./$f") ;;
     esac
   done < <(git ls-files -z)
   if [ "${#scripts[@]}" -eq 0 ]; then
     failed=$((failed + 1))
     failed_names="$failed_names shellcheck"
     echo "shellcheck: FAIL - found 0 shell scripts; nothing was checked"
-  elif out=$(shellcheck -x -f gcc "${scripts[@]}" 2>&1); then
+  elif out=$(shellcheck $norc -x -f gcc "${scripts[@]}" 2>&1); then
     passed=$((passed + 1))
     echo "shellcheck: PASS - examined ${#scripts[@]} shell scripts, no findings"
   else

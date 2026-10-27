@@ -25,8 +25,11 @@ new_sandbox_dir() {
     *) base=/tmp ;; # a relative TMPDIR would put the sandbox inside the repo
   esac
   parent=$(mktemp -d "${base%/}/sandbox.XXXXXX") || return 1
-  case "$parent/" in
-    "$src"/*)
+  # compare real paths, so a TMPDIR that is a link into the repo is caught too
+  src_real=$(cd -P "$src" && pwd -P) || return 1
+  parent_real=$(cd -P "$parent" && pwd -P) || return 1
+  case "$parent_real/" in
+    "$src_real"/*)
       rm -rf "$parent"
       return 1
       ;;
@@ -41,7 +44,10 @@ new_sandbox_dir() {
 # make_sandbox: prints the path of a new sandbox repo holding a copy of every
 # tracked and untracked (not ignored) file. Fails, and leaves nothing behind,
 # if any file could not be copied. Files deleted from the working tree are
-# left out, as they would be from a commit.
+# left out, as they would be from a commit. A symlink is copied as a link
+# only when its target is relative and does not climb out with "..";
+# otherwise the sandbox fails, so no plant can write through a link to a
+# place outside the sandbox.
 make_sandbox() {
   src=$(repo_root) || return 1
   dir=$(new_sandbox_dir) || return 1
@@ -52,7 +58,11 @@ make_sandbox() {
       *) to=$dir ;;
     esac
     if [ -L "$src/$f" ]; then
-      mkdir -p "$to" && ln -s "$(readlink "$src/$f")" "$dir/$f" || copy_failed=1
+      target=$(readlink "$src/$f")
+      case "$target" in
+        /* | .. | ../* | */.. | */../*) copy_failed=1 ;;
+        *) mkdir -p "$to" && ln -s "$target" "$dir/$f" || copy_failed=1 ;;
+      esac
     elif [ -f "$src/$f" ]; then
       mkdir -p "$to" && cp -p "$src/$f" "$dir/$f" || copy_failed=1
     fi

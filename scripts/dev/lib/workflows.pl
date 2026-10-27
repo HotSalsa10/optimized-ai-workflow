@@ -13,19 +13,28 @@
 # - no "permissions:" value, top-level or in a job, is write-all;
 # - every job sets "timeout-minutes:" at job level (any indentation).
 # The lint reads YAML one line at a time, so it fails closed: a form it
-# cannot read reliably is a finding. That covers flow mappings ({ ... }), a
-# flow sequence holding a mapping, YAML tags (!!str), anchors (&a), aliases
-# (*a) and merge keys (<<:). Keys may be quoted, and a value may sit on the
-# next, deeper line. Text inside a block scalar (run: |) is not read.
+# cannot read reliably is a finding. That covers flow mappings ({ ... }, but
+# an empty {} is fine), a flow sequence holding a mapping, YAML tags (!!str),
+# anchors (&a), aliases (*a), merge keys (<<:), explicit keys (? key), a
+# line that starts with ":", a backslash escape in a double-quoted key or
+# value, and a block scalar as the value of permissions, uses or
+# timeout-minutes. Keys may be quoted, and a value may sit on the next,
+# deeper line. Text inside a block scalar (run: |) is not read. A UTF-8
+# byte-order mark at the start of a file is ignored.
 use strict;
 use warnings;
 
 # Prints one line of output. Control characters taken from file names or
-# content are shown as \xNN, so text from a file can never start a new line
-# of output, move the cursor or reach the CI runner as a command.
+# content (also UTF-8 C1 controls) are shown as \xNN, and the CI runner's
+# command forms (## [ anywhere, :: at the start after spaces) are broken up,
+# so text from a file can never start a new line of output, move the cursor
+# or reach the CI runner as a command.
 sub say_line {
   my ($s) = @_;
   $s =~ s/([\x00-\x1F\x7F])/sprintf('\\x%02X', ord $1)/ge;
+  $s =~ s/\xC2([\x80-\x9F])/sprintf('\\xC2\\x%02X', ord $1)/ge;
+  $s =~ s/##\[/#\\x23[/g;
+  $s =~ s/^(\s*):(?=:)/$1\\x3A/;
   print "$s\n";
 }
 
@@ -44,6 +53,7 @@ for my $file (@ARGV) {
   open my $fh, '<', $file or do { say_line("workflows: cannot read $file"); $bad++; next };
   my @lines = map { my $l = $_; $l =~ s/\r?\n\z//; $l } <$fh>;
   close $fh;
+  $lines[0] =~ s/^\xEF\xBB\xBF// if @lines;    # a byte-order mark
   my $is_workflow = $file =~ m{(?:^|/)\.github/workflows/[^/]+\.ya?ml$};
   if ($is_workflow) { $examined++ } else { $actions++ }
   my $problem = sub {
@@ -93,13 +103,26 @@ for my $file (@ARGV) {
     };
 
     # fail closed on forms a line reader cannot follow
-    if ($plain =~ /^\{/ || $l =~ /^\s*(?:-\s+)?\{/ || ($plain =~ /^\[/ && $plain =~ /[{:]/)) {
+    (my $unquoted = $plain) =~ s/"(?:[^"\\]|\\.)*"|'[^']*'//g;    # flow text outside quotes
+    if (($plain =~ /^\{/ && $plain !~ /^\{\s*\}$/) || $l =~ /^\s*(?:-\s+)?\{(?!\s*\}\s*(?:#.*)?$)/
+      || ($plain =~ /^\[/ && $unquoted =~ /\{|:(?:\s|$)/)) {
       $problem->($n, 'a flow mapping ({ ... }) cannot be checked; write it in block style');
     }
     if ($plain =~ /^[!&*]/ || (defined $key && $key eq '<<')) {
       $problem->($n, 'YAML tags, anchors, aliases and merge keys cannot be checked; write the value out');
     }
-    if ($v =~ /^[|>][-+0-9]*$/) { $block_indent = $ind; }
+    if ($l =~ /^\s*(?:-\s+)?[?:](?:\s|$)/) {
+      $problem->($n, 'an explicit key (? key) or a line starting with ":" cannot be checked; write key: value');
+    }
+    if ($l =~ /^\s*(?:-\s+)?"(?:[^"\\]|\\.)*\\/ || $plain =~ /^"(?:[^"\\]|\\.)*\\/) {
+      $problem->($n, 'a backslash escape in a double-quoted key or value cannot be checked; write it plainly');
+    }
+    if ($v =~ /^[|>][-+0-9]*$/) {
+      $problem->($n, "a block scalar as the value of $key cannot be checked; write it on one line")
+        if defined $key && $key =~ /^(?:permissions|uses|timeout-minutes)$/;
+      # the block's text is everything indented deeper than this key
+      $block_indent = $ind + (defined $dash ? length $dash : 0);
+    }
 
     next unless defined $key;
     if ($key eq 'uses') {

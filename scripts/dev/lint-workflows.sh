@@ -36,7 +36,7 @@ out=$(perl scripts/dev/lib/workflows.pl "${files[@]}" 2>&1) || {
 examined=$(printf '%s\n' "$out" | sed -n 's/^EXAMINED //p')
 action_files=$(printf '%s\n' "$out" | sed -n 's/^ACTIONS //p')
 bad=$(printf '%s\n' "$out" | sed -n 's/^BAD //p')
-printf '%s\n' "$out" | grep -v -e '^EXAMINED ' -e '^ACTIONS ' -e '^BAD '
+printf '%s\n' "$out" | grep -v -e '^EXAMINED ' -e '^ACTIONS ' -e '^BAD ' | perl -pe 's/([\x00-\x09\x0B-\x1F\x7F])/sprintf("\\x%02X", ord $1)/ge; s/##\[/#\\x23[/g; s/^(\s*):(?=:)/$1\\x3A/'
 
 # Each count must be one plain number. Anything else means the output could
 # not be trusted, which is a failure, never a pass.

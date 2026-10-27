@@ -28,16 +28,25 @@
 use strict;
 use warnings;
 use IPC::Open2;
+use File::Spec;
 
 # Prints one line of output. Control characters taken from file names or
-# content are shown as \xNN, so text from a file can never start a new line
-# of output, move the cursor or reach the CI runner as a command.
+# content (also UTF-8 C1 controls) are shown as \xNN, and the CI runner's
+# command forms (## [ anywhere, :: at the start after spaces) are broken up,
+# so text from a file can never start a new line of output, move the cursor
+# or reach the CI runner as a command.
 sub esc {
   my ($s) = @_;
   $s =~ s/([\x00-\x1F\x7F])/sprintf('\\x%02X', ord $1)/ge;
+  $s =~ s/\xC2([\x80-\x9F])/sprintf('\\xC2\\x%02X', ord $1)/ge;
+  $s =~ s/##\[/#\\x23[/g;
   return $s;
 }
-sub say_line { print esc($_[0]), "\n" }
+sub say_line {
+  my $s = esc($_[0]);
+  $s =~ s/^(\s*):(?=:)/$1\\x3A/;
+  print "$s\n";
+}
 
 my ($staged, $show_ids, $mask_mode) = (0, 0, 0);
 while (@ARGV && $ARGV[0] =~ /^--/) {
@@ -141,6 +150,7 @@ sub iban_checksum_ok {
   return $m == 1;
 }
 
+my @iban_written;    # the text of each hit as written, with spaces
 sub iban_hits {
   my ($line) = @_;
   my @hits;
@@ -150,9 +160,11 @@ sub iban_hits {
     # exactly the country's length, in one block or in spaced groups, and
     # not running on into more letters or digits (a longer hash)
     next unless substr($line, pos($line) - 2) =~ /^([A-Z]{2}\d{2}(?: ?[A-Z0-9]){$rest})(?![A-Za-z0-9])/;
-    (my $cand = $1) =~ s/ //g;
+    my $written = $1;
+    (my $cand = $written) =~ s/ //g;
     next unless ($cand =~ tr/0-9//) >= 8;
     push @hits, $cand if iban_checksum_ok($cand);
+    push @iban_written, $written if iban_checksum_ok($cand);
   }
   return @hits;
 }
@@ -171,13 +183,35 @@ sub mask {
 if ($mask_mode) {
   while (my $line = <STDIN>) {
     $line =~ s/\r?\n\z//;
-    for my $r (@token_rules) { $line =~ s/($r->[0])/mask($1, 1)/ge }
-    $line =~ s/$quoted_cred/$1 . mask($3, 0)/ge;
-    $line =~ s/$env_cred/$1 . mask($3, 0)/e;
-    $line =~ s/($email_re)/email_ok($1) ? $1 : mask($1, 0)/ge;
-    say_line("  $line");
+    # A check's own output is already escaped; an escape such as \x09 ends a
+    # word, so each piece between escapes is masked on its own.
+    my @parts = split /(\\x[0-9A-F]{2})/, $line;
+    for my $part (@parts) {
+      next if $part =~ /^\\x[0-9A-F]{2}$/;
+      for my $r (@token_rules) { $part =~ s/($r->[0])/mask($1, 1)/ge }
+      $part =~ s/$quoted_cred/$1 . mask($3, 0)/ge;
+      $part =~ s/$env_cred/$1 . mask($3, 0)/e;
+      $part =~ s/($email_re)/email_ok($1) ? $1 : mask($1, 0)/ge;
+      for my $p (phone_hits($part)) { $part =~ s/\Q$p\E/mask($p, 0)/ge }
+      @iban_written = ();
+      iban_hits($part);
+      for my $w (@iban_written) { $part =~ s/\Q$w\E/mask($w, 0)/ge }
+    }
+    say_line('  ' . join('', @parts));
   }
   exit 0;
+}
+
+# git_pipe ARGS: a pipe from git with its warnings discarded, because a
+# warning can quote a file name raw.
+sub git_pipe {
+  my @args = @_;
+  open my $saved, '>&', \*STDERR or die "secrets: cannot save stderr\n";
+  open STDERR, '>', File::Spec->devnull or die "secrets: cannot silence git\n";
+  my $ok = open my $p, '-|', 'git', @args;
+  open STDERR, '>&', $saved or die "secrets: cannot restore stderr\n";
+  die "secrets: git $args[0] did not run\n" unless $ok;
+  return $p;
 }
 
 my $allow_file = shift @ARGV;
@@ -293,10 +327,11 @@ sub utf16 {
   return join '', map { chr } unpack($order eq 'LE' ? 'v*' : 'n*', $bytes);
 }
 
-# Returns (text, kind, raw): raw is set whenever the bytes hold a NUL.
+# Returns (text, kind, raw): raw is set whenever the bytes hold a NUL or start
+# with a UTF-16 byte-order mark.
 sub classify {
   my ($bytes) = @_;
-  my $raw = index($bytes, "\0") >= 0 ? $bytes : undef;
+  my $raw = (index($bytes, "\0") >= 0 || $bytes =~ /^(?:\xFF\xFE|\xFE\xFF)/) ? $bytes : undef;
   return (utf16(substr($bytes, 2), 'LE'), 'text', $raw) if $bytes =~ /^\xFF\xFE/;
   return (utf16(substr($bytes, 2), 'BE'), 'text', $raw) if $bytes =~ /^\xFE\xFF/;
   if (defined $raw) {
@@ -338,6 +373,7 @@ sub read_raw {
 }
 
 for my $file (@ARGV) {
+  scan_line($file, "$file (file name)", $file, {}, 0);
   my $bytes = read_raw($file);
   if (!defined $bytes) { say_line("secrets: cannot read $file"); $bad++; next; }
   scan_content($file, $file, $bytes);
@@ -348,13 +384,22 @@ if ($staged) {
   my %differs;
   {
     local $/ = "\0";
-    open my $d, '-|', 'git', 'diff', '--name-only', '-z' or die "secrets: git diff did not run\n";
+    my $d = git_pipe('diff', '--name-only', '-z');
     while (my $p = <$d>) { chomp $p; $differs{$p} = 1 }
     close $d or die "secrets: git diff failed\n";
+    # files marked assume-unchanged (lower-case tag) or skip-worktree (S), which
+    # git diff does not compare
+    my $v = git_pipe('ls-files', '-v', '-z');
+    while (my $e = <$v>) {
+      chomp $e;
+      my ($tag, $p) = split / /, $e, 2;
+      $differs{$p} = 1 if defined $p && ($tag =~ /^[a-z]$/ || $tag eq 'S');
+    }
+    close $v or die "secrets: git ls-files -v failed\n";
   }
   if (%differs) {
     local $/ = "\0";
-    open my $l, '-|', 'git', 'ls-files', '-s', '-z' or die "secrets: git ls-files did not run\n";
+    my $l = git_pipe('ls-files', '-s', '-z');
     my @blobs;
     while (my $e = <$l>) {
       chomp $e;
@@ -366,7 +411,7 @@ if ($staged) {
     for my $b (@blobs) {
       my ($path, $oid) = @$b;
       local $/;
-      open my $c, '-|', 'git', 'cat-file', 'blob', $oid or die "secrets: git cat-file did not run\n";
+      my $c = git_pipe('cat-file', 'blob', $oid);
       binmode $c;
       my $bytes = <$c>;
       close $c or die "secrets: git cat-file failed\n";

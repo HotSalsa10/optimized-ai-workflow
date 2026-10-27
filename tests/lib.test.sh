@@ -77,6 +77,59 @@ case "$sb" in
 esac
 drop_sandbox "$sb"
 
+# 5. a TMPDIR inside the repo, or a link to a folder inside it, is refused
+mkdir -p "$src_repo/tmp-inside"
+out=$(cd "$src_repo" && TMPDIR="$src_repo/tmp-inside" make_sandbox)
+code=$?
+left=$(ls -A "$src_repo/tmp-inside")
+if [ "$code" -ne 0 ] && [ -z "$out" ] && [ -z "$left" ]; then
+  pass "make_sandbox refuses a TMPDIR inside the repo"
+else
+  fail "make_sandbox refuses a TMPDIR inside the repo: exit $code, made '$out', left behind: $left"
+fi
+link_parent=$(mktemp -d "${tmp_base%/}/linktmp.XXXXXX") || abort_sandbox
+ln -s "$src_repo/tmp-inside" "$link_parent/tmp" 2>/dev/null
+if [ -L "$link_parent/tmp" ]; then
+  out=$(cd "$src_repo" && TMPDIR="$link_parent/tmp" make_sandbox)
+  code=$?
+  left=$(ls -A "$src_repo/tmp-inside")
+  if [ "$code" -ne 0 ] && [ -z "$out" ] && [ -z "$left" ]; then
+    pass "make_sandbox refuses a TMPDIR that is a link into the repo"
+  else
+    fail "make_sandbox refuses a TMPDIR that is a link into the repo: exit $code, made '$out', left behind: $left"
+  fi
+else
+  skip "a TMPDIR that is a link: this system cannot make symlinks"
+fi
+rm -rf "$link_parent" "$src_repo/tmp-inside"
+
+# 6. a symlink that points outside the repo fails the sandbox, so no plant can
+#    write through it
+ln -s /tmp "$src_repo/abs-link" 2>/dev/null
+ln -s ../outside "$src_repo/up-link" 2>/dev/null
+if [ -L "$src_repo/abs-link" ] && [ -L "$src_repo/up-link" ]; then
+  out=$(cd "$src_repo" && make_sandbox)
+  code=$?
+  if [ "$code" -ne 0 ] && [ -z "$out" ]; then
+    pass "make_sandbox fails on a symlink that points outside the repo"
+  else
+    fail "make_sandbox fails on a symlink that points outside the repo: exit $code, made '$out'"
+    [ -n "$out" ] && drop_sandbox "$out"
+  fi
+  rm -f "$src_repo/abs-link"
+  out=$(cd "$src_repo" && make_sandbox)
+  code=$?
+  if [ "$code" -ne 0 ] && [ -z "$out" ]; then
+    pass "make_sandbox fails on a symlink that climbs out with .."
+  else
+    fail "make_sandbox fails on a symlink that climbs out with ..: exit $code, made '$out'"
+    [ -n "$out" ] && drop_sandbox "$out"
+  fi
+else
+  skip "symlinks that point outside: this system cannot make symlinks"
+fi
+rm -f "$src_repo/abs-link" "$src_repo/up-link"
+
 drop_sandbox "$src_repo"
 echo "tests: sandbox helpers: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]

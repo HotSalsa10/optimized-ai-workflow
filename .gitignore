@@ -26,6 +26,22 @@ id_ecdsa*
 .pypirc
 .git-credentials
 credentials*.json
+.credentials.json
+client_secret*.json
+*service-account*.json
+.aws/
+*.tfvars
+!*.tfvars.example
+*.tfstate*
+id_dsa*
+*.jks
+*.keystore
+*.ppk
+.pgpass
+.vault-token
+.docker/config.json
+.kube/config
+kubeconfig
 
 # Editors and operating systems
 .DS_Store

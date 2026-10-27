@@ -53,7 +53,7 @@ bad=$(printf '%s\n' "$out" | sed -n 's/^BAD //p')
 allowed=$(printf '%s\n' "$out" | sed -n 's/^ALLOWED //p')
 skipped=$(printf '%s\n' "$out" | sed -n 's/^SKIPPED //p')
 skipped_names=$(printf '%s\n' "$out" | sed -n 's/^SKIPPED_NAMES //p')
-printf '%s\n' "$out" | grep -v -e '^EXAMINED ' -e '^STAGED ' -e '^BAD ' -e '^ALLOWED ' -e '^SKIPPED ' -e '^SKIPPED_NAMES ' | sed 's/^NOTE /secrets: note - /'
+printf '%s\n' "$out" | grep -v -e '^EXAMINED ' -e '^STAGED ' -e '^BAD ' -e '^ALLOWED ' -e '^SKIPPED ' -e '^SKIPPED_NAMES ' | sed 's/^NOTE /secrets: note - /' | perl -pe 's/([\x00-\x09\x0B-\x1F\x7F])/sprintf("\\x%02X", ord $1)/ge; s/##\[/#\\x23[/g; s/^(\s*):(?=:)/$1\\x3A/'
 
 # Each count must be one plain number. Anything else means the output could
 # not be trusted, which is a failure, never a pass.
