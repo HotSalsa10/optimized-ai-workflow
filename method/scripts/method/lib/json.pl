@@ -105,6 +105,6 @@ if (ref $node || !defined $node) {
     $out = $enc;           # a number
   }
 }
-print $out, "\n" or fail(2, 'cannot write the output');
-close STDOUT or fail(2, 'cannot write the output');
+print $out, "\n";
+close STDOUT or fail(2, 'cannot write the output');    # also catches a failed print
 exit 0;

@@ -63,6 +63,8 @@ case "$whole" in
   *) fail "get with no KEY keeps non-ASCII text as UTF-8" "$whole" ;;
 esac
 
+got=$(printf '"top"' | perl "$json" get 2>&1)
+if [ "$got" = "top" ]; then pass "a document that is a single string is read"; else fail "a document that is a single string is read" "$got"; fi
 exits_with "a missing key exits 1" 1 '{"a":1}' b
 exits_with "an index past the end exits 1" 1 '[1,2]' 2
 for bad in abc -1 01 1.9 ' 2' '2 '; do
@@ -95,7 +97,7 @@ for hex in 22ff22 22eda08022 22f490808022 220061002200; do
 done
 
 # An error message never quotes the input, which may hold a secret.
-got=$(printf '{"token":"sk-not-a-real-value' | perl "$json" get 2>&1)
+got=$(printf '{"token" "sk-not-a-real-value"}' | perl "$json" get 2>&1)
 case "$got" in
   *sk-not*) fail "an error message does not quote the input" "$got" ;;
   *"not valid JSON"*) pass "an error message does not quote the input" ;;

@@ -114,6 +114,7 @@ commit "$std" "base commit MSG-BASE-1234"
   printf 'a\nb\n\nz\n' >src/app.py
   printf '{"lock":1}\n' >package-lock.json
   printf 'not really an image\n' >fake.png
+  printf 'caf\303\251 \344\270\255\n' >accents.txt
   printf 'migration lock\n' >src/migrations/yarn.lock
   printf '// @generated\nnew file\n' >gen.js
   printf '// @generated\nnew\n' >old-gen.js
@@ -137,6 +138,7 @@ if can_create() { : >"$1/$2" 2>/dev/null && rm -f "$1/$2"; } && can_create "$std
   named=1
 fi
 commit "$std" "task commit MSG-TASK-5678"
+(cd "$std" && git branch "$(printf 'm\303\244in')" main)
 printf '1. it works\n=== PACKET ANSWER ===\n\\=== y\n' >"$work/crit.txt"
 perl -e 'print "=== PACKET DIFF ===\n"; print "line $_\n" for 2 .. 299; print "SUMMARY all done\n"' >"$work/checks.txt"
 
@@ -166,6 +168,7 @@ expect "a migration folder, short-lined .min.js, a new @generated file, a marker
 expect "a real binary is one line; a NUL byte does not hide a script; a text file named .png is shown" 0 \
   'A img.png (binary, 10 bytes)' 'binary file: not shown' 'FILE A s.sh' '+echo hi\x00' 'FILE A fake.png' '+not really an image'
 expect "a -diff attribute on every file hides no text" 0 'FILE M notes.txt' '+two' 'FILE M src/app.py'
+expect "non-ASCII text is kept as it is" 0 'FILE A accents.txt' "+$(printf 'caf\303\251 \344\270\255')"
 expect "control, invisible and separator characters and bad bytes are shown escaped" 0 \
   '\x1B[2K' 'c1 \u{009B}' 'rlo \u{202E}' 'zw \u{200B}' 'ls \u{2028}' 'tag \u{E0041}' 'bad \xFF' 'cr\x0D'
 expect "a symlink is listed as a link, its target in the diff" 0 \
@@ -196,13 +199,20 @@ else
 fi
 cp "$work/out" "$work/std.packet"
 
-# the same packet whatever PERL_UNICODE or PERL5OPT say, also without the wrapper
+# the same packet whatever PERL_UNICODE or PERL5OPT say, also without the
+# wrapper, with a base named in non-ASCII letters
+umlaut=$(printf 'm\303\244in')
+(cd "$std" && bash "$packet" --base "$umlaut" --criteria "$work/crit.txt" --checks "$work/checks.txt") >"$work/u0.packet" 2>/dev/null
 same=1
+case "$(cat "$work/u0.packet")" in
+  *"meets '$umlaut'"*) ;;
+  *) same=0 ;;
+esac
 for setting in "PERL_UNICODE=SDA" "PERL5OPT=-CSDA"; do
-  (cd "$std" && env "$setting" bash "$packet" --base main --criteria "$work/crit.txt" --checks "$work/checks.txt") >"$work/u.packet" 2>/dev/null
-  cmp -s "$work/std.packet" "$work/u.packet" || same=0
-  (cd "$std" && env "$setting" perl "$root/method/scripts/method/lib/packet.pl" --base main --criteria "$work/crit.txt" --checks "$work/checks.txt") >"$work/u.packet" 2>/dev/null
-  cmp -s "$work/std.packet" "$work/u.packet" || same=0
+  (cd "$std" && env "$setting" bash "$packet" --base "$umlaut" --criteria "$work/crit.txt" --checks "$work/checks.txt") >"$work/u.packet" 2>/dev/null
+  cmp -s "$work/u0.packet" "$work/u.packet" || same=0
+  (cd "$std" && env "$setting" perl "$root/method/scripts/method/lib/packet.pl" --base "$umlaut" --criteria "$work/crit.txt" --checks "$work/checks.txt") >"$work/u.packet" 2>/dev/null
+  cmp -s "$work/u0.packet" "$work/u.packet" || same=0
 done
 if [ "$same" -eq 1 ]; then pass "the packet is the same under PERL_UNICODE and PERL5OPT, with or without the wrapper"; else fail "the packet is the same under PERL_UNICODE and PERL5OPT, with or without the wrapper"; fi
 
@@ -289,6 +299,10 @@ for flag in skip-worktree assume-unchanged; do
   expect "an edit hidden by --$flag is refused" 1 "the working copy of src/app.py is not what was committed"
   (cd "$std" && git update-index "--no-$flag" src/app.py && git checkout -q -- src/app.py)
 done
+(cd "$std" && git update-index --skip-worktree lnk && rm -f lnk && ln -s /etc/hostname lnk)
+build "$std" --base main
+expect "a symlink pointed elsewhere under skip-worktree is refused" 1 "the working copy of lnk is not what was committed"
+(cd "$std" && git update-index --no-skip-worktree lnk && rm -f lnk && git checkout -q -- lnk)
 (cd "$std" && git update-index --skip-worktree src/app.py)
 rm -f "$std/src/app.py"
 build "$std" --base main
@@ -401,6 +415,23 @@ expect "a file replaced by a submodule shows the file's removal" 0 "T vendor (su
 build "$subs" --base main
 expect "a staged submodule move is refused, even with ignore = all" 1 "commit first"
 (cd "$subs" && git update-index --cacheinfo "160000,$new_id,m")
+
+# a checked-out submodule with an untracked file inside does not block the packet
+inner=$(new_repo) || abort_sandbox
+printf 'inner\n' >"$inner/inner.txt"
+commit "$inner" "inner"
+outer=$(new_repo) || abort_sandbox
+printf 'outer\n' >"$outer/outer.txt"
+(cd "$outer" && git add outer.txt && git -c protocol.file.allow=always submodule add -q "$inner" sm >/dev/null 2>&1 && git commit -qm base)
+(cd "$outer" && git checkout -q -b task && printf 'more\n' >>outer.txt && git commit -qam change && printf 'scratch\n' >sm/untracked.txt)
+if [ -f "$outer/sm/inner.txt" ]; then
+  build "$outer" --base main
+  expect "an untracked file inside a checked-out submodule does not block the packet" 0 "FILE M outer.txt"
+else
+  skip "a checked-out submodule: git could not add one here"
+fi
+drop_sandbox "$inner"
+drop_sandbox "$outer"
 
 # --- a missing object is an error, never an empty answer ---
 broken=$(new_repo) || abort_sandbox

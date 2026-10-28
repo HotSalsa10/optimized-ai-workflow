@@ -89,8 +89,7 @@ delete @ENV{qw(GIT_DIFF_OPTS GIT_EXTERNAL_DIFF GIT_LITERAL_PATHSPECS GIT_GLOB_PA
   GIT_ICASE_PATHSPECS GIT_REPLACE_REF_BASE)};
 $ENV{GIT_NO_REPLACE_OBJECTS} = 1;    # local replace refs would change the content shown
 $ENV{GIT_GRAFT_FILE} = File::Spec->catfile(tempdir(CLEANUP => 1), 'none');    # and so would grafts
-my @GIT = ('git', '--no-optional-locks', '-c', 'core.quotepath=true', '-c', 'color.ui=false',
-  '-c', 'diff.suppressBlankEmpty=false');
+my @GIT = ('git', '--no-optional-locks', '-c', 'diff.suppressBlankEmpty=false');
 
 # run_git ARGS: (exit status, standard output). git's own messages are
 # dropped, because they can quote file names raw.
@@ -120,7 +119,8 @@ sub commit_id {
   my ($rev) = @_;
   my ($st, $out) = run_git('rev-parse', '--verify', '--quiet', "$rev^{commit}");
   return undef if $st;
-  return $out =~ /\A([0-9a-f]{40}|[0-9a-f]{64})\n\z/ ? $1 : undef;
+  chomp $out;
+  return $out;
 }
 
 sub is_ancestor {
@@ -162,7 +162,7 @@ if (defined $opt{since}) {
 # Submodules are listed whatever .gitmodules or the settings say.
 sub changed {
   my ($a, $b) = @_;
-  my $raw = git_ok('diff', '--raw', '-z', '--no-abbrev', '-M', '--ignore-submodules=none', '--no-ext-diff', $a, $b);
+  my $raw = git_ok('diff', '--raw', '-z', '--no-abbrev', '-M', '--ignore-submodules=none', $a, $b);
   my @f = split /\0/, $raw, -1;
   pop @f if @f && $f[-1] eq '';
   my @files;
@@ -448,6 +448,6 @@ for my $s (['HEADER', \@header_lines], ['CRITERIA', \@criteria_lines], ['CHECKLI
 }
 $packet .= "=== PACKET END ===\n";
 
-print $packet or fail(2, 'cannot write the packet');
-close STDOUT or fail(2, 'cannot write the packet');
+print $packet;
+close STDOUT or fail(2, 'cannot write the packet');    # also catches a failed print
 exit 0;

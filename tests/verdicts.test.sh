@@ -59,10 +59,11 @@ sb=$(make_sandbox) || abort_sandbox
 vfile="$sb/method/scripts/method/verdicts.txt"
 cp "$vfile" "$sb/verdicts.orig"
 tab=$(printf '\t')
-for plant in "two-fields" "unknown-kind" "two-keys" "no-verdict" "control-char" "empty-meaning"; do
+for plant in "two-fields" "four-fields" "unknown-kind" "two-keys" "no-verdict" "control-char" "empty-meaning"; do
   cp "$sb/verdicts.orig" "$vfile"
   case "$plant" in
     two-fields) printf 'verdict%sMAYBE\n' "$tab" >>"$vfile" ;;
+    four-fields) printf 'verdict%sMAYBE%sa meaning%sextra\n' "$tab" "$tab" "$tab" >>"$vfile" ;;
     unknown-kind) printf 'verdikt%sMAYBE%sa typo in the kind\n' "$tab" "$tab" >>"$vfile" ;;
     two-keys) printf 'trailer-key%sOther-Key%sa second key\n' "$tab" "$tab" >>"$vfile" ;;
     no-verdict) perl -i -ne 'print unless /^verdict\t/' "$vfile" ;;
