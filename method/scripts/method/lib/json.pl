@@ -11,20 +11,27 @@
 #
 # Exit codes: 0 done; 1 the path does not exist; 2 bad usage, input that is
 # not valid UTF-8 or not valid JSON, a string holding a NUL byte (a shell
-# variable cannot hold one), a number out of range, or JSON::PP missing.
+# variable cannot hold one), or JSON::PP missing.
+#
+# Numbers with a fraction or an exponent print with all their digits (as
+# exact decimals, so 1e3 prints as 1000).
+#
+# Run it as "perl json.pl": switches given to perl itself (-M, -C) are the
+# caller's choice and are not undone.
 #
 # Known limits: duplicate keys keep the last value, as JavaScript's
 # JSON.parse does. A string that reads like another value ("true", "null",
 # "12") prints the same as that value, and $( ) drops a string's trailing
-# newlines. On old perl, integers of more than about 18 digits come back as
-# strings.
+# newlines. An integer of exactly 20 digits above 18446744073709551615 comes
+# back rounded (JSON::PP reads it as a floating-point number).
 use strict;
 use warnings;
 
 # PERL5OPT and PERL_UNICODE change how perl reads and computes (-C, -Mbigint,
-# -Minteger), so the helper starts again without them.
-if (grep { defined $ENV{$_} } qw(PERL5OPT PERL_UNICODE)) {
-  delete @ENV{qw(PERL5OPT PERL_UNICODE)};
+# -Minteger), and PERL5LIB and PERLLIB could put another JSON::PP in place,
+# so the helper starts again without them.
+if (grep { defined $ENV{$_} } qw(PERL5OPT PERL_UNICODE PERL5LIB PERLLIB)) {
+  delete @ENV{qw(PERL5OPT PERL_UNICODE PERL5LIB PERLLIB)};
   utf8::encode($_) for grep { utf8::is_utf8($_) } @ARGV;
   exec { $^X } $^X, $0, @ARGV or do {
     print STDERR "json: cannot start perl again\n";
@@ -68,7 +75,7 @@ my $chars = $text;
 fail(2, 'the input is not valid UTF-8 (or holds a NUL byte)')
   if index($text, "\0") >= 0 || !utf8::decode($chars) || $chars =~ /[\x{D800}-\x{DFFF}]|[^\x{0}-\x{10FFFF}]/;
 
-my $json = JSON::PP->new->utf8->allow_nonref->canonical;
+my $json = JSON::PP->new->utf8->allow_nonref->canonical->allow_bignum;
 my $data = eval { $json->decode($text) };
 if (!defined $data && $@) {
   my $err = $@;
@@ -91,23 +98,10 @@ for my $key (@keys) {
   }
 }
 
-# finite: false for a number that is Inf or NaN anywhere in the value
-sub finite {
-  no warnings 'recursion';    # deep nesting is valid JSON
-  my ($v) = @_;
-  return !grep { !finite($_) } values %$v if ref $v eq 'HASH';
-  return !grep { !finite($_) } @$v if ref $v eq 'ARRAY';
-  return 1 if !defined $v || ref $v;
-  require B;
-  my $flags = B::svref_2object(\$v)->FLAGS;
-  return 1 if $flags & B::SVf_POK() || !($flags & (B::SVf_IOK() | B::SVf_NOK()));
-  return $v * 0 == 0;
-}
-fail(2, 'a number is out of range') unless finite($node);
 
 my $out;
 if (ref $node || !defined $node) {
-  $out = $json->encode($node);    # object, array, true, false, null
+  $out = $json->encode($node);    # object, array, true, false, null, exact number
 } else {
   my $enc = $json->encode($node);
   if ($enc =~ /\A"/) {

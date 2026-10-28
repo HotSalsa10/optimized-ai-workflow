@@ -79,6 +79,14 @@ for plant in "two-fields" "four-fields" "unknown-kind" "two-keys" "no-verdict" "
     *) fail "a malformed vocabulary file ($plant) exits 2 and names the file: exit $code" "$got" ;;
   esac
 done
+perl -pe 's/\n/\r\n/' "$sb/verdicts.orig" >"$vfile"
+got=$(cd "$sb" && perl "$reader" words verdict 2>&1)
+want=$(cd "$sb" && perl -pe 's/\r//' "$vfile" >"$sb/verdicts.lf" && perl -e 'print join "", map { (split /\t/)[1] . "\n" } grep { /^verdict\t/ } <>' "$sb/verdicts.lf")
+if [ -n "$want" ] && [ "$got" = "$want" ]; then
+  pass "a copy checked out with CRLF line ends reads the same"
+else
+  fail "a copy checked out with CRLF line ends reads the same" "got: $got"
+fi
 rm -f "$vfile"
 got=$(cd "$sb" && perl "$reader" words verdict 2>&1)
 code=$?

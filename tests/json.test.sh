@@ -75,8 +75,14 @@ exits_with "a KEY on a string exits 1" 1 '{"a":"text"}' a 0
 exits_with "a KEY on null exits 1" 1 '{"a":null}' a b
 exits_with "input that is not JSON exits 2" 2 '{"a":' a
 exits_with "an empty input exits 2" 2 '' a
-exits_with "a number out of range exits 2" 2 '{"a":1e400}' a
-exits_with "a number out of range anywhere in a printed value exits 2" 2 '{"a":[1,-1e400]}' a
+for pair in '0.30000000000000004 0.30000000000000004' '3.141592653589793 3.141592653589793' '[1,-1.25e2] [1,-125]' '2.50 2.5'; do
+  in=${pair%% *}
+  want=${pair#* }
+  got=$(printf '{"a":%s}' "$in" | perl "$json" get a 2>&1)
+  if [ "$got" = "$want" ]; then pass "the number $in prints exactly as $want"; else fail "the number $in prints exactly as $want: got '$got'"; fi
+done
+got=$(printf '{"a":1e400}' | perl "$json" get a 2>&1)
+if [ "$got" = "1$(perl -e 'print "0" x 400')" ]; then pass "a number too big for a double prints with all its digits"; else fail "a number too big for a double prints with all its digits" "$got"; fi
 exits_with "a string holding a NUL byte exits 2" 2 '{"a":"x\u0000y"}' a
 for cmd in "" check format; do
   printf '{}' | perl "$json" ${cmd:+"$cmd"} >/dev/null 2>&1
@@ -119,14 +125,19 @@ done
 # Numbers read the same whatever PERL5OPT loads.
 for setting in "PERL5OPT=-Mbigint" "PERL5OPT=-Minteger" "PERL5OPT=-Mbignum"; do
   got=$(env "$setting" perl "$json" get b 1 <"$doc" 2>&1)
-  big=$(printf '{"a":1e400}' | env "$setting" perl "$json" get a 2>/dev/null)
-  code=$?
-  if [ "$got" = "2.5" ] && [ "$code" -eq 2 ] && [ -z "$big" ]; then
+  exact=$(printf '{"a":0.30000000000000004}' | env "$setting" perl "$json" get a 2>&1)
+  if [ "$got" = "2.5" ] && [ "$exact" = "0.30000000000000004" ]; then
     pass "with $setting numbers are read as without it"
   else
-    fail "with $setting numbers are read as without it: got '$got', out of range gave exit $code '$big'"
+    fail "with $setting numbers are read as without it: got '$got' and '$exact'"
   fi
 done
+
+# A JSON::PP put on PERL5LIB is not used: the helper starts again without it.
+mkdir -p "$work/fake/JSON"
+printf 'package JSON::PP; die "planted: a JSON::PP from PERL5LIB ran\\n";\n' >"$work/fake/JSON/PP.pm"
+got=$(PERL5LIB="$work/fake" perl "$json" get b 4 y <"$doc" 2>&1)
+if [ "$got" = "q" ]; then pass "a JSON::PP put on PERL5LIB is not used"; else fail "a JSON::PP put on PERL5LIB is not used" "$got"; fi
 
 # Deep nesting is valid JSON and gives no warning.
 deep=$(perl -e 'print "[" x 400, "1", "]" x 400')
@@ -141,7 +152,7 @@ if [ "$code" -eq 2 ]; then pass "a failed write exits 2"; else fail "a failed wr
 # Without JSON::PP: one plain sentence and exit 2.
 mkdir -p "$work/stub/JSON"
 printf 'die "planted: no JSON::PP\\n";\n' >"$work/stub/JSON/PP.pm"
-got=$(printf '{}' | PERL5LIB="$work/stub" perl "$json" get 2>&1)
+got=$(printf '{}' | perl -I"$work/stub" "$json" get 2>&1)
 code=$?
 case "$code:$got" in
   2:*"JSON::PP module is missing"*) pass "without JSON::PP it says so and exits 2" ;;

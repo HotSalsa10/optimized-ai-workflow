@@ -26,7 +26,7 @@ sub rows {
   my $n = 0;
   while (my $line = <$fh>) {
     $n++;
-    $line =~ s/\n\z//;
+    $line =~ s/\r?\n\z//;    # a copy checked out with CRLF line ends reads the same
     next if $line eq '' || $line =~ /\A#/;
     my @f = split /\t/, $line, -1;
     die "verdicts.txt line $n: expected KIND<TAB>WORDS<TAB>MEANING with a known KIND\n"

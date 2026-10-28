@@ -30,10 +30,13 @@
 #   folder are always kept, and so is everything when only such files
 #   changed.
 # - M113: every line inside a section goes through one escaping step, so
-#   only the packet's own section markers start with "===", and control or
-#   invisible characters are shown as \xNN or \u{XXXX}.
-# The reviewer reads the changed files from disk, so the packet is refused
-# while the working copy differs from the commit.
+#   only the packet's own section markers start with "===", and control,
+#   format and invisible characters are shown as \xNN or \u{XXXX}. The
+#   markers also carry a token made from the whole packet, which no line of
+#   content can hold.
+# The reviewer reads files from disk, so the packet is refused while any
+# tracked file on disk differs from the commit. Stored files and folders
+# are checked against their ids as they are read.
 set -u
 # perl reads bytes; these settings would change how it reads them, and the
 # library paths would let modules from elsewhere run inside the builder
