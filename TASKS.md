@@ -1,6 +1,6 @@
 # TASKS
 
-Current phase: Release 1, step 1b (security fixes). Step 1 is closed except the owner's CI item.
+Current phase: Release 1. Steps 1 and 1b are closed except the owner's CI item.
 
 ## Step 1: repo skeleton, records, rule map, CI with planted defects
 
@@ -44,7 +44,8 @@ Each item that changes a check gets a planted defect that turns it red; config-o
 - [x] Found while working: two planted-break batches were first "caught" by the wrong test (a sandbox count that other parallel runs changed; a phone number left as plain text in a plant). Both causes fixed and both batches re-run; the checks now run before every batch.
 - [x] Review round 2 (same set-up): REQUEST CHANGES. 10 confirmed. 3 medium: a symlink target starting with "-" let a sandbox plant write outside the sandbox; a list holding `"uses":x` and YAML line breaks other than LF hid lines from the workflow lint. 7 low: tags and anchors on keys, a C1 name dropped from shellcheck without a message, a CRLF working copy over a binary staged copy, two .gitignore entries that worked only at the root, and an overstated planted-break record. 13 notes.
 - [x] Repair loop 2 (of 3): all 10 fixed, and the workflow lint rewritten to accept only plain YAML line shapes and report every other line, which closes that whole class instead of adding forms one by one. Also: file names always shown masked, names of staged-only files scanned, the mask filter masks the whole line before the pieces, `::` after Unicode spaces broken up, git's warnings tested by a plant, the index and working copy judged separately for line endings and files marked binary skipped, pathspec and SHELLCHECK_OPTS settings ignored, and escaping layers that could never fire removed. Checked: 115 test cases in 4 files pass; 87 planted breaks for step 1b, 82 caught and 5 that cannot be caught, each named in TESTS.md.
-- [ ] Review round 3 (the last under the cap) on the changes since round 2; closing commit with the verdict trailer, push
+- [x] Review round 3 (the last under the cap): REQUEST CHANGES. 4 confirmed, 2 of them the same issue, so 3 to fix: a step's timeout in a steps list not indented under `steps:` counted as the job's (medium; the second verifier rated it low); the planted-break record was overstated again (4 guards of the rewritten lint could be removed unnoticed); validate's names check printed a key held in a file name in full, against the records. 11 notes. The owner chose one last repair loop, with no 4th review.
+- [x] Repair loop 3 (the last): all 3 fixed, with plants for every form the review named. Also these notes: a job's timeout counts only at job level and only as a number or a `${{ }}` expression; `permissions:` needs something listed under it; a deeper line after a plain value is reported; trailing spaces are ignored; every check script clears PERL_UNICODE and PERL5OPT; the secret scan reads the names and stored targets of symlinks; sandboxes refuse Windows link forms, and the `-` link test now fails on the old helper; file names are scanned in one place. Not reviewed by a fresh reviewer (3-round cap); checked instead by 120 test cases in 4 files and by the planted-break runs summed up in TESTS.md.
 
 ## Fixed elsewhere
 
@@ -58,6 +59,7 @@ Each item that changes a check gets a planted defect that turns it red; config-o
 
 - Refuted by the verifying agent: the checkout leaves the read-only CI token on disk; the scans follow tracked symlinks.
 - Accepted: CI runs twice when a branch has an open pull request (cost only); crafted lines thousands of characters long slow the perl helpers (CI's 15-minute timeout caps it); anyone who can push can start the Windows and macOS runs with a v* tag (only the owner can push); runner images are not pinned.
+- Accepted from review round 3: a `-text` attribute in .gitattributes takes a file out of the line-endings check (TESTS.md Known limits).
 - Kept as notes for later steps: owner details in records and history are fine while the repo is private (review before publishing anything); project settings apply only in single-repo sessions without managed settings, and the Opus-only list can turn a fallback re-run into a refusal (both for step 5 and the cloud acceptance test in step 9); the planned method/.claude/ files will load as live skills in this repo's own sessions (step 6 design).
 
 ## Follow-ups (not blocking)
