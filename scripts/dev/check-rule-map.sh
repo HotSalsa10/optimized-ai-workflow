@@ -8,6 +8,8 @@
 # Each rule has one reason and one home (M111): the same rule in two places
 # is a defect. The checks live in scripts/dev/lib/rule-map.pl.
 set -u
+# perl reads bytes here; these settings would change how it reads them
+unset PERL_UNICODE PERL5OPT
 
 root=$(git rev-parse --show-toplevel 2>/dev/null) || {
   echo "rule-map: FAIL - not inside a git repository"

@@ -8,6 +8,8 @@
 # read here directly, and fails if it holds a CR and no NUL byte, so a lone
 # CR cannot hide CRLF lines from this check.
 set -u
+# perl reads bytes here; these settings would change how it reads them
+unset PERL_UNICODE PERL5OPT
 
 root=$(git rev-parse --show-toplevel 2>/dev/null) || {
   echo "line-endings: FAIL - not inside a git repository"

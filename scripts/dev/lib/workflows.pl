@@ -11,7 +11,9 @@
 #   its own action file;
 # - a workflow sets top-level "permissions:";
 # - no "permissions:" value, top-level or in a job, is write-all;
-# - every job sets "timeout-minutes:" at job level (any indentation).
+# - every job sets "timeout-minutes:" at job level (any indentation), to a
+#   number or a ${{ }} expression; a step's own timeout does not count;
+# - a "permissions:" with no value has its permissions listed under it.
 #
 # It reads YAML one line at a time, so it accepts only plain YAML whose
 # meaning a line reader can be sure of, and every other line is a finding.
@@ -22,9 +24,11 @@
 # where VALUE is a plain scalar, a block scalar indicator (| or >), a quoted
 # scalar closed on the same line (double quotes without backslashes), {} or
 # [], or a one-line [list] of plain or quoted scalars, each optionally
-# followed by a comment. Anything else (flow mappings, quoted or explicit
-# keys, tags, anchors, aliases, escapes, values over several lines, line
-# breaks other than LF) is reported, not guessed at. A UTF-8 byte-order mark
+# followed by a comment. A line indented deeper than a key or list item that
+# already has a plain value continues that value, so it is reported too.
+# Anything else (flow mappings, quoted or explicit keys, tags, anchors,
+# aliases, escapes, values over several lines, line breaks other than LF) is
+# reported, not guessed at. Trailing spaces are ignored. A UTF-8 byte-order mark
 # at the start of a file is ignored, and "---" may open a file.
 use strict;
 use warnings;
@@ -80,10 +84,12 @@ for my $file (@ARGV) {
   my ($has_permissions, $in_jobs, $job_indent, $job, $child_indent) = (0, 0, undef, undef, undef);
   my (%timeout, @order);
   my $block_indent;    # set while inside a block scalar (run: |)
+  my $scalar_limit;    # a deeper line than this continues the last plain value
   for (my $i = 0; $i < @lines; $i++) {
     my $l = $lines[$i];
     my $n = $i + 1;
     $l =~ s/\r\z//;    # CRLF is the line-endings check's business
+    $l =~ s/[ \t]+\z//;
     # YAML also ends a line at CR, NEL, LS and PS; a reader that splits on LF
     # alone would see two lines as one.
     if ($l =~ /\r|\xC2\x85|\xE2\x80[\xA8\xA9]/) {
@@ -98,6 +104,14 @@ for my $file (@ARGV) {
       undef $block_indent;
     }
     next if $n == 1 && $l =~ /^---\s*$/;
+    if (defined $scalar_limit) {
+      my $limit = $scalar_limit;
+      undef $scalar_limit;
+      if ($ind > $limit) {
+        $problem->($n, 'this line continues the value above it over several lines; write the value on one line or as a block scalar');
+        next;
+      }
+    }
 
     # (the parts are copied out before the value is tested, because a second
     # match resets $1, $2 and $3)
@@ -114,6 +128,10 @@ for my $file (@ARGV) {
       next;
     }
     my $v = clean($value);
+    # a plain or quoted value: a deeper next line would continue it
+    if (length $v && $value !~ /^[|>]/) {
+      $scalar_limit = defined $key ? $ind + length($dash) : $ind + length($dash) - 2;
+    }
     if ($value =~ /^[|>]/) {
       $problem->($n, "a block scalar as the value of $key cannot be checked; write it on one line")
         if defined $key && $key =~ /^(?:permissions|uses|timeout-minutes)$/;
@@ -136,6 +154,13 @@ for my $file (@ARGV) {
     next unless $is_workflow;
     if ($key eq 'permissions') {
       $has_permissions = 1 if $ind == 0 && !length $dash;
+      if (!length $v && $value !~ /^(?:\{\}|\[\])/) {
+        my $j = $i + 1;
+        $j++ while $j < @lines && $lines[$j] =~ /^\s*(?:#.*)?\r?$/;
+        my ($next_lead) = $j < @lines ? $lines[$j] =~ /^( *)/ : ('');
+        $problem->($n, '"permissions:" has no value and nothing listed under it; list each permission, or use {}')
+          unless $j < @lines && length($next_lead) > $ind + length($dash);
+      }
       $problem->($n, 'permissions are write-all; grant only what is needed') if $v eq 'write-all';
     }
     if ($ind == 0 && !length $dash) {
@@ -154,7 +179,7 @@ for my $file (@ARGV) {
     }
     next unless defined $job && $ind > $job_indent;
     $child_indent = $ind unless defined $child_indent;
-    $timeout{$job} = 1 if $ind == $child_indent && $key eq 'timeout-minutes' && length $v;
+    $timeout{$job} = 1 if $ind == $child_indent && !length($dash) && $key eq 'timeout-minutes' && $v =~ /^(?:\d+|\$\{\{.*\}\})$/;
   }
   next unless $is_workflow;
   $problem->(undef, 'no top-level permissions:') unless $has_permissions;

@@ -5,7 +5,9 @@
 #   perl secrets.pl [--staged] [--ids] ALLOW_FILE FILE...
 #       Scans each FILE. With --staged (run from the repo root), also scans the
 #       staged copy of every tracked file whose staged copy differs from the
-#       working tree, so a secret that is staged but no longer on disk is seen.
+#       working tree, so a secret that is staged but no longer on disk is seen;
+#       the name of every tracked entry (also links, folders of other repos
+#       and files missing from disk); and the stored target of every symlink.
 #       With --ids, each finding also shows the ID to put in ALLOW_FILE.
 #       Prints one line per finding (masked, never in full), "NOTE ..." lines,
 #       then "EXAMINED n", "STAGED n", "BAD n", "ALLOWED n", "SKIPPED n", "SKIPPED_NAMES ...".
@@ -414,7 +416,7 @@ if ($staged) {
     }
     close $v or die "secrets: git ls-files -v failed\n";
   }
-  if (%differs) {
+  {
     local $/ = "\0";
     my $l = git_pipe('ls-files', '-s', '-z');
     my @blobs;
@@ -422,11 +424,14 @@ if ($staged) {
       chomp $e;
       my ($meta, $path) = split /\t/, $e, 2;
       my ($mode, $oid) = split / /, $meta;
-      push @blobs, [$path, $oid] if $differs{$path} && $mode ne '160000';
+      scan_name($path);
+      # a symlink's stored target is text too, whatever it points at
+      push @blobs, [$path, $oid, ' (link target)'] if $mode eq '120000';
+      push @blobs, [$path, $oid, ' (staged)'] if $differs{$path} && $mode ne '160000' && $mode ne '120000';
     }
     close $l or die "secrets: git ls-files failed\n";
     for my $b (@blobs) {
-      my ($path, $oid) = @$b;
+      my ($path, $oid, $kind) = @$b;
       local $/;
       my $c = git_pipe('cat-file', 'blob', $oid);
       binmode $c;
@@ -434,7 +439,7 @@ if ($staged) {
       close $c or die "secrets: git cat-file failed\n";
       scan_name($path);
       my $before = $examined;
-      scan_content($path, mask_text($path) . ' (staged)', defined $bytes ? $bytes : '');
+      scan_content($path, mask_text($path) . $kind, defined $bytes ? $bytes : '');
       $staged_examined += $examined - $before;
     }
   }

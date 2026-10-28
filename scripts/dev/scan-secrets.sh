@@ -12,6 +12,8 @@
 # Run "bash scripts/dev/scan-secrets.sh --ids" to see each finding's id.
 # The rules live in scripts/dev/lib/secrets.pl.
 set -u
+# perl reads bytes here; these settings would change how it reads them
+unset PERL_UNICODE PERL5OPT
 
 ids=""
 case "${1:-}" in
@@ -76,7 +78,7 @@ if [ "$bad" -gt 0 ]; then
 fi
 notes=""
 if [ "$staged_copies" -gt 0 ]; then
-  notes="$notes (and $staged_copies staged copies that differ from the working tree)"
+  notes="$notes (and $staged_copies staged copies and link targets)"
 fi
 if [ "$skipped" -gt 0 ]; then
   notes="$notes (skipped $skipped binary, searched for keys only: $skipped_names)"

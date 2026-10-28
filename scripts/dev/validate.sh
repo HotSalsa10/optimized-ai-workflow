@@ -12,6 +12,8 @@
 # character fails the "names" check and is kept away from the tools, whose
 # output it could split into lines.
 set -u
+# perl reads bytes here; these settings would change how it reads them
+unset PERL_UNICODE PERL5OPT
 
 root=$(git rev-parse --show-toplevel 2>/dev/null) || {
   echo "validate: FAIL - not inside a git repository"
@@ -49,7 +51,7 @@ bad_names=$(git ls-files -z | CONTROL=$control_re perl -0ne 'chomp; next unless 
 if [ -n "$bad_names" ]; then
   failed=$((failed + 1))
   failed_names="$failed_names names"
-  printf '%s\n' "$bad_names" | sed 's/^/  names: /'
+  printf '%s\n' "$bad_names" | sed 's/^/names: /' | masked
   echo "names: FAIL - tracked file names hold control characters; rename them"
 else
   passed=$((passed + 1))

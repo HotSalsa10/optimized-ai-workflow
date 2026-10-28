@@ -825,6 +825,32 @@ printf '\357\273\277jobs:\n  b:\n    runs-on: ubuntu-latest\n    steps:\n      -
   wf_head
   printf '      - name: x\342\200\250        uses: evil/a@main\n'
 } >"$wf/f-linesep.yml"
+printf 'name: t\non: push\npermissions:\n  contents: read\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n    - timeout-minutes: 1\n      run: echo quick\n    - name: long\n      run: sleep 21000\n' >"$wf/f-indentless.yml"
+printf 'name: t\non: push\npermissions:\n  contents: read\njobs:\n  b:\n    runs-on: ubuntu-latest\n    timeout-minutes: ~\n    steps:\n      - run: true\n' >"$wf/f-tilde.yml"
+printf 'name: t\non: push\npermissions:\njobs:\n  b:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    steps:\n      - run: true\n' >"$wf/f-emptyperm.yml"
+{
+  wf_head
+  printf '      - run: echo hi\n          - uses: evil/x@main\n'
+} >"$wf/f-cont.yml"
+{
+  wf_head
+  printf '      - run: true\n    other: [uses: evil/x@main]\n'
+} >"$wf/f-flowmap.yml"
+printf 'name: t\non: push\npermissions: &p write-all\njobs:\n  b:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    steps:\n      - run: true\n' >"$wf/f-anchorval.yml"
+printf 'name: t\non: push\npermissions: "write\\x2dall"\njobs:\n  b:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    steps:\n      - run: true\n' >"$wf/f-escval.yml"
+{
+  wf_head
+  printf '      - run: echo #\302\205      - uses: evil/a@main\n'
+} >"$wf/f-nel.yml"
+{
+  wf_head
+  printf '      - run: echo #\342\200\251      - uses: evil/a@main\n'
+} >"$wf/f-ps.yml"
+{
+  wf_head
+  printf '      - run: echo #\r      - uses: evil/a@main\n'
+} >"$wf/f-cr.yml"
+printf 'name: t  \non: push\npermissions:   \n  contents: read  \njobs:\n  build:  \n    runs-on: ubuntu-latest \n    timeout-minutes: %s\n    steps:\n      - uses: %s # v7  \n        with:\n          persist-credentials: false\n      - run: |\n          a\n          b\n' "${d}{{ fromJSON(vars.T) }}" "$pinned" >"$wf/g-trailing.yml"
 mkdir -p "$sb/act"
 printf 'runs:\n  using: composite\n  steps:\n    - uses: actions/setup-python@main\n' >"$sb/act/action.yml"
 {
@@ -836,7 +862,7 @@ printf 'runs:\n  using: composite\n  steps:\n    - uses: actions/setup-python@ma
   printf '    permissions: {}\n    services:\n      db:\n        image: postgres\n        ports: ["5432:5432"]\n'
   printf '    strategy:\n      matrix:\n        os: [windows-latest, macos-latest]\n'
 } >"$wf/g-lookalikes.yml"
-(cd "$sb" && git add .github/workflows act)
+(cd "$sb" && git -c core.autocrlf=false -c core.safecrlf=false add .github/workflows act)
 if expect_landed "workflows plant 9" grep -q "setup-python@main" "$sb/act/action.yml"; then
   out=$(cd "$sb" && bash scripts/dev/lint-workflows.sh 2>&1)
   code=$?
@@ -859,13 +885,23 @@ if expect_landed "workflows plant 9" grep -q "setup-python@main" "$sb/act/action
     "f-anchor.yml:11: $plain_msg" \
     "f-tagkey.yml:11: $plain_msg" \
     "f-multiquote.yml:10: $plain_msg" \
-    "f-linesep.yml:10: a line break other than LF"; do
+    "f-linesep.yml:10: a line break other than LF" \
+    "f-indentless.yml: job 'build' has no timeout-minutes" \
+    "f-tilde.yml: job 'b' has no timeout-minutes" \
+    "f-emptyperm.yml:3: \"permissions:\" has no value" \
+    "f-cont.yml:11: this line continues the value" \
+    "f-flowmap.yml:11: $plain_msg" \
+    "f-anchorval.yml:3: $plain_msg" \
+    "f-escval.yml:3: $plain_msg" \
+    "f-nel.yml:10: a line break other than LF" \
+    "f-ps.yml:10: a line break other than LF" \
+    "f-cr.yml:10: a line break other than LF"; do
     printf '%s\n' "$out" | grep -F -q -- "$want" || missing="$missing [$want]"
   done
-  if [ "$code" -eq 1 ] && [ -z "$missing" ] && ! printf '%s\n' "$out" | grep -q "g-lookalikes.yml"; then
-    pass "workflows flag 18 forms a line reader cannot follow, and not the valid look-alikes"
+  if [ "$code" -eq 1 ] && [ -z "$missing" ] && ! printf '%s\n' "$out" | grep -q -e "g-lookalikes.yml" -e "g-trailing.yml"; then
+    pass "workflows flag 28 forms a line reader cannot follow, and not the valid look-alikes"
   else
-    fail "workflows flag 18 forms a line reader cannot follow, and not the valid look-alikes: exit $code; missing:${missing:- none}" "$out"
+    fail "workflows flag 28 forms a line reader cannot follow, and not the valid look-alikes: exit $code; missing:${missing:- none}" "$out"
   fi
 fi
 drop_sandbox "$sb"
@@ -895,7 +931,39 @@ if expect_landed "name plant 1" has_nul "$sb/$key.gif"; then
 fi
 drop_sandbox "$sb"
 
-# 57. the name of a staged file that is gone from the working tree is scanned too
+# 57. validate's names check masks a key held in a file name
+sb=$(make_sandbox) || abort_sandbox
+tab_name="notes-$key$(printf '\t').txt"
+if can_create "$sb" "$tab_name"; then
+  printf 'hello\n' >"$sb/$tab_name"
+  (cd "$sb" && git add -- "$tab_name")
+  out=$(cd "$sb" && bash scripts/dev/validate.sh 2>&1)
+  if printf '%s\n' "$out" | grep -F -q -- "$key"; then
+    fail "validate printed a key in full from a file name" "$out"
+  elif printf '%s\n' "$out" | grep -q "names: FAIL"; then
+    pass "validate's names check masks a key held in a file name"
+  else
+    fail "validate's names check masks a key held in a file name: the name was not reported" "$out"
+  fi
+else
+  skip "a tab in a file name: this file system does not allow one"
+fi
+drop_sandbox "$sb"
+
+# 58. the names and stored targets of symlinks are scanned
+sb=$(make_sandbox) || abort_sandbox
+ln -s "missing-$key" "$sb/planted-link-target" 2>/dev/null
+ln -s nowhere "$sb/link-$key" 2>/dev/null
+if [ -L "$sb/planted-link-target" ] && [ -L "$sb/link-$key" ]; then
+  (cd "$sb" && git add -- planted-link-target "link-$key")
+  expect_red "secrets red on a key in a symlink's stored target" "$sb" "planted-link-target (link target):1: Anthropic API key" bash scripts/dev/scan-secrets.sh
+  expect_red "secrets red on a key in the name of a dangling symlink" "$sb" "a tracked file name (link-sk-a...(" bash scripts/dev/scan-secrets.sh
+else
+  skip "symlink names and targets: this system cannot make symlinks"
+fi
+drop_sandbox "$sb"
+
+# 59. the name of a staged file that is gone from the working tree is scanned too
 sb=$(make_sandbox) || abort_sandbox
 printf 'hello\n' >"$sb/notes-$key.md"
 (cd "$sb" && git add -- "notes-$key.md")
@@ -905,7 +973,7 @@ if expect_landed "name plant 2" staged_has "$sb" "notes-$key.md" hello; then
 fi
 drop_sandbox "$sb"
 
-# 58. a staged key in a file git was told to treat as unchanged
+# 60. a staged key in a file git was told to treat as unchanged
 sb=$(make_sandbox) || abort_sandbox
 printf 'clean\n' >"$sb/planted-hidden.txt"
 (cd "$sb" && git add planted-hidden.txt && git commit -q -m clean)
@@ -917,7 +985,7 @@ if expect_landed "staged plant 2" staged_has "$sb" planted-hidden.txt api03; the
 fi
 drop_sandbox "$sb"
 
-# 59. validate masks a key after a tab, and an IBAN that perl quotes
+# 61. validate masks a key after a tab, and an IBAN that perl quotes
 sb=$(make_sandbox) || abort_sandbox
 gh_key="ghp_""ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef0123456789"
 iban="DE89""370400440532013000"
@@ -936,7 +1004,7 @@ if expect_landed "leak plant 3" grep -q "ghp_" "$sb/.github/workflows/planted.ym
 fi
 drop_sandbox "$sb"
 
-# 60. the runner's ##[ command form in a file name never reaches the output whole
+# 62. the runner's ##[ command form in a file name never reaches the output whole
 sb=$(make_sandbox) || abort_sandbox
 cmd_gif='assets ##[error]Secret scan bypassed.gif'
 printf 'GIF89a\000plain\n' >"$sb/$cmd_gif"
@@ -951,7 +1019,8 @@ if expect_landed "command-name plant 1" has_nul "$sb/$cmd_gif"; then
 fi
 drop_sandbox "$sb"
 
-# 61. the runner's ##[ form and C1 control characters are broken up in every check's output
+# 63. the runner's ##[ form and C1 control characters are broken up in every check's output,
+#     also when PERL_UNICODE asks perl to read text as characters
 c1=$(printf '\302\233')
 sb=$(make_sandbox) || abort_sandbox
 write_workflow "$sb/.github/workflows/planted.yml" "  " "someone/action@v1##[error]x${c1}2J" "read-all" yes
@@ -969,7 +1038,7 @@ if expect_landed "command-form plant 2" grep -q "##\[error\]" "$sb/.github/workf
     case "$check" in
       lint-portability.sh | check-line-endings.sh) [ "$named" -eq 0 ] && continue ;;
     esac
-    out=$(cd "$sb" && bash "scripts/dev/$check" 2>&1)
+    out=$(cd "$sb" && PERL_UNICODE=SDA bash "scripts/dev/$check" 2>&1)
     if printf '%s\n' "$out" | grep -F -q -e '##[' -e "$c1"; then
       bad_out="$bad_out
 $out"
@@ -986,7 +1055,7 @@ $check did not report the planted text: $out"
 fi
 drop_sandbox "$sb"
 
-# 62. a file name holding a newline fails validate's names check
+# 64. a file name holding a newline fails validate's names check
 sb=$(make_sandbox) || abort_sandbox
 nl_name=$(printf 'notes\nx.txt')
 if can_create "$sb" "$nl_name"; then
@@ -998,7 +1067,7 @@ else
 fi
 drop_sandbox "$sb"
 
-# 63. a CRLF+CR file that is staged while the working copy is clean, and the reverse
+# 65. a CRLF+CR file that is staged while the working copy is clean, and the reverse
 sb=$(make_sandbox) || abort_sandbox
 printf 'echo a\n' >"$sb/planted-stagedcr.sh"
 (cd "$sb" && git add planted-stagedcr.sh && git commit -q -m clean)
@@ -1014,7 +1083,7 @@ if expect_landed "line-endings plant 5" eol_is "$sb" planted-stagedcr.sh "i/-tex
 fi
 drop_sandbox "$sb"
 
-# 64. a file marked binary in .gitattributes may hold a CR
+# 66. a file marked binary in .gitattributes may hold a CR
 sb=$(make_sandbox) || abort_sandbox
 printf '%%PDF-1.0\r1 0 obj\r<< >>\rendobj\r' >"$sb/planted-doc.pdf"
 (cd "$sb" && git add planted-doc.pdf)
@@ -1023,7 +1092,7 @@ if expect_landed "line-endings plant 6" lacks_lf "$sb/planted-doc.pdf"; then
 fi
 drop_sandbox "$sb"
 
-# 65. a CRLF file whose name holds an escape character is shown escaped
+# 67. a CRLF file whose name holds an escape character is shown escaped
 sb=$(make_sandbox) || abort_sandbox
 esc_name="crlf${esc_char}[2K.sh"
 if can_create "$sb" "$esc_name"; then
@@ -1035,7 +1104,7 @@ else
 fi
 drop_sandbox "$sb"
 
-# 66. a rule-map cell holding an escape character is shown escaped
+# 68. a rule-map cell holding an escape character is shown escaped
 sb=$(make_sandbox) || abort_sandbox
 printf '| M%s[31m1 | planted rule | test | README.md | done |\n' "$esc_char" >>"$sb/docs/rule-map.md"
 if expect_landed "rule-map plant 7" grep -q "$esc_char" "$sb/docs/rule-map.md"; then
@@ -1049,7 +1118,7 @@ if expect_landed "rule-map plant 7" grep -q "$esc_char" "$sb/docs/rule-map.md"; 
 fi
 drop_sandbox "$sb"
 
-# 67. a workflow with permissions only on its job still needs top-level permissions
+# 69. a workflow with permissions only on its job still needs top-level permissions
 sb=$(make_sandbox) || abort_sandbox
 printf 'name: t\non: push\njobs:\n  b:\n    runs-on: ubuntu-latest\n    permissions:\n      contents: read\n    timeout-minutes: 5\n    steps:\n      - run: true\n' >"$sb/.github/workflows/planted.yml"
 (cd "$sb" && git add .github/workflows/planted.yml)
@@ -1059,7 +1128,7 @@ fi
 drop_sandbox "$sb"
 
 # --- step 1b, review round 2 -----------------------------------------------------------
-# 68. a CRLF working copy over a staged copy that holds a NUL byte
+# 70. a CRLF working copy over a staged copy that holds a NUL byte
 sb=$(make_sandbox) || abort_sandbox
 printf 'a\000b\n' >"$sb/planted-was-binary.md"
 (cd "$sb" && git add planted-was-binary.md && git commit -q -m binary)
@@ -1069,7 +1138,7 @@ if expect_landed "line-endings plant 7" eol_is "$sb" planted-was-binary.md "i/-t
 fi
 drop_sandbox "$sb"
 
-# 69. a CRLF file marked binary in .gitattributes stays green
+# 71. a CRLF file marked binary in .gitattributes stays green
 sb=$(make_sandbox) || abort_sandbox
 printf '%%PDF-1.0\r\n1 0 obj\r\nendobj\r\n' >"$sb/planted-crlf-doc.pdf"
 (cd "$sb" && git add planted-crlf-doc.pdf)
@@ -1078,7 +1147,7 @@ if expect_landed "line-endings plant 8" grep -q "endobj" "$sb/planted-crlf-doc.p
 fi
 drop_sandbox "$sb"
 
-# 70. the staged-copy check is not blinded by the caller's pathspec settings
+# 72. the staged-copy check is not blinded by the caller's pathspec settings
 sb=$(make_sandbox) || abort_sandbox
 printf 'echo a\n' >"$sb/planted-pathspec.sh"
 (cd "$sb" && git add planted-pathspec.sh && git commit -q -m clean)
@@ -1090,14 +1159,14 @@ if expect_landed "line-endings plant 9" eol_is "$sb" planted-pathspec.sh "i/-tex
 fi
 drop_sandbox "$sb"
 
-# 71. a script or perl file whose name holds a UTF-8 C1 control fails validate
+# 73. a script or perl file whose name holds a UTF-8 C1 control fails validate
 sb=$(make_sandbox) || abort_sandbox
 c1_sh="tool$(printf '\302\233')x.sh"
 if can_create "$sb" "$c1_sh"; then
   printf '#!/usr/bin/env bash\nrm -f %s1\n' "$d" >"$sb/$c1_sh"
   printf 'my %sx = ;\n' "$d" >"$sb/scripts/dev/lib/bad$(printf '\302\233').pl"
   (cd "$sb" && git add -A)
-  out=$(cd "$sb" && bash scripts/dev/validate.sh 2>&1)
+  out=$(cd "$sb" && PERL_UNICODE=SDA bash scripts/dev/validate.sh 2>&1)
   code=$?
   if [ "$code" -eq 1 ] && printf '%s\n' "$out" | grep -F -q 'names: tool\xC2\x9Bx.sh' && printf '%s\n' "$out" | grep -F -q 'names: scripts/dev/lib/bad\xC2\x9B.pl'; then
     pass "validate fails script and perl file names that hold a C1 control"
@@ -1109,7 +1178,7 @@ else
 fi
 drop_sandbox "$sb"
 
-# 72. the names check breaks up ##[ in a name it reports
+# 74. the names check breaks up ##[ in a name it reports
 sb=$(make_sandbox) || abort_sandbox
 nl_cmd_name=$(printf 'w\nx ##[error]fake.txt')
 if can_create "$sb" "$nl_cmd_name"; then
@@ -1128,7 +1197,7 @@ else
 fi
 drop_sandbox "$sb"
 
-# 73. a key shorter than 20 characters is shown by its length only
+# 75. a key shorter than 20 characters is shown by its length only
 sb=$(make_sandbox) || abort_sandbox
 slack="xoxb-""1234567890"
 printf 'SLACK_HOOK=%s\n' "$slack" >"$sb/planted-slack.txt"
@@ -1138,7 +1207,7 @@ if expect_landed "mask plant 2" grep -q "1234567890" "$sb/planted-slack.txt"; th
 fi
 drop_sandbox "$sb"
 
-# 74. git's own warnings never reach the secret scan's output
+# 76. git's own warnings never reach the secret scan's output
 sb=$(make_sandbox) || abort_sandbox
 printf 'a\nb\n' >"$sb/planted-warn.txt"
 (cd "$sb" && git add planted-warn.txt && git commit -q -m lf)
@@ -1154,7 +1223,7 @@ fi
 drop_sandbox "$sb"
 
 # --- perl syntax (run through validate.sh) -------------------------------------------------
-# 75. a perl file that does not compile
+# 77. a perl file that does not compile
 sb=$(make_sandbox) || abort_sandbox
 printf 'use strict;\nmy %sx = ;\n' "$d" >"$sb/scripts/dev/lib/planted.pl"
 (cd "$sb" && git add scripts/dev/lib/planted.pl)
@@ -1165,7 +1234,7 @@ drop_sandbox "$sb"
 
 # --- shellcheck (run through validate.sh) --------------------------------------------------
 if command -v shellcheck >/dev/null 2>&1; then
-  # 76. an unchecked cd
+  # 78. an unchecked cd
   sb=$(make_sandbox) || abort_sandbox
   printf '#!/usr/bin/env bash\ncd "%s1"\nrm -f ./tmpfile\n' "$d" >"$sb/planted-cd.sh"
   (cd "$sb" && git add planted-cd.sh)
@@ -1181,7 +1250,7 @@ if command -v shellcheck >/dev/null 2>&1; then
   fi
   drop_sandbox "$sb"
 
-  # 77. an unquoted variable
+  # 79. an unquoted variable
   sb=$(make_sandbox) || abort_sandbox
   printf '#!/usr/bin/env bash\nf=%s1\nrm -f %sf\n' "$d" "$d" >"$sb/planted-unquoted.sh"
   (cd "$sb" && git add planted-unquoted.sh)
@@ -1197,7 +1266,7 @@ if command -v shellcheck >/dev/null 2>&1; then
   fi
   drop_sandbox "$sb"
 
-  # 78. SHELLCHECK_OPTS in the environment cannot switch shellcheck off
+  # 80. SHELLCHECK_OPTS in the environment cannot switch shellcheck off
   sb=$(make_sandbox) || abort_sandbox
   printf '#!/usr/bin/env bash\nf=%s1\nrm -f %sf\n' "$d" "$d" >"$sb/planted-unquoted4.sh"
   (cd "$sb" && git add planted-unquoted4.sh)
@@ -1206,7 +1275,7 @@ if command -v shellcheck >/dev/null 2>&1; then
   fi
   drop_sandbox "$sb"
 
-  # 79. a tracked .shellcheckrc cannot switch shellcheck off
+  # 81. a tracked .shellcheckrc cannot switch shellcheck off
   sb=$(make_sandbox) || abort_sandbox
   printf 'disable=all\n' >"$sb/.shellcheckrc"
   printf '#!/usr/bin/env bash\nf=%s1\nrm -f %sf\n' "$d" "$d" >"$sb/planted-unquoted3.sh"
@@ -1216,7 +1285,7 @@ if command -v shellcheck >/dev/null 2>&1; then
   fi
   drop_sandbox "$sb"
 
-  # 80. a file named like a shellcheck option is linted as a file, not read as one
+  # 82. a file named like a shellcheck option is linted as a file, not read as one
   sb=$(make_sandbox) || abort_sandbox
   printf '#!/usr/bin/env bash\ntrue\n' >"$sb/--rcfile=sc.sh"
   printf '# disable=all\ndisable=all\n' >"$sb/sc.sh"
@@ -1227,7 +1296,7 @@ if command -v shellcheck >/dev/null 2>&1; then
   fi
   drop_sandbox "$sb"
 
-  # 81. a key on a line shellcheck flags is not printed in full
+  # 83. a key on a line shellcheck flags is not printed in full
   sb=$(make_sandbox) || abort_sandbox
   printf '#!/usr/bin/env bash\necho %s1 "%s"\n' "$d" "$key" >"$sb/planted-leak.sh"
   (cd "$sb" && git add planted-leak.sh)
@@ -1243,7 +1312,7 @@ if command -v shellcheck >/dev/null 2>&1; then
   fi
   drop_sandbox "$sb"
 
-  # 82. no output line starts with "::", which the CI runner would read as a command
+  # 84. no output line starts with "::", which the CI runner would read as a command
   sb=$(make_sandbox) || abort_sandbox
   cmd_name='::warning title=Spoof::x.sh'
   if can_create "$sb" "$cmd_name"; then

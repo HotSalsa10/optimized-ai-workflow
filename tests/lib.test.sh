@@ -128,16 +128,31 @@ if [ -L "$src_repo/abs-link" ] && [ -L "$src_repo/up-link" ]; then
     [ -n "$out" ] && drop_sandbox "$out"
   fi
   rm -f "$src_repo/up-link"
-  ln -s -- -tnowhere "$src_repo/dash-link"
+  # "-toutdir" names a folder that exists, so GNU ln, if it read the target
+  # as its -t option, would write a link into it
+  mkdir "$src_repo/outdir"
+  ln -s -- -toutdir "$src_repo/dash-link"
   out=$(cd "$src_repo" && make_sandbox)
   code=$?
-  if [ "$code" -ne 0 ] && [ -z "$out" ] && [ ! -e "$src_repo/nowhere" ]; then
-    pass "make_sandbox fails on a symlink whose target starts with -"
+  if [ "$code" -ne 0 ] && [ -z "$out" ] && [ -z "$(ls -A "$src_repo/outdir")" ]; then
+    pass "make_sandbox fails on a symlink whose target starts with -, and writes nothing"
   else
-    fail "make_sandbox fails on a symlink whose target starts with -: exit $code, made '$out'"
+    fail "make_sandbox fails on a symlink whose target starts with -, and writes nothing: exit $code, made '$out', in outdir: $(ls -A "$src_repo/outdir")"
     [ -n "$out" ] && drop_sandbox "$out"
   fi
-  rm -f "$src_repo/dash-link"
+  rm -rf "$src_repo/dash-link" "$src_repo/outdir"
+  for target in '..\outside' 'C:/outside'; do
+    ln -s -- "$target" "$src_repo/win-link"
+    out=$(cd "$src_repo" && make_sandbox)
+    code=$?
+    if [ "$code" -ne 0 ] && [ -z "$out" ]; then
+      pass "make_sandbox fails on a symlink to the Windows path $target"
+    else
+      fail "make_sandbox fails on a symlink to the Windows path $target: exit $code, made '$out'"
+      [ -n "$out" ] && drop_sandbox "$out"
+    fi
+    rm -f "$src_repo/win-link"
+  done
 else
   skip "symlinks that point outside: this system cannot make symlinks"
 fi
