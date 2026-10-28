@@ -416,17 +416,18 @@ build "$subs" --base main
 expect "a staged submodule move is refused, even with ignore = all" 1 "commit first"
 (cd "$subs" && git update-index --cacheinfo "160000,$new_id,m")
 
-# a checked-out submodule with an untracked file inside does not block the packet
+# a checked-out submodule with its own edits does not block the packet: they
+# are not part of the change
 inner=$(new_repo) || abort_sandbox
 printf 'inner\n' >"$inner/inner.txt"
 commit "$inner" "inner"
 outer=$(new_repo) || abort_sandbox
 printf 'outer\n' >"$outer/outer.txt"
 (cd "$outer" && git add outer.txt && git -c protocol.file.allow=always submodule add -q "$inner" sm >/dev/null 2>&1 && git commit -qm base)
-(cd "$outer" && git checkout -q -b task && printf 'more\n' >>outer.txt && git commit -qam change && printf 'scratch\n' >sm/untracked.txt)
+(cd "$outer" && git checkout -q -b task && printf 'more\n' >>outer.txt && git commit -qam change && printf 'edited\n' >>sm/inner.txt)
 if [ -f "$outer/sm/inner.txt" ]; then
   build "$outer" --base main
-  expect "an untracked file inside a checked-out submodule does not block the packet" 0 "FILE M outer.txt"
+  expect "an edit inside a checked-out submodule does not block the packet" 0 "FILE M outer.txt"
 else
   skip "a checked-out submodule: git could not add one here"
 fi

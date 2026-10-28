@@ -1,6 +1,6 @@
 # TASKS
 
-Current phase: Release 1. Steps 1 and 1b are closed except the owner's CI item.
+Current phase: Release 1, step 2 (JSON helper, verdict vocabulary, review packet). Steps 1 and 1b are closed except the owner's CI item.
 
 ## Step 1: repo skeleton, records, rule map, CI with planted defects
 
@@ -46,6 +46,18 @@ Each item that changes a check gets a planted defect that turns it red; config-o
 - [x] Repair loop 2 (of 3): all 10 fixed, and the workflow lint rewritten to accept only plain YAML line shapes and report every other line, which closes that whole class instead of adding forms one by one. Also: file names always shown masked, names of staged-only files scanned, the mask filter masks the whole line before the pieces, `::` after Unicode spaces broken up, git's warnings tested by a plant, the index and working copy judged separately for line endings and files marked binary skipped, pathspec and SHELLCHECK_OPTS settings ignored, and escaping layers that could never fire removed. Checked: 115 test cases in 4 files pass; 87 planted breaks for step 1b, 82 caught and 5 that cannot be caught, each named in TESTS.md.
 - [x] Review round 3 (the last under the cap): REQUEST CHANGES. 4 confirmed, 2 of them the same issue, so 3 to fix: a step's timeout in a steps list not indented under `steps:` counted as the job's (medium; the second verifier rated it low); the planted-break record was overstated again (4 guards of the rewritten lint could be removed unnoticed); validate's names check printed a key held in a file name in full, against the records. 11 notes. The owner chose one last repair loop, with no 4th review.
 - [x] Repair loop 3 (the last): all 3 fixed, with plants for every form the review named. Also these notes: a job's timeout counts only at job level and only as a number or a `${{ }}` expression; `permissions:` needs something listed under it; a deeper line after a plain value is reported; trailing spaces are ignored; every check script clears PERL_UNICODE and PERL5OPT; the secret scan reads the names and stored targets of symlinks; sandboxes refuse Windows link forms, and the `-` link test now fails on the old helper; file names are scanned in one place. Not reviewed by a fresh reviewer (3-round cap); checked instead by 120 test cases in 4 files and by the planted-break runs summed up in TESTS.md.
+
+## Step 2: JSON helper, verdict vocabulary, review packet
+
+Rules: M032, M038, M039, M085, M112, M113.
+
+- [x] Design written first, then critiqued before any code by three independent critics (correctness, security, scope), each serious finding re-checked by a skeptic: 40 confirmed, none refuted, 14 more were ideas. The design changed for every confirmed finding. The main changes: no size limit on the packet (DECISIONS A29); one incident checklist per project (A28); json.pl does `get` only; diffs compare stored versions, so attributes, settings, replace refs and grafts cannot change them; a change can no longer hide content behind a NUL byte, an @generated line, a submodule setting or skip-worktree; every line of the packet goes through one escaping step.
+- [x] Built: `method/scripts/method/lib/json.pl`, `verdicts.txt`, `lib/verdicts.pl`, `review-packet.sh`, `lib/packet.pl`. validate.sh's perl syntax check also covers `method/scripts/`.
+- [x] Tests: json.test.sh, verdicts.test.sh and review-packet.test.sh, and a plant for the wider perl syntax check. The planted-break runs are summed up in TESTS.md.
+- [x] Found while working: git applies file attributes to a diff of two stored versions too, matched against the version's id, so `--text`, `--no-textconv` and `--no-ext-diff` are all needed; the tests now put such attributes on every name.
+- [x] Records: TESTS.md, CHANGELOG.md, DECISIONS A28 and A29, RISKS #11, rule map (6 rules done).
+- Moved to step 3: the commit trailer check, shaped for status.sh. A message that is only the trailer line must fail it (design critique C20).
+- [ ] Review round 1 (blind reviewer and security checker; each blocking or medium finding re-checked by an independent agent that tries to refute it)
 
 ## Fixed elsewhere
 

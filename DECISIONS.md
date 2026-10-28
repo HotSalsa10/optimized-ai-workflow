@@ -55,3 +55,7 @@ A25. Rejected: a weekly watcher; `/autocompact` on top of the autocompact percen
 A26. Writing rule that had a measured effect: keep every hedge and every number exactly, with currency, sign and period.
 
 A27. For now the method is for the owner alone, on Linux (including Claude Code cloud sessions). Linux is the only system that must pass. The Windows and macOS runs of A19 wait until the method is used on those systems or shared. The scripts keep following the portability rules, so that later run is a check, not a rewrite. Why: owner decision; it saves Windows and macOS minutes, which cost more.
+
+A28. Each project keeps one incident checklist, `docs/incident-checklist.md`, and the review packet gives it to every checking agent (M032). The packet reads it from the merge base, so a change cannot weaken the list it is checked against; an edit to it shows in the diff. Why: M032 names one project list, and no record set up a list per agent; reading it from the base stops a change from grading itself against a list it wrote.
+
+A29. The review packet has no size limit. Why: no rule asks for one; the plan's 80 KB cap would have refused this repo's own step 1b reviews (diffs of 85 KB and 121 KB), and M112 keeps migrations whatever their size. A limit enters the rule map with its reason first.
