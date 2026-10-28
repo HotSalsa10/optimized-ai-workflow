@@ -37,14 +37,14 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M029 | The tester runs the checks, reports the actual output and fixes nothing | incident | method/.claude/agents/method/tester.md | step 6 |
 | M030 | The security check covers secrets, personal data, permissions, injection, dependencies and dangerous shell, on the final change | incident | method/.claude/agents/method/security-checker.md | step 6 |
 | M031 | Check what can be checked without a screen, and write the click-by-click script for the rest | incident | method/.claude/agents/method/reporter.md | step 6 |
-| M032 | Each checking agent reads the project's own incident checklist | incident | method/scripts/method/review-packet.sh | step 2 |
+| M032 | Each checking agent reads the project's own incident checklist | incident | method/scripts/method/review-packet.sh | done |
 | M033 | Touch only the files the phase needs | incident | method/.claude/rules/method/method.md | step 6 |
 | M034 | Two owner stops: plan approval and release readiness | incident | method/.claude/rules/method/method.md | step 6 |
 | M035 | FULL tier by default; unsure means FULL | incident | method/.claude/rules/method/method.md | step 6 |
 | M036 | LIGHT relaxes exactly five things and never drops the reviewer, security check, scripted checks or merge check | incident; decision A11 | method/.claude/rules/method/method.md | step 6 |
 | M037 | No success without five parts: summary, change summary, actual check output, risks, verdict | incident | method/.claude/rules/method/owner.md | step 6 |
-| M038 | The review packet is the reviewer's whole input, leaves out the author's account, and exits non-zero when empty | incident | method/scripts/method/review-packet.sh | step 2 |
-| M039 | One verdict vocabulary file, read by every script and test | incident | method/scripts/method/verdicts.txt | step 2 |
+| M038 | The review packet is the reviewer's whole input, leaves out the author's account, and exits non-zero when empty | incident | method/scripts/method/review-packet.sh | done |
+| M039 | One verdict vocabulary file, read by every script and test | incident | method/scripts/method/verdicts.txt | done |
 | M040 | The commit hook that only checks the trailer is not shipped; the trailer is generated | incident; decision A24 | DECISIONS.md @A24 | done |
 | M041 | A check that has not been seen to fail is untested: plant the defect and watch it go red | incident | TESTS.md | done |
 | M042 | Plant, verify and revert are three separate commands, never chained | incident | method/.claude/skills/checks/SKILL.md | step 6 |
@@ -90,7 +90,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M082 | When the work is done and its checks pass, stop and report; no unrequested changes | research: scope creep at high effort | method/.claude/rules/method/method.md | step 6 |
 | M083 | Every finding gets a disposition: fixed with its proving test, wrong, intentional, or not worth it | research: Claude Code team | method/.claude/agents/method/reviewer.md | step 6 |
 | M084 | Flag the whole class of bug; never repeat a finding already posted | research: Claude Code team | method/.claude/agents/method/reviewer.md | step 6 |
-| M085 | Later review rounds see only the changes since the last reviewed version, or the whole change when in doubt | research: Claude Code team, Cloudflare | method/scripts/method/review-packet.sh | step 2 |
+| M085 | Later review rounds see only the changes since the last reviewed version, or the whole change when in doubt | research: Claude Code team, Cloudflare | method/scripts/method/review-packet.sh | done |
 | M086 | Unproven serious or security findings go on an unresolved list; they are never dropped | research: evidence critique | method/.claude/agents/method/reviewer.md | step 6 |
 | M087 | High-risk changes get Deep review: several independent finders and a vote on each finding | research: Claude Code team | method/.claude/skills/finish/SKILL.md | step 6 |
 | M088 | People add a review layer and never replace the reviewer agents; they look at intent and risk before the AI findings | research: layered review; decision A8 | method/.claude/rules/method/method.md | step 6 |
@@ -117,8 +117,8 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M109 | A person is accountable for every change that ships | research: Claude Code team | method/.claude/rules/method/method.md | step 6 |
 | M110 | Improvement by hand: /research, /research-update every 2 to 4 weeks, a model-release checklist, pruning | decision A21 | method/.claude/skills/research-update/SKILL.md | later |
 | M111 | Every rule records its reason and its one home | incident: same rule twice | scripts/dev/check-rule-map.sh | done |
-| M112 | The review packet leaves out noise (lockfiles, generated and minified files) and always keeps migrations | research: Cloudflare | method/scripts/method/review-packet.sh | step 2 |
-| M113 | Packet separators are escaped so file content cannot fake a section or a verdict | research: Cloudflare | method/scripts/method/review-packet.sh | step 2 |
+| M112 | The review packet leaves out noise (lockfiles, generated and minified files) and always keeps migrations | research: Cloudflare | method/scripts/method/review-packet.sh | done |
+| M113 | Packet separators are escaped so file content cannot fake a section or a verdict | research: Cloudflare | method/scripts/method/review-packet.sh | done |
 | M114 | Checking agents get a "do not flag" list: unchanged code, far-fetched risks, style, "consider library X" | research: Cloudflare | method/.claude/agents/method/reviewer.md | step 6 |
 | M115 | A checking agent reads its packet and every changed file in its first turn | research: Cloudflare | method/.claude/agents/method/reviewer.md | step 6 |
 | M116 | Receipts record token classes, first-request cache reads and a hash of the agent's instructions | research: Cloudflare | method/.claude/hooks/method/gate-receipt.sh | step 5 |

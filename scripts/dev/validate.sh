@@ -70,13 +70,14 @@ run_check secrets bash scripts/dev/scan-secrets.sh
 run_check rule-map bash scripts/dev/check-rule-map.sh
 run_check workflows bash scripts/dev/lint-workflows.sh
 
-# perl syntax: every tracked .pl file under scripts/ must compile. perl -c
-# runs BEGIN blocks, so it is pointed only at this repo's own helpers.
+# perl syntax: every tracked .pl file under scripts/ and method/scripts/ must
+# compile. perl -c runs BEGIN blocks, so it is pointed only at this repo's
+# own helpers.
 # Only the file, line and the start of each message are shown.
 pl_files=()
 while IFS= read -r -d '' f; do
   [ -f "$f" ] && pl_files+=("./$f")
-done < <(tracked_plain '^scripts/.*\.pl\z')
+done < <(tracked_plain '^(?:scripts|method/scripts)/.*\.pl\z')
 if [ "${#pl_files[@]}" -eq 0 ]; then
   failed=$((failed + 1))
   failed_names="$failed_names perl-syntax"

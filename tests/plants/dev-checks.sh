@@ -1234,6 +1234,16 @@ if expect_landed "perl-syntax plant" grep -q "= ;" "$sb/scripts/dev/lib/planted.
 fi
 drop_sandbox "$sb"
 
+# 77b. a perl file under method/scripts/ that does not compile
+sb=$(make_sandbox) || abort_sandbox
+mkdir -p "$sb/method/scripts/method/lib"
+printf 'use strict;\nmy %sx = ;\n' "$d" >"$sb/method/scripts/method/lib/planted.pl"
+(cd "$sb" && git add method/scripts/method/lib/planted.pl)
+if expect_landed "perl-syntax plant 2" grep -q "= ;" "$sb/method/scripts/method/lib/planted.pl"; then
+  expect_red "perl-syntax red on a method file that does not compile" "$sb" "./method/scripts/method/lib/planted.pl line 2" bash scripts/dev/validate.sh
+fi
+drop_sandbox "$sb"
+
 # --- shellcheck (run through validate.sh) --------------------------------------------------
 if command -v shellcheck >/dev/null 2>&1; then
   # 78. an unchecked cd
