@@ -135,6 +135,7 @@ commit "$std" "base commit MSG-BASE-1234"
   printf 'echo pwned\n' >tools/Cargo.lock
   printf 'map upgrade connection { default upgrade; }\n' >tools/setup.map
   printf 'echo pwned\n\0' >assets/logo.png
+  printf '%%PDF-1.4 a text note\n' >notes.pdf
   printf 'rails lock\n' >db/migrate/Gemfile.lock
   printf 'ef lock\n' >Migrations/package-lock.json
   printf '{}\n' >vendor/package.json
@@ -191,7 +192,8 @@ expect "lockfiles in migrate, Migrations and moved out of migrations are kept (M
   'FILE A db/migrate/Gemfile.lock' '+rails lock' 'FILE A Migrations/package-lock.json' '+ef lock' \
   'FILE R migrations/yarn.lock -> vendor/yarn.lock'
 expect "a lockfile name with no manifest, a .map that is not a source map and a .png without its signature are shown" 0 \
-  'FILE A tools/Cargo.lock' '+echo pwned' 'FILE A tools/setup.map' '+map upgrade' 'FILE A assets/logo.png' '+\x00'
+  'FILE A tools/Cargo.lock' '+echo pwned' 'FILE A tools/setup.map' '+map upgrade' 'FILE A assets/logo.png' '+\x00' \
+  'FILE A notes.pdf' '+%PDF-1.4 a text note'
 expect "a real binary is one line; a NUL byte does not hide a script; a text file named .png is shown" 0 \
   'A img.png (binary, 16 bytes)' 'binary file: not shown' 'FILE A s.sh' '+echo hi\x00' 'FILE A fake.png' '+not really an image'
 expect "a -diff attribute on every file hides no text" 0 'FILE M notes.txt' '+two' 'FILE M src/app.py'
@@ -642,18 +644,27 @@ expect "a Git LFS file is shown as its pointer, with a note" 0 \
   "A big.bin (stored in Git LFS: the diff shows the pointer, and the file on disk is the content)" "+version https://git-lfs.github.com/spec/v1"
 drop_sandbox "$lfs"
 
-# a change of many files is read in parts, so no command line grows too long
+# a change of many files is read in parts, so no command line grows too long:
+# 600 long names make about 150 KB of paths, over the 128 KB limit a small
+# stack gives on Linux
 many=$(new_repo) || abort_sandbox
 printf 'base\n' >"$many/base.txt"
 commit "$many" "base"
-(cd "$many" && git checkout -q -b task && mkdir -p d && perl -e 'for (1 .. 450) { open my $f, ">", sprintf("d/file-with-a-longer-name-%03d.txt", $_) or die; print $f "n $_\n" }')
+(cd "$many" && git checkout -q -b task && mkdir -p d && perl -e 'my $n = "n" x 230; for (1 .. 600) { open my $f, ">", sprintf("d/%s-%03d.txt", $n, $_) or die; print $f "n $_\n" }')
 commit "$many" "many files"
-build "$many" --base main
-files_listed=$(printf '%s\n' "$out" | grep -c '^A d/file-with-a-longer-name-')
-if [ "$code" -eq 0 ] && [ "$files_listed" -eq 450 ]; then
-  pass "a change of 450 files is read in parts and lists every file"
+if (ulimit -s 256) 2>/dev/null; then
+  (cd "$many" && ulimit -s 256 && bash "$packet" --base main) >"$work/out" 2>"$work/err"
+  code=$?
+  out=$(cat "$work/out")
+  err=$(cat "$work/err")
+  files_listed=$(printf '%s\n' "$out" | grep -c '^A d/nnn')
+  if [ "$code" -eq 0 ] && [ "$files_listed" -eq 600 ]; then
+    pass "a change of 600 long file names is read in parts and lists every file"
+  else
+    fail "a change of 600 long file names is read in parts and lists every file: exit $code, $files_listed listed" "$err"
+  fi
 else
-  fail "a change of 450 files is read in parts and lists every file: exit $code, $files_listed listed" "$err"
+  skip "many long file names: the stack limit cannot be lowered here"
 fi
 drop_sandbox "$many"
 
