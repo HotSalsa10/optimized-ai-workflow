@@ -62,7 +62,7 @@ make_sandbox() {
       target=$(readlink "$src/$f")
       case "$target" in
         /* | -* | .. | ../* | */.. | */../* | *\\* | [A-Za-z]:*) copy_failed=1 ;;
-        *) mkdir -p "$to" && ln -s -- "$target" "$dir/$f" || copy_failed=1 ;;
+        *) mkdir -p "$to" && ln -s "$target" "$dir/$f" || copy_failed=1 ;;
       esac
     elif [ -f "$src/$f" ]; then
       mkdir -p "$to" && cp -p "$src/$f" "$dir/$f" || copy_failed=1

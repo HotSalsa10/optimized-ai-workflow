@@ -1020,7 +1020,7 @@ fi
 drop_sandbox "$sb"
 
 # 63. the runner's ##[ form and C1 control characters are broken up in every check's output,
-#     also when PERL_UNICODE asks perl to read text as characters
+#     also when PERL_UNICODE asks perl to read text (and file names) as characters
 c1=$(printf '\302\233')
 sb=$(make_sandbox) || abort_sandbox
 write_workflow "$sb/.github/workflows/planted.yml" "  " "someone/action@v1##[error]x${c1}2J" "read-all" yes
@@ -1028,15 +1028,16 @@ printf '| M##[warning]x%s1 | planted rule | test | README.md | done |\n' "$c1" >
 c1_name="p##[error]x${c1}.sh"
 named=0
 if can_create "$sb" "$c1_name"; then
-  printf '#!/usr/bin/env bash\r\n%s colours\r\n' "declare -""A" >"$sb/$c1_name"
+  printf '#!/usr/bin/env bash\r\n%s colours\r\n# %s\r\n' "declare -""A" "$key" >"$sb/$c1_name"
+  write_workflow "$sb/.github/workflows/p##[error]x${c1}.yml" "  " "someone/action" "read-all" yes
   named=1
 fi
 (cd "$sb" && git -c core.autocrlf=false -c core.safecrlf=false add -A)
 if expect_landed "command-form plant 2" grep -q "##\[error\]" "$sb/.github/workflows/planted.yml"; then
   bad_out=""
-  for check in lint-workflows.sh check-rule-map.sh lint-portability.sh check-line-endings.sh; do
+  for check in lint-workflows.sh check-rule-map.sh lint-portability.sh check-line-endings.sh scan-secrets.sh; do
     case "$check" in
-      lint-portability.sh | check-line-endings.sh) [ "$named" -eq 0 ] && continue ;;
+      lint-portability.sh | check-line-endings.sh | scan-secrets.sh) [ "$named" -eq 0 ] && continue ;;
     esac
     out=$(cd "$sb" && PERL_UNICODE=SDA bash "scripts/dev/$check" 2>&1)
     if printf '%s\n' "$out" | grep -F -q -e '##[' -e "$c1"; then
@@ -1048,9 +1049,9 @@ $check did not report the planted text: $out"
     fi
   done
   if [ -z "$bad_out" ]; then
-    pass "workflows, rule-map, portability and line-endings break up ##[ and C1 control characters"
+    pass "workflows, rule-map, portability, line-endings and secrets break up ##[ and C1 control characters"
   else
-    fail "workflows, rule-map, portability and line-endings break up ##[ and C1 control characters" "$bad_out"
+    fail "workflows, rule-map, portability, line-endings and secrets break up ##[ and C1 control characters" "$bad_out"
   fi
 fi
 drop_sandbox "$sb"
@@ -1159,7 +1160,8 @@ if expect_landed "line-endings plant 9" eol_is "$sb" planted-pathspec.sh "i/-tex
 fi
 drop_sandbox "$sb"
 
-# 73. a script or perl file whose name holds a UTF-8 C1 control fails validate
+# 73. a script or perl file whose name holds a UTF-8 C1 control fails validate,
+#     and is kept away from perl (the planted perl file does not compile)
 sb=$(make_sandbox) || abort_sandbox
 c1_sh="tool$(printf '\302\233')x.sh"
 if can_create "$sb" "$c1_sh"; then
@@ -1168,10 +1170,10 @@ if can_create "$sb" "$c1_sh"; then
   (cd "$sb" && git add -A)
   out=$(cd "$sb" && PERL_UNICODE=SDA bash scripts/dev/validate.sh 2>&1)
   code=$?
-  if [ "$code" -eq 1 ] && printf '%s\n' "$out" | grep -F -q 'names: tool\xC2\x9Bx.sh' && printf '%s\n' "$out" | grep -F -q 'names: scripts/dev/lib/bad\xC2\x9B.pl'; then
-    pass "validate fails script and perl file names that hold a C1 control"
+  if [ "$code" -eq 1 ] && printf '%s\n' "$out" | grep -F -q 'names: tool\xC2\x9Bx.sh' && printf '%s\n' "$out" | grep -F -q 'names: scripts/dev/lib/bad\xC2\x9B.pl' && printf '%s\n' "$out" | grep -q '^perl-syntax: PASS'; then
+    pass "validate fails script and perl file names that hold a C1 control, and keeps them from perl"
   else
-    fail "validate fails script and perl file names that hold a C1 control: exit $code" "$out"
+    fail "validate fails script and perl file names that hold a C1 control, and keeps them from perl: exit $code" "$out"
   fi
 else
   skip "a C1 control in a file name: this file system does not allow one"

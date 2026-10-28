@@ -47,7 +47,7 @@ run_check() {
 # escape, or a UTF-8 C1 control); such a name could split or steer any tool's
 # output. The same byte-level test keeps such names away from the tools below.
 control_re='[\x00-\x1F\x7F]|\xC2[\x80-\x9F]'
-bad_names=$(git ls-files -z | CONTROL=$control_re perl -0ne 'chomp; next unless /$ENV{CONTROL}/; s/([\x00-\x1F\x7F])/sprintf("\\x%02X", ord $1)/ge; s/\xC2([\x80-\x9F])/sprintf("\\xC2\\x%02X", ord $1)/ge; s/##\[/#\\x23[/g; print "$_\n"')
+bad_names=$(git ls-files -z | CONTROL=$control_re perl -0ne 'chomp; next unless /$ENV{CONTROL}/; s/([\x00-\x1F\x7F])/sprintf("\\x%02X", ord $1)/ge; s/\xC2([\x80-\x9F])/sprintf("\\xC2\\x%02X", ord $1)/ge; print "$_\n"')
 if [ -n "$bad_names" ]; then
   failed=$((failed + 1))
   failed_names="$failed_names names"

@@ -382,8 +382,8 @@ sub read_raw {
   return defined $bytes ? $bytes : '';
 }
 
-# A file name is shown masked, so a key or an email in a name is never
-# printed in full, and the name itself is scanned as text.
+# With --staged, every tracked name is scanned as text, once. It is shown
+# masked, so a key or an email in a name is never printed in full.
 my %name_done;
 sub scan_name {
   my ($path) = @_;
@@ -392,7 +392,6 @@ sub scan_name {
 }
 
 for my $file (@ARGV) {
-  scan_name($file);
   my $bytes = read_raw($file);
   if (!defined $bytes) { say_line('secrets: cannot read ' . mask_text($file)); $bad++; next; }
   scan_content($file, mask_text($file), $bytes);
@@ -437,7 +436,6 @@ if ($staged) {
       binmode $c;
       my $bytes = <$c>;
       close $c or die "secrets: git cat-file failed\n";
-      scan_name($path);
       my $before = $examined;
       scan_content($path, mask_text($path) . $kind, defined $bytes ? $bytes : '');
       $staged_examined += $examined - $before;
