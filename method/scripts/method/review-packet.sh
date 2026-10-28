@@ -35,8 +35,9 @@
 # The reviewer reads the changed files from disk, so the packet is refused
 # while the working copy differs from the commit.
 set -u
-# perl reads bytes; these settings would change how it reads them
-unset PERL_UNICODE PERL5OPT
+# perl reads bytes; these settings would change how it reads them, and the
+# library paths would let modules from elsewhere run inside the builder
+unset PERL_UNICODE PERL5OPT PERL5LIB PERLLIB
 
 command -v perl >/dev/null 2>&1 || {
   echo "review-packet: perl is not installed" >&2

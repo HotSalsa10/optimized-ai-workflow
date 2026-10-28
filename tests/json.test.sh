@@ -106,7 +106,7 @@ esac
 
 # The same bytes come out whatever PERL_UNICODE or PERL5OPT ask for.
 plain=$(perl "$json" get s <"$doc" | od -An -tx1)
-for setting in "PERL_UNICODE=SDA" "PERL_UNICODE=S" "PERL5OPT=-CSDA"; do
+for setting in "PERL_UNICODE=SDA" "PERL_UNICODE=S" "PERL5OPT=-CSDA" "PERL5OPT=-Mbigint" "PERL5OPT=-Minteger"; do
   got=$(env "$setting" perl "$json" get s <"$doc" | od -An -tx1)
   key=$(env "$setting" perl "$json" get "$(printf '\303\274k')" <"$doc")
   if [ "$got" = "$plain" ] && [ "$key" = "v" ]; then
@@ -115,6 +115,23 @@ for setting in "PERL_UNICODE=SDA" "PERL_UNICODE=S" "PERL5OPT=-CSDA"; do
     fail "with $setting the output bytes and key lookup are unchanged" "got $got (wanted $plain), key '$key'"
   fi
 done
+
+# Numbers read the same whatever PERL5OPT loads.
+for setting in "PERL5OPT=-Mbigint" "PERL5OPT=-Minteger" "PERL5OPT=-Mbignum"; do
+  got=$(env "$setting" perl "$json" get b 1 <"$doc" 2>&1)
+  big=$(printf '{"a":1e400}' | env "$setting" perl "$json" get a 2>/dev/null)
+  code=$?
+  if [ "$got" = "2.5" ] && [ "$code" -eq 2 ] && [ -z "$big" ]; then
+    pass "with $setting numbers are read as without it"
+  else
+    fail "with $setting numbers are read as without it: got '$got', out of range gave exit $code '$big'"
+  fi
+done
+
+# Deep nesting is valid JSON and gives no warning.
+deep=$(perl -e 'print "[" x 400, "1", "]" x 400')
+got=$(printf '%s' "$deep" | perl "$json" get 2>&1 >/dev/null)
+if [ -z "$got" ]; then pass "deep nesting gives no warning"; else fail "deep nesting gives no warning" "$got"; fi
 
 # A failed write is an error, not a success.
 (perl "$json" get s <"$doc" >&-) 2>/dev/null

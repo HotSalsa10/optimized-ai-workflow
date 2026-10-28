@@ -14,11 +14,23 @@
 # variable cannot hold one), a number out of range, or JSON::PP missing.
 #
 # Known limits: duplicate keys keep the last value, as JavaScript's
-# JSON.parse does. The string "true" and the value true print the same, and
-# $( ) drops a string's trailing newlines. On old perl, integers of more than
-# about 18 digits come back as strings.
+# JSON.parse does. A string that reads like another value ("true", "null",
+# "12") prints the same as that value, and $( ) drops a string's trailing
+# newlines. On old perl, integers of more than about 18 digits come back as
+# strings.
 use strict;
 use warnings;
+
+# PERL5OPT and PERL_UNICODE change how perl reads and computes (-C, -Mbigint,
+# -Minteger), so the helper starts again without them.
+if (grep { defined $ENV{$_} } qw(PERL5OPT PERL_UNICODE)) {
+  delete @ENV{qw(PERL5OPT PERL_UNICODE)};
+  utf8::encode($_) for grep { utf8::is_utf8($_) } @ARGV;
+  exec { $^X } $^X, $0, @ARGV or do {
+    print STDERR "json: cannot start perl again\n";
+    exit 2;
+  };
+}
 
 # Raw handles, whatever PERL_UNICODE or PERL5OPT asked for, so the bytes in
 # are the bytes JSON::PP sees and the bytes out are UTF-8.
@@ -81,6 +93,7 @@ for my $key (@keys) {
 
 # finite: false for a number that is Inf or NaN anywhere in the value
 sub finite {
+  no warnings 'recursion';    # deep nesting is valid JSON
   my ($v) = @_;
   return !grep { !finite($_) } values %$v if ref $v eq 'HASH';
   return !grep { !finite($_) } @$v if ref $v eq 'ARRAY';

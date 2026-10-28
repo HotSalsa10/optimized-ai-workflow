@@ -32,6 +32,7 @@ sub rows {
     die "verdicts.txt line $n: expected KIND<TAB>WORDS<TAB>MEANING with a known KIND\n"
       unless @f == 3 && $kinds{ $f[0] } && $f[1] =~ /\A[A-Za-z][A-Za-z -]*[A-Za-z]\z/ && $f[2] =~ /\S/ && $f[2] !~ /[\x00-\x1F\x7F]/;
     $count{ $f[0] }++;
+    die "verdicts.txt line $n: $f[0] $f[1] is listed twice\n" if $count{"$f[0]\t$f[1]"}++;
     push @rows, [@f];
   }
   close $fh;

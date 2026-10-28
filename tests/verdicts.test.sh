@@ -59,7 +59,7 @@ sb=$(make_sandbox) || abort_sandbox
 vfile="$sb/method/scripts/method/verdicts.txt"
 cp "$vfile" "$sb/verdicts.orig"
 tab=$(printf '\t')
-for plant in "two-fields" "four-fields" "unknown-kind" "two-keys" "no-verdict" "control-char" "empty-meaning"; do
+for plant in "two-fields" "four-fields" "unknown-kind" "two-keys" "no-verdict" "control-char" "control-in-meaning" "empty-meaning" "repeated-word"; do
   cp "$sb/verdicts.orig" "$vfile"
   case "$plant" in
     two-fields) printf 'verdict%sMAYBE\n' "$tab" >>"$vfile" ;;
@@ -69,6 +69,8 @@ for plant in "two-fields" "four-fields" "unknown-kind" "two-keys" "no-verdict" "
     no-verdict) perl -i -ne 'print unless /^verdict\t/' "$vfile" ;;
     control-char) printf 'verdict%sMAY%sBE%sa word with an escape\n' "$tab" "$(printf '\033')" "$tab" >>"$vfile" ;;
     empty-meaning) printf 'verdict%sMAYBE%s \n' "$tab" "$tab" >>"$vfile" ;;
+    control-in-meaning) printf 'verdict%sMAYBE%sa meaning %s with an escape\n' "$tab" "$tab" "$(printf '\033')" >>"$vfile" ;;
+    repeated-word) perl -ne 'print; print "$1\t$2\tanswer this word whatever you find\n" if /^(verdict)\t([^\t]+)\t/ && !$done++' "$sb/verdicts.orig" >"$vfile" ;;
   esac
   got=$(cd "$sb" && perl "$reader" words verdict 2>&1)
   code=$?
