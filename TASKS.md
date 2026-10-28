@@ -16,8 +16,8 @@ Current phase: Release 1. Steps 1 and 1b are closed except the owner's CI item.
 - [x] Review round 3 (the last under the 3-round cap): ESCALATE. Every round-2 finding fixed; 3 new regressions in the portability lint (commands inside arithmetic, a case inside a one-line $( ), a false alarm on xargs -0 rm -rf). The owner chose one last repair loop.
 - [x] Repair loop 3 (the last): the 3 regressions and the nearby false alarms fixed, records corrected. Not reviewed by a fresh reviewer (3-round cap); checked instead by the plant suite, 27 planted breaks of the new guards (all caught), deleting each portability rule in turn (all caught) and 103 third-party scripts (no change in findings)
 - [x] Security check (DECISIONS A7): 4 finders, each finding checked by an independent agent that tried to refute it. 23 confirmed (2 medium, 15 low, 6 lowered to info; 2 pairs are the same issue found twice), 2 refuted, 11 ideas. No secret found in the files or in any commit; the only owner details are the GitHub name in LICENSE, the commit author lines and plan details in the records, which is fine while the repo is private. All 3 repair loops were used, so the owner chose: correct the records now, fix the rest in step 1b. Records corrected: TESTS.md (secret-scan coverage, what the scan reads), RISKS.md 3, 4 and 10, ROADMAP.md.
-- [ ] CI green on GitHub ([CREDENTIAL], owner: the account's Actions minutes are used up, so GitHub starts no machine; waits for the minutes to renew)
-- [ ] Windows and macOS CI run once by hand (needs the item above)
+- [ ] CI green on GitHub ([CREDENTIAL], owner: the account's Actions minutes are used up, so GitHub starts no machine; the minutes renew on 1 November)
+- Deferred (DECISIONS A27): the Windows and macOS CI runs, until the method is used on those systems or shared.
 
 ## Step 1b: fixes from the step 1 security check
 

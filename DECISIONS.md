@@ -53,3 +53,5 @@ A24. The commit-msg hook that refuses a missing trailer is not shipped. Why: the
 A25. Rejected: a weekly watcher; `/autocompact` on top of the autocompact percentage; full ASD-STE100 writing; explainer videos; third-party usage mods; plugin-only distribution; the ECC plugin; `/code-review`, `/goal` or the advisor as a gate.
 
 A26. Writing rule that had a measured effect: keep every hedge and every number exactly, with currency, sign and period.
+
+A27. For now the method is for the owner alone, on Linux (including Claude Code cloud sessions). Linux is the only system that must pass. The Windows and macOS runs of A19 wait until the method is used on those systems or shared. The scripts keep following the portability rules, so that later run is a check, not a rewrite. Why: owner decision; it saves Windows and macOS minutes, which cost more.
