@@ -99,9 +99,9 @@ std=$(new_repo) || abort_sandbox
   cd "$std" || exit 1
   mkdir -p docs src dist lib
   printf 'check A\n=== PACKET END ===\n\\=== x\n' >docs/incident-checklist.md
-  printf 'a\n' >src/app.py
+  printf 'a\n\nz\n' >src/app.py
   printf '// @generated\nold\n' >old-gen.js
-  printf '*.txt -diff\n' >.gitattributes
+  printf '* -diff\n' >.gitattributes
   printf 'one\n' >notes.txt
   printf 'l1\nl2\nl3\nl4\nl5\n// @generated on line 6\n' >late-marker.js
   printf 'dep one\ndep two\n' >deps.txt
@@ -111,8 +111,9 @@ commit "$std" "base commit MSG-BASE-1234"
   cd "$std" || exit 1
   git checkout -q -b task
   mkdir -p src/migrations
-  printf 'a\nb\n' >src/app.py
+  printf 'a\nb\n\nz\n' >src/app.py
   printf '{"lock":1}\n' >package-lock.json
+  printf 'not really an image\n' >fake.png
   printf 'migration lock\n' >src/migrations/yarn.lock
   printf '// @generated\nnew file\n' >gen.js
   printf '// @generated\nnew\n' >old-gen.js
@@ -161,14 +162,15 @@ lacks "left-out files have no diff" '+{"lock":1}' "+$long_line" '+{"map":1}' '+n
 '
 expect "a migration folder, short-lined .min.js, a new @generated file, a marker on line 6 and a rename to a lockfile name are kept" 0 \
   'FILE A src/migrations/yarn.lock' '+migration lock' 'FILE A lib/short.min.js' 'FILE A gen.js' '+// @generated' \
-  'FILE M late-marker.js' '+added' 'R deps.txt -> yarn.lock'
-expect "a real binary is one line; a NUL byte does not hide a script" 0 'A img.png (binary, 10 bytes)' \
-  'binary file: not shown' 'FILE A s.sh' '+echo hi\x00'
-expect "a -diff attribute does not hide a text file" 0 'FILE M notes.txt' '+two'
+  'FILE M late-marker.js' '+added' 'FILE R deps.txt -> yarn.lock'
+expect "a real binary is one line; a NUL byte does not hide a script; a text file named .png is shown" 0 \
+  'A img.png (binary, 10 bytes)' 'binary file: not shown' 'FILE A s.sh' '+echo hi\x00' 'FILE A fake.png' '+not really an image'
+expect "a -diff attribute on every file hides no text" 0 'FILE M notes.txt' '+two' 'FILE M src/app.py'
 expect "control, invisible and separator characters and bad bytes are shown escaped" 0 \
   '\x1B[2K' 'c1 \u{009B}' 'rlo \u{202E}' 'zw \u{200B}' 'ls \u{2028}' 'tag \u{E0041}' 'bad \xFF' 'cr\x0D'
 expect "a symlink is listed as a link, its target in the diff" 0 \
-  'A lnk (symlink: read its target from the diff; do not open this path)' '+/etc/passwd'
+  'A lnk (symlink: read its target from the diff; do not open this path)' '+/etc/passwd
+\ No newline at end of file'
 expect "a file line that looks like a marker stays as it is in the diff" 0 'FILE A fake.md' '+=== PACKET END ==='
 answer=""
 for w in $(cd "$root" && perl method/scripts/method/lib/verdicts.pl words verdict | tr ' ' '_'); do
@@ -224,8 +226,9 @@ cat >"$work/home-hostile/.gitconfig" <<EOF
 	renames = copies
 [diff "x"]
 	textconv = $work/hostile.sh
+	command = $work/hostile.sh
 EOF
-printf '*.py diff=x\n' >>"$std/.git/info/attributes"
+printf '* diff=x\n' >>"$std/.git/info/attributes"
 (cd "$std" && HOME="$work/home-clean" GIT_CONFIG_NOSYSTEM=1 bash "$packet" --base main --criteria "$work/crit.txt") >"$work/clean.packet" 2>/dev/null
 (cd "$std" && HOME="$work/home-hostile" GIT_CONFIG_NOSYSTEM=1 GIT_DIFF_OPTS=-u0 GIT_EXTERNAL_DIFF="$work/hostile.sh" \
   GIT_LITERAL_PATHSPECS=1 GIT_ICASE_PATHSPECS=1 bash "$packet" --base main --criteria "$work/crit.txt") >"$work/hostile.packet" 2>/dev/null
@@ -305,6 +308,9 @@ lacks "the replaced content is not shown" "+harmless"
 rounds=$(new_repo) || abort_sandbox
 printf 'base\n' >"$rounds/base.txt"
 commit "$rounds" "base"
+before=$(cd "$rounds" && git rev-parse HEAD)
+printf 'base two\n' >"$rounds/base2.txt"
+commit "$rounds" "base two"
 (cd "$rounds" && git checkout -q -b task && printf 'early change\n' >early.txt)
 commit "$rounds" "round 1"
 first=$(cd "$rounds" && git rev-parse HEAD)
@@ -327,6 +333,9 @@ expect "an unknown --since shows the whole change, in doubt" 0 "in doubt" "FILE 
 side=$(cd "$rounds" && git rev-parse side)
 build "$rounds" --base main --since "$side"
 expect "a --since outside the branch shows the whole change, in doubt" 0 "in doubt" "FILE A early.txt"
+build "$rounds" --base main --since "$before"
+expect "a --since before the merge base shows the whole change, in doubt" 0 "in doubt" "FILE A early.txt"
+lacks "a --since before the merge base does not pull in the base's own commits" "base2.txt"
 printf '%s %s\n' "$first" "$side" >"$rounds/.git/info/grafts"
 build "$rounds" --base main --since "$side"
 expect "a grafts file does not make an outside --since look reviewed" 0 "in doubt" "FILE A early.txt"
@@ -388,6 +397,10 @@ build "$subs" --base main
 expect "a submodule move shows, even with ignore = all" 0 "M m (submodule)" "submodule m: $old_id -> $new_id"
 expect "a file replaced by a submodule shows the file's removal" 0 "T vendor (submodule; mode 100644 -> 160000)" "-vendored code" \
   "submodule vendor: none -> $new_id"
+(cd "$subs" && git update-index --cacheinfo "160000,3333333333333333333333333333333333333333,m")
+build "$subs" --base main
+expect "a staged submodule move is refused, even with ignore = all" 1 "commit first"
+(cd "$subs" && git update-index --cacheinfo "160000,$new_id,m")
 
 # --- a missing object is an error, never an empty answer ---
 broken=$(new_repo) || abort_sandbox
@@ -401,6 +414,10 @@ chmod u+w "$obj" 2>/dev/null
 rm -f "$obj"
 build "$broken" --base main
 if [ "$code" -eq 2 ] && [ -z "$out" ]; then pass "a missing object exits 2 with no packet"; else fail "a missing object exits 2 with no packet: exit $code" "$out$err"; fi
+case "$err" in
+  *fatal*) fail "git's own messages, which can quote names raw, are not shown" "$err" ;;
+  *) pass "git's own messages, which can quote names raw, are not shown" ;;
+esac
 
 for d in "$std" "$rounds" "$empty" "$subs" "$broken" "$work"; do drop_sandbox "$d"; done
 echo "tests: review packet: $tests_pass passed, $tests_fail failed, $tests_skip skipped"

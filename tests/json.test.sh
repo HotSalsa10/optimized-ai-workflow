@@ -114,6 +114,11 @@ for setting in "PERL_UNICODE=SDA" "PERL_UNICODE=S" "PERL5OPT=-CSDA"; do
   fi
 done
 
+# A failed write is an error, not a success.
+(perl "$json" get s <"$doc" >&-) 2>/dev/null
+code=$?
+if [ "$code" -eq 2 ]; then pass "a failed write exits 2"; else fail "a failed write exits 2: exit $code"; fi
+
 # Without JSON::PP: one plain sentence and exit 2.
 mkdir -p "$work/stub/JSON"
 printf 'die "planted: no JSON::PP\\n";\n' >"$work/stub/JSON/PP.pm"
