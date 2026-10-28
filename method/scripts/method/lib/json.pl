@@ -11,7 +11,8 @@
 #
 # Exit codes: 0 done; 1 the path does not exist; 2 bad usage, input that is
 # not valid UTF-8 or not valid JSON, a string holding a NUL byte (a shell
-# variable cannot hold one), or JSON::PP missing.
+# variable cannot hold one), JSON::PP missing, or perl's taint mode switched
+# on through PERL5OPT.
 #
 # Numbers with a fraction or an exponent print with all their digits (as
 # exact decimals, so 1e3 prints as 1000).
@@ -31,8 +32,11 @@ use warnings;
 # -Minteger), and PERL5LIB and PERLLIB could put another JSON::PP in place,
 # so the helper starts again without them.
 if (grep { defined $ENV{$_} } qw(PERL5OPT PERL_UNICODE PERL5LIB PERLLIB)) {
+  if (${^TAINT} == 1) {    # taint mode (-T) forbids starting perl again
+    print STDERR "json: perl's taint mode (-T) is on through PERL5OPT; run json.pl without it\n";
+    exit 2;
+  }
   delete @ENV{qw(PERL5OPT PERL_UNICODE PERL5LIB PERLLIB)};
-  utf8::encode($_) for grep { utf8::is_utf8($_) } @ARGV;
   exec { $^X } $^X, $0, @ARGV or do {
     print STDERR "json: cannot start perl again\n";
     exit 2;
@@ -97,7 +101,6 @@ for my $key (@keys) {
     exit 1;    # a KEY on a string, number, true, false or null
   }
 }
-
 
 my $out;
 if (ref $node || !defined $node) {

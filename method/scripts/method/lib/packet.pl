@@ -129,8 +129,7 @@ delete @ENV{qw(GIT_DIFF_OPTS GIT_EXTERNAL_DIFF GIT_LITERAL_PATHSPECS GIT_GLOB_PA
   GIT_ICASE_PATHSPECS GIT_REPLACE_REF_BASE)};
 $ENV{GIT_NO_REPLACE_OBJECTS} = 1;    # local replace refs would change the content shown
 $ENV{GIT_GRAFT_FILE} = File::Spec->catfile(tempdir(CLEANUP => 1), 'none');    # and so would grafts
-# a commit-graph file and a file-system monitor are local files that could
-# also misreport history or changes
+# a commit-graph file is a local file that could also misreport history, and
 # paths are never pathspec magic
 my @GIT = ('git', '--no-optional-locks', '--literal-pathspecs', '-c', 'core.commitGraph=false',
   '-c', 'diff.suppressBlankEmpty=false');
@@ -370,14 +369,6 @@ my $dirty = git_ok('status', '--porcelain=v1', '-z', '--untracked-files=no', '--
 fail(1, 'tracked files have uncommitted or staged changes; commit first, because the reviewer reads the changed files from disk')
   if length $dirty;
 
-sub hash_paths {
-  my ($opts, @paths) = @_;
-  my @ids;
-  push @ids, split /\n/, git_ok('hash-object', @$opts, '--', @$_) for chunks(@paths);
-  fail(2, 'git hash-object gave the wrong number of ids') unless @ids == @paths;
-  return @ids;
-}
-
 sub filter_attr {
   my %f;
   for my $c (chunks(@_)) {
@@ -427,7 +418,7 @@ for my $p (sort keys %head_files) {
 for my $it (@lfs_maybe) {
   my ($p, $id) = @$it;
   if (defined $filter{$p} && $filter{$p} eq 'lfs' && blob($id) =~ m{\Aversion https://git-lfs\.github\.com/spec/v1\n}
-    && (hash_paths([], $p))[0] eq $id) {
+    && git_ok('hash-object', '--', $p) eq "$id\n") {
     $lfs{$p} = 1;
     next;
   }

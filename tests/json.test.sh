@@ -110,9 +110,9 @@ case "$got" in
   *) fail "an error message does not quote the input: unexpected message" "$got" ;;
 esac
 
-# The same bytes come out whatever PERL_UNICODE or PERL5OPT ask for.
+# The same bytes come out whatever PERL_UNICODE, PERL5OPT or PERLIO ask for.
 plain=$(perl "$json" get s <"$doc" | od -An -tx1)
-for setting in "PERL_UNICODE=SDA" "PERL_UNICODE=S" "PERL5OPT=-CSDA" "PERL5OPT=-Mbigint" "PERL5OPT=-Minteger"; do
+for setting in "PERL_UNICODE=SDA" "PERL_UNICODE=S" "PERL5OPT=-CSDA" "PERL5OPT=-Mbigint" "PERL5OPT=-Minteger" "PERLIO=:utf8" "PERLIO=:crlf"; do
   got=$(env "$setting" perl "$json" get s <"$doc" | od -An -tx1)
   key=$(env "$setting" perl "$json" get "$(printf '\303\274k')" <"$doc")
   if [ "$got" = "$plain" ] && [ "$key" = "v" ]; then
@@ -138,6 +138,15 @@ mkdir -p "$work/fake/JSON"
 printf 'package JSON::PP; die "planted: a JSON::PP from PERL5LIB ran\\n";\n' >"$work/fake/JSON/PP.pm"
 got=$(PERL5LIB="$work/fake" perl "$json" get b 4 y <"$doc" 2>&1)
 if [ "$got" = "q" ]; then pass "a JSON::PP put on PERL5LIB is not used"; else fail "a JSON::PP put on PERL5LIB is not used" "$got"; fi
+
+# Taint mode switched on through PERL5OPT forbids starting perl again: exit 2
+# with a message, not perl's own failure.
+got=$(printf '{"a":1}' | PERL5OPT=-T perl "$json" get a 2>&1)
+code=$?
+case "$code:$got" in
+  "2:json: perl's taint mode"*) pass "PERL5OPT=-T exits 2 and says why" ;;
+  *) fail "PERL5OPT=-T exits 2 and says why: exit $code" "$got" ;;
+esac
 
 # Deep nesting is valid JSON and gives no warning.
 deep=$(perl -e 'print "[" x 400, "1", "]" x 400')
