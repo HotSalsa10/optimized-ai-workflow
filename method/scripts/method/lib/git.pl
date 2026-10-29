@@ -26,7 +26,6 @@
 package Git;
 use strict;
 use warnings;
-use Digest::SHA ();
 use File::Spec;
 use File::Temp qw(tempdir);
 use IO::Handle ();
@@ -70,9 +69,11 @@ sub ok {
 }
 
 # object_id TYPE CONTENT LIKE: in the hash that the id LIKE uses (SHA-1, or
-# SHA-256 for a 64-digit id).
+# SHA-256 for a 64-digit id). Digest::SHA is loaded only here, so a perl
+# without it can still load this file (status.sh reports it missing).
 sub object_id {
   my ($type, $c, $like) = @_;
+  require Digest::SHA;
   my $data = "$type " . length($c) . "\0" . $c;
   return length($like) == 64 ? Digest::SHA::sha256_hex($data) : Digest::SHA::sha1_hex($data);
 }

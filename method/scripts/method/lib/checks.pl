@@ -8,7 +8,6 @@
 package Checks;
 use strict;
 use warnings;
-use Digest::SHA ();
 use Fcntl qw(O_WRONLY O_CREAT O_EXCL);
 use File::Basename qw(dirname);
 use File::Spec;
@@ -251,6 +250,7 @@ sub check_env {
 # fingerprint: HEAD and every changed or untracked path that git does not
 # ignore, with the SHA-256 of what is on disk (.method/local left out)
 sub fingerprint {
+  require Digest::SHA;    # loaded here, so status.pl can load this file without it
   my ($st, $head) = Git::run('rev-parse', '-q', '--verify', 'HEAD^{commit}');
   $head = $st ? 'none' : (split /\n/, $head)[0];
   my $out = Git::ok('status', '--porcelain=v1', '-z', '--no-renames', '--untracked-files=all',

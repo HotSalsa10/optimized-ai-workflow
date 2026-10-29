@@ -155,5 +155,53 @@ case "$got" in
 esac
 drop_sandbox "$sb"
 
+# 5. the commit trailer check (DECISIONS A10), with the words read from the
+# vocabulary
+key=$(cd "$root" && perl "$reader" words trailer-key)
+alone=$(cd "$root" && perl "$reader" words trailer | sed -n 1p)
+needs=$(cd "$root" && perl "$reader" words trailer-reason | sed -n 1p)
+needs2=$(cd "$root" && perl "$reader" words trailer-reason | sed -n 2p)
+lower=$(printf '%s' "$key" | tr '[:upper:]' '[:lower:]')
+# trailer_is NAME CODE MESSAGE [REASON]: check-trailer exits CODE on
+# MESSAGE (a printf format) and prints REASON
+trailer_is() {
+  # shellcheck disable=SC2059 # the message is a printf format on purpose
+  got=$(printf "$3" | (cd "$root" && perl "$reader" check-trailer) 2>&1)
+  code=$?
+  if [ "$code" -ne "$2" ]; then
+    fail "$1: exit $code, wanted $2" "$got"
+  elif [ -n "${4:-}" ] && ! printf '%s\n' "$got" | grep -F -q -- "$4"; then
+    fail "$1: the reason does not say '$4'" "$got"
+  elif [ "$2" -eq 0 ] && [ -n "$got" ]; then
+    fail "$1: a valid message printed something" "$got"
+  else
+    pass "$1"
+  fi
+}
+trailer_is "a subject and a trailer are valid" 0 "Subject\n\nBody line.\n\n$key: $alone\n"
+trailer_is "CRLF line ends are read as LF" 0 "Subject\r\n\r\n$key: $alone\r\n"
+trailer_is "trailing spaces and blank lines are dropped" 0 "Subject\n\n$key: $alone \t\n\n \n"
+trailer_is "a first line of only spaces and tabs is blank" 0 " \t\nSubject\n\n$key: $alone\n"
+trailer_is "a reason word with a reason is valid" 0 "Subject\n\n$key: $needs2 - docs only\n"
+trailer_is "a lone CR is invalid" 1 "Sub\rject\n\n$key: $alone\n" "carriage return"
+trailer_is "an empty message is invalid" 1 " \n\n" "the message is empty"
+trailer_is "a trailer-only message is invalid, also after blank lines" 1 "\n\n$key: $alone\n" "the message is only the $key line"
+trailer_is "a last paragraph of two lines is invalid" 1 "Subject\n\n$key: $alone\nmore\n" "it has 2 lines"
+trailer_is "a trailer without a blank line before it is invalid" 1 "Subject\n$key: $alone\n" "it has 2 lines"
+trailer_is "a second key line in the body is invalid" 1 "Subject\n$key: $alone\n\n$key: $alone\n" "another line also starts with $key:"
+trailer_is "a word that takes no reason, given one, is invalid" 1 "Subject\n\n$key: $alone - x\n" "$alone takes no reason"
+trailer_is "a reason word without its reason is invalid" 1 "Subject\n\n$key: $needs\n" "$needs needs a reason"
+trailer_is "a reason of only spaces is invalid" 1 "Subject\n\n$key: $needs -   \n" "$needs needs a reason"
+trailer_is "a reason of only punctuation is invalid" 1 "Subject\n\n$key: $needs - ...\n" "must say something"
+trailer_is "a control character in the reason is invalid" 1 "Subject\n\n$key: $needs - fix \033[2J\n" "control character"
+trailer_is "an unknown value is invalid" 1 "Subject\n\n$key: maybe\n" "unknown value"
+trailer_is "the key in lower case is invalid" 1 "Subject\n\n$lower: $alone\n" "no line starts with $key:"
+trailer_is "no space after the colon is invalid" 1 "Subject\n\n$key:$alone\n" "one space after the colon"
+trailer_is "GitHub's squash-merge block after the trailer is named as the cause" 1 \
+  "Subject\n\n$key: $alone\n\n---------\n\nCo-authored-by: A <a@example.invalid>\n" "GitHub's ---------/Co-authored-by block"
+got=$(cd "$root" && perl "$reader" check-trailer extra </dev/null 2>&1)
+code=$?
+if [ "$code" -eq 2 ]; then pass "check-trailer with an argument is bad usage"; else fail "check-trailer with an argument is bad usage: exit $code" "$got"; fi
+
 echo "tests: verdict vocabulary: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]
