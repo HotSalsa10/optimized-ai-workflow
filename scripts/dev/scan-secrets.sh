@@ -12,8 +12,9 @@
 # Run "bash scripts/dev/scan-secrets.sh --ids" to see each finding's id.
 # The rules live in method/scripts/method/lib/secrets.pl.
 set -u
-# perl reads bytes here; these settings would change how it reads them
-unset PERL_UNICODE PERL5OPT
+# perl reads bytes here; these settings would change how it reads them, and
+# the library paths would let modules from elsewhere run inside the scan
+unset PERL_UNICODE PERL5OPT PERL5LIB PERLLIB
 
 ids=""
 case "${1:-}" in
@@ -35,16 +36,8 @@ command -v perl >/dev/null 2>&1 || {
   exit 2
 }
 
-files=()
-while IFS= read -r -d '' f; do
-  [ -f "$f" ] && files+=("$f")
-done < <(git ls-files -z)
-if [ "${#files[@]}" -eq 0 ]; then
-  echo "secrets: FAIL - found 0 tracked files; nothing was checked"
-  exit 1
-fi
-
-out=$(perl method/scripts/method/lib/secrets.pl --staged $ids scripts/dev/scan-allow.txt "${files[@]}" 2>&1) || {
+# the scan lists the tracked files itself, so no file name goes on a command line
+out=$(perl method/scripts/method/lib/secrets.pl --repo $ids scripts/dev/scan-allow.txt 2>&1) || {
   printf '%s\n' "$out"
   echo "secrets: FAIL - the scan itself did not run"
   exit 2
@@ -55,7 +48,7 @@ bad=$(printf '%s\n' "$out" | sed -n 's/^BAD //p')
 allowed=$(printf '%s\n' "$out" | sed -n 's/^ALLOWED //p')
 skipped=$(printf '%s\n' "$out" | sed -n 's/^SKIPPED //p')
 skipped_names=$(printf '%s\n' "$out" | sed -n 's/^SKIPPED_NAMES //p')
-printf '%s\n' "$out" | grep -v -e '^EXAMINED ' -e '^STAGED ' -e '^BAD ' -e '^ALLOWED ' -e '^SKIPPED ' -e '^SKIPPED_NAMES ' | sed 's/^NOTE /secrets: note - /'
+printf '%s\n' "$out" | grep -v -e '^EXAMINED ' -e '^STAGED ' -e '^BAD ' -e '^ALLOWED ' -e '^SKIPPED ' -e '^SKIPPED_NAMES ' -e '^RESULT ' | sed 's/^NOTE /secrets: note - /'
 
 # Each count must be one plain number. Anything else means the output could
 # not be trusted, which is a failure, never a pass.

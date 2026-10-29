@@ -1,7 +1,15 @@
 #!/usr/bin/env perl
-# Scans files for secrets and personal data. Called by scripts/dev/scan-secrets.sh.
+# Scans files for secrets and personal data (M066). Called by run-checks.sh
+# (its built-in check "secrets") and by this method repo's
+# scripts/dev/scan-secrets.sh, both with --repo.
 #
 # Usage:
+#   perl secrets.pl --repo [--ids] ALLOW_FILE
+#       Run from the repo root: scans every tracked file that is a regular
+#       file on disk (git ls-files, so no file name goes on a command line),
+#       with everything --staged adds. After the count lines it prints
+#       "RESULT PASS|FAIL|SKIPPED <reason>": FAIL on any finding or unreadable
+#       file, SKIPPED when it examined no text file, else PASS.
 #   perl secrets.pl [--staged] [--ids] ALLOW_FILE FILE...
 #       Scans each FILE. With --staged (run from the repo root), also scans the
 #       staged copy of every tracked file whose staged copy differs from the
@@ -29,6 +37,7 @@
 # part, for example).
 use strict;
 use warnings;
+use File::Basename qw(dirname);
 use IPC::Open2;
 use File::Spec;
 
@@ -51,12 +60,13 @@ sub say_line {
   print "$s\n";
 }
 
-my ($staged, $show_ids, $mask_mode) = (0, 0, 0);
+my ($staged, $show_ids, $mask_mode, $repo_mode) = (0, 0, 0, 0);
 while (@ARGV && $ARGV[0] =~ /^--/) {
   my $opt = shift @ARGV;
   if ($opt eq '--staged') { $staged = 1 }
   elsif ($opt eq '--ids') { $show_ids = 1 }
   elsif ($opt eq '--mask') { $mask_mode = 1 }
+  elsif ($opt eq '--repo') { $repo_mode = $staged = 1 }
   else { die "secrets: unknown option " . esc($opt) . "\n" }
 }
 
@@ -71,6 +81,8 @@ my @token_rules = (
   [qr/(?<![A-Za-z0-9])xox[abprs]-[A-Za-z0-9-]{10,}/, 'Slack token'],
   [qr/-----BEGIN (?:[A-Z]+ )*PRIVATE KEY-----/, 'private key'],
 );
+# the same rules with a capture group, compiled once
+my @token_cap = map { qr/($_->[0])/ } @token_rules;
 
 # Credentials assigned to a name that contains a credential word, also as
 # part of a longer name (DB_PASSWORD, client_secret). Names are capped at 64
@@ -186,17 +198,24 @@ sub mask {
 # phone number and IBAN masked. The whole text is masked first; then each
 # piece between escapes, because a check's output is already escaped and an
 # escape such as \x09 ends a word without leaving a space.
+# mask_all TEXT HIT...: every HIT in TEXT masked, in one pass (longest first)
+sub mask_all {
+  my ($s, @hits) = @_;
+  return $s unless @hits;
+  my $alt = join '|', map { quotemeta } sort { length $b <=> length $a } @hits;
+  $s =~ s/($alt)/mask($1, 0)/ge;
+  return $s;
+}
 sub mask_pass {
   my ($s) = @_;
-  for my $r (@token_rules) { $s =~ s/($r->[0])/mask($1, 1)/ge }
+  $s =~ s/$_/mask($1, 1)/ge for @token_cap;
   $s =~ s/$quoted_cred/$1 . mask($3, 0)/ge;
   $s =~ s/$env_cred/$1 . mask($3, 0)/e;
   $s =~ s/($email_re)/email_ok($1) ? $1 : mask($1, 0)/ge;
-  for my $p (phone_hits($s)) { $s =~ s/\Q$p\E/mask($p, 0)/ge }
+  $s = mask_all($s, phone_hits($s));
   @iban_written = ();
   iban_hits($s);
-  for my $w (@iban_written) { $s =~ s/\Q$w\E/mask($w, 0)/ge }
-  return $s;
+  return mask_all($s, @iban_written);
 }
 sub mask_text {
   my $s = mask_pass($_[0]);
@@ -212,20 +231,34 @@ if ($mask_mode) {
   exit 0;
 }
 
+# git runs through lib/git.pl's fixed options and cleaned environment, so
+# GIT_INDEX_FILE or a file-system monitor cannot change what is scanned.
+require File::Spec->catfile(dirname(File::Spec->rel2abs(__FILE__)), 'git.pl');
+
 # git_pipe ARGS: a pipe from git with its warnings discarded, because a
 # warning can quote a file name raw.
 sub git_pipe {
   my @args = @_;
   open my $saved, '>&', \*STDERR or die "secrets: cannot save stderr\n";
   open STDERR, '>', File::Spec->devnull or die "secrets: cannot silence git\n";
-  my $ok = open my $p, '-|', 'git', @args;
+  my $ok = open my $p, '-|', @Git::GIT, @args;
   open STDERR, '>&', $saved or die "secrets: cannot restore stderr\n";
   die "secrets: git $args[0] did not run\n" unless $ok;
   return $p;
 }
 
 my $allow_file = shift @ARGV;
-die "secrets: usage: secrets.pl [--staged] [--ids] ALLOW_FILE FILE...\n" unless defined $allow_file;
+die "secrets: usage: secrets.pl --repo [--ids] ALLOW_FILE, or secrets.pl [--staged] [--ids] ALLOW_FILE FILE...\n"
+  unless defined $allow_file && !($repo_mode && @ARGV);
+if ($repo_mode) {
+  local $/ = "\0";
+  my $l = git_pipe('ls-files', '-z');
+  while (my $p = <$l>) {
+    chomp $p;
+    push @ARGV, $p if -f $p;
+  }
+  close $l or die "secrets: git ls-files failed\n";
+}
 
 # The allowlist: PATH<TAB>ID<TAB>REASON. Errors name the line, never its text.
 my (%allow, @allow_lines);
@@ -253,7 +286,7 @@ sub allow_id {
   my ($path, $text) = @_;
   my $key = "$path\0$text";
   return $id_cache{$key} if exists $id_cache{$key};
-  my $pid = open2(my $out, my $in, 'git', 'hash-object', '--stdin');
+  my $pid = open2(my $out, my $in, @Git::GIT, 'hash-object', '--stdin');
   binmode $in;
   print $in $key;
   close $in;
@@ -288,8 +321,8 @@ sub report {
 # Every rule on one line of text.
 sub scan_line {
   my ($path, $where, $line, $seen, $skip_seen) = @_;
-  for my $r (@token_rules) {
-    while ($line =~ /($r->[0])/g) { report($path, $where, $r->[1], $1, 1, $seen, $skip_seen) }
+  for my $i (0 .. $#token_rules) {
+    while ($line =~ /$token_cap[$i]/g) { report($path, $where, $token_rules[$i][1], $1, 1, $seen, $skip_seen) }
   }
   while ($line =~ /$quoted_cred/g) {
     my ($name, $value) = ($2, $3);
@@ -315,8 +348,8 @@ sub scan_runs {
       scan_line($path, "$label (raw bytes)", $run, $seen, 1);
       next;
     }
-    for my $r (@token_rules) {
-      while ($run =~ /($r->[0])/g) { report($path, "$label (binary)", $r->[1], $1, 1, $seen, 1) }
+    for my $i (0 .. $#token_rules) {
+      while ($run =~ /$token_cap[$i]/g) { report($path, "$label (binary)", $token_rules[$i][1], $1, 1, $seen, 1) }
     }
   }
 }
@@ -452,3 +485,10 @@ my @shown = map { esc($_) } @skipped_names[0 .. ($#skipped_names < 4 ? $#skipped
 $examined -= $staged_examined;
 print "EXAMINED $examined\nSTAGED $staged_examined\nBAD $bad\nALLOWED $allowed_hits\nSKIPPED $skipped\nSKIPPED_NAMES "
   . join(', ', @shown) . ($skipped > 5 ? ', ...' : '') . "\n";
+if ($repo_mode) {
+  my $extra = ($staged_examined ? " and $staged_examined staged copies and link targets" : '')
+    . ($skipped ? "; $skipped binary files searched for keys only" : '') . ($allowed_hits ? "; $allowed_hits allowed" : '');
+  if ($bad) { print "RESULT FAIL $bad finding(s) in $examined tracked text files\n" }
+  elsif (!$examined) { print "RESULT SKIPPED examined no tracked text file\n" }
+  else { print "RESULT PASS examined $examined tracked text files$extra\n" }
+}
