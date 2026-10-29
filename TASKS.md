@@ -1,6 +1,6 @@
 # TASKS
 
-Current phase: Release 1, step 2 (JSON helper, verdict vocabulary, review packet). Steps 1 and 1b are closed except the owner's CI item.
+Current phase: Release 1, step 3 (run-checks.sh and status.sh). Steps 1, 1b and 2 are closed except the owner's CI item.
 
 ## Step 1: repo skeleton, records, rule map, CI with planted defects
 
@@ -56,7 +56,7 @@ Rules: M032, M038, M039, M085, M112, M113.
 - [x] Tests: json.test.sh, verdicts.test.sh and review-packet.test.sh, and a plant for the wider perl syntax check. The planted-break runs are summed up in TESTS.md.
 - [x] Found while working: git applies file attributes to a diff of two stored versions too, matched against the version's id, so `--text`, `--no-textconv` and `--no-ext-diff` are all needed; the tests now put such attributes on every name.
 - [x] Records: TESTS.md, CHANGELOG.md, DECISIONS A28 and A29, RISKS #11, rule map (6 rules done).
-- Moved to step 3: the commit trailer check, shaped for status.sh. A message that is only the trailer line must fail it (design critique C20).
+- [x] Moved to step 3: the commit trailer check, shaped for status.sh. A message that is only the trailer line must fail it (design critique C20). Done in step 3.
 - [x] Review round 1 (blind reviewer and security checker; each blocking or medium finding re-checked by an agent that tried to refute it): REQUEST CHANGES. 8 findings re-checked, none refuted. 3 block after checking: a clean file stored with CRLF was refused under text=auto or core.autocrlf (medium); json.pl gave other output under PERL5OPT=-Mbigint; 3 of the 4 migration guards had no test. 5 more were confirmed as low: a very large change overflowed the command line; hand-written code could hide as a .map file; a lying commit-graph file or a hand-changed stored file could change what the packet shows; an index flag could hide edits to files outside the change; marker look-alikes after a no-break space, a combining mark or a diff sign. 16 notes.
 - [x] Repair loop 1 (of 3): all 8 fixed, and most notes: two merge bases named in doubt; a --since equal to the merge base; a folder given as a file; a file-system monitor hook; PERL5LIB in the wrapper; a word listed twice in verdicts.txt; deep nesting in json.pl; a lockfile counts only next to its manifest and a binary only with its type's signature; the checklist messages; symlink tests skip where links cannot be made; RISKS order. Not acted on: escapes that read the same as text that spells them (the header says so), one git process per stored file (speed only), no size limit (A29). Checked: 88, 48 and 22 test cases in the three new test files, the full suite and the planted breaks in TESTS.md.
 - [x] Review round 2, on the changes since round 1 (the packet's own `--since`): REQUEST CHANGES. Most round 1 fixes held (27 of the reviewer's 29 planted breaks caught). 4 findings re-checked, none refuted, all low and all blocking: a folder named `:` defeated the lockfile-manifest rule (paths read as pathspec magic); zero-width format characters (U+FFF9, U+13430) were not escaped, so a fake marker after them looked real; a stored folder (tree) changed by hand changed what the packet listed; four record sentences claimed more than the code. 18 notes.
@@ -65,6 +65,22 @@ Rules: M032, M038, M039, M085, M112, M113.
 - [x] Review round 3 (the last under the cap), on the changes since round 2: REQUEST CHANGES. Most round 2 items held; the json.pl number records and the fixed diff options were only partly fixed (44 of the reviewer's planted breaks run, 39 caught). 6 findings re-checked. 1 refuted: json.pl expanding a 13-byte number into gigabytes (no caller yet, and Claude Code's hook input cannot hold such a number). 4 low and blocking: json.pl's records named only part of its integer rounding (negative 20-character integers too); a core.worktree setting or GIT_WORK_TREE moved the disk check to a clean copy elsewhere while the reviewer read the edited folder; commits changed by hand moved the merge base and hid a committed file; a local diff driver chose the function name in hunk headers, against the record. 1 medium, not blocking: one git and git-lfs process per Git LFS file, so a one-line change in a repo of 2,000 LFS files took 65 s. 11 notes.
 - [x] The owner chose a last fix round, with no 4th review (3-round cap).
 - [x] Repair loop 3 (the last): all 6 acted on: the 4 blocking ones, the LFS speed, and the refuted number expansion. json.pl prints numbers exactly or exits 2 (20-character integers outside the 64-bit range, exponents beyond 10000). The packet refuses a working copy that git finds elsewhere and ignores GIT_DIR and GIT_WORK_TREE; reads stored objects through one `git cat-file --batch` and checks every commit after the merge base, on HEAD's side and the base's; keeps only line numbers in hunk headers; checks a Git LFS file by the SHA-256 its pointer names (2,000 LFS files: 0.4 s), which also closes the old limit of a local LFS filter pointed elsewhere. From the notes: trees parse in linear time (60,000 files in one folder: 1.5 s, was 26 s); file lists are sorted, so diff.orderFile changes nothing; the file-system monitor is off again; a file that is not a regular file is refused before it is opened (a FIFO would hang); each byte that is not valid UTF-8 is shown; the header says untracked files are not part of the change; tests for a .map whose mappings is not a string or whose version is not a whole number, and a lone CR under skip-worktree; TESTS.md known limits name clean filters other than LFS, noise files that a line elsewhere runs, and modules loaded through PERL5OPT. Not acted on: U+1D159 or U+FFFC before === (the token already marks such lines as content). Not reviewed by a fresh reviewer (3-round cap); checked instead by the full test suite (210 test cases) and a planted-break run: 144 of 148 caught, the other 4 second layers (TESTS.md, Planted breaks).
+
+## Step 3: run-checks.sh and status.sh
+
+Rules: M001, M002, M003, M050, M051, M066, M077.
+
+- [x] Design written first, then critiqued before any code by four independent critics (robustness, security, scope, callers), each serious finding re-checked by a skeptic: 60 checked, 56 confirmed, 4 refuted, 13 ideas. The design changed for every confirmed finding. The main changes: one git runner, one escaper and one reader per input file (M048); a check passes only when it exited 0 and printed a count of 1 or more; run-checks writes its log before any check runs and waits for the check's own process, not for the end of its output; `PRIVATE_INPUTS` became `LOCAL_ONLY`, with bare names for caches; status never fails an area and runs each one on its own; status judges main's first-parent history only (DECISIONS A30).
+- [x] Built, in 4 commits, restructuring apart from behaviour (M093): `lib/git.pl` and `lib/esc.pl` taken out of `packet.pl` (the step 2 packet is byte for byte the same); the secret scan moved to `method/scripts/method/lib/secrets.pl`, with a `--repo` mode that lists the tracked files itself, and 7 times faster with the same output; `lib/conf.pl` and `REQUIRES`; `run-checks.sh` with `lib/checks.pl`; the trailer check in `lib/verdicts.pl`; `status.sh` with `lib/status.pl`.
+- [x] Tests: conf.test.sh (62), run-checks.test.sh (78), status.test.sh (72), and 21 trailer cases in verdicts.test.sh.
+- [x] Records: rule map (7 rules done, M010 moved to step 7), DECISIONS A30 to A32, RISKS #3 and #11, TESTS.md, CHANGELOG.md.
+- [x] Found while working: `git check-ignore` refuses literal pathspecs, so run-checks asks `git ls-files` whether its log is ignored; `git symbolic-ref --short` says `heads/main` when a tag is also named main, so status shortens the full name itself; Digest::SHA is now loaded only where it is used, so status can report it missing.
+- [ ] Planted-break run on the step 3 code.
+- [ ] Review round 1.
+- Moved to step 4: the baseline ("introduced by this change"); the log run at the merge base can serve as one.
+- Moved to step 6: the "same check failed twice, call diagnose" trigger (it can read the kept logs' RESULT lines); the diff scan (new skips, stubs, a test-count ratchet, text addressed to an AI, bidi characters) with plan v3's ".skip" plant, which needs its own rule-map row; the `tiers` column of checks/*.tsv.
+- Moved to step 7: M010 (run the guards' own tests when scripts change). In a project the method's scripts change only through sync or a local edit, which sync reports; step 7 decides whether the self-test ships and how M010 is met.
+- For steps 6 and 7: every commit that lands on main must end with the trailer, so the finish skill and any merge must pass the trailer message through (DECISIONS A30).
 
 ## Fixed elsewhere
 
@@ -88,4 +104,4 @@ Rules: M032, M038, M039, M085, M112, M113.
 
 ## Next
 
-Step 3 starts only when the owner says so.
+Step 3: the planted-break run, then review round 1.

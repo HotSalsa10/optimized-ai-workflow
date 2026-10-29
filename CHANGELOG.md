@@ -22,6 +22,19 @@ Nothing yet. Release 1 is being built.
 - validate.sh's perl syntax check also covers `method/scripts/`.
 - Tests: 3 new test files with 210 test cases, and 1 new plant.
 
+### Added (step 3)
+
+- `run-checks.sh`: runs the method's built-in checks (secrets on every tracked file, fresh-clone, tree-unchanged) and the project's own checks from `checks/*.tsv`. A check passes only when it exited 0 and printed how many things it examined; a check that examined nothing is SKIPPED, never a pass. The whole output goes to a private log under `.method/local/logs/`, masked; the screen shows failures, skips and one last line. Exit codes 0, 1, 2 and 3.
+- `status.sh`: one read-only report for any session: work not committed or not pushed (also in linked worktrees and in the other repositories listed in REPOS), commits on main without a valid verdict trailer, the project records, the Claude Code version against the floor, CLAUDE_CODE_EFFORT_LEVEL, perl's modules and CI. It says PASS, LOOK or SKIPPED and exits 1 when something needs a look.
+- `.claude/method.conf` settings (PRODUCT_PATHS, LOCAL_ONLY, REPOS, VERDICTS_FROM) with one reader, `lib/conf.pl`, and `REQUIRES` with the Claude Code floor.
+- The commit trailer check, `lib/verdicts.pl check-trailer`, used by status.
+- Shared helpers `lib/git.pl` (every git call, with the settings that could change what git shows turned off) and `lib/esc.pl` (the one line escaper), taken out of the review packet, whose output is unchanged.
+- Tests: 3 new test files and 21 more trailer cases, 233 test cases in all.
+
+### Changed (step 3)
+
+- The secret scan moved into the method (`method/scripts/method/lib/secrets.pl`), lists the tracked files itself, and runs about 7 times faster with the same output.
+
 ### Changed (step 1b, from the step 1 security check)
 
 - The checks can no longer be fooled by odd file names: output is escaped, counts are read strictly, and file names never reach a tool as an option.

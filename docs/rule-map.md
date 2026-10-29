@@ -6,16 +6,16 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 
 | ID | Rule | Source | Home | Status |
 |---|---|---|---|---|
-| M001 | One read-only status command orients any session: uncommitted and unpushed work in every repo, commits missing a verdict, record consistency, health | incident | method/scripts/method/status.sh | step 3 |
-| M002 | A check that examined nothing prints SKIPPED, never "ok" | incident | method/scripts/method/run-checks.sh | step 3 |
-| M003 | status exits 1 when something needs a look; it reports, it does not block | incident | method/scripts/method/status.sh | step 3 |
+| M001 | One read-only status command orients any session: uncommitted and unpushed work in every repo, commits missing a verdict, record consistency, health | incident | method/scripts/method/status.sh | done |
+| M002 | A check that examined nothing prints SKIPPED, never "ok" | incident | method/scripts/method/run-checks.sh | done |
+| M003 | status exits 1 when something needs a look; it reports, it does not block | incident | method/scripts/method/status.sh | done |
 | M004 | Session start says where things stand, what is blocked and on whom, and the one next thing and why | incident | method/.claude/skills/start/SKILL.md | step 6 |
 | M005 | Do not start work until the owner says go | incident | method/.claude/skills/start/SKILL.md | step 6 |
 | M006 | Plan first: read everything, write nothing, mark VERIFIED and INFERRED, wait | incident | method/.claude/skills/plan-first/SKILL.md | step 6 |
 | M007 | Update the records before review, so one review covers one change | incident | method/.claude/skills/finish/SKILL.md | step 6 |
 | M008 | The verdict comes before the merge | incident | method/scripts/method/done-check.sh | step 4 |
 | M009 | Act on the verdict; at most 3 review rounds, then re-plan | incident; research: Claude Code team | method/.claude/agents/method/reviewer.md | step 6 |
-| M010 | When scripts change, run the guards' own tests | incident | method/scripts/method/run-checks.sh | step 3 |
+| M010 | When scripts change, run the guards' own tests | incident | method/scripts/method/run-checks.sh | step 7 |
 | M011 | Commit with the verdict trailer, push, show status | incident | method/.claude/skills/finish/SKILL.md | step 6 |
 | M012 | Reports open with status and next step, then what changed, what is left, risks, what is uncertain, checks | incident | method/.claude/rules/method/owner.md | step 6 |
 | M013 | If a new session cannot orient from the files, fix the files, not the handoff | incident | method/.claude/rules/method/method.md | step 6 |
@@ -55,8 +55,8 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M047 | Write the question in words before computing; two agreeing methods can answer the wrong question | incident | method/.claude/rules/method/method.md | step 6 |
 | M048 | The same rule implemented twice is a defect | incident | method/.claude/rules/method/method.md | step 6 |
 | M049 | Verify through the path the user takes, or say plainly that you did not | incident | method/.claude/rules/method/method.md | step 6 |
-| M050 | Check what a fresh clone gets, not only what works locally | incident | method/scripts/method/run-checks.sh | step 3 |
-| M051 | Long runs write their log where they run | incident | method/scripts/method/run-checks.sh | step 3 |
+| M050 | Check what a fresh clone gets, not only what works locally | incident | method/scripts/method/run-checks.sh | done |
+| M051 | Long runs write their log where they run | incident | method/scripts/method/run-checks.sh | done |
 | M052 | A plant shows a check worked once; a committed test keeps it working | incident | method/.claude/skills/checks/SKILL.md | step 6 |
 | M053 | Silence is never an outcome: loud pass, loud fail or loud skip | incident | method/.claude/hooks/method/gate-receipt.sh | step 5 |
 | M054 | Claims about how something looks go before a person before they go into a record | incident | method/.claude/rules/method/method.md | step 6 |
@@ -71,7 +71,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M063 | A script that writes to live records refuses to run without a stated reason | incident | packs/frappe/templates/owner-script.sh | step 7 |
 | M064 | Never edit core or third-party source in place | incident | method/.claude/rules/method/method.md | step 6 |
 | M065 | Never work around the permission check; live steps are fixed scripts the owner runs | incident; decision A13 | method/.claude/rules/method/method.md | step 6 |
-| M066 | No secrets or personal data in a repo | incident | method/scripts/method/run-checks.sh | step 3 |
+| M066 | No secrets or personal data in a repo | incident | method/scripts/method/run-checks.sh | done |
 | M067 | Enforcement is stated honestly: what hooks and CI enforce, and what is only convention | incident | docs/why.md | step 6 |
 | M068 | Writing for people: plain, precise, honest hedges; no machine-sounding habits | incident | method/.claude/rules/method/owner.md | step 6 |
 | M069 | A reporter agent re-derives claims before the owner approves; /supervise stays optional | incident; decision A12 | method/.claude/agents/method/reporter.md | step 6 |
@@ -82,7 +82,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M074 | Keep every hedge and every number exactly, with currency, sign and period | research: writing test | method/.claude/rules/method/owner.md | step 6 |
 | M075 | Never use /code-review, /goal or the advisor as a gate | research: Claude Code internals | method/.claude/rules/method/method.md | step 6 |
 | M076 | The server-side advisor is off | research: advisor docs; decision A5 | method/settings.fragment.json | step 5 |
-| M077 | Never set CLAUDE_CODE_EFFORT_LEVEL | research: measured; decision A4 | method/scripts/method/status.sh | step 3 |
+| M077 | Never set CLAUDE_CODE_EFFORT_LEVEL | research: measured; decision A4 | method/scripts/method/status.sh | done |
 | M078 | A refusal or a missing verdict means "not checked" | research: model fallback docs | method/.claude/hooks/method/gate-receipt.sh | step 5 |
 | M079 | One repo per code-changing cloud session | research: cloud docs | method/.claude/hooks/method/session-status.sh | step 5 |
 | M080 | Check /permissions on each new clone | research: untrusted folders | README.md | step 9 |
