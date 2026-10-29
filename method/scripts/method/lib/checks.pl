@@ -39,10 +39,13 @@ sub read_tsv {
   my $dir = File::Spec->catdir($root, 'checks');
   return (\@checks, \@problems) unless -d $dir;
   opendir my $dh, $dir or return (\@checks, ['checks: cannot read the folder']);
-  my @files = sort grep { /\A[^.].*\.tsv\z/s && -f File::Spec->catfile($dir, $_) } readdir $dh;
+  my @files = sort grep { /\A[^.].*\.tsv\z/s } readdir $dh;
   closedir $dh;
   for my $name (@files) {
     my $label = 'checks/' . Esc::line($name);
+    # a link or a folder could stand for checks that a clone does not have
+    my $path = File::Spec->catfile($dir, $name);
+    if (-l $path || !-f $path) { push @problems, "$label: not a regular file, so its checks would not run everywhere"; next }
     my $fh;
     if (!open $fh, '<:raw', File::Spec->catfile($dir, $name)) { push @problems, "$label: cannot read the file"; next }
     my $n = 0;
@@ -79,6 +82,8 @@ sub read_tsv {
         }
         if ($bad) { $problem->($bad); next }
       }
+      # perl's warnings would quote the pattern's bytes raw, so they are dropped
+      local $SIG{__WARN__} = sub { };
       my $re = eval { qr/$count/ };
       if (!$re) { $problem->('the count pattern does not compile (code inside a pattern is not allowed)'); next }
       if ('' =~ $re) { $problem->('the count pattern matches an empty line'); next }
@@ -247,30 +252,47 @@ sub check_env {
   return \%e;
 }
 
-# fingerprint: HEAD and every changed or untracked path that git does not
-# ignore, with the SHA-256 of what is on disk (.method/local left out)
+# fingerprint: what a check must leave as it found it. HEAD's commit and the
+# branch it is on, the commit of every branch and tag, and every path git
+# does not ignore that is changed, untracked, or marked so git does not
+# compare it (assume-unchanged, or skip-worktree with the file on disk),
+# each with its mode and the SHA-256 of what is on disk (.method/local left
+# out). git status runs with no filter program and no stat shortcut
+# (Git::status_options).
 sub fingerprint {
   require Digest::SHA;    # loaded here, so status.pl can load this file without it
   my ($st, $head) = Git::run('rev-parse', '-q', '--verify', 'HEAD^{commit}');
   $head = $st ? 'none' : (split /\n/, $head)[0];
-  my $out = Git::ok('status', '--porcelain=v1', '-z', '--no-renames', '--untracked-files=all',
-    '--ignore-submodules=none');
-  my %e;
+  my ($bst, $branch) = Git::run('symbolic-ref', '-q', 'HEAD');
+  $branch = $bst ? 'detached' : (split /\n/, $branch)[0];
+  my $refs = Git::ok('for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads/', 'refs/tags/');
+  my $out = Git::ok(Git::status_options(), 'status', '--porcelain=v1', '-z', '--no-renames',
+    '--untracked-files=all', '--ignore-submodules=none');
+  my @paths;
   for my $rec (split /\0/, $out) {
-    next if length $rec < 4;
-    my ($xy, $path) = (substr($rec, 0, 2), substr($rec, 3));
+    push @paths, [substr($rec, 3), substr($rec, 0, 2)] if length $rec >= 4;
+  }
+  for my $rec (split /\0/, Git::ok('ls-files', '-v', '-z')) {
+    my ($tag, $path) = split / /, $rec, 2;
+    next unless defined $path;
+    push @paths, [$path, "flag $tag"] if $tag =~ /\A[a-z]\z/ || ($tag eq 'S' && (-e $path || -l $path));
+  }
+  my %e;
+  for my $p (@paths) {
+    my ($path, $why) = @$p;
     next if index($path, "$LOCAL/") == 0;
     my $h = '-';
-    if (-l $path) {
+    my @s = lstat $path;
+    if (-l _) {
       my $t = readlink $path;
       $h = 'link ' . (defined $t ? Digest::SHA::sha256_hex($t) : '?');
     } elsif (-f _) {
       $h = eval { Digest::SHA->new(256)->addfile($path, 'b')->hexdigest };
       $h = 'unreadable' unless defined $h;
     }
-    $e{$path} = "$xy $h";
+    $e{$path} = join ' ', grep { defined } $e{$path}, $why, (@s ? sprintf('%o', $s[2]) : '-'), $h;
   }
-  return { head => $head, e => \%e };
+  return { head => $head, branch => $branch, refs => $refs, e => \%e };
 }
 
 sub tracked_count {
@@ -360,13 +382,22 @@ sub check_tree_unchanged {
   my %all = (%{ $before->{e} }, %{ $after->{e} });
   my @changed = sort grep { ($before->{e}{$_} || '') ne ($after->{e}{$_} || '') } keys %all;
   write_lines($out, map {"changed during the run: $_"} @changed);
+  my %refs_before = map { split / /, $_, 2 } split /\n/, $before->{refs};
+  my %refs_after = map { split / /, $_, 2 } split /\n/, $after->{refs};
+  my %all_refs = (%refs_before, %refs_after);
+  my @moved = sort grep { ($refs_before{$_} || '') ne ($refs_after{$_} || '') } keys %all_refs;
+  write_lines($out, map {"moved during the run: $_"} @moved);
   my @why;
   push @why, 'HEAD moved during the run' if $before->{head} ne $after->{head};
+  push @why, 'HEAD is on another branch than before the run' if $before->{branch} ne $after->{branch};
+  push @why, scalar(@moved) . ' branches or tags moved during the run' if @moved;
   push @why, 'the checks changed ' . scalar(@changed) . ' files' if @changed;
   my $examined = tracked_count();
   return { status => 'FAIL', kind => 'finding', examined => $examined, detail => join('; ', @why) } if @why;
+  return { status => 'SKIPPED', kind => 'examined-nothing', examined => 0,
+    detail => 'the repository tracks no file, so there was nothing to compare' } unless $examined;
   return { status => 'PASS', kind => 'pass', examined => $examined,
-    detail => "HEAD and the files on disk are as they were before the checks ran" };
+    detail => "HEAD, its branch, the branches and tags, and the files on disk are as they were before the checks ran" };
 }
 
 sub check_project {
@@ -508,9 +539,10 @@ sub main {
     print "run-checks: usage: run-checks.sh (it takes no arguments)\n";
     exit 2;
   }
-  my ($st, $top) = Git::run('rev-parse', '--show-toplevel');
-  stop('not inside a git working tree') if $st || $top !~ /\S/;
-  $top =~ s/\n\z//;
+  my ($top, $elsewhere) = Git::top();
+  stop('not inside a git working tree') unless defined $top;
+  stop("git's working folder is not this folder: a core.worktree setting points git elsewhere;"
+    . ' run the checks in the working folder itself') if $elsewhere;
   chdir $top or stop('cannot enter the top folder of the repository');
 
   my ($conf, $cp) = Conf::read('.');

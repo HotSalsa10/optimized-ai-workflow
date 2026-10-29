@@ -10,7 +10,6 @@
 # review.
 use strict;
 use warnings;
-use Cwd ();
 use Digest::SHA ();
 use File::Basename qw(dirname);
 use File::Spec;
@@ -256,29 +255,17 @@ sub check_trees {
   }
 }
 
-my ($st, $top) = run_git('rev-parse', '--show-toplevel');
-fail(2, 'not inside a git working tree') if $st || $top !~ /\A(.+)\n\z/;
-$top = $1;
-# git's working copy must be the folder the reviewer reads: the first
-# folder at or above this one that holds a .git entry, where git itself
-# looks. A core.worktree setting could point git at a clean copy elsewhere.
-my $home = Cwd::getcwd();
-fail(2, 'cannot read the current folder') unless defined $home;
-until (-e File::Spec->catfile($home, '.git')) {
-  my $up = dirname($home);
-  fail(2, 'not inside a git working tree') if $up eq $home;
-  $home = $up;
-}
-my @home_id = stat $home;
-my @top_id = stat $top;
+# git's working copy must be the folder the reviewer reads (lib/git.pl's
+# Git::top). A core.worktree setting could point git at a clean copy elsewhere.
+my ($top, $where) = Git::top();
+fail(2, 'not inside a git working tree') unless defined $top;
 fail(1, "git's working copy is not the folder the packet is built from: a core.worktree setting points git elsewhere; build the packet in the working copy itself")
-  unless @home_id && @top_id && $home_id[0] == $top_id[0] && $home_id[1] == $top_id[1];
+  if $where;
 chdir $top or fail(2, 'cannot change to the repository root');
 
 my $head = commit_id('HEAD') or fail(2, 'HEAD is not a commit');
 my $base = commit_id($opt{base}) or fail(2, "the base '$opt{base}' is not a commit here");
-my $mbs;
-($st, $mbs) = run_git('merge-base', '--all', $base, $head);
+my ($st, $mbs) = run_git('merge-base', '--all', $base, $head);
 fail(2, "the base '$opt{base}' and HEAD share no history here; in a shallow clone, fetch more history (git fetch --deepen=N or git fetch --unshallow)")
   if $st == 1 << 8;
 fail(2, 'git merge-base failed') if $st || $mbs !~ /\A(?:[0-9a-f]+\n)+\z/;

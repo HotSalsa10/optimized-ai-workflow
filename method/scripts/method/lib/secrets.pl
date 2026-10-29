@@ -194,10 +194,6 @@ sub mask {
   return "***($len chars)";
 }
 
-# mask_text TEXT: TEXT with every key, credential, personal email address,
-# phone number and IBAN masked. The whole text is masked first; then each
-# piece between escapes, because a check's output is already escaped and an
-# escape such as \x09 ends a word without leaving a space.
 # mask_all TEXT HIT...: every HIT in TEXT masked, in one pass (longest first)
 sub mask_all {
   my ($s, @hits) = @_;
@@ -217,9 +213,17 @@ sub mask_pass {
   iban_hits($s);
   return mask_all($s, @iban_written);
 }
+
+# mask_text TEXT: TEXT with every key, credential, personal email address,
+# phone number and IBAN masked. The whole text is masked first; then each
+# piece between escapes and terminal codes, because a check's output may be
+# escaped already, and an escape such as \x09 or a colour code such as
+# ESC[31m ends a word without leaving a space. The terminal codes are
+# masked too, so a key inside one (a link's address) is not let through.
+my $term_code = qr/\e\[[0-?]*[ -\/]*[@-~]|\e\][^\a\e]*(?:\a|\e\\)?|\e[@-Z\\-_]/;
 sub mask_text {
   my $s = mask_pass($_[0]);
-  return join '', map { /^\\x[0-9A-F]{2}$/ ? $_ : mask_pass($_) } split /(\\x[0-9A-F]{2})/, $s;
+  return join '', map { /^\\x[0-9A-F]{2}$/ ? $_ : mask_pass($_) } split /(\\x[0-9A-F]{2}|$term_code)/, $s;
 }
 
 # --mask: a filter for other tools' output.
@@ -435,7 +439,8 @@ if ($staged) {
   my %differs;
   {
     local $/ = "\0";
-    my $d = git_pipe('diff', '--name-only', '-z');
+    # no filter program runs and no stat shortcut hides an edit (lib/git.pl)
+    my $d = git_pipe(Git::status_options(), 'diff', '--name-only', '-z');
     while (my $p = <$d>) { chomp $p; $differs{$p} = 1 }
     close $d or die "secrets: git diff failed\n";
     # files marked assume-unchanged (lower-case tag) or skip-worktree (S), which

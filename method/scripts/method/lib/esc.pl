@@ -9,7 +9,9 @@
 # format, private-use, unassigned, invisible (default ignorable), line or
 # paragraph separator character as \u{XXXX}. Then === that opens the line,
 # also after blanks, marks or a diff sign, gets a backslash in front (the
-# review packet's section markers, M113). Returns UTF-8 bytes.
+# review packet's section markers, M113), and the CI runner's old command
+# form ##[ is broken up as #\x23[, so a line shown in a CI log cannot give
+# the runner a command. Returns UTF-8 bytes.
 package Esc;
 use strict;
 use warnings;
@@ -32,6 +34,7 @@ sub line {
   $s =~ s/([\x00-\x08\x0A-\x1F\x7F])/sprintf('\\x%02X', ord $1)/ge;
   $s =~ s/((?!\t)[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Default_Ignorable_Code_Point}\p{Zl}\p{Zp}])/sprintf('\\u{%04X}', ord $1)/ge;
   $s =~ s/\A([+\- \t\p{Zs}\p{Mn}\p{Mc}\p{Me}\x{2800}]*)(\\*===)/$1\\$2/;
+  $s =~ s/##\[/#\\x23[/g;
   utf8::encode($s);
   return $s;
 }

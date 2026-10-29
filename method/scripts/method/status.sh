@@ -34,8 +34,10 @@
 # - M003: it exits 1 when something needs a look; it reports, it does not
 #   block.
 # - M077: CLAUDE_CODE_EFFORT_LEVEL is never set (DECISIONS A4).
-# It writes no file: git runs with --no-optional-locks and without a
-# file-system monitor, so even the index is left as it is.
+# It writes no file and runs no program from the repository: git runs with
+# --no-optional-locks, without a file-system monitor and with every filter
+# program turned off (lib/git.pl), so even the index is left as it is (git
+# may still freshen the time stamp of a split index's shared file).
 set -u
 # perl reads bytes; these settings would change how it reads them, and the
 # library paths would let modules from elsewhere run inside it

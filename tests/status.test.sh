@@ -135,6 +135,38 @@ else
   fail "a file-system monitor set in the repository never runs, and the edit is seen" "$out"
 fi
 (cd "$w" && git config --unset core.fsmonitor && git checkout -q a.txt)
+printf '#!/bin/sh\n: >"%s/filter-ran"\nprintf "hello\\n"\n' "$work" >"$work/filter"
+chmod +x "$work/filter"
+(cd "$w" && git config filter.hide.clean "$work/filter" && printf 'a.txt filter=hide\n' >.git/info/attributes)
+printf 'HELLO\n' >"$w/a.txt"
+st "$w"
+if [ "$code" -eq 1 ] && [ ! -e "$work/filter-ran" ] && printf '%s\n' "$out" | grep -q '^work: LOOK - 1 uncommitted'; then
+  pass "a filter program set in the repository never runs, and the same-size edit it would hide is seen"
+else
+  fail "a filter program set in the repository never runs, and the same-size edit it would hide is seen" "$out"
+fi
+(cd "$w" && git config filter.hide.required true)
+st "$w"
+expect "a filter marked required is turned off too, and the edit is still seen" 1 "work: LOOK - 1 uncommitted"
+(cd "$w" && git config --unset filter.hide.clean && git config --unset filter.hide.required && rm -f .git/info/attributes && git checkout -q a.txt)
+# an edit of the same size with its old time stamp put back, under settings
+# that tell git to trust size and time alone
+(cd "$w" && touch -t 202001010000 a.txt && git update-index -q --refresh && cp -p a.txt "$work/stamp")
+# git compares change times to the second, so the edit must come a second later
+sleep 1
+(cd "$w" && git config core.trustctime false && git config core.checkStat minimal)
+printf 'HELLO\n' >"$w/a.txt"
+touch -r "$work/stamp" "$w/a.txt"
+st "$w"
+expect "an edit hidden from git's stat check by core.trustctime and core.checkStat is seen" 1 "work: LOOK - 1 uncommitted"
+(cd "$w" && git config --unset core.trustctime && git config --unset core.checkStat && git checkout -q a.txt)
+printf 'garbage' >"$work/index.keep"
+cp "$w/.git/index" "$work/index.keep"
+printf 'garbage' >"$w/.git/index"
+st "$w"
+expect "an area that fails is a LOOK naming the git command, and the next areas still report" 1 \
+  "work: LOOK - could not be checked: git status failed" "verdicts: PASS" "perl: PASS"
+cp "$work/index.keep" "$w/.git/index"
 (cd "$w" && git update-index --assume-unchanged a.txt)
 echo hidden >>"$w/a.txt"
 st "$w"
@@ -324,9 +356,49 @@ expect "main is the branch origin/HEAD names" 1 "verdicts: LOOK - 1 commits on r
 ) || fail "could not build the merge project"
 st "$ohw"
 expect "commits that came in through a merge are not judged; the merge is" 0 "verdicts: PASS - 2 commits on refs/remotes/origin/main"
+(cd "$ohw" && git branch -q task side && git symbolic-ref refs/remotes/origin/HEAD refs/heads/task)
+st "$ohw"
+expect "an origin/HEAD that points at a local branch is not taken for main" 0 "verdicts: PASS - 2 commits on refs/remotes/origin/main"
+(cd "$ohw" && git remote set-head origin main && git branch -q -D task)
+xm=$(new_project) || abort_sandbox
+xw="$xm/w"
+(cd "$xw" && git remote remove origin)
+cm "$xw" 'No verdict\n'
+(cd "$xw" && git branch -q refs/remotes/origin/main HEAD~1 2>/dev/null)
+st "$xw"
+expect "a branch named refs/remotes/origin/main does not stand in for main" 1 "verdicts: LOOK - 1 commits on refs/heads/main"
+(cd "$xw" && git branch -q -D refs/remotes/origin/main 2>/dev/null && git tag refs/remotes/origin/main HEAD~1 2>/dev/null)
+st "$xw"
+expect "a tag named refs/remotes/origin/main does not stand in for main" 1 "verdicts: LOOK - 1 commits on refs/heads/main"
+printf '%s\n' "$(cd "$xw" && git rev-parse HEAD)" >"$work/shallow"
+st "$xw" GIT_SHALLOW_FILE="$work/shallow"
+expect "GIT_SHALLOW_FILE from the caller does not cut the history status reads" 1 "verdicts: LOOK - 1 commits on refs/heads/main"
+# shellcheck disable=SC2034 # a key shape, built from pieces
+tok="gh""p_abcdefghijklmnopqrstuvwxyz0123456789"
+(cd "$xw" && git reset -q --hard HEAD~1)
+cm "$xw" "deploy with $tok\n"
+st "$xw"
+if [ "$code" -eq 1 ] && ! printf '%s\n' "$out" | grep -F -q -- "$tok" && printf '%s\n' "$out" | grep -F -q 'ghp_...('; then
+  pass "a key in a commit subject is masked"
+else
+  fail "a key in a commit subject is masked" "$out"
+fi
+cwp=$(new_project) || abort_sandbox
+(cd "$cwp" && git clone -q remote.git copy 2>/dev/null)
+(cd "$cwp/w" && git config core.worktree "$cwp/copy")
+st "$cwp/w"
+expect "a core.worktree setting that points git elsewhere is a LOOK naming the folder" 1 \
+  "work: LOOK - git's working folder is $cwp/copy, not this folder: a core.worktree setting points git elsewhere"
 (cd "$oh" && git clone -q --depth 1 "file://$oh/remote.git" shallow 2>/dev/null)
 st "$oh/shallow"
-expect "a shallow clone says older commits were not read" 0 "; shallow history: older commits not read"
+expect "a shallow clone is SKIPPED: where the verdicts start may be older than what is here" 0 \
+  "verdicts: SKIPPED - 1 commits on refs/remotes/origin/main since " "but the history is shallow, so older commits were not read"
+mkdir -p "$oh/shallow/.claude"
+printf 'VERDICTS_FROM=%s\n' "$(cd "$ohw" && git rev-list --max-parents=0 HEAD)" >"$oh/shallow/.claude/method.conf"
+st "$oh/shallow"
+expect "a VERDICTS_FROM older than a shallow history is SKIPPED, not a LOOK" 1 \
+  "verdicts: SKIPPED - VERDICTS_FROM in .claude/method.conf is not in this shallow history of refs/remotes/origin/main"
+rm -rf "$oh/shallow/.claude"
 
 # 4. records
 r=$(new_project) || abort_sandbox
@@ -514,9 +586,23 @@ if [ "$took" -lt 25 ] && printf '%s\n' "$out" | grep -q '^ci: SKIPPED - gh did n
 else
   fail "a gh that hangs is stopped within the time limit: ${took}s" "$out"
 fi
-# shellcheck disable=SC2009 # pgrep is not on every system the tests run on
-left=$(ps -A -o args= 2>/dev/null | grep -c "^sleep $nap\$")
-if [ "$left" -eq 0 ]; then pass "what a stopped gh started is stopped too"; else fail "what a stopped gh started is stopped too: $left left"; fi
+if ps -A -o args= >/dev/null 2>&1; then
+  # shellcheck disable=SC2009 # pgrep is not on every system the tests run on
+  left=$(ps -A -o args= | grep -c "^sleep $nap\$")
+  if [ "$left" -eq 0 ]; then pass "what a stopped gh started is stopped too"; else fail "what a stopped gh started is stopped too: $left left"; fi
+else
+  skip "what a stopped gh started is stopped too: ps cannot list command lines here"
+fi
+mkdir -p "$gw/relbin"
+printf '#!/bin/sh\n: >"%s/relgh-ran"\n' "$work" >"$gw/relbin/gh"
+chmod +x "$gw/relbin/gh"
+st "$gw" PATH="relbin:$work/nogh"
+if [ ! -e "$work/relgh-ran" ] && printf '%s\n' "$out" | grep -q '^ci: SKIPPED - gh is not installed$'; then
+  pass "a gh in a relative PATH entry (inside the repository) is never run"
+else
+  fail "a gh in a relative PATH entry (inside the repository) is never run" "$out"
+fi
+rm -rf "$gw/relbin"
 
 # 8. other repositories
 o=$(new_project) || abort_sandbox
@@ -544,14 +630,18 @@ case "$out" in *"work: LOOK"*) fail "the other repository's bisect was reported 
 echo dirty >>"$o/site/a.txt"
 mkdir -p "$ow/evil/objects" "$ow/evil/refs/heads"
 printf 'ref: refs/heads/main\n' >"$ow/evil/HEAD"
-printf '[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tworktree = ..\n\tfsmonitor = %s\n' "$work/fsmonitor" >"$ow/evil/config"
+mkdir -p "$ow/evil/info"
+printf '[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tworktree = .\n\tfsmonitor = %s\n[filter "hide"]\n\tclean = %s\n' \
+  "$work/fsmonitor" "$work/filter" >"$ow/evil/config"
+printf '* filter=hide\n' >"$ow/evil/info/attributes"
 : >"$ow/evil/refs/heads/.keep"
 : >"$ow/evil/objects/.keep"
 printf 'REPOS=evil\n' >"$ow/.claude/method.conf"
 (cd "$ow" && git add -A && git commit -q -m "A repository layout" -m "Review-Verdict: approve")
 rm -f "$work/fsmonitor-ran"
 st "$ow"
-if [ "$code" -eq 1 ] && [ ! -e "$work/fsmonitor-ran" ] && printf '%s\n' "$out" | grep -q '^repo evil: LOOK - not the top folder of a git working tree$'; then
+if [ "$code" -eq 1 ] && [ ! -e "$work/fsmonitor-ran" ] && [ ! -e "$work/filter-ran" ] \
+  && printf '%s\n' "$out" | grep -q '^repo evil: LOOK - not the top folder of a git working tree$'; then
   pass "a committed folder laid out like a bare repository is never used as one"
 else
   fail "a committed folder laid out like a bare repository is never used as one" "$out"

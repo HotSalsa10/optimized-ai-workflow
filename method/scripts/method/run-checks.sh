@@ -33,8 +33,11 @@
 #                   not in a clone; LOCAL_ONLY names the ones a clone is
 #                   meant to lack
 #   project-checks  SKIPPED when checks/*.tsv lists no checks
-#   tree-unchanged  last: the checks left HEAD and the files on disk as
-#                   they found them
+#   tree-unchanged  last: the checks left HEAD (its commit and its branch),
+#                   the branches and tags, and the files on disk (content,
+#                   mode, and index flags that hide edits) as they found
+#                   them; git runs no filter program and takes no stat
+#                   shortcut for this (lib/git.pl)
 #
 # Screen: the log's path first; each FAIL with its last 10 output lines,
 # masked; up to 10 SKIPPED lines; the passed ids; then one line that starts
@@ -49,9 +52,11 @@
 # evidence.
 #
 # Exit codes: 0 every check that applies here ran, examined something and
-# passed; 1 something failed; 2 bad usage or a bad config file, and no check
-# ran; 3 nothing failed, but a check that applies here was SKIPPED, or no
-# project check runs here. A SKIPPED is never a pass.
+# passed; 1 something failed; 2 bad usage, a bad config file or a working
+# folder that git finds elsewhere (no check ran), or a run that could not go
+# on (git failed, say; the log ends with END and exit 2); 3 nothing failed,
+# but a check that applies here was SKIPPED, or no project check runs here.
+# A SKIPPED is never a pass.
 #
 # Rules it serves:
 # - M002: a check that examined nothing is SKIPPED, never a pass; a check

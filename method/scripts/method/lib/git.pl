@@ -3,18 +3,22 @@
 # helpers load it with require; every git call they make goes through it.
 #
 # Loading it clears the variables that would point git at another
-# repository, index or object store, or change what it shows: GIT_DIR,
-# GIT_WORK_TREE, GIT_COMMON_DIR, GIT_INDEX_FILE, GIT_OBJECT_DIRECTORY,
-# GIT_ALTERNATE_OBJECT_DIRECTORIES, GIT_NAMESPACE, GIT_DIFF_OPTS,
-# GIT_EXTERNAL_DIFF, GIT_REPLACE_REF_BASE and the GIT_*_PATHSPECS settings.
-# Replace refs and grafts are turned off. So git finds the repository from
-# the current folder, as a reader of the files there does.
+# repository, index, object store or history, or change what it shows:
+# GIT_DIR, GIT_WORK_TREE, GIT_COMMON_DIR, GIT_INDEX_FILE,
+# GIT_OBJECT_DIRECTORY, GIT_ALTERNATE_OBJECT_DIRECTORIES, GIT_SHALLOW_FILE,
+# GIT_IMPLICIT_WORK_TREE, GIT_PREFIX, GIT_INTERNAL_SUPER_PREFIX,
+# GIT_NAMESPACE, GIT_DIFF_OPTS, GIT_EXTERNAL_DIFF, GIT_REPLACE_REF_BASE and
+# the GIT_*_PATHSPECS settings. Replace refs and grafts are turned off. So
+# git finds the repository from the current folder, as a reader of the
+# files there does.
 #
 # Every call gets: --no-optional-locks (git status does not rewrite the
 # index), --literal-pathspecs (a path is never pathspec magic),
 # core.commitGraph=false (a commit-graph file is a local file that could
-# misreport history) and core.fsmonitor=false (a file-system monitor is a
-# local program that would run inside the caller and could hide changes).
+# misreport history), core.fsmonitor=false (a file-system monitor is a
+# local program that would run inside the caller and could hide changes)
+# and safe.bareRepository=explicit (a folder laid out like a repository,
+# committed inside another one, is never used as one; git 2.38 or later).
 # A caller adds its own -c options in front of the git command.
 #
 #   Git::run(ARGS)      (exit status, standard output); stdin and stderr on
@@ -23,28 +27,75 @@
 #   Git::ok(ARGS)       standard output, or dies "git <command> failed"
 #   Git::cat(TYPE, ID)  a stored object's content, checked against its id
 #   Git::object_id(TYPE, CONTENT, LIKE)  the id git gives CONTENT
+#   Git::top()          (TOP, PROBLEM): the top folder of the working tree
+#                       git finds from the current folder; PROBLEM is undef,
+#                       'none' (not inside a working tree) or 'elsewhere'
+#                       (git's working tree is not the first folder at or
+#                       above this one that holds a .git entry, where git
+#                       itself looks: a core.worktree setting points it at
+#                       another copy)
+#   Git::status_options(GIT...)  -c options for `git status` in the
+#                       repository GIT points at, so it runs no program and
+#                       trusts no stat shortcut: every filter driver set in
+#                       its settings is turned off (a clean filter is a local
+#                       program that could hide an edit, like a file-system
+#                       monitor), and core.trustctime and core.checkStat are
+#                       set to git's defaults
 package Git;
 use strict;
 use warnings;
+use Cwd ();
+use File::Basename ();
 use File::Spec;
 use File::Temp qw(tempdir);
 use IO::Handle ();
 use IPC::Open2 ();
 
 delete @ENV{qw(GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
-  GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE GIT_DIFF_OPTS GIT_EXTERNAL_DIFF GIT_REPLACE_REF_BASE
+  GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_SHALLOW_FILE GIT_IMPLICIT_WORK_TREE GIT_PREFIX GIT_INTERNAL_SUPER_PREFIX
+  GIT_NAMESPACE GIT_DIFF_OPTS GIT_EXTERNAL_DIFF GIT_REPLACE_REF_BASE
   GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS)};
 $ENV{GIT_NO_REPLACE_OBJECTS} = 1;
 $ENV{GIT_GRAFT_FILE} = File::Spec->catfile(tempdir(CLEANUP => 1), 'none');
 
 our @GIT = ('git', '--no-optional-locks', '--literal-pathspecs', '-c', 'core.commitGraph=false',
-  '-c', 'core.fsmonitor=false');
+  '-c', 'core.fsmonitor=false', '-c', 'safe.bareRepository=explicit');
 
-# the git command in ARGS, after any -c NAME=VALUE pairs
+# the git command in ARGS, after any -c NAME=VALUE and -C FOLDER pairs
 sub command_name {
   my @a = @_;
-  splice @a, 0, 2 while @a >= 2 && $a[0] eq '-c';
+  splice @a, 0, 2 while @a >= 2 && ($a[0] eq '-c' || $a[0] eq '-C');
   return defined $a[0] ? $a[0] : 'git';
+}
+
+sub top {
+  my ($st, $top) = run('rev-parse', '--show-toplevel');
+  return (undef, 'none') if $st || $top !~ /\A(.+)\n\z/;
+  $top = $1;
+  my $home = Cwd::getcwd();
+  return (undef, 'none') unless defined $home;
+  until (-e File::Spec->catfile($home, '.git')) {
+    my $up = File::Basename::dirname($home);
+    return (undef, 'none') if $up eq $home;
+    $home = $up;
+  }
+  my @home_id = stat $home;
+  my @top_id = stat $top;
+  return ($top, 'elsewhere') unless @home_id && @top_id && $home_id[0] == $top_id[0] && $home_id[1] == $top_id[1];
+  return ($top, undef);
+}
+
+sub status_options {
+  my @g = @_;
+  my @o = ('-c', 'core.trustctime=true', '-c', 'core.checkStat=default');
+  my ($st, $names) = run(@g, 'config', '--name-only', '-z', '--get-regexp', '^filter\.');
+  return @o if $st;
+  for my $name (split /\0/, $names) {
+    my ($driver) = $name =~ /\Afilter\.(.+)\.[^.]+\z/s or next;
+    die "a filter driver has a name git cannot be told to skip\n" if $driver =~ /[=\n]/;
+    push @o, map { ('-c', "filter.$driver.$_") } 'clean=', 'smudge=', 'process=', 'required=false';
+  }
+  return @o;
 }
 
 sub run {

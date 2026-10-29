@@ -8,6 +8,7 @@ use strict;
 use warnings;
 use File::Basename qw(dirname basename);
 use File::Spec;
+use IPC::Open2 ();
 use POSIX ();
 use Time::HiRes ();
 
@@ -102,11 +103,13 @@ sub run_limited {
   return;
 }
 
-# on_path NAME: the full path of the program NAME on PATH, or undef
+# on_path NAME: the full path of the program NAME on PATH, or undef. Only
+# absolute PATH entries count, so a program in the repository (./gh) never
+# runs.
 sub on_path {
   my ($name) = @_;
   for my $d (split /:/, defined $ENV{PATH} ? $ENV{PATH} : '') {
-    next if $d eq '';
+    next unless File::Spec->file_name_is_absolute($d);
     for my $f ("$d/$name", "$d/$name.exe") { return $f if -f $f && -x _ }
   }
   return undef;
@@ -153,8 +156,8 @@ sub work_lines {
     }
     next if $wt->{bare};
     my @wg = (@g, '-C', $wt->{worktree});
-    my $st = Git::ok(@wg, 'status', '--porcelain=v1', '-z', '--no-renames', '--untracked-files=normal',
-      '--ignore-submodules=none');
+    my $st = Git::ok(@wg, Git::status_options(@wg), 'status', '--porcelain=v1', '-z', '--no-renames',
+      '--untracked-files=normal', '--ignore-submodules=none');
     my $n = () = $st =~ /\0/g;
     push @parts, "$where$n uncommitted entries (a new folder counts once)" if $n;
     my $marked = 0;
@@ -206,16 +209,49 @@ sub work_lines {
 
 # --- verdicts: every commit on main's first-parent history since the start ---
 
-sub ref_ok { my ($st) = Git::run('rev-parse', '-q', '--verify', "$_[0]^{commit}"); return !$st }
+# exact REF: the commit a ref of exactly the full name REF points at, or
+# undef. git's usual lookup would also take refs/tags/REF or refs/heads/REF
+# when REF itself does not exist, so a branch or tag named
+# refs/remotes/origin/main could stand in for main.
+sub exact {
+  my ($ref) = @_;
+  my ($st, $id) = Git::run('show-ref', '--verify', '--hash', $ref);
+  return undef if $st || $id !~ /\A([0-9a-f]+)\n\z/;
+  my ($cst, $c) = Git::run('rev-parse', '-q', '--verify', "$1^{commit}");
+  return $cst || $c !~ /\A([0-9a-f]+)\n\z/ ? undef : $1;
+}
 
+# main_ref: (the full name of main, its commit), or () when there is none
 sub main_ref {
   my ($st, $t) = Git::run('symbolic-ref', '-q', 'refs/remotes/origin/HEAD');
   $t =~ s/\n\z//;
-  return $t if !$st && $t =~ m{\Arefs/remotes/origin/\S+\z} && ref_ok($t);
-  for my $ref (qw(refs/remotes/origin/main refs/heads/main refs/remotes/origin/master refs/heads/master)) {
-    return $ref if ref_ok($ref);
+  if (!$st && $t =~ m{\Arefs/remotes/origin/\S+\z}) {
+    my $id = exact($t);
+    return ($t, $id) if defined $id;
   }
-  return undef;
+  for my $ref (qw(refs/remotes/origin/main refs/heads/main refs/remotes/origin/master refs/heads/master)) {
+    my $id = exact($ref);
+    return ($ref, $id) if defined $id;
+  }
+  return;
+}
+
+# masked TEXT: TEXT with keys, credentials and personal data masked, by
+# secrets.pl --mask (control characters come back escaped)
+sub masked {
+  my ($text) = @_;
+  my ($out, $in);
+  my $pid = eval { IPC::Open2::open2($out, $in, $^X, File::Spec->catfile($lib, 'secrets.pl'), '--mask') };
+  die "cannot run the masking step\n" unless $pid;
+  binmode $in;
+  binmode $out;
+  print {$in} "$text\n";
+  close $in;
+  my $line = <$out>;
+  close $out;
+  waitpid $pid, 0;
+  die "the masking step failed\n" if $? || !defined $line || $line !~ /\A  (.*)\n\z/s;
+  return $1;
 }
 
 # message ID: a commit's message, read raw and checked against its id
@@ -242,18 +278,21 @@ sub subject {
 sub verdicts_lines {
   my ($conf) = @_;
   my $note = 'task-branch commits are not read; done-check checks the change at merge';
-  my $ref = main_ref();
+  my ($ref, $tip) = main_ref();
   return ['verdicts', 'SKIPPED', 'no main branch (looked for origin/HEAD, refs/remotes/origin/main, refs/heads/main,'
     . " refs/remotes/origin/master, refs/heads/master); $note"] unless defined $ref;
   my ($key) = Verdicts::words('trailer-key', Verdicts::rows());
-  my @ids = split /\n/, Git::ok('rev-list', '--first-parent', $ref);
+  my @ids = split /\n/, Git::ok('rev-list', '--first-parent', $tip);
   my ($sh) = Git::ok('rev-parse', '--is-shallow-repository') =~ /\A(\w+)/;
   my $shallow = defined $sh && $sh eq 'true' ? '; shallow history: older commits not read' : '';
   my (@range, $since);
   if (defined $conf->{VERDICTS_FROM}) {
     my ($at) = grep { $ids[$_] eq $conf->{VERDICTS_FROM} } 0 .. $#ids;
-    return ['verdicts', 'LOOK', "VERDICTS_FROM in .claude/method.conf is not on ${ref}'s first-parent history$shallow"]
+    return ['verdicts', 'SKIPPED', "VERDICTS_FROM in .claude/method.conf is not in this shallow history of $ref;"
+      . ' fetch more history (git fetch --unshallow)'] if !defined $at && $shallow;
+    return ['verdicts', 'LOOK', "VERDICTS_FROM in .claude/method.conf is not on ${ref}'s first-parent history"]
       unless defined $at;
+    $shallow = '';    # the whole range after VERDICTS_FROM is here
     @range = @ids[0 .. $at - 1];
     $since = 'after ' . short($conf->{VERDICTS_FROM});
   } else {
@@ -270,12 +309,15 @@ sub verdicts_lines {
     my $old = $bad[-1];
     my @show = map { short($_) } @bad[0 .. ($#bad < 4 ? $#bad : 4)];
     return ['verdicts', 'LOOK', scalar(@bad) . " commits on $ref $since lack a valid $key line: @show"
-      . (@bad > 5 ? ' ...' : '') . '; the oldest, "' . subject(message($old)) . '": '
+      . (@bad > 5 ? ' ...' : '') . '; the oldest, "' . masked(subject(message($old))) . '": '
       . Verdicts::trailer_problem(message($old))
       . '; accept them by moving VERDICTS_FROM in .claude/method.conf through a reviewed change; never rewrite main'
       . $shallow];
   }
-  return ['verdicts', 'PASS', scalar(@range) . " commits on $ref $since carry a $key line$shallow"];
+  # in a shallow history the first verdict may be older than what is here
+  return ['verdicts', 'SKIPPED', scalar(@range) . " commits on $ref $since carry a $key line, but the history is"
+    . ' shallow, so older commits were not read; fetch more history or set VERDICTS_FROM'] if $shallow;
+  return ['verdicts', 'PASS', scalar(@range) . " commits on $ref $since carry a $key line"];
 }
 
 # --- records ---
@@ -399,11 +441,8 @@ sub ci_lines {
   my ($hst, $head) = Git::run('rev-parse', '-q', '--verify', 'HEAD^{commit}');
   return ['ci', 'SKIPPED', 'no commit yet'] if $hst;
   push @want, ['', (split /\n/, $head)[0]];
-  my $ref = main_ref();
-  if (defined $ref) {
-    my $tip = (split /\n/, Git::ok('rev-parse', "$ref^{commit}"))[0];
-    push @want, ['main: ', $tip] if $tip ne $want[0][1];
-  }
+  my ($ref, $tip) = main_ref();
+  push @want, ['main: ', $tip] if defined $tip && $tip ne $want[0][1];
   my (@details, %words);
   for my $w (@want) {
     my ($label, $sha) = @$w;
@@ -430,8 +469,9 @@ sub repo_lines {
       if ($ENV{CLAUDE_CODE_REMOTE} || '') eq 'true';
     return [$area, 'LOOK', 'not found; clone it there or remove it from REPOS in .claude/method.conf'];
   }
-  # a folder holding a bare repository's files is never read as one
-  my @g = ('-c', 'safe.bareRepository=explicit', '-C', $path);
+  # (lib/git.pl's safe.bareRepository=explicit: a folder holding a bare
+  # repository's files is never read as one)
+  my @g = ('-C', $path);
   my ($st, $out) = Git::run(@g, 'rev-parse', '--is-inside-work-tree', '--show-prefix');
   return [$area, 'LOOK', 'not the top folder of a git working tree'] unless !$st && $out eq "true\n\n";
   return work_lines($area, @g);
@@ -445,12 +485,11 @@ sub main {
     print "status: usage: status.sh (it takes no arguments)\n";
     exit 2;
   }
-  my ($st, $top) = Git::run('rev-parse', '--show-toplevel');
-  if ($st || $top !~ /\S/) {
+  my ($top, $elsewhere) = Git::top();
+  if (!defined $top) {
     print "status: not inside a git working tree\n";
     exit 2;
   }
-  $top =~ s/\n\z//;
   chdir $top or do { print "status: cannot enter the top folder of the repository\n"; exit 2 };
   # the full name, shortened here: git's own short form turns into
   # heads/main when a tag is also called main
@@ -461,6 +500,10 @@ sub main {
   print Esc::line('status: ' . basename($top) . ' on ' . ($bst ? 'a detached HEAD' : $branch) . ' at '
     . ($hst ? 'no commit yet' : short($head))), "\n";
 
+  # git reads a working tree elsewhere when a core.worktree setting says so;
+  # everything below is then about that folder, not this one
+  say_area('work', 'LOOK', "git's working folder is $top, not this folder: a core.worktree setting points git"
+    . ' elsewhere, so what follows is about that folder') if $elsewhere;
   my ($conf, $problems) = Conf::read('.');
   if (@$problems) {
     say_area('config', 'LOOK', $_) for @$problems[0 .. ($#$problems < 2 ? $#$problems : 2)];

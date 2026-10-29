@@ -532,13 +532,30 @@ fi
 
 # 11. more edges, from the planted-break run
 e=$(new_repo) || abort_sandbox
-mkdir -p "$e/checks/dir.tsv"
-printf 'x\n' >"$e/checks/dir.tsv/x"
 printf 'not a checks line\n' >"$e/checks/.hidden.tsv"
 tsv "$e" "$(ck unit 'echo "1 passed"')"
 run "$e"
-expect "a folder named like a checks file and a hidden checks file are not read" 0 "run-checks: PASS - 4 passed"
-(cd "$e" && git rm -rq checks/dir.tsv checks/.hidden.tsv && git commit -qm clean)
+expect "a hidden checks file is not read" 0 "run-checks: PASS - 4 passed"
+(cd "$e" && git rm -q checks/.hidden.tsv && git commit -qm clean)
+mkdir -p "$e/checks/dir.tsv"
+printf 'x\n' >"$e/checks/dir.tsv/x"
+run "$e"
+expect "a folder named like a checks file stops the run" 2 "run-checks: checks/dir.tsv: not a regular file"
+rm -rf "$e/checks/dir.tsv"
+printf '%s\n' "$(ck linked 'echo "1 passed"')" | perl -pe 's/<T>/\t/g' >"$work/outside.tsv"
+ln -s "$work/outside.tsv" "$e/checks/linked.tsv"
+run "$e"
+expect "a checks file that is a link stops the run (a clone may not have what it points at)" 2 "run-checks: checks/linked.tsv: not a regular file"
+rm -f "$e/checks/linked.tsv"
+mkdir -p "$e/checks"
+printf 'x\n' >"$e/checks/##[error]x.tsv"
+run "$e"
+if [ "$code" -eq 2 ] && printf '%s\n' "$out" | grep -F -q 'checks/#\x23[error]x.tsv line 1' && ! printf '%s\n' "$out" | grep -F -q '##['; then
+  pass "a CI runner command in a checks file name is broken up"
+else
+  fail "a CI runner command in a checks file name is broken up" "$out"
+fi
+rm -f "$e/checks/##[error]x.tsv"
 tsv "$e" "$(ck wideutf "perl -e 'print \"x\", \"\\xC3\\xA9\" x 1000, \"\\n\"; exit 1'")" \
   "$(ck widectl "perl -e 'print \"\\x01\" x 200, \"\\n\"; exit 1'")" "$(ck bidi "printf '\\342\\200\\256evil\\n'; exit 1")"
 run "$e"
@@ -642,6 +659,89 @@ expect "a tracked file deleted from disk is not a scan error" 0 "passed: secrets
 n1="+1415""555013"
 got=$(printf '%s and %s2\n' "$n1" "$n1" | perl "$root/method/scripts/method/lib/secrets.pl" --mask 2>&1)
 if [ "$got" = "  ***(11 chars) and ***(12 chars)" ]; then pass "the mask covers the longer of two numbers that start alike"; else fail "the mask covers the longer of two numbers that start alike" "$got"; fi
+# 12. from review round 1
+tsv "$e" "warn<T>any<T>-<T>\\y([0-9]+) passed<T>echo 'y1 passed'"
+run "$e"
+case "$out" in
+  *"Unrecognized escape"*) fail "perl's warnings about a count pattern stay off the screen" "$out" ;;
+  *) pass "perl's warnings about a count pattern stay off the screen" ;;
+esac
+# shellcheck disable=SC2034 # a key shape, built from pieces
+tok="gh""p_abcdefghijklmnopqrstuvwxyz0123456789"
+ak="AKI""AABCDEFGHIJKLMNOP"
+ph="+1415""5550132"
+ib="DE89""370400440532013000"
+tsv "$e" "$(ck colour "printf '\\033[31m%s\\033[0m\\n\\033[2K%s\\n\\033[1m%s\\033[0m\\n\\033[32m%s\\033[0m\\n' $tok $ak $ph $ib; exit 1")"
+run "$e"
+leaked=""
+for v in "$tok" "$ak" "$ph" "$ib"; do
+  if printf '%s\n' "$out" | grep -F -q -- "$v" || grep -F -q -- "$v" "$logf"; then leaked="$leaked [$v]"; fi
+done
+if [ "$code" -eq 1 ] && [ -z "$leaked" ]; then pass "a key, a phone number or an IBAN right after a colour code is masked on screen and in the log"; else fail "values after colour codes are masked: shown in full:$leaked" "$out"; fi
+printf '#!/bin/sh\n: >"%s/filter-ran"\nprintf "hello\\n"\n' "$work" >"$work/filter"
+chmod +x "$work/filter"
+fl2=$(new_repo) || abort_sandbox
+tsv "$fl2" "$(ck unit 'echo "1 passed"')"
+(cd "$fl2" && git config filter.hide.clean "$work/filter" && printf 'src/a.txt filter=hide\n' >.git/info/attributes)
+printf 'HELLO\n' >"$fl2/src/a.txt"
+run "$fl2"
+if [ "$code" -eq 0 ] && [ ! -e "$work/filter-ran" ] && printf '%s\n' "$out" | grep -q 'on uncommitted changes$'; then
+  pass "a filter program set in the repository never runs, and the edit it would hide is seen"
+else
+  fail "a filter program set in the repository never runs, and the edit it would hide is seen" "$out
+$(ls "$work")"
+fi
+(cd "$fl2" && git config --unset filter.hide.clean && rm -f .git/info/attributes && git checkout -q src/a.txt)
+(cd "$fl2" && touch -t 202001010000 src/a.txt && git update-index -q --refresh && cp -p src/a.txt "$work/stamp")
+sleep 1
+(cd "$fl2" && git config core.trustctime false && git config core.checkStat minimal)
+printf 'HELLO\n' >"$fl2/src/a.txt"
+touch -r "$work/stamp" "$fl2/src/a.txt"
+run "$fl2"
+expect "an edit hidden from git's stat check by core.trustctime and core.checkStat is counted as uncommitted" 0 "on uncommitted changes"
+(cd "$fl2" && git config --unset core.trustctime && git config --unset core.checkStat && git checkout -q src/a.txt)
+echo hidden >>"$fl2/src/a.txt"
+(cd "$fl2" && git update-index --assume-unchanged src/a.txt)
+run "$fl2"
+expect "an edit hidden by assume-unchanged is counted as uncommitted" 0 "on uncommitted changes"
+in_log "the log says the tree had uncommitted changes, not clean" "tree at start uncommitted changes"
+(cd "$fl2" && git update-index --no-assume-unchanged src/a.txt && git checkout -q src/a.txt)
+tsv "$fl2" "$(ck rewrite 'echo changed >src/a.txt; echo "1 passed"')"
+(cd "$fl2" && git update-index --skip-worktree src/a.txt)
+run "$fl2"
+expect "a check that rewrites a skip-worktree file fails tree-unchanged" 1 "changed during the run: src/a.txt"
+(cd "$fl2" && git update-index --no-skip-worktree src/a.txt && git checkout -q src/a.txt)
+tsv "$fl2" "$(ck switch 'git checkout -q -b other && echo "1 passed"')"
+run "$fl2"
+expect "a check that switches branch fails tree-unchanged" 1 "tree-unchanged: FAIL - HEAD is on another branch than before the run"
+(cd "$fl2" && git checkout -q main && git branch -q -D other)
+tsv "$fl2" "$(ck detach 'git checkout -q --detach && echo "1 passed"')"
+run "$fl2"
+expect "a check that detaches HEAD fails tree-unchanged" 1 "tree-unchanged: FAIL - HEAD is on another branch than before the run"
+(cd "$fl2" && git checkout -q main)
+tsv "$fl2" "$(ck refs 'git branch -f keep HEAD~1 && git tag v1 && echo "1 passed"')"
+(cd "$fl2" && git branch -q keep)
+run "$fl2"
+expect "a check that moves a branch or adds a tag fails tree-unchanged" 1 "2 branches or tags moved during the run" \
+  "moved during the run: refs/heads/keep" "moved during the run: refs/tags/v1"
+(cd "$fl2" && git tag -d v1 >/dev/null && git branch -q -f keep HEAD)
+tsv "$fl2" "$(ck mode 'chmod +x src/a.txt && echo "1 passed"')"
+echo dirty >>"$fl2/src/a.txt"
+run "$fl2"
+expect "a check that changes only the mode of an already changed file fails tree-unchanged" 1 "changed during the run: src/a.txt"
+(cd "$fl2" && chmod -x src/a.txt && git checkout -q src/a.txt)
+mkdir -p "$work/copy"
+(cd "$fl2" && git config core.worktree "$work/copy")
+run "$fl2"
+expect "a core.worktree setting that points git at another folder stops the run" 2 \
+  "run-checks: FAIL - git's working folder is not this folder: a core.worktree setting points git elsewhere"
+(cd "$fl2" && git config --unset core.worktree)
+em=$(new_sandbox_dir) || abort_sandbox
+repos="$repos $em"
+(cd "$em" && git init -q)
+run "$em"
+expect "in a repository that tracks no file, tree-unchanged is SKIPPED" 3 "tree-unchanged: SKIPPED - the repository tracks no file"
+
 got=$(cd "$e" && perl "$root/method/scripts/method/lib/secrets.pl" --repo allow.txt extra 2>&1)
 code=$?
 if [ "$code" -ne 0 ] && printf '%s\n' "$got" | grep -q 'secrets: usage:'; then pass "the scan's --repo mode takes no file names"; else fail "the scan's --repo mode takes no file names: exit $code" "$got"; fi
