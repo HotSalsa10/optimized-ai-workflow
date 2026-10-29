@@ -10,11 +10,13 @@
 # review.
 use strict;
 use warnings;
+use Cwd ();
 use Digest::SHA ();
-use Encode ();
 use File::Basename qw(dirname);
 use File::Spec;
 use File::Temp qw(tempdir);
+use IO::Handle ();
+use IPC::Open2 ();
 
 # Raw bytes in and out, whatever PERL_UNICODE or PERL5OPT asked for.
 binmode STDIN, ':raw';
@@ -70,21 +72,33 @@ $MAGIC{$_} = qr/\A\x7FELF/ for qw(so o);
 $MAGIC{$_} = qr/\A(?:\xCF\xFA\xED\xFE|\xCE\xFA\xED\xFE|\xCA\xFE\xBA\xBE)/ for qw(dylib);
 
 # esc_line: the one choke point every line inside a section passes through
-# (M113). Bytes that are not UTF-8 are shown as \xNN, control characters
-# other than TAB as \xNN, and every other control, format, private-use,
-# unassigned, invisible (default ignorable), line or paragraph separator
-# character as \u{XXXX}, so no text is hidden, reordered or split. Then ===
-# that opens the line, also after blanks, marks or a diff sign, gets a
-# backslash in front. The section markers also carry a token no content can
-# know (see the end of this file).
+# (M113). Each byte that is not part of valid UTF-8 is shown as \xNN,
+# control characters other than TAB as \xNN, and every other control,
+# format, private-use, unassigned, invisible (default ignorable), line or
+# paragraph separator character as \u{XXXX}, so no text is hidden,
+# reordered or split. Then === that opens the line, also after blanks, marks
+# or a diff sign, gets a backslash in front. The section markers also carry
+# a token no content can know (see the end of this file).
 sub esc_line {
   my ($bytes) = @_;
-  my $copy = $bytes;
-  my $s = Encode::decode('UTF-8', $copy, sub { sprintf '\\x%02X', $_[0] });
+  my $s = '';
+  # runs of UTF-8 as RFC 3629 defines it (no overlong forms, no surrogates,
+  # nothing above U+10FFFF) are decoded; any other byte is shown on its own
+  while ($bytes =~ /\G(?:((?:[\x00-\x7F]|[\xC2-\xDF][\x80-\xBF]|\xE0[\xA0-\xBF][\x80-\xBF]|[\xE1-\xEC\xEE\xEF][\x80-\xBF]{2}
+      |\xED[\x80-\x9F][\x80-\xBF]|\xF0[\x90-\xBF][\x80-\xBF]{2}|[\xF1-\xF3][\x80-\xBF]{3}|\xF4[\x80-\x8F][\x80-\xBF]{2})+)|(.))/gsx) {
+    if (defined $1) {
+      my $run = $1;
+      utf8::decode($run);
+      $s .= $run;
+    } else {
+      $s .= sprintf '\\x%02X', ord $2;
+    }
+  }
   $s =~ s/([\x00-\x08\x0A-\x1F\x7F])/sprintf('\\x%02X', ord $1)/ge;
   $s =~ s/((?!\t)[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Default_Ignorable_Code_Point}\p{Zl}\p{Zp}])/sprintf('\\u{%04X}', ord $1)/ge;
   $s =~ s/\A([+\- \t\p{Zs}\p{Mn}\p{Mc}\p{Me}\x{2800}]*)(\\*===)/$1\\$2/;
-  return Encode::encode('UTF-8', $s);
+  utf8::encode($s);
+  return $s;
 }
 
 sub fail {
@@ -127,12 +141,16 @@ my $checks_text = defined $opt{checks} ? read_file($opt{checks}, 'check output')
 # --- git, with settings that could change what it shows switched off ---
 delete @ENV{qw(GIT_DIFF_OPTS GIT_EXTERNAL_DIFF GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS
   GIT_ICASE_PATHSPECS GIT_REPLACE_REF_BASE)};
+# git finds the repository from the current folder, as the reviewer does
+delete @ENV{qw(GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
+  GIT_ALTERNATE_OBJECT_DIRECTORIES)};
 $ENV{GIT_NO_REPLACE_OBJECTS} = 1;    # local replace refs would change the content shown
 $ENV{GIT_GRAFT_FILE} = File::Spec->catfile(tempdir(CLEANUP => 1), 'none');    # and so would grafts
-# a commit-graph file is a local file that could also misreport history, and
+# a commit-graph file is a local file that could also misreport history; a
+# file-system monitor is a local program that would run inside the builder;
 # paths are never pathspec magic
 my @GIT = ('git', '--no-optional-locks', '--literal-pathspecs', '-c', 'core.commitGraph=false',
-  '-c', 'diff.suppressBlankEmpty=false');
+  '-c', 'core.fsmonitor=false', '-c', 'diff.suppressBlankEmpty=false');
 
 # run_git ARGS: (exit status, standard output). git's own messages are
 # dropped, because they can quote file names raw.
@@ -158,23 +176,6 @@ sub git_ok {
   return $out;
 }
 
-# chunks PATHS: the paths in groups small enough for any command line,
-# Windows included.
-sub chunks {
-  my (@out, @cur);
-  my $len = 0;
-  for my $p (@_) {
-    if (@cur && ($len + length($p) > 8000 || @cur >= 100)) {
-      push @out, [@cur];
-      @cur = ();
-      $len = 0;
-    }
-    push @cur, $p;
-    $len += length($p) + 1;
-  }
-  push @out, [@cur] if @cur;
-  return @out;
-}
 
 sub commit_id {
   my ($rev) = @_;
@@ -203,18 +204,38 @@ sub object_id {
 }
 
 # stored TYPE ID: a stored object's content, checked against its id. git
-# does not check a stored file or a subtree when it reads one, so an object
-# changed by hand could otherwise pass for the committed one.
-my %stored_cache;
+# does not check a stored file, folder or parent commit when it reads one,
+# so an object changed by hand could otherwise pass for the committed one.
+# Objects are read through one `git cat-file --batch`, so reading many of
+# them costs one git process.
+my (%stored_cache, $batch_in, $batch_out);
 sub stored {
   my ($type, $id) = @_;
-  if (!exists $stored_cache{$id}) {
-    my $c = git_ok('cat-file', $type, $id);
-    fail(2, "a stored $type does not match its id ($id); the repository's object store is damaged or was changed by hand")
-      unless object_id($type, $c, $id) eq $id;
-    $stored_cache{$id} = $c;
+  return $stored_cache{$id} if exists $stored_cache{$id};
+  if (!$batch_in) {
+    open my $saved, '>&', \*STDERR or fail(2, 'cannot run git');
+    open STDERR, '>', File::Spec->devnull;    # git's messages can quote names raw
+    my $pid = eval { IPC::Open2::open2($batch_out, $batch_in, @GIT, 'cat-file', '--batch') };
+    open STDERR, '>&', $saved;
+    fail(2, 'cannot run git cat-file') unless $pid;
+    binmode $batch_out;
+    binmode $batch_in;
+    $batch_in->autoflush(1);
   }
-  return $stored_cache{$id};
+  print {$batch_in} "$id\n";
+  my $head = <$batch_out>;
+  # the id check below also covers the type and the right object: both are
+  # part of what the id is made from
+  fail(2, "cannot read the stored $type $id") unless defined $head && $head =~ /\A[0-9a-f]+ [a-z]+ ([0-9]+)\n\z/;
+  my ($size, $c) = ($1, '');
+  while (length $c < $size) {
+    read($batch_out, $c, $size - length $c, length $c) or fail(2, "cannot read the stored $type $id");
+  }
+  read($batch_out, my $nl, 1);
+  fail(2, "cannot read the stored $type $id") unless defined $nl && $nl eq "\n";
+  fail(2, "a stored $type does not match its id ($id); the repository's object store is damaged or was changed by hand")
+    unless object_id($type, $c, $id) eq $id;
+  return $stored_cache{$id} = $c;
 }
 
 sub blob {
@@ -223,18 +244,19 @@ sub blob {
 }
 
 # tree_entries ID: the checked tree's entries, name => [mode, id].
+my %entries_cache;
 sub tree_entries {
   my ($id) = @_;
+  return $entries_cache{$id} if $entries_cache{$id};
   my $c = stored('tree', $id);
   my $len = length($id) / 2;
   my %e;
-  while (length $c) {
-    $c =~ s/\A(\d+) ([^\0]*)\0//s or fail(2, "cannot read the stored tree $id");
-    my ($mode, $name) = ($1, $2);
-    fail(2, "cannot read the stored tree $id") if length($c) < $len;
-    $e{$name} = [$mode, unpack('H*', substr($c, 0, $len, ''))];
+  pos($c) = 0;
+  while (pos($c) < length $c) {
+    $c =~ /\G([0-9]+) ([^\0]*)\0(.{$len})/gcs or fail(2, "cannot read the stored tree $id");
+    $e{$2} = [$1, unpack('H*', $3)];
   }
-  return \%e;
+  return $entries_cache{$id} = \%e;
 }
 
 sub root_tree {
@@ -303,7 +325,22 @@ sub check_trees {
 
 my ($st, $top) = run_git('rev-parse', '--show-toplevel');
 fail(2, 'not inside a git working tree') if $st || $top !~ /\A(.+)\n\z/;
-chdir $1 or fail(2, 'cannot change to the repository root');
+$top = $1;
+# git's working copy must be the folder the reviewer reads: the first
+# folder at or above this one that holds a .git entry, where git itself
+# looks. A core.worktree setting could point git at a clean copy elsewhere.
+my $home = Cwd::getcwd();
+fail(2, 'cannot read the current folder') unless defined $home;
+until (-e File::Spec->catfile($home, '.git')) {
+  my $up = dirname($home);
+  fail(2, 'not inside a git working tree') if $up eq $home;
+  $home = $up;
+}
+my @home_id = stat $home;
+my @top_id = stat $top;
+fail(1, "git's working copy is not the folder the packet is built from: a core.worktree setting points git elsewhere; build the packet in the working copy itself")
+  unless @home_id && @top_id && $home_id[0] == $top_id[0] && $home_id[1] == $top_id[1];
+chdir $top or fail(2, 'cannot change to the repository root');
 
 my $head = commit_id('HEAD') or fail(2, 'HEAD is not a commit');
 my $base = commit_id($opt{base}) or fail(2, "the base '$opt{base}' is not a commit here");
@@ -315,6 +352,19 @@ fail(2, 'git merge-base failed') if $st || $mbs !~ /\A(?:[0-9a-f]+\n)+\z/;
 my @mbs = split /\n/, $mbs;
 my $mb = $mbs[0];
 
+# git finds the merge base by following parent links without checking the
+# commits that hold them, so a commit changed by hand could move it and hide
+# part of the change. Moving it would take a changed commit after the merge
+# base, on HEAD's side or on the base's, so each of those is checked here.
+my %after_mb;
+stored('commit', $mb);
+for my $tip ($head, $base) {
+  for my $c (split /\n/, git_ok('rev-list', $tip, "^$mb")) {
+    stored('commit', $c);
+    $after_mb{$c} = 1 if $tip eq $head;
+  }
+}
+
 # M085: a later round shows the changes since the last reviewed version, or,
 # in doubt, the whole change.
 my ($from, $scope) = ($mb, 'the whole change, from the merge base to HEAD');
@@ -324,18 +374,19 @@ if (defined $opt{since}) {
     $scope = "the whole change: in doubt, because the last reviewed version '$opt{since}' is not a commit here";
   } elsif ($since eq $mb) {
     $scope = 'the whole change, from the merge base to HEAD; the last reviewed version is the merge base';
-  } elsif (is_ancestor($since, $head) && is_ancestor($mb, $since)) {
+  } elsif ($after_mb{$since} && is_ancestor($mb, $since)) {
     ($from, $scope) = ($since, "the changes since the last reviewed version $since; FILES also lists the whole change");
   } else {
     $scope = "the whole change: in doubt, because the last reviewed version $since is not between the merge base and HEAD";
   }
 }
 
-# changed FROM TO: the changed files, each {st, m1, m2, o1, o2, path, old}.
-# Submodules are listed whatever .gitmodules or the settings say.
+# changed FROM TO: the changed files, each {st, m1, m2, o1, o2, path, old},
+# sorted by name. Submodules are listed whatever .gitmodules or the settings
+# say, and the order is the same whatever a diff.orderFile setting says.
 sub changed {
-  my ($a, $b) = @_;
-  my $raw = git_ok('diff', '--raw', '-z', '--no-abbrev', '-M', '--ignore-submodules=none', $a, $b);
+  my ($from_rev, $to_rev) = @_;
+  my $raw = git_ok('diff', '--raw', '-z', '--no-abbrev', '-M', '--ignore-submodules=none', $from_rev, $to_rev);
   my @f = split /\0/, $raw, -1;
   pop @f if @f && $f[-1] eq '';
   my @files;
@@ -349,7 +400,7 @@ sub changed {
     fail(2, 'cannot read the list of changed files from git') unless defined $p;
     push @files, { st => $s, m1 => $m1, m2 => $m2, o1 => $o1, o2 => $o2, path => $p, old => $old };
   }
-  return @files;
+  return sort { $a->{path} cmp $b->{path} } @files;
 }
 
 check_trees($mb, $head);
@@ -369,30 +420,19 @@ my $dirty = git_ok('status', '--porcelain=v1', '-z', '--untracked-files=no', '--
 fail(1, 'tracked files have uncommitted or staged changes; commit first, because the reviewer reads the changed files from disk')
   if length $dirty;
 
-sub filter_attr {
-  my %f;
-  for my $c (chunks(@_)) {
-    my @t = split /\0/, git_ok('check-attr', '-z', 'filter', '--', @$c), -1;
-    while (@t >= 3) {
-      my ($p, undef, $v) = splice @t, 0, 3;
-      $f{$p} = $v;
-    }
-  }
-  return %f;
-}
 
-# check_disk: every file of HEAD holds its committed content on disk: the
-# same bytes, or the same bytes once CRLF line ends are turned into LF
-# (git's line-ending conversion), or, for Git LFS, a pointer that git's LFS
-# filter makes of the disk copy. Any other difference is refused, also one
-# that git status misses (a flag such as skip-worktree, a file-system
-# monitor, a stat cache told to ignore change times) or that a filter, an
-# ident attribute or an encoding setting would explain away. A file missing
-# from disk is allowed only outside the change (a sparse checkout).
+# check_disk: every file of HEAD holds its committed content on disk, as a
+# regular file: the same bytes, or the same bytes once CRLF line ends are
+# turned into LF (git's line-ending conversion), or, for Git LFS, content
+# whose SHA-256 is the one the stored pointer names. Any other
+# difference is refused, also one that git status misses (a flag such as
+# skip-worktree, a file-system monitor, a stat cache told to ignore change
+# times) or that a filter, an ident attribute or an encoding setting would
+# explain away. A file missing from disk is allowed only outside the change
+# (a sparse checkout).
 my %lfs;
 my %in_change = map { ($_->{path} => 1) } @whole;
 my %head_files = %{ all_files($head) };
-my (@lfs_maybe, %filter);
 for my $p (sort keys %head_files) {
   my ($mode, $id) = @{ $head_files{$p} };
   next if $mode eq '160000';
@@ -405,20 +445,16 @@ for my $p (sort keys %head_files) {
     fail(1, "the working copy of $p is not what was committed; commit or restore it") unless defined $target && $target eq blob($id);
     next;
   }
+  fail(1, "the working copy of $p is not a regular file; commit or restore it") unless -f $p;
   open my $fh, '<:raw', $p or fail(2, "cannot read $p");
   my $disk = do { local $/; <$fh> };
   close $fh;
   fail(2, "cannot read $p") unless defined $disk;
   next if object_id('blob', $disk, $id) eq $id;
-  $disk =~ s/\r\n/\n/g;
-  next if object_id('blob', $disk, $id) eq $id;    # only line endings differ
-  push @lfs_maybe, [$p, $id];
-}
-%filter = filter_attr(map { $_->[0] } @lfs_maybe) if @lfs_maybe;
-for my $it (@lfs_maybe) {
-  my ($p, $id) = @$it;
-  if (defined $filter{$p} && $filter{$p} eq 'lfs' && blob($id) =~ m{\Aversion https://git-lfs\.github\.com/spec/v1\n}
-    && git_ok('hash-object', '--', $p) eq "$id\n") {
+  (my $lf = $disk) =~ s/\r\n/\n/g;
+  next if object_id('blob', $lf, $id) eq $id;    # only line endings differ
+  my ($oid) = blob($id) =~ m{\Aversion https://git-lfs\.github\.com/spec/v1\noid sha256:([0-9a-f]{64})\nsize [0-9]+\n\z};
+  if (defined $oid && Digest::SHA::sha256_hex($disk) eq $oid) {
     $lfs{$p} = 1;
     next;
   }
@@ -510,8 +546,10 @@ sub one_sided {
   return "@@ $range @@\n" . join('', map { "$sign$_\n" } @l) . $tail;
 }
 
-# content_diff: the hunks between two blobs, compared by id, so no file
-# attribute, filter or pathspec setting plays a part.
+# content_diff: the hunks between two blobs, compared by id with fixed
+# options. A hunk header keeps only its line numbers: the function name git
+# adds after them comes from a diff driver that attributes and settings
+# choose.
 sub content_diff {
   my ($f) = @_;
   my $a = $f->{o1} =~ $zero || $f->{m1} eq '160000' ? undef : $f->{o1};
@@ -523,7 +561,9 @@ sub content_diff {
     '--inter-hunk-context=0', '--diff-algorithm=myers', '--indent-heuristic', $a, $b);
   my $at = index($d, "\n@@");
   fail(2, "git showed no change for $f->{path}, although its content changed") if $at < 0;
-  return substr($d, $at + 1);
+  $d = substr($d, $at + 1);
+  $d =~ s/^(\@\@ -[0-9]+(?:,[0-9]+)? \+[0-9]+(?:,[0-9]+)? \@\@).*$/$1/mg;
+  return $d;
 }
 
 sub count_lines {
@@ -659,6 +699,7 @@ my @header_lines = (
   'In the content, === that opens a line, also after blanks, marks or a diff sign, has a backslash in front.',
   'Control, format, private-use and invisible characters are shown as \xNN or \u{XXXX}. Text that already spells such an escape looks the same, so read escapes with care.',
   'Symlinks are listed as links: read their target from the diff, never through the file system.',
+  'Only files git tracks are part of the commit: a file on disk that git does not track is not part of the change.',
 );
 
 # The section markers carry a token made from the whole packet, so no line

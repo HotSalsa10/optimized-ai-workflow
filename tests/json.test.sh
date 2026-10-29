@@ -83,6 +83,22 @@ for pair in '0.30000000000000004 0.30000000000000004' '3.141592653589793 3.14159
 done
 got=$(printf '{"a":1e400}' | perl "$json" get a 2>&1)
 if [ "$got" = "1$(perl -e 'print "0" x 400')" ]; then pass "a number too big for a double prints with all its digits"; else fail "a number too big for a double prints with all its digits" "$got"; fi
+
+# Numbers come back exactly or not at all: an integer that JSON::PP can only
+# read as a floating-point number, and a number with an exponent beyond
+# 10000, exit 2.
+for n in -9223372036854775809 -9999999999999999999 18446744073709551616 99999999999999999999 1e99999999999 1e-99999999999 -1e10001; do
+  exits_with "the number $n, which cannot print exactly or in full, exits 2" 2 "{\"a\":$n}" a
+done
+exits_with "such a number deep inside the printed value exits 2" 2 '{"a":{"b":[1,1e1000000000]}}' a
+for n in -9223372036854775808 18446744073709551615 -10000000000000000000 100000000000000000000; do
+  got=$(printf '{"a":%s}' "$n" | perl "$json" get a 2>&1)
+  if [ "$got" = "$n" ]; then pass "the integer $n prints exactly"; else fail "the integer $n prints exactly" "$got"; fi
+done
+got=$(printf '{"a":1e10000}' | perl "$json" get a 2>&1)
+if [ "$got" = "1$(perl -e 'print "0" x 10000')" ]; then pass "a number with an exponent of 10000 prints in full"; else fail "a number with an exponent of 10000 prints in full" "$(printf '%s' "$got" | head -c 100)"; fi
+got=$(printf '{"a":1e1000000000,"b":"x"}' | perl "$json" get b 2>&1)
+if [ "$got" = "x" ]; then pass "a value next to such a number is read"; else fail "a value next to such a number is read" "$got"; fi
 exits_with "a string holding a NUL byte exits 2" 2 '{"a":"x\u0000y"}' a
 for cmd in "" check format; do
   printf '{}' | perl "$json" ${cmd:+"$cmd"} >/dev/null 2>&1

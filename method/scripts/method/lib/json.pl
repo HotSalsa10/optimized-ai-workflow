@@ -11,20 +11,26 @@
 #
 # Exit codes: 0 done; 1 the path does not exist; 2 bad usage, input that is
 # not valid UTF-8 or not valid JSON, a string holding a NUL byte (a shell
-# variable cannot hold one), JSON::PP missing, or perl's taint mode switched
-# on through PERL5OPT.
+# variable cannot hold one), a printed number that cannot print exactly or
+# in full, JSON::PP missing, or perl's taint mode switched on through
+# PERL5OPT.
 #
-# Numbers with a fraction or an exponent print with all their digits (as
-# exact decimals, so 1e3 prints as 1000).
+# Numbers print exactly or not at all. Numbers with a fraction or an
+# exponent print with all their digits (as exact decimals, so 1e3 prints as
+# 1000). A number with an exponent beyond 10000 either way, or an integer
+# that JSON::PP can only read as a floating-point number (one of 20
+# characters, minus sign included, outside -9223372036854775808 to
+# 18446744073709551615 on a 64-bit perl), exits 2.
 #
 # Run it as "perl json.pl": switches given to perl itself (-M, -C) are the
-# caller's choice and are not undone.
+# caller's choice and are not undone. A module loaded through PERL5OPT (such
+# as -MO=Deparse) runs before the first line here, so a caller that cannot
+# trust its environment unsets PERL5OPT first, as review-packet.sh does.
 #
 # Known limits: duplicate keys keep the last value, as JavaScript's
 # JSON.parse does. A string that reads like another value ("true", "null",
 # "12") prints the same as that value, and $( ) drops a string's trailing
-# newlines. An integer of exactly 20 digits above 18446744073709551615 comes
-# back rounded (JSON::PP reads it as a floating-point number).
+# newlines.
 use strict;
 use warnings;
 
@@ -99,6 +105,24 @@ for my $key (@keys) {
     $node = $node->[$key];
   } else {
     exit 1;    # a KEY on a string, number, true, false or null
+  }
+}
+
+# Every number in the printed value prints exactly and in full: JSON::PP
+# reads a short integer outside the 64-bit range as a floating-point
+# number, which prints rounded in exponent form, and a large exponent would
+# print as millions of digits.
+my @todo = ($node);
+while (@todo) {
+  my $v = shift @todo;
+  if (ref $v eq 'HASH') {
+    push @todo, values %$v;
+  } elsif (ref $v eq 'ARRAY') {
+    push @todo, @$v;
+  } elsif (ref $v eq 'Math::BigFloat') {
+    fail(2, 'a number has an exponent beyond 10000, too long to print in full') if abs($v->exponent) > 10000;
+  } elsif (defined $v && !ref $v && $v =~ /[eE]/ && $json->encode($v) =~ /\A-?[0-9]/) {
+    fail(2, 'an integer outside the 64-bit range cannot be printed exactly');
   }
 }
 

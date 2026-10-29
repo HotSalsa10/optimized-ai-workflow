@@ -35,8 +35,9 @@
 #   markers also carry a token made from the whole packet, which no line of
 #   content can hold.
 # The reviewer reads files from disk, so the packet is refused while any
-# tracked file on disk differs from the commit. Stored files and folders
-# are checked against their ids as they are read.
+# tracked file on disk differs from the commit, or while git's working copy
+# is not the folder it is built from. Stored files, folders and the commits
+# after the merge base are checked against their ids as they are read.
 set -u
 # perl reads bytes; these settings would change how it reads them, and the
 # library paths would let modules from elsewhere run inside the builder
