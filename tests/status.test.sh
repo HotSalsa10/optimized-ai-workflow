@@ -707,6 +707,10 @@ expect "a REPOS entry that is a submodule is read" 0 "repo lib: PASS - nothing u
 echo dirty >>"$smw/lib/a.txt"
 st "$smw/lib"
 expect "a change inside a submodule is seen there" 1 "work: LOOK - 1 uncommitted entries"
+(cd "$smw" && git worktree add -q -b side "$sm/linked" 2>/dev/null) || fail "could not add a linked worktree"
+st "$sm/linked"
+expect "status run in a linked worktree reads the main working tree from its own folder" 1 \
+  "work: LOOK - 1 uncommitted entries (a new folder counts once); linked worktrees: $sm/linked"
 (cd "$lib" && git clone -q --separate-git-dir "$lib/sep.git" remote.git sep 2>/dev/null) || fail "could not clone with --separate-git-dir"
 st "$lib/sep"
 expect "a clone made with --separate-git-dir is read" 0 "work: PASS - nothing uncommitted, nothing unpushed"

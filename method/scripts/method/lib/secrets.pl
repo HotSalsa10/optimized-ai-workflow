@@ -405,13 +405,19 @@ sub rules_on {
 # Every rule on one line of text. A key right after an escape written as
 # text (print("\x1b[1mAKIA...")) has a letter before it, so the pieces
 # between such escapes are searched too, for what the whole line did not
-# show.
+# show: a piece's find that is part of a find on the whole line (an email
+# address that took in the n of \n) is reported already.
 sub scan_line {
   my ($path, $where, $line, $seen, $skip_seen) = @_;
   my %here;
   rules_on($line, sub { $here{ $_[1] } = 1; report($path, $where, @_, $seen, $skip_seen) });
   return unless $line =~ $text_code;
-  rules_on($_, sub { report($path, $where, @_, $seen, $skip_seen) unless $here{ $_[1] }++ }) for split /$text_code/, $line;
+  for my $piece (split /$text_code/, $line) {
+    rules_on($piece, sub {
+      my $t = $_[1];
+      report($path, $where, @_, $seen, $skip_seen) unless grep { index($_, $t) >= 0 } keys %here;
+    });
+  }
 }
 
 # The runs of printable bytes in raw content, with every rule or keys only.

@@ -817,7 +817,7 @@ r3=$(new_repo) || abort_sandbox
 # a test runner's string forms: Python's repr, Node's inspect, JSON, an escaped newline, grep's
 # highlighting inside a key; and a key found on the whole line and again after an escaped newline
 printf '%s\n' "'\\x1b[1m$ak\\x1b[0m'" "'\\x1B[33m$tok\\x1B[39m'" "\"\\u001b[31m$ph\"" "line\\n$ib" \
-  "'\\x1b[01;31m\\x1b[K$ak1\\x1b[m\\x1b[K$ak2'" "x\\ny $ak" >"$r3/out.txt"
+  "'\\x1b[01;31m\\x1b[K$ak1\\x1b[m\\x1b[K$ak2'" "x\\ny $ak" "x\\nbo.smith@""gmail.com" >"$r3/out.txt"
 pgb="-----BEGIN PGP PRIV""ATE KEY BLOCK-----"
 pge="-----END PGP PRIV""ATE KEY BLOCK-----"
 printf '%s\n\nlQOYBF%s\n%s\n=Wx7z\n%s\nafter the key\n{"key":"%s\\n\\nlQOYBF%s\\n%s"}\n' "$pgb" "$(perl -e 'print "Ab12" x 15')" \
@@ -839,8 +839,12 @@ fi
 expect "the shown lines keep what is not secret" 1 'x\x1B[31mAKIA...(20 chars)' "'\\x1B[33mghp_...(40 chars)\\x1B[39m'" 'line\n***(22 chars)' "  after the key"
 expect "the secrets check finds a key after an escape written as text, and a PGP private key, in a tracked file" 1 \
   "out.txt:1: AWS access key" "out.txt:2: GitHub token" "out.txt:3: phone number" "out.txt:4: bank account number" "pgp.txt:1: private key"
-n=$(grep -c 'out.txt:6: AWS access key' "$logf")
-if [ "$n" -eq 1 ]; then pass "a key found on the whole line is not reported again from a piece of it"; else fail "a key found on the whole line is reported once, not $n times" "$(cat "$logf")"; fi
+n=$(grep -c -e 'out.txt:6: AWS access key' -e 'out.txt:7: email address' "$logf")
+if [ "$n" -eq 2 ]; then
+  pass "a find on the whole line is not reported again from a piece of it, also when the piece holds less of it"
+else
+  fail "a find on the whole line is reported once: $n lines for 2 finds" "$(cat "$logf")"
+fi
 (cd "$r3" && git rm -q out.txt pgp.txt && git commit -q -m "no fixtures")
 tsv "$r3" "$(ck unit 'echo "1 passed"')"
 (cd "$r3" && git update-index --skip-worktree src/a.txt)
