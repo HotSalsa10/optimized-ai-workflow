@@ -262,17 +262,20 @@ sub message {
 }
 
 # subject MESSAGE: its first non-blank line, at most 60 characters
+# subject MESSAGE: its first non-blank line, masked whole (a key cut first
+# could be too short for its rule), then cut to 60 characters, never inside
+# an escape
 sub subject {
   my ($m) = @_;
   my ($s) = grep { /\S/ } split /\r?\n/, $m;
-  $s = '' unless defined $s;
-  my $copy = $s;
-  if (utf8::decode($copy)) {
-    $copy = substr($copy, 0, 57) . '...' if length $copy > 60;
-    utf8::encode($copy);
-    return $copy;
-  }
-  return length $s > 60 ? substr($s, 0, 57) . '...' : $s;
+  my $t = masked(defined $s ? $s : '');
+  my $copy = $t;
+  my $chars = utf8::decode($copy);
+  return $t if length $copy <= 60;
+  $copy = substr($copy, 0, 57);
+  $copy =~ s/\\(?:x[0-9A-F]?|u(?:\{[0-9A-F]*)?)?\z//;
+  utf8::encode($copy) if $chars;
+  return "$copy...";
 }
 
 sub verdicts_lines {
@@ -309,7 +312,7 @@ sub verdicts_lines {
     my $old = $bad[-1];
     my @show = map { short($_) } @bad[0 .. ($#bad < 4 ? $#bad : 4)];
     return ['verdicts', 'LOOK', scalar(@bad) . " commits on $ref $since lack a valid $key line: @show"
-      . (@bad > 5 ? ' ...' : '') . '; the oldest, "' . masked(subject(message($old))) . '": '
+      . (@bad > 5 ? ' ...' : '') . '; the oldest, "' . subject(message($old)) . '": '
       . Verdicts::trailer_problem(message($old))
       . '; accept them by moving VERDICTS_FROM in .claude/method.conf through a reviewed change; never rewrite main'
       . $shallow];
@@ -487,7 +490,7 @@ sub main {
   }
   my ($top, $elsewhere) = Git::top();
   if (!defined $top) {
-    print "status: not inside a git working tree\n";
+    print "status: not inside a git working tree (or git refuses this one: owned by another user, or a damaged .git)\n";
     exit 2;
   }
   chdir $top or do { print "status: cannot enter the top folder of the repository\n"; exit 2 };
@@ -503,7 +506,7 @@ sub main {
   # git reads a working tree elsewhere when a core.worktree setting says so;
   # everything below is then about that folder, not this one
   say_area('work', 'LOOK', "git's working folder is $top, not this folder: a core.worktree setting points git"
-    . ' elsewhere, so what follows is about that folder') if $elsewhere;
+    . ' elsewhere (or a .git here is damaged), so what follows is about that folder') if $elsewhere;
   my ($conf, $problems) = Conf::read('.');
   if (@$problems) {
     say_area('config', 'LOOK', $_) for @$problems[0 .. ($#$problems < 2 ? $#$problems : 2)];

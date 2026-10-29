@@ -34,10 +34,11 @@
 #                   meant to lack
 #   project-checks  SKIPPED when checks/*.tsv lists no checks
 #   tree-unchanged  last: the checks left HEAD (its commit and its branch),
-#                   the branches and tags, and the files on disk (content,
-#                   mode, and index flags that hide edits) as they found
-#                   them; git runs no filter program and takes no stat
-#                   shortcut for this (lib/git.pl)
+#                   the branches, the tags that were there, and the files on
+#                   disk (content, mode where git compares modes, and index
+#                   flags that hide edits) as they found them; git runs no
+#                   filter program and takes no stat shortcut for this
+#                   (lib/git.pl). A new tag, as a fetch brings, is allowed.
 #
 # Screen: the log's path first; each FAIL with its last 10 output lines,
 # masked; up to 10 SKIPPED lines; the passed ids; then one line that starts
@@ -70,12 +71,16 @@ set -u
 # Perl reads bytes; these settings would change how the method's perl reads
 # them, and the library paths would let modules from elsewhere run inside
 # it. The project's checks get the caller's values back (lib/checks.pl).
+# PERL_USE_UNSAFE_INC would let perl load a missing module from the
+# repository's own folder.
 unset METHOD_CALLER_PERL_UNICODE METHOD_CALLER_PERL5OPT METHOD_CALLER_PERL5LIB METHOD_CALLER_PERLLIB
+unset METHOD_CALLER_PERL_USE_UNSAFE_INC
 if [ "${PERL_UNICODE+set}" = set ]; then export METHOD_CALLER_PERL_UNICODE="$PERL_UNICODE"; fi
 if [ "${PERL5OPT+set}" = set ]; then export METHOD_CALLER_PERL5OPT="$PERL5OPT"; fi
 if [ "${PERL5LIB+set}" = set ]; then export METHOD_CALLER_PERL5LIB="$PERL5LIB"; fi
 if [ "${PERLLIB+set}" = set ]; then export METHOD_CALLER_PERLLIB="$PERLLIB"; fi
-unset PERL_UNICODE PERL5OPT PERL5LIB PERLLIB
+if [ "${PERL_USE_UNSAFE_INC+set}" = set ]; then export METHOD_CALLER_PERL_USE_UNSAFE_INC="$PERL_USE_UNSAFE_INC"; fi
+unset PERL_UNICODE PERL5OPT PERL5LIB PERLLIB PERL_USE_UNSAFE_INC
 
 command -v perl >/dev/null 2>&1 || {
   echo "run-checks: FAIL - perl is not installed; the run stopped"

@@ -20,9 +20,9 @@
 # and tabs) split it into paragraphs, leading and trailing ones dropped; it
 # has at least two paragraphs; the last paragraph is one line,
 # "<trailer-key>: <trailer word>" or "<trailer-key>: <trailer-reason word>
-# - <text>" where the text holds a letter or digit and no control
-# character (trailing spaces and tabs are dropped); and no other line
-# starts with "<trailer-key>:".
+# - <text>" where the text is UTF-8 and holds a letter or digit and no
+# control, format or invisible character (trailing spaces and tabs are
+# dropped); and no other line starts with "<trailer-key>:".
 package Verdicts;
 use strict;
 use warnings;
@@ -104,6 +104,10 @@ sub trailer_problem {
   if (defined $word && $reason{$word}) {
     return "$word needs a reason: $key: $word - <what is open or why>" unless defined $text;
     return "the reason after $word holds a control character" if $text =~ /[\x00-\x1F\x7F]/;
+    my $chars = $text;
+    return "the reason after $word is not valid UTF-8" unless utf8::decode($chars);
+    return "the reason after $word holds a control, format or invisible character"
+      if $chars =~ /[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\p{Zl}\p{Zp}]/;
     return "the reason after $word must say something (a letter or a digit)" unless $text =~ /[A-Za-z0-9]/;
     return undef;
   }

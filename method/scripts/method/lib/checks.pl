@@ -37,6 +37,8 @@ sub read_tsv {
   my ($root) = @_;
   my (@checks, @problems, %seen);
   my $dir = File::Spec->catdir($root, 'checks');
+  # a link could stand for checks that a clone does not have
+  return (\@checks, ['checks: a link, so its checks would not run everywhere']) if -l $dir;
   return (\@checks, \@problems) unless -d $dir;
   opendir my $dh, $dir or return (\@checks, ['checks: cannot read the folder']);
   my @files = sort grep { /\A[^.].*\.tsv\z/s } readdir $dh;
@@ -53,6 +55,7 @@ sub read_tsv {
       $n++;
       my $problem = sub { push @problems, "$label line $n: $_[0]" };
       $l =~ s/\r?\n\z//;
+      $l =~ s/\A\xEF\xBB\xBF// if $n == 1;    # a byte-order mark some editors add
       next if $l =~ /\A[ \t]*(?:#|\z)/;
       if ($l =~ /[\x00-\x08\x0A-\x1F\x7F]/) { $problem->('holds a control character'); next }
       my @f = split /\t/, $l, -1;
@@ -122,7 +125,8 @@ my $temp_n = 0;
 sub temp_file {
   my $path = sprintf '%s/run-checks-%d-%d.out', $LOCAL, $$, ++$temp_n;
   unlink $path;
-  sysopen my $fh, $path, O_WRONLY | O_CREAT | O_EXCL, 0600 or stop('cannot create an output file in .method/local');
+  sysopen my $fh, $path, O_WRONLY | O_CREAT | O_EXCL, 0600
+    or stop('cannot create an output file in .method/local (did a check delete the folder, with git clean -x say?)');
   close $fh;
   push @temps, $path;
   return $path;
@@ -190,11 +194,11 @@ sub masked {
   return @out;
 }
 
-# tail_lines FILE N: (the last N lines of FILE, split at LF, CRLF or CR,
-# taken from its last 64 KB; a line cut by that window is left out, so a
-# key cut in half is never shown; whether a line was left out that way)
+# tail_lines FILE: (the lines of FILE's last 64 KB, split at LF, CRLF or
+# CR; a line cut by that window is left out, so a key cut in half is never
+# shown; whether a line was left out that way)
 sub tail_lines {
-  my ($file, $n) = @_;
+  my ($file) = @_;
   open my $fh, '<:raw', $file or return ([], 0);
   my $size = -s $fh;
   my $start = $size > 65536 ? $size - 65536 : 0;
@@ -206,7 +210,6 @@ sub tail_lines {
   pop @l if @l && $l[-1] eq '';
   my $cut = 0;
   if ($start > 0 && @l) { shift @l; $cut = !@l }
-  splice @l, 0, @l - $n if @l > $n;
   return (\@l, $cut);
 }
 
@@ -231,9 +234,7 @@ sub count_in {
   while (my $chunk = <$fh>) {
     $chunk =~ s/\n\z//;
     for my $line (split /\r/, $chunk, -1) {
-      $line =~ s/\e\[[0-?]*[ -\/]*[@-~]//g;
-      $line =~ s/\e\][^\a\e]*(?:\a|\e\\)?//g;
-      $line =~ s/\e[@-Z\\-_]//g;
+      $line = Esc::plain($line);
       if ($line =~ $re) { $matched = 1; $value = $1 }
     }
   }
@@ -244,7 +245,7 @@ sub count_in {
 # the environment a project check runs in
 sub check_env {
   my %e = %CALLER_ENV;
-  for my $v (qw(PERL_UNICODE PERL5OPT PERL5LIB PERLLIB)) {
+  for my $v (qw(PERL_UNICODE PERL5OPT PERL5LIB PERLLIB PERL_USE_UNSAFE_INC)) {
     delete $e{$v};
     $e{$v} = $e{"METHOD_CALLER_$v"} if exists $e{"METHOD_CALLER_$v"};
     delete $e{"METHOD_CALLER_$v"};
@@ -384,8 +385,11 @@ sub check_tree_unchanged {
   write_lines($out, map {"changed during the run: $_"} @changed);
   my %refs_before = map { split / /, $_, 2 } split /\n/, $before->{refs};
   my %refs_after = map { split / /, $_, 2 } split /\n/, $after->{refs};
+  # a branch that moved, appeared or went, or a tag that moved or went (a
+  # fetch may bring new tags, which is allowed)
   my %all_refs = (%refs_before, %refs_after);
-  my @moved = sort grep { ($refs_before{$_} || '') ne ($refs_after{$_} || '') } keys %all_refs;
+  my @moved = sort grep { ($refs_before{$_} || '') ne ($refs_after{$_} || '') && (exists $refs_before{$_} || m{\Arefs/heads/}) }
+    keys %all_refs;
   write_lines($out, map {"moved during the run: $_"} @moved);
   my @why;
   push @why, 'HEAD moved during the run' if $before->{head} ne $after->{head};
@@ -498,8 +502,12 @@ sub finish {
   push @results, { %$r, id => $id, project => $runs_in ne '-' };
   if ($r->{status} eq 'FAIL') {
     print "$id: FAIL - $detail\n";
-    my ($tail, $cut) = tail_lines($out, 10);
-    if (@$tail) { print cut($_, 300), "\n" for masked(@$tail) }
+    # the whole window is masked, so a private key whose BEGIN line is
+    # above the last 10 lines is still masked; then the last 10 are shown
+    my ($tail, $cut) = tail_lines($out);
+    my @shown = masked(@$tail);
+    splice @shown, 0, @shown - 10 if @shown > 10;
+    if (@shown) { print cut($_, 300), "\n" for @shown }
     elsif ($cut) { print "  (its last output line is longer than 64 KB; see the log)\n" }
     else { print "  (no output)\n" }
     print "  $r->{hint}\n" if $r->{hint};
@@ -540,9 +548,10 @@ sub main {
     exit 2;
   }
   my ($top, $elsewhere) = Git::top();
-  stop('not inside a git working tree') unless defined $top;
-  stop("git's working folder is not this folder: a core.worktree setting points git elsewhere;"
-    . ' run the checks in the working folder itself') if $elsewhere;
+  stop('not inside a git working tree (or git refuses this one: owned by another user, or a damaged .git)')
+    unless defined $top;
+  stop("git's working folder is not this folder: a core.worktree setting points git elsewhere (or a .git here is"
+    . ' damaged); run the checks in the working folder itself') if $elsewhere;
   chdir $top or stop('cannot enter the top folder of the repository');
 
   my ($conf, $cp) = Conf::read('.');

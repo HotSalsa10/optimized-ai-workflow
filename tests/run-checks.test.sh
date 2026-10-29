@@ -290,7 +290,7 @@ mkdir -p "$work/plain"
 (cd "$work/plain" && GIT_CEILING_DIRECTORIES=$work bash "$rc") >"$work/out" 2>&1
 code=$?
 out=$(cat "$work/out")
-expect "outside a git working tree the run stops" 2 "run-checks: FAIL - not inside a git working tree; the run stopped"
+expect "outside a git working tree the run stops" 2 "run-checks: FAIL - not inside a git working tree (or git refuses this one"
 rm -rf "$i/.method"
 mkdir -p "$work/elsewhere" "$i/.method"
 ln -s "$work/elsewhere" "$i/.method/local"
@@ -719,12 +719,14 @@ tsv "$fl2" "$(ck detach 'git checkout -q --detach && echo "1 passed"')"
 run "$fl2"
 expect "a check that detaches HEAD fails tree-unchanged" 1 "tree-unchanged: FAIL - HEAD is on another branch than before the run"
 (cd "$fl2" && git checkout -q main)
-tsv "$fl2" "$(ck refs 'git branch -f keep HEAD~1 && git tag v1 && echo "1 passed"')"
-(cd "$fl2" && git branch -q keep)
+tsv "$fl2" "$(ck refs 'git branch -f keep HEAD~1 && git tag -f v0 HEAD~1 >/dev/null && git tag v1 && git branch made && echo "1 passed"')"
+(cd "$fl2" && git branch -q keep && git tag v0)
 run "$fl2"
-expect "a check that moves a branch or adds a tag fails tree-unchanged" 1 "2 branches or tags moved during the run" \
-  "moved during the run: refs/heads/keep" "moved during the run: refs/tags/v1"
-(cd "$fl2" && git tag -d v1 >/dev/null && git branch -q -f keep HEAD)
+expect "a check that moves a branch or a tag, or makes a branch, fails tree-unchanged; a new tag (as a fetch brings) does not count" 1 \
+  "3 branches or tags moved during the run" "moved during the run: refs/heads/keep" "moved during the run: refs/tags/v0" \
+  "moved during the run: refs/heads/made"
+case "$out" in *refs/tags/v1*) fail "a new tag counts as a move" "$out" ;; esac
+(cd "$fl2" && git tag -d v0 v1 >/dev/null && git branch -q -f keep HEAD && git branch -q -D made)
 tsv "$fl2" "$(ck mode 'chmod +x src/a.txt && echo "1 passed"')"
 echo dirty >>"$fl2/src/a.txt"
 run "$fl2"
@@ -736,6 +738,82 @@ run "$fl2"
 expect "a core.worktree setting that points git at another folder stops the run" 2 \
   "run-checks: FAIL - git's working folder is not this folder: a core.worktree setting points git elsewhere"
 (cd "$fl2" && git config --unset core.worktree)
+# 13. from review round 2
+tsv "$fl2" "$(ck unit 'echo "1 passed"')"
+(cd "$fl2" && git config 'filter..clean' "$work/filter" && printf 'src/a.txt filter=\n' >.git/info/attributes)
+printf 'HELLO\n' >"$fl2/src/a.txt"
+run "$fl2"
+if [ "$code" -eq 0 ] && [ ! -e "$work/filter-ran" ] && printf '%s\n' "$out" | grep -q 'on uncommitted changes$'; then
+  pass "a filter with an empty name never runs either"
+else
+  fail "a filter with an empty name never runs either" "$out"
+fi
+(cd "$fl2" && git config --unset 'filter..clean' && git config filter.hide.clean "$work/filter" && printf 'src/a.txt filter=hide\n' >.git/info/attributes)
+run "$fl2" GIT_CONFIG=/dev/null
+if [ "$code" -eq 0 ] && [ ! -e "$work/filter-ran" ] && printf '%s\n' "$out" | grep -q 'on uncommitted changes$'; then
+  pass "GIT_CONFIG from the caller cannot hide the repository's filters from the switch-off"
+else
+  fail "GIT_CONFIG from the caller cannot hide the repository's filters from the switch-off" "$out"
+fi
+(cd "$fl2" && git config --unset filter.hide.clean && rm -f .git/info/attributes && git checkout -q src/a.txt)
+pb="-----BEGIN PRIV""ATE KEY-----"
+pe="-----END PRIV""ATE KEY-----"
+tsv "$fl2" "$(ck pem "printf '%s\\n' '$pb'; perl -e 'print \"MII\", \"Ab12\" x 15, \"x\\n\" for 1..12'; printf '%s\\nafter the key\\n' '$pe'; exit 1")" \
+  "$(ck pemcut "printf '%s\\n' '$pb'; perl -e 'print \"MII\", \"Gh78\" x 15, \"x\\n\" for 1..12'; exit 1")" \
+  "$(ck pemlong "printf '%s\\n' '$pb'; perl -e 'print \"MII\", \"Cd34\" x 15, \"x\\n\" for 1..1200'; printf '%s\\n' '$pe'; exit 1")" \
+  "$(ck pemjson "printf '{\"key\":\"%s\\\\\\\\nMII%s\\\\\\\\n%s\"}\\n' '$pb' Ef56Ef56Ef56Ef56Ef56Ef56 '$pe'; exit 1")"
+run "$fl2"
+leaked=$( (printf '%s\n' "$out"; cat "$logf") | grep -c -e 'Ab12Ab12' -e 'Cd34Cd34' -e 'Ef56Ef56' -e 'Gh78Gh78')
+if [ "$code" -eq 1 ] && [ "$leaked" -eq 0 ] && printf '%s\n' "$out" | grep -q '^pemlong: FAIL' && printf '%s\n' "$out" | grep -q '^  after the key$'; then
+  pass "a private key's body is masked on screen and in the log, also far below its BEGIN line, cut off before its END line, and on one JSON line; the next line shows again"
+else
+  fail "a private key's body is masked on screen and in the log: $leaked lines show it" "$out"
+fi
+ak1="AKI""A"
+ak2="ABCDEFGHIJKLMNOP"
+tk1="gh""p_abcdefghij"
+tk2="klmno"
+tk3="pqrstuvwxyz0123456789"
+tsv "$fl2" "$(ck split "printf '\\033[01;31m\\033[K%s\\033[m\\033[K%s\\n%s\\033[7m%s\\033[27m%s\\n\\033(B%s\\n' $ak1 $ak2 $tk1 $tk2 $tk3 $tk1$tk2$tk3; exit 1")"
+run "$fl2"
+if [ "$code" -eq 1 ] && ! (printf '%s\n' "$out"; cat "$logf") | grep -q -e "$ak2" -e "$tk3" && printf '%s\n' "$out" | grep -F -q 'AKIA...(20 chars)'; then
+  pass "a key with terminal codes inside it, or right after ESC ( B, is masked on screen and in the log"
+else
+  fail "a key with terminal codes inside it, or right after ESC ( B, is masked on screen and in the log" "$out"
+fi
+mkdir -p "$work/realchecks"
+mv "$fl2/checks/main.tsv" "$work/realchecks/main.tsv"
+rmdir "$fl2/checks"
+ln -s "$work/realchecks" "$fl2/checks"
+run "$fl2"
+expect "a checks folder that is a link stops the run" 2 "run-checks: checks: a link, so its checks would not run everywhere"
+rm -f "$fl2/checks"
+mkdir -p "$fl2/checks"
+printf '\357\273\277%s\n' "$(ck bom 'echo "1 passed"')" | perl -pe 's/<T>/\t/g' >"$fl2/checks/main.tsv"
+(cd "$fl2" && git add -A && git commit -q -m bom)
+run "$fl2"
+expect "a byte-order mark at the start of a checks file is dropped" 0 "run-checks: PASS - 4 passed"
+sub2=$(new_repo) || abort_sandbox
+(
+  cd "$fl2" || exit 1
+  git -c protocol.file.allow=always submodule -q add "$sub2" lib 2>/dev/null
+  git config submodule.lib.ignore all
+  git -C lib config user.name Test
+  git -C lib config user.email test@example.invalid
+  git commit -q -m sub
+) || fail "could not build the submodule repo"
+tsv "$fl2" "$(ck inner '(cd lib && git commit -q --allow-empty -m inner) && echo "1 passed"')"
+run "$fl2"
+expect "a check that commits inside a submodule set to be ignored fails tree-unchanged" 1 "changed during the run: lib"
+tsv "$fl2" "$(ck unit 'echo "1 passed"')"
+run "$fl2" CI=1
+expect "only CI=true counts as CI" 0 "; where local"
+tsv "$fl2" "$(ck clean 'git clean -fdxq && echo "1 passed"')"
+run "$fl2"
+expect "a check that deletes .method/local stops the run and says what probably happened" 2 \
+  "cannot create an output file in .method/local (did a check delete the folder"
+
+
 em=$(new_sandbox_dir) || abort_sandbox
 repos="$repos $em"
 (cd "$em" && git init -q)

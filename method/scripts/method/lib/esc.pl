@@ -12,9 +12,22 @@
 # review packet's section markers, M113), and the CI runner's old command
 # form ##[ is broken up as #\x23[, so a line shown in a CI log cannot give
 # the runner a command. Returns UTF-8 bytes.
+#
+# $Esc::TERM_CODE: one terminal control sequence, as ECMA-48 defines them:
+# CSI (ESC [ ... final byte), OSC (ESC ] ... BEL or ESC \), or any other
+# ESC sequence (ESC, intermediate bytes, one final byte). run-checks strips
+# them before it reads a count; the secret mask splits text at them.
+# Esc::plain(TEXT): TEXT with every such sequence taken out.
 package Esc;
 use strict;
 use warnings;
+
+our $TERM_CODE = qr/\e\[[0-?]*[ -\/]*[@-~]|\e\][^\a\e]*(?:\a|\e\\)?|\e[ -\/]*[0-~]/;
+
+sub plain {
+  (my $s = $_[0]) =~ s/$TERM_CODE//g;
+  return $s;
+}
 
 sub line {
   my ($bytes) = @_;

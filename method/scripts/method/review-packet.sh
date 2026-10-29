@@ -30,10 +30,10 @@
 #   folder are always kept, and so is everything when only such files
 #   changed.
 # - M113: every line inside a section goes through one escaping step, so
-#   only the packet's own section markers start with "===", and control,
-#   format and invisible characters are shown as \xNN or \u{XXXX}. The
-#   markers also carry a token made from the whole packet, which no line of
-#   content can hold.
+#   only the packet's own section markers start with "===", control,
+#   format and invisible characters are shown as \xNN or \u{XXXX}, and the
+#   CI runner's command form ##[ is shown as #\x23[. The markers also carry
+#   a token made from the whole packet, which no line of content can hold.
 # The reviewer reads files from disk, so the packet is refused while any
 # tracked file on disk differs from the commit, or while git's working copy
 # is not the folder it is built from. Stored files, folders and the commits
@@ -41,7 +41,7 @@
 set -u
 # perl reads bytes; these settings would change how it reads them, and the
 # library paths would let modules from elsewhere run inside the builder
-unset PERL_UNICODE PERL5OPT PERL5LIB PERLLIB
+unset PERL_UNICODE PERL5OPT PERL5LIB PERLLIB PERL_USE_UNSAFE_INC
 
 command -v perl >/dev/null 2>&1 || {
   echo "review-packet: perl is not installed" >&2

@@ -28,8 +28,8 @@ Nothing yet. Release 1 is being built.
 - `status.sh`: one read-only report for any session: work not committed or not pushed (also in linked worktrees and in the other repositories listed in REPOS), commits on main without a valid verdict trailer, the project records, the Claude Code version against the floor, CLAUDE_CODE_EFFORT_LEVEL, perl's modules and CI. It says PASS, LOOK or SKIPPED and exits 1 when something needs a look.
 - `.claude/method.conf` settings (PRODUCT_PATHS, LOCAL_ONLY, REPOS, VERDICTS_FROM) with one reader, `lib/conf.pl`, and `REQUIRES` with the Claude Code floor.
 - The commit trailer check, `lib/verdicts.pl check-trailer`, used by status.
-- Shared helpers `lib/git.pl` (every git call, with the settings that could change what git shows turned off) and `lib/esc.pl` (the one line escaper), taken out of the review packet, whose output is unchanged.
-- Tests: 3 new test files and 21 more trailer cases, 304 test cases in all.
+- Shared helpers `lib/git.pl` (every git call, with the settings that could change what git shows turned off) and `lib/esc.pl` (the one line escaper), taken out of the review packet with its output unchanged. Later in the step the escaper also learned to show the CI runner's command form `##[` as `#\x23[`, so the packet shows it that way too and says so in its header, and every git call refuses to use a folder laid out like a repository.
+- Tests: 3 new test files and 21 more trailer cases, 325 test cases in all.
 
 ### Changed (step 3)
 

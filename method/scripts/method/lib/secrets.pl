@@ -40,6 +40,9 @@ use warnings;
 use File::Basename qw(dirname);
 use IPC::Open2;
 use File::Spec;
+# lib/esc.pl: $Esc::TERM_CODE, the one pattern for a terminal code
+require File::Spec->catfile(dirname(File::Spec->rel2abs(__FILE__)), 'esc.pl');
+my $term_code = do { no warnings 'once'; $Esc::TERM_CODE };
 
 # Prints one line of output. Control characters taken from file names or
 # content (also UTF-8 C1 controls) are shown as \xNN, and the CI runner's
@@ -202,8 +205,12 @@ sub mask_all {
   $s =~ s/($alt)/mask($1, 0)/ge;
   return $s;
 }
+my $pem_begin = qr/-----BEGIN (?:[A-Z]+ )*PRIVATE KEY-----/;
+my $pem_end = qr/-----END (?:[A-Z]+ )*PRIVATE KEY-----/;
 sub mask_pass {
   my ($s) = @_;
+  # a whole private key on one line (as JSON writes it) is masked to its end
+  $s =~ s/($pem_begin.*?(?:$pem_end|\z))/mask($1, 1)/ge;
   $s =~ s/$_/mask($1, 1)/ge for @token_cap;
   $s =~ s/$quoted_cred/$1 . mask($3, 0)/ge;
   $s =~ s/$env_cred/$1 . mask($3, 0)/e;
@@ -220,18 +227,50 @@ sub mask_pass {
 # escaped already, and an escape such as \x09 or a colour code such as
 # ESC[31m ends a word without leaving a space. The terminal codes are
 # masked too, so a key inside one (a link's address) is not let through.
-my $term_code = qr/\e\[[0-?]*[ -\/]*[@-~]|\e\][^\a\e]*(?:\a|\e\\)?|\e[@-Z\\-_]/;
+# Last, a key with a code inside it (grep's highlighting, a coloured diff)
+# is whole only with the codes taken out: when that copy still holds
+# something to mask, the text is shown without its codes, masked.
 sub mask_text {
-  my $s = mask_pass($_[0]);
-  return join '', map { /^\\x[0-9A-F]{2}$/ ? $_ : mask_pass($_) } split /(\\x[0-9A-F]{2}|$term_code)/, $s;
+  my ($t) = @_;
+  my $s = mask_pass($t);
+  $s = join '', map { /^\\x[0-9A-F]{2}$/ ? $_ : mask_pass($_) } split /(\\x[0-9A-F]{2}|$term_code)/, $s;
+  my $plain = Esc::plain($s);
+  return $s if $plain eq $s || mask_pass($plain) eq $plain;
+  return mask_text(Esc::plain($t));
 }
 
-# --mask: a filter for other tools' output.
+# --mask: a filter for other tools' output. A private key's body lines hold
+# nothing a rule can see, so every line from a BEGIN ... PRIVATE KEY line to
+# its END line is masked. Lines that look like key body (base64) are held
+# back until the next other line: when that is an END ... PRIVATE KEY line,
+# they were the end of a key whose BEGIN line came before this input (a
+# window of a longer output), and they are masked too.
 if ($mask_mode) {
+  my $body = qr/\A[ \t]*[A-Za-z0-9+\/=]{16,}[ \t]*\z/;
+  my ($in_key, @held) = (0);
+  my $out = sub { say_line('  ' . $_[0]) };
   while (my $line = <STDIN>) {
     $line =~ s/\r?\n\z//;
-    say_line('  ' . mask_text($line));
+    my $plain = Esc::plain($line);
+    if ($in_key) {
+      $out->(mask($line, 0));
+      $in_key = 0 if $plain =~ $pem_end;
+    } elsif ($plain =~ $pem_begin) {
+      $out->(mask_text($_)) for splice @held;
+      $out->(mask_text($line));
+      $in_key = 1 unless $plain =~ $pem_end;
+    } elsif ($plain =~ $body) {
+      push @held, $line;
+      $out->(mask_text(shift @held)) if @held > 200;
+    } elsif ($plain =~ $pem_end) {
+      $out->(mask($_, 0)) for splice @held;
+      $out->(mask_text($line));
+    } else {
+      $out->(mask_text($_)) for splice @held;
+      $out->(mask_text($line));
+    }
   }
+  $out->(mask_text($_)) for @held;
   exit 0;
 }
 

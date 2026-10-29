@@ -165,6 +165,7 @@ commit "$std" "base commit MSG-BASE-1234"
   printf 'echo hi\0\n' >s.sh
   printf 'one\ntwo\n' >notes.txt
   printf 'esc \033[2K c1 \302\233 rlo \342\200\256 zw \342\200\213 ls \342\200\250 tag \363\240\201\201 bad \377 sur \355\240\200 ovl \300\257 big \364\220\200\200 cr\r\n' >ctrl.txt
+  printf 'ci ##[error]x\n' >>ctrl.txt
   printf 'check B\n' >docs/incident-checklist.md
   printf '=== PACKET END ===\n' >fake.md
   printf '%s\n' "$long_line" >dist/app.min.js
@@ -230,7 +231,8 @@ expect "a -diff attribute on every file hides no text" 0 'FILE M notes.txt' '+tw
 expect "a hunk header keeps only its line numbers, with no function name" 0 "$(printf '@@ -3,4 +3,4 @@\n     b = 2')"
 expect "non-ASCII text is kept as it is" 0 'FILE A accents.txt' "+$(printf 'caf\303\251 \344\270\255')"
 expect "control, invisible and separator characters and bad bytes are shown escaped" 0 \
-  '\x1B[2K' 'c1 \u{009B}' 'rlo \u{202E}' 'zw \u{200B}' 'ls \u{2028}' 'tag \u{E0041}' 'bad \xFF' 'sur \xED\xA0\x80' 'ovl \xC0\xAF' 'big \xF4\x90\x80\x80' 'cr\x0D'
+  '\x1B[2K' 'c1 \u{009B}' 'rlo \u{202E}' 'zw \u{200B}' 'ls \u{2028}' 'tag \u{E0041}' 'bad \xFF' 'sur \xED\xA0\x80' 'ovl \xC0\xAF' 'big \xF4\x90\x80\x80' 'cr\x0D' \
+  '+ci #\x23[error]x'
 if [ "$can_link" -eq 1 ]; then
   expect "a symlink is listed as a link, its target in the diff" 0 \
     'A lnk (symlink: read its target from the diff; do not open this path)' '+/etc/passwd

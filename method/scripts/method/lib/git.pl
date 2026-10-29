@@ -3,8 +3,8 @@
 # helpers load it with require; every git call they make goes through it.
 #
 # Loading it clears the variables that would point git at another
-# repository, index, object store or history, or change what it shows:
-# GIT_DIR, GIT_WORK_TREE, GIT_COMMON_DIR, GIT_INDEX_FILE,
+# repository, index, object store, history or settings file, or change what
+# it shows: GIT_DIR, GIT_WORK_TREE, GIT_COMMON_DIR, GIT_INDEX_FILE, GIT_CONFIG,
 # GIT_OBJECT_DIRECTORY, GIT_ALTERNATE_OBJECT_DIRECTORIES, GIT_SHALLOW_FILE,
 # GIT_IMPLICIT_WORK_TREE, GIT_PREFIX, GIT_INTERNAL_SUPER_PREFIX,
 # GIT_NAMESPACE, GIT_DIFF_OPTS, GIT_EXTERNAL_DIFF, GIT_REPLACE_REF_BASE and
@@ -51,7 +51,7 @@ use File::Temp qw(tempdir);
 use IO::Handle ();
 use IPC::Open2 ();
 
-delete @ENV{qw(GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
+delete @ENV{qw(GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_CONFIG GIT_OBJECT_DIRECTORY
   GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_SHALLOW_FILE GIT_IMPLICIT_WORK_TREE GIT_PREFIX GIT_INTERNAL_SUPER_PREFIX
   GIT_NAMESPACE GIT_DIFF_OPTS GIT_EXTERNAL_DIFF GIT_REPLACE_REF_BASE
   GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS)};
@@ -91,7 +91,8 @@ sub status_options {
   my ($st, $names) = run(@g, 'config', '--name-only', '-z', '--get-regexp', '^filter\.');
   return @o if $st;
   for my $name (split /\0/, $names) {
-    my ($driver) = $name =~ /\Afilter\.(.+)\.[^.]+\z/s or next;
+    # a driver may have an empty name ([filter ""]), which filter= selects
+    my ($driver) = $name =~ /\Afilter\.(.*)\.[^.]+\z/s or next;
     die "a filter driver has a name git cannot be told to skip\n" if $driver =~ /[=\n]/;
     push @o, map { ('-c', "filter.$driver.$_") } 'clean=', 'smudge=', 'process=', 'required=false';
   }

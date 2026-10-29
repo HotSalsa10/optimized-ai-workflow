@@ -37,11 +37,13 @@
 # It writes no file and runs no program from the repository: git runs with
 # --no-optional-locks, without a file-system monitor and with every filter
 # program turned off (lib/git.pl), so even the index is left as it is (git
-# may still freshen the time stamp of a split index's shared file).
+# may still freshen the time stamp of a split index's shared file). git and
+# perl are found on PATH, which the session controls; gh only in absolute
+# PATH folders.
 set -u
 # perl reads bytes; these settings would change how it reads them, and the
 # library paths would let modules from elsewhere run inside it
-unset PERL_UNICODE PERL5OPT PERL5LIB PERLLIB
+unset PERL_UNICODE PERL5OPT PERL5LIB PERLLIB PERL_USE_UNSAFE_INC
 
 command -v perl >/dev/null 2>&1 || {
   echo "status: perl is not installed"

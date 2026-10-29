@@ -129,6 +129,25 @@ case "$got" in
   *) fail "a folder in the file's place is a problem" "$got" ;;
 esac
 rmdir "$cfile"
+conf_is "a byte-order mark at the start is dropped" '\357\273\277PRODUCT_PATHS=src\n' 'V PRODUCT_PATHS=src'
+printf 'PRODUCT_PATHS=src\n' >"$work/other.conf"
+rm -f "$cfile"
+ln -s "$work/other.conf" "$cfile"
+read_conf
+case "$got" in
+  "P .claude/method.conf: .claude or the file is a link; settings must be in the repository itself") pass "a method.conf that is a link is a problem" ;;
+  *) fail "a method.conf that is a link is a problem" "$got" ;;
+esac
+rm -f "$cfile"
+mv "$work/.claude" "$work/real-claude"
+ln -s "$work/real-claude" "$work/.claude"
+read_conf
+case "$got" in
+  "P .claude/method.conf: .claude or the file is a link"*) pass "a .claude folder that is a link is a problem" ;;
+  *) fail "a .claude folder that is a link is a problem" "$got" ;;
+esac
+rm -f "$work/.claude"
+mv "$work/real-claude" "$work/.claude"
 
 # 3. REQUIRES: read by the same parser, and the same floor as SPEC.md
 req=$(perl -e "require \$ARGV[0]; shift; $read_pl" "$conf_pl" requires "$root/method/scripts/method" 2>&1)

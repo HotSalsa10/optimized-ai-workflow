@@ -148,7 +148,17 @@ fi
 (cd "$w" && git config filter.hide.required true)
 st "$w"
 expect "a filter marked required is turned off too, and the edit is still seen" 1 "work: LOOK - 1 uncommitted"
-(cd "$w" && git config --unset filter.hide.clean && git config --unset filter.hide.required && rm -f .git/info/attributes && git checkout -q a.txt)
+st "$w" GIT_CONFIG=/dev/null
+expect "GIT_CONFIG from the caller cannot hide the repository's filters from the switch-off" 1 "work: LOOK - 1 uncommitted"
+(cd "$w" && git config --unset filter.hide.clean && git config --unset filter.hide.required)
+(cd "$w" && git config 'filter..clean' "$work/filter" && printf 'a.txt filter=\n' >.git/info/attributes)
+st "$w"
+if [ "$code" -eq 1 ] && [ ! -e "$work/filter-ran" ] && printf '%s\n' "$out" | grep -q '^work: LOOK - 1 uncommitted'; then
+  pass "a filter with an empty name never runs either"
+else
+  fail "a filter with an empty name never runs either" "$out"
+fi
+(cd "$w" && git config --unset 'filter..clean' && rm -f .git/info/attributes && git checkout -q a.txt)
 # an edit of the same size with its old time stamp put back, under settings
 # that tell git to trust size and time alone
 (cd "$w" && touch -t 202001010000 a.txt && git update-index -q --refresh && cp -p a.txt "$work/stamp")
@@ -308,10 +318,19 @@ cm "$vw" '\033[31mA subject that is far too long to show in full on one line of 
 (cd "$vw" && git push -q -f origin main 2>/dev/null)
 st "$vw"
 if [ "$code" -eq 1 ] && ! printf '%s\n' "$out" | grep -q "$(printf '\033')" \
-  && printf '%s\n' "$out" | grep -F -q 'the oldest, "\x1B[31mA subject that is far too long to show in full on on...": '; then
-  pass "a commit subject is shown escaped and cut to 60 characters"
+  && printf '%s\n' "$out" | grep -F -q 'the oldest, "\x1B[31mA subject that is far too long to show in full on...": '; then
+  pass "a commit subject is shown escaped and cut to 60 characters, never inside an escape"
 else
-  fail "a commit subject is shown escaped and cut to 60 characters" "$out"
+  fail "a commit subject is shown escaped and cut to 60 characters, never inside an escape" "$out"
+fi
+(cd "$vw" && git reset -q --hard "$accepted")
+cm "$vw" 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\033[31mmore\n'
+(cd "$vw" && git push -q -f origin main 2>/dev/null)
+st "$vw"
+if printf '%s\n' "$out" | grep -F -q 'the oldest, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...": '; then
+  pass "a subject cut where an escape starts loses the whole escape, not half of it"
+else
+  fail "a subject cut where an escape starts loses the whole escape, not half of it" "$out"
 fi
 (cd "$vw" && git reset -q --hard "$accepted" && git push -q -f origin main 2>/dev/null)
 (cd "$vw" && git checkout -q -b task && cm "$vw" 'wip\n' && git push -q origin task 2>/dev/null && git checkout -q main)
@@ -383,6 +402,14 @@ if [ "$code" -eq 1 ] && ! printf '%s\n' "$out" | grep -F -q -- "$tok" && printf 
 else
   fail "a key in a commit subject is masked" "$out"
 fi
+(cd "$xw" && git reset -q --hard HEAD~1)
+cm "$xw" "a subject of forty characters before it: $tok\n"
+st "$xw"
+if ! printf '%s\n' "$out" | grep -F -q 'ghp_abcdefghij' && printf '%s\n' "$out" | grep -F -q 'before it: ghp_...(40 chars)'; then
+  pass "a key that the 60-character cut would split is masked whole first"
+else
+  fail "a key that the 60-character cut would split is masked whole first" "$out"
+fi
 cwp=$(new_project) || abort_sandbox
 (cd "$cwp" && git clone -q remote.git copy 2>/dev/null)
 (cd "$cwp/w" && git config core.worktree "$cwp/copy")
@@ -444,6 +471,12 @@ st "$rw"
 expect "config problems are a LOOK, and the other areas still report" 1 \
   "config: LOOK - .claude/method.conf line 2: unknown key NOPE" "config: LOOK - .claude/method.conf line 3: is not KEY=VALUE" \
   "work: LOOK - 1 uncommitted entries" "repos: SKIPPED - .claude/method.conf has problems" "status: 2 areas need a look (config, work)"
+printf 'PRODUCT_PATHS=.\n' >"$work/elsewhere.conf"
+rm -f "$rw/.claude/method.conf"
+ln -s "$work/elsewhere.conf" "$rw/.claude/method.conf"
+st "$rw"
+expect "a method.conf that is a link is a config LOOK" 1 "config: LOOK - .claude/method.conf: .claude or the file is a link"
+rm -f "$rw/.claude/method.conf"
 printf 'A=1\nB=1\nC=1\nD=1\nE=1\n' >"$rw/.claude/method.conf"
 st "$rw"
 expect "more than 3 config problems are cut to 3 and a count" 1 "config: LOOK - and 2 more"

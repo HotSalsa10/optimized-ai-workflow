@@ -73,6 +73,7 @@ sub parse {
     $n++;
     my $problem = sub { push @problems, "$label line $n: $_[0]" };
     $l =~ s/\r?\n\z//;
+    $l =~ s/\A\xEF\xBB\xBF// if $n == 1;    # a byte-order mark some editors add
     next if $l =~ /\A[ \t]*(?:#|\z)/;
     if ($l =~ /[\x00-\x1F\x7F]/) { $problem->('holds a control character'); next }
     my ($k, $val) = $l =~ /\A([A-Za-z][A-Za-z0-9_]*)=(.*)\z/;
@@ -136,6 +137,9 @@ sub value_rule {
 sub read {
   my ($root) = @_;
   my $file = File::Spec->catfile($root, '.claude', 'method.conf');
+  # a link could stand for settings that a clone does not have
+  return ({}, ['.claude/method.conf: .claude or the file is a link; settings must be in the repository itself'])
+    if -l File::Spec->catfile($root, '.claude') || -l $file;
   return ({}, []) unless -e $file;
   return ({}, ['.claude/method.conf: not a regular file']) unless -f $file;
   return parse($file, '.claude/method.conf', \%CONF_KEYS);
