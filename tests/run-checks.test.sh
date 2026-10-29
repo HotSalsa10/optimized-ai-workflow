@@ -812,7 +812,86 @@ tsv "$fl2" "$(ck clean 'git clean -fdxq && echo "1 passed"')"
 run "$fl2"
 expect "a check that deletes .method/local stops the run and says what probably happened" 2 \
   "cannot create an output file in .method/local (did a check delete the folder"
-
+# 14. from review round 3
+r3=$(new_repo) || abort_sandbox
+# a test runner's string forms: Python's repr, Node's inspect, JSON, an escaped newline, grep's
+# highlighting inside a key; and a key found on the whole line and again after an escaped newline
+printf '%s\n' "'\\x1b[1m$ak\\x1b[0m'" "'\\x1B[33m$tok\\x1B[39m'" "\"\\u001b[31m$ph\"" "line\\n$ib" \
+  "'\\x1b[01;31m\\x1b[K$ak1\\x1b[m\\x1b[K$ak2'" "x\\ny $ak" >"$r3/out.txt"
+pgb="-----BEGIN PGP PRIV""ATE KEY BLOCK-----"
+pge="-----END PGP PRIV""ATE KEY BLOCK-----"
+printf '%s\n\nlQOYBF%s\n%s\n=Wx7z\n%s\nafter the key\n{"key":"%s\\n\\nlQOYBF%s\\n%s"}\n' "$pgb" "$(perl -e 'print "Ab12" x 15')" \
+  "$(perl -e 'print "Cd34" x 15')" "$pge" "$pgb" "$(perl -e 'print "Ef56" x 15')" "$pge" >"$r3/pgp.txt"
+(cd "$r3" && git add -A && git commit -q -m fixtures)
+# shellcheck disable=SC2016 # the checks' own shell expands these
+tsv "$r3" "$(ck glued "printf 'x\\033[31m%s\\033[0m\\nx\\033[31m%s\\nx\\033[1m%s\\n' $ak $ph $ib; exit 1")" \
+  "$(ck repr 'cat out.txt; exit 1')" "$(ck pgp 'cat pgp.txt; exit 1')" "$(ck pgpend 'sed -n "4,\$p" pgp.txt; exit 1')"
+run "$r3"
+leaked=""
+for v in "$ak" "$tok" "$ph" "$ib" "$ak2" Ab12Ab12 Cd34Cd34 Ef56Ef56; do
+  if printf '%s\n' "$out" | grep -F -q -- "$v" || grep -F -q -- "$v" "$logf"; then leaked="$leaked [$v]"; fi
+done
+if [ "$code" -eq 1 ] && [ -z "$leaked" ]; then
+  pass "a key, a phone number or an IBAN after a letter and a colour code, after an escape written as text, or in a PGP key block is masked on screen and in the log"
+else
+  fail "values after a letter and a colour code, after escapes written as text, or in a PGP key block are masked: shown in full:$leaked" "$out"
+fi
+expect "the shown lines keep what is not secret" 1 'x\x1B[31mAKIA...(20 chars)' "'\\x1B[33mghp_...(40 chars)\\x1B[39m'" 'line\n***(22 chars)' "  after the key"
+expect "the secrets check finds a key after an escape written as text, and a PGP private key, in a tracked file" 1 \
+  "out.txt:1: AWS access key" "out.txt:2: GitHub token" "out.txt:3: phone number" "out.txt:4: bank account number" "pgp.txt:1: private key"
+n=$(grep -c 'out.txt:6: AWS access key' "$logf")
+if [ "$n" -eq 1 ]; then pass "a key found on the whole line is not reported again from a piece of it"; else fail "a key found on the whole line is reported once, not $n times" "$(cat "$logf")"; fi
+(cd "$r3" && git rm -q out.txt pgp.txt && git commit -q -m "no fixtures")
+tsv "$r3" "$(ck unit 'echo "1 passed"')"
+(cd "$r3" && git update-index --skip-worktree src/a.txt)
+rm "$r3/src/a.txt"
+run "$r3"
+expect "a tracked file deleted and hidden by skip-worktree counts as uncommitted" 0 "on uncommitted changes"
+in_log "the log does not call a tree with a hidden deletion clean" "tree at start uncommitted changes"
+(cd "$r3" && git update-index --no-skip-worktree src/a.txt && git checkout -q src/a.txt)
+# shellcheck disable=SC2016 # the check's own shell expands it
+tsv "$r3" "$(ck pio 'echo "perlio=${PERLIO:-unset}"; echo "1 passed"')"
+run "$r3" PERLIO=:crlf
+expect "PERLIO=:crlf does not break the method's own reading" 0 "run-checks: PASS - 4 passed"
+in_log "the checks get the caller's PERLIO back" "perlio=:crlf"
+tsv "$r3" "rec<T>any<T>-<T>(?R)([0-9]+)<T>echo 1"
+run "$r3"
+expect "a count pattern that fails when it is matched stops the run and names the line" 2 \
+  "checks/main.tsv line 1: the count pattern fails when it is matched"
+printf '# nothing accepted\n' >"$work/allow.txt"
+ln -s "$work/allow.txt" "$r3/checks/scan-allow.txt"
+tsv "$r3" "$(ck unit 'echo "1 passed"')"
+run "$r3"
+expect "a checks/scan-allow.txt that is a link fails the secrets check" 1 "secrets: FAIL - the scan itself did not run" \
+  "checks/scan-allow.txt is a link or not a regular file"
+(cd "$r3" && git rm -q checks/scan-allow.txt && git commit -q -m "no link")
+printf 'src/ig*\n' >"$r3/.gitignore"
+(cd "$r3" && git add .gitignore && git commit -q -m ignore)
+if : >"$r3/src/ig
+x" 2>/dev/null; then
+  # shellcheck disable=SC2016 # perl code: perl expands it
+  tsv "$r3" "$(ck nl 'perl -e '"'"'open my $f, ">", "src/n\nl" or die'"'"' && echo "1 passed"')"
+  run "$r3"
+  expect "a file name holding a newline is one escaped line in fresh-clone and tree-unchanged" 1 \
+    "ignored by git, so not in a clone: src/ig\x0Ax" "changed during the run: src/n\x0Al"
+  rm -f "$r3/src/ig
+x" "$r3/src/n
+l"
+else
+  skip "a file name holding a newline: this file system does not allow one"
+fi
+tsv "$r3" "$(ck unit 'echo "1 passed"')"
+printf '#!/bin/sh\n: >"%s/hook-ran"\n' "$work" >"$r3/.git/hooks/post-index-change"
+chmod +x "$r3/.git/hooks/post-index-change"
+touch -t 202001010000 "$r3/src/a.txt"
+cp "$r3/.git/index" "$work/index.before"
+run "$r3"
+if [ "$code" -eq 0 ] && [ ! -e "$work/hook-ran" ] && cmp -s "$r3/.git/index" "$work/index.before"; then
+  pass "with a file's stat data out of date, run-checks writes no index and runs no index hook"
+else
+  fail "with a file's stat data out of date, run-checks writes no index and runs no index hook: exit $code" "$out
+$(ls "$work")"
+fi
 
 em=$(new_sandbox_dir) || abort_sandbox
 repos="$repos $em"

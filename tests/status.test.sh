@@ -188,7 +188,8 @@ expect "a file marked skip-worktree that is on disk is a LOOK" 1 "1 files are ma
 (cd "$w" && git update-index --skip-worktree a.txt)
 rm "$w/a.txt"
 st "$w"
-expect "a skip-worktree file that is not on disk (a sparse checkout) is not a LOOK" 0 "work: PASS"
+expect "a tracked file deleted and hidden by skip-worktree (or left out by a sparse checkout) is a LOOK" 1 \
+  "work: LOOK - 1 tracked files are not on disk and are marked skip-worktree, so git does not show them as deleted"
 (cd "$w" && git update-index --no-skip-worktree a.txt && git checkout -q a.txt)
 st "$w" GIT_INDEX_FILE="$work/no-index"
 expect "GIT_INDEX_FILE from the caller does not change what status reads" 0 "work: PASS"
@@ -293,6 +294,8 @@ st "$vw"
 expect "a commit after the first verdict without one is a LOOK naming it and the reason" 1 \
   "verdicts: LOOK - 1 commits on refs/remotes/origin/main since " "lack a valid Review-Verdict line: $bad1; the oldest, \"No trailer here\": no line starts with Review-Verdict:" \
   "accept them by moving VERDICTS_FROM in .claude/method.conf through a reviewed change; never rewrite main"
+st "$vw" PERLIO=:crlf
+expect "PERLIO=:crlf from the caller adds no CR to what status reads back" 1 "\"No trailer here\": no line starts"
 printf 'VERDICTS_FROM=%s\n' "$(cd "$vw" && git rev-parse HEAD)" >"$vw/.claude-method.conf.tmp"
 mkdir -p "$vw/.claude"
 mv "$vw/.claude-method.conf.tmp" "$vw/.claude/method.conf"
@@ -344,6 +347,10 @@ expect "main is found by its full name, past a branch and a tag that shadow it" 
 printf 'VERDICTS_FROM=%s\n' "$(cd "$vw" && git rev-parse task)" >"$vw/.claude/method.conf"
 st "$vw"
 expect "VERDICTS_FROM not on main is a LOOK" 1 "verdicts: LOOK - VERDICTS_FROM in .claude/method.conf is not on refs/remotes/origin/main's first-parent history"
+printf 'VERDICTS_FROM=%s\n' "$(cd "$vw" && git rev-parse origin/main)" >"$vw/.claude/method.conf"
+st "$vw"
+expect "VERDICTS_FROM at main's tip leaves nothing to check: SKIPPED, not a pass" 1 \
+  "verdicts: SKIPPED - no commit on refs/remotes/origin/main after $(cd "$vw" && git rev-parse --short=7 origin/main) yet"
 (cd "$vw" && git checkout -q .claude/method.conf)
 n=$(new_project) || abort_sandbox
 nw="$n/w"
@@ -680,7 +687,31 @@ else
   fail "a committed folder laid out like a bare repository is never used as one" "$out"
 fi
 
-# 9. read-only
+# 9. from review round 3: a submodule, and a repository made with --separate-git-dir
+sm=$(new_project) || abort_sandbox
+smw="$sm/w"
+lib=$(new_project) || abort_sandbox
+(
+  cd "$smw" || exit 1
+  git -c protocol.file.allow=always submodule -q add -b main "$lib/remote.git" lib 2>/dev/null
+  mkdir -p .claude
+  printf 'REPOS=lib\n' >.claude/method.conf
+  git add -A
+  git commit -q -m "Add lib" -m "Review-Verdict: approve"
+  git push -q origin main 2>/dev/null
+) || fail "could not build the submodule project"
+st "$smw/lib"
+expect "status inside a submodule reads its work area" 0 "work: PASS - nothing uncommitted, nothing unpushed"
+st "$smw"
+expect "a REPOS entry that is a submodule is read" 0 "repo lib: PASS - nothing uncommitted, nothing unpushed"
+echo dirty >>"$smw/lib/a.txt"
+st "$smw/lib"
+expect "a change inside a submodule is seen there" 1 "work: LOOK - 1 uncommitted entries"
+(cd "$lib" && git clone -q --separate-git-dir "$lib/sep.git" remote.git sep 2>/dev/null) || fail "could not clone with --separate-git-dir"
+st "$lib/sep"
+expect "a clone made with --separate-git-dir is read" 0 "work: PASS - nothing uncommitted, nothing unpushed"
+
+# 10. read-only
 ro=$(new_project) || abort_sandbox
 rw2="$ro/w"
 (cd "$rw2" && git config core.trustctime false && git config core.fsmonitor "$work/fsmonitor" && git config core.untrackedCache true)

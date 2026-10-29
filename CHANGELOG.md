@@ -29,11 +29,11 @@ Nothing yet. Release 1 is being built.
 - `.claude/method.conf` settings (PRODUCT_PATHS, LOCAL_ONLY, REPOS, VERDICTS_FROM) with one reader, `lib/conf.pl`, and `REQUIRES` with the Claude Code floor.
 - The commit trailer check, `lib/verdicts.pl check-trailer`, used by status.
 - Shared helpers `lib/git.pl` (every git call, with the settings that could change what git shows turned off) and `lib/esc.pl` (the one line escaper), taken out of the review packet with its output unchanged. Later in the step the escaper also learned to show the CI runner's command form `##[` as `#\x23[`, so the packet shows it that way too and says so in its header, and every git call refuses to use a folder laid out like a repository.
-- Tests: 3 new test files and 21 more trailer cases, 325 test cases in all.
+- Tests: 3 new test files and 25 more trailer cases, 345 test cases in all.
 
 ### Changed (step 3)
 
-- The secret scan moved into the method (`method/scripts/method/lib/secrets.pl`), lists the tracked files itself, and runs about 7 times faster with the same findings. Its mask (`--mask`) now covers the whole of a phone number or IBAN that starts like a shorter one (it used to leave the last digits), and a key, phone number or IBAN right after a terminal colour code.
+- The secret scan moved into the method (`method/scripts/method/lib/secrets.pl`), lists the tracked files itself, and runs about 7 times faster with the same findings. Its mask (`--mask`) now covers the whole of a phone number or IBAN that starts like a shorter one (it used to leave the last digits), and a key, phone number or IBAN right after a terminal colour code, or right after an escape written as text, as a test runner prints a string (`\x1b[1m`, `\u001b[31m`, `\n`). The scan also finds a key after such an escape in a file, and an armored PGP private key.
 
 ### Changed (step 1b, from the step 1 security check)
 

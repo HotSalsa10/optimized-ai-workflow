@@ -79,6 +79,8 @@ sub parse {
     my ($k, $val) = $l =~ /\A([A-Za-z][A-Za-z0-9_]*)=(.*)\z/;
     if (!defined $k) { $problem->('is not KEY=VALUE'); next }
     my $kind = $keys->{$k};
+    # a name with digits, or a long one, may be a pasted secret that ends in =
+    if (!$kind && $k !~ /\A[A-Za-z_]{1,30}\z/) { $problem->('an unknown key, not shown: it holds digits or is long, so it may be a pasted value'); next }
     if (!$kind) { $problem->("unknown key $k (a typo, or a key from a newer method version)"); next }
     if ($val eq '') { $problem->("$k has no value"); next }
     if ($val =~ /\A |[ ]\z/) { $problem->("$k: the value starts or ends with a space"); next }

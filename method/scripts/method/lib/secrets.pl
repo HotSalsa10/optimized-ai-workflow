@@ -82,7 +82,7 @@ my @token_rules = (
   [qr/(?<![A-Za-z0-9])AKIA[0-9A-Z]{16}(?![0-9A-Z])/, 'AWS access key'],
   [qr/(?<![A-Za-z0-9])AIza[0-9A-Za-z_-]{35}(?![0-9A-Za-z_-])/, 'Google API key'],
   [qr/(?<![A-Za-z0-9])xox[abprs]-[A-Za-z0-9-]{10,}/, 'Slack token'],
-  [qr/-----BEGIN (?:[A-Z]+ )*PRIVATE KEY-----/, 'private key'],
+  [qr/-----BEGIN (?:[A-Z]+ )*PRIVATE KEY(?: BLOCK)?-----/, 'private key'],
 );
 # the same rules with a capture group, compiled once
 my @token_cap = map { qr/($_->[0])/ } @token_rules;
@@ -205,8 +205,20 @@ sub mask_all {
   $s =~ s/($alt)/mask($1, 0)/ge;
   return $s;
 }
-my $pem_begin = qr/-----BEGIN (?:[A-Z]+ )*PRIVATE KEY-----/;
-my $pem_end = qr/-----END (?:[A-Z]+ )*PRIVATE KEY-----/;
+# (BLOCK: an armored PGP private key)
+my $pem_begin = qr/-----BEGIN (?:[A-Z]+ )*PRIVATE KEY(?: BLOCK)?-----/;
+my $pem_end = qr/-----END (?:[A-Z]+ )*PRIVATE KEY(?: BLOCK)?-----/;
+# An escape written as text, as a test runner prints a string (Python's
+# '\x1b[1m', Node's '\x1B[33m', JSON's "\u001b[31m", '\033[0m', '\n',
+# cat -v's ^[[K), with the rest of a colour code after it. A word right
+# after one has a letter before it, which hides a key from every rule.
+my $text_code = qr/(?:\\(?:x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|u\{[0-9A-Fa-f]{1,6}\}|[0-7]{1,3}|[abefnrtv])|\^\[)(?:\[[0-?]*[ -\/]*[@-~])?/;
+# plain TEXT: TEXT with every terminal code and every escape written as
+# text taken out
+sub plain {
+  (my $s = Esc::plain($_[0])) =~ s/$text_code//g;
+  return $s;
+}
 sub mask_pass {
   my ($s) = @_;
   # a whole private key on one line (as JSON writes it) is masked to its end
@@ -223,20 +235,21 @@ sub mask_pass {
 
 # mask_text TEXT: TEXT with every key, credential, personal email address,
 # phone number and IBAN masked. The whole text is masked first; then each
-# piece between escapes and terminal codes, because a check's output may be
-# escaped already, and an escape such as \x09 or a colour code such as
-# ESC[31m ends a word without leaving a space. The terminal codes are
-# masked too, so a key inside one (a link's address) is not let through.
-# Last, a key with a code inside it (grep's highlighting, a coloured diff)
-# is whole only with the codes taken out: when that copy still holds
-# something to mask, the text is shown without its codes, masked.
+# piece between escapes written as text and terminal codes, because a
+# check's output may be escaped already, and an escape such as \x09, a
+# colour code such as ESC[31m or one written as text such as \x1b[31m ends
+# a word without leaving a space. The terminal codes are masked too, so a
+# key inside one (a link's address) is not let through. Last, a key with a
+# code inside it (grep's highlighting, a coloured diff) is whole only with
+# the codes taken out: when that copy still holds something to mask, the
+# text is shown without its codes, masked.
 sub mask_text {
   my ($t) = @_;
   my $s = mask_pass($t);
-  $s = join '', map { /^\\x[0-9A-F]{2}$/ ? $_ : mask_pass($_) } split /(\\x[0-9A-F]{2}|$term_code)/, $s;
-  my $plain = Esc::plain($s);
+  $s = join '', map { /\A$text_code\z/ ? $_ : mask_pass($_) } split /($text_code|$term_code)/, $s;
+  my $plain = plain($s);
   return $s if $plain eq $s || mask_pass($plain) eq $plain;
-  return mask_text(Esc::plain($t));
+  return mask_text(plain($t));
 }
 
 # --mask: a filter for other tools' output. A private key's body lines hold
@@ -246,7 +259,8 @@ sub mask_text {
 # they were the end of a key whose BEGIN line came before this input (a
 # window of a longer output), and they are masked too.
 if ($mask_mode) {
-  my $body = qr/\A[ \t]*[A-Za-z0-9+\/=]{16,}[ \t]*\z/;
+  # (=XXXX: the checksum line before a PGP key's END line)
+  my $body = qr/\A[ \t]*(?:[A-Za-z0-9+\/=]{16,}|=[A-Za-z0-9+\/]{4})[ \t]*\z/;
   my ($in_key, @held) = (0);
   my $out = sub { say_line('  ' . $_[0]) };
   while (my $line = <STDIN>) {
@@ -304,6 +318,10 @@ if ($repo_mode) {
 }
 
 # The allowlist: PATH<TAB>ID<TAB>REASON. Errors name the line, never its text.
+# A link could point at a file a clone does not have, accepting findings
+# here that CI reports.
+die "secrets: $allow_file is a link or not a regular file; it must be a file in the repository itself\n"
+  if -l $allow_file || (-e _ && !-f _);
 my (%allow, @allow_lines);
 if (-f $allow_file) {
   open my $a, '<', $allow_file or die "secrets: cannot read $allow_file\n";
@@ -384,10 +402,16 @@ sub rules_on {
   $hit->('bank account number (IBAN)', $_, 0) for iban_hits($line);
 }
 
-# Every rule on one line of text.
+# Every rule on one line of text. A key right after an escape written as
+# text (print("\x1b[1mAKIA...")) has a letter before it, so the pieces
+# between such escapes are searched too, for what the whole line did not
+# show.
 sub scan_line {
   my ($path, $where, $line, $seen, $skip_seen) = @_;
-  rules_on($line, sub { report($path, $where, @_, $seen, $skip_seen) });
+  my %here;
+  rules_on($line, sub { $here{ $_[1] } = 1; report($path, $where, @_, $seen, $skip_seen) });
+  return unless $line =~ $text_code;
+  rules_on($_, sub { report($path, $where, @_, $seen, $skip_seen) unless $here{ $_[1] }++ }) for split /$text_code/, $line;
 }
 
 # The runs of printable bytes in raw content, with every rule or keys only.
@@ -485,10 +509,13 @@ if ($staged) {
   my %differs;
   {
     local $/ = "\0";
-    # no filter program runs and no stat shortcut hides an edit (lib/git.pl)
-    my $d = git_pipe(Git::status_options(), 'diff', '--name-only', '-z');
+    # no filter program runs and no stat shortcut hides an edit (lib/git.pl);
+    # diff-files never refreshes or writes the index, so no hook runs (a
+    # file whose stat data is out of date is listed too, and only adds its
+    # staged copy to the scan)
+    my $d = git_pipe(Git::status_options(), 'diff-files', '--name-only', '-z');
     while (my $p = <$d>) { chomp $p; $differs{$p} = 1 }
-    close $d or die "secrets: git diff failed\n";
+    close $d or die "secrets: git diff-files failed\n";
     # files marked assume-unchanged (lower-case tag) or skip-worktree (S), which
     # git diff does not compare
     my $v = git_pipe('ls-files', '-v', '-z');

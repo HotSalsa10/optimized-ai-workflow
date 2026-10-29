@@ -39,9 +39,10 @@
 # is not the folder it is built from. Stored files, folders and the commits
 # after the merge base are checked against their ids as they are read.
 set -u
-# perl reads bytes; these settings would change how it reads them, and the
-# library paths would let modules from elsewhere run inside the builder
-unset PERL_UNICODE PERL5OPT PERL5LIB PERLLIB PERL_USE_UNSAFE_INC
+# perl reads bytes; these settings would change how it reads and writes
+# them, and the library paths would let modules from elsewhere run inside
+# the builder
+unset PERL_UNICODE PERL5OPT PERL5LIB PERLLIB PERL_USE_UNSAFE_INC PERLIO
 
 command -v perl >/dev/null 2>&1 || {
   echo "review-packet: perl is not installed" >&2

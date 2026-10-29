@@ -89,10 +89,12 @@ sub read_tsv {
       local $SIG{__WARN__} = sub { };
       my $re = eval { qr/$count/ };
       if (!$re) { $problem->('the count pattern does not compile (code inside a pattern is not allowed)'); next }
-      if ('' =~ $re) { $problem->('the count pattern matches an empty line'); next }
-      # with the empty line ruled out, only the empty branch can match here,
-      # and every capture group comes back undefined
-      my @caps = ('' =~ /$re|/);
+      # with the empty line ruled out, only the empty branch of the second
+      # match can match, and every capture group comes back undefined; a
+      # pattern can also fail when it is matched (endless recursion, say)
+      my ($empty, @caps);
+      if (!eval { $empty = '' =~ $re; @caps = ('' =~ /$re|/); 1 }) { $problem->('the count pattern fails when it is matched'); next }
+      if ($empty) { $problem->('the count pattern matches an empty line'); next }
       if (@caps != 1 || defined $caps[0]) { $problem->('the count pattern needs exactly one capture group, around the number'); next }
       if ($command !~ /\S/) { $problem->('the command is empty'); next }
       $seen{$id} = "$label line $n";
@@ -245,7 +247,7 @@ sub count_in {
 # the environment a project check runs in
 sub check_env {
   my %e = %CALLER_ENV;
-  for my $v (qw(PERL_UNICODE PERL5OPT PERL5LIB PERLLIB PERL_USE_UNSAFE_INC)) {
+  for my $v (qw(PERL_UNICODE PERL5OPT PERL5LIB PERLLIB PERL_USE_UNSAFE_INC PERLIO)) {
     delete $e{$v};
     $e{$v} = $e{"METHOD_CALLER_$v"} if exists $e{"METHOD_CALLER_$v"};
     delete $e{"METHOD_CALLER_$v"};
@@ -256,9 +258,10 @@ sub check_env {
 # fingerprint: what a check must leave as it found it. HEAD's commit and the
 # branch it is on, the commit of every branch and tag, and every path git
 # does not ignore that is changed, untracked, or marked so git does not
-# compare it (assume-unchanged, or skip-worktree with the file on disk),
-# each with its mode and the SHA-256 of what is on disk (.method/local left
-# out). git status runs with no filter program and no stat shortcut
+# compare it (assume-unchanged, or skip-worktree, also with the file gone
+# from disk: a sparse checkout, or a deletion hidden that way), each with
+# its mode and the SHA-256 of what is on disk (.method/local left out). git
+# status runs with no filter program and no stat shortcut
 # (Git::status_options).
 sub fingerprint {
   require Digest::SHA;    # loaded here, so status.pl can load this file without it
@@ -276,7 +279,7 @@ sub fingerprint {
   for my $rec (split /\0/, Git::ok('ls-files', '-v', '-z')) {
     my ($tag, $path) = split / /, $rec, 2;
     next unless defined $path;
-    push @paths, [$path, "flag $tag"] if $tag =~ /\A[a-z]\z/ || ($tag eq 'S' && (-e $path || -l $path));
+    push @paths, [$path, "flag $tag"] if $tag =~ /\A[a-z]\z/ || $tag eq 'S';
   }
   my %e;
   for my $p (@paths) {
@@ -321,7 +324,8 @@ sub check_secrets {
   write_lines($out, @lines);
   if ($st || !$result || !defined $n{EXAMINED}) {
     my $why = $st & 127 ? 'killed by signal ' . ($st & 127) : 'exit ' . ($st >> 8);
-    return { status => 'FAIL', kind => 'exit', examined => '-', detail => "the scan itself did not run ($why)" };
+    return { status => 'FAIL', kind => 'exit', examined => '-',
+      detail => $st ? "the scan itself did not run ($why)" : 'the scan ran, but its output could not be read' };
   }
   my ($status, $detail) = @$result;
   return { status => 'PASS', kind => 'pass', examined => $n{EXAMINED}, detail => $detail } if $status eq 'PASS';
@@ -363,7 +367,8 @@ sub check_fresh_clone {
     if (grep { $f =~ $_ } @lo) { $aside++; next }
     push @left, $f;
   }
-  write_lines($out, (map {"ignored by git, so not in a clone: $_"} @left),
+  # a name may hold a line break, which would make it look like two lines
+  write_lines($out, (map { 'ignored by git, so not in a clone: ' . Esc::line($_) } @left),
     (map {"a PRODUCT_PATHS entry that matches no tracked file: $_"} @typo));
   my $examined = keys %tracked;
   if (@left || @typo) {
@@ -382,7 +387,7 @@ sub check_tree_unchanged {
   my $after = fingerprint();
   my %all = (%{ $before->{e} }, %{ $after->{e} });
   my @changed = sort grep { ($before->{e}{$_} || '') ne ($after->{e}{$_} || '') } keys %all;
-  write_lines($out, map {"changed during the run: $_"} @changed);
+  write_lines($out, map { 'changed during the run: ' . Esc::line($_) } @changed);
   my %refs_before = map { split / /, $_, 2 } split /\n/, $before->{refs};
   my %refs_after = map { split / /, $_, 2 } split /\n/, $after->{refs};
   # a branch that moved, appeared or went, or a tag that moved or went (a

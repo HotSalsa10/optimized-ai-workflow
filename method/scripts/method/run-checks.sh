@@ -72,15 +72,17 @@ set -u
 # them, and the library paths would let modules from elsewhere run inside
 # it. The project's checks get the caller's values back (lib/checks.pl).
 # PERL_USE_UNSAFE_INC would let perl load a missing module from the
-# repository's own folder.
+# repository's own folder, and PERLIO=:crlf would end every line perl
+# writes in CR.
 unset METHOD_CALLER_PERL_UNICODE METHOD_CALLER_PERL5OPT METHOD_CALLER_PERL5LIB METHOD_CALLER_PERLLIB
-unset METHOD_CALLER_PERL_USE_UNSAFE_INC
+unset METHOD_CALLER_PERL_USE_UNSAFE_INC METHOD_CALLER_PERLIO
 if [ "${PERL_UNICODE+set}" = set ]; then export METHOD_CALLER_PERL_UNICODE="$PERL_UNICODE"; fi
 if [ "${PERL5OPT+set}" = set ]; then export METHOD_CALLER_PERL5OPT="$PERL5OPT"; fi
 if [ "${PERL5LIB+set}" = set ]; then export METHOD_CALLER_PERL5LIB="$PERL5LIB"; fi
 if [ "${PERLLIB+set}" = set ]; then export METHOD_CALLER_PERLLIB="$PERLLIB"; fi
 if [ "${PERL_USE_UNSAFE_INC+set}" = set ]; then export METHOD_CALLER_PERL_USE_UNSAFE_INC="$PERL_USE_UNSAFE_INC"; fi
-unset PERL_UNICODE PERL5OPT PERL5LIB PERLLIB PERL_USE_UNSAFE_INC
+if [ "${PERLIO+set}" = set ]; then export METHOD_CALLER_PERLIO="$PERLIO"; fi
+unset PERL_UNICODE PERL5OPT PERL5LIB PERLLIB PERL_USE_UNSAFE_INC PERLIO
 
 command -v perl >/dev/null 2>&1 || {
   echo "run-checks: FAIL - perl is not installed; the run stopped"

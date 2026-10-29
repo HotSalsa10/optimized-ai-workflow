@@ -7,10 +7,11 @@
 # One line per area, "<area>: PASS|LOOK|SKIPPED - <detail>". LOOK means a
 # person should look; status never says FAIL and never blocks anything.
 #   config       problems in .claude/method.conf (only when there are any)
-#   work         uncommitted changes, files git is told not to compare, a
-#                merge, rebase, cherry-pick, revert or bisect in progress,
-#                stashes and commits not pushed (as of the last fetch), in
-#                this repository and each of its linked worktrees
+#   work         uncommitted changes, files git is told not to compare (also
+#                ones gone from disk), a merge, rebase, cherry-pick, revert
+#                or bisect in progress, stashes and commits not pushed (as
+#                of the last fetch), in this repository and each of its
+#                linked worktrees
 #   verdicts     every commit on main's first-parent history since the first
 #                one with a Review-Verdict line (or after VERDICTS_FROM)
 #                ends with a valid trailer (lib/verdicts.pl check-trailer)
@@ -41,9 +42,9 @@
 # perl are found on PATH, which the session controls; gh only in absolute
 # PATH folders.
 set -u
-# perl reads bytes; these settings would change how it reads them, and the
-# library paths would let modules from elsewhere run inside it
-unset PERL_UNICODE PERL5OPT PERL5LIB PERLLIB PERL_USE_UNSAFE_INC
+# perl reads bytes; these settings would change how it reads and writes
+# them, and the library paths would let modules from elsewhere run inside it
+unset PERL_UNICODE PERL5OPT PERL5LIB PERLLIB PERL_USE_UNSAFE_INC PERLIO
 
 command -v perl >/dev/null 2>&1 || {
   echo "status: perl is not installed"

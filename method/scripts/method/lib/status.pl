@@ -146,6 +146,12 @@ sub work_lines {
   my @g = ('-C', $dir);
   my @wts = worktrees(@g);
   die "git worktree list gave nothing\n" unless @wts;
+  # for a submodule, or a repository made with --separate-git-dir, git
+  # lists the repository's own folder as the main working tree; when DIR is
+  # the main working tree (its git folder is the shared one), DIR is used
+  my ($gd, $cd) = map { [stat File::Spec->rel2abs($_, $dir)] } split /\n/,
+    Git::ok(@g, 'rev-parse', '--git-dir', '--git-common-dir');
+  $wts[0]{worktree} = $dir if !$wts[0]{bare} && @$gd && @$cd && $gd->[0] == $cd->[0] && $gd->[1] == $cd->[1];
   my (@parts, @linked);
   for my $i (0 .. $#wts) {
     my $wt = $wts[$i];
@@ -161,14 +167,19 @@ sub work_lines {
       '--untracked-files=normal', '--ignore-submodules=none');
     my $n = () = $st =~ /\0/g;
     push @parts, "$where$n uncommitted entries (a new folder counts once)" if $n;
-    my $marked = 0;
+    my ($marked, $missing) = (0, 0);
     for my $e (split /\0/, Git::ok(@wg, 'ls-files', '-v', '-z')) {
       my ($tag, $path) = split / /, $e, 2;
       next unless defined $path;
-      $marked++ if $tag =~ /\A[a-z]\z/ || ($tag eq 'S' && (-e "$wt->{worktree}/$path" || -l "$wt->{worktree}/$path"));
+      if ($tag =~ /\A[a-z]\z/) { $marked++; next }
+      next unless $tag eq 'S';
+      if (-e "$wt->{worktree}/$path" || -l "$wt->{worktree}/$path") { $marked++ } else { $missing++ }
     }
     push @parts, "$where$marked files are marked so git does not compare them (assume-unchanged or skip-worktree)"
       if $marked;
+    # a deletion hidden this way would drop a test from every local run
+    push @parts, "$where$missing tracked files are not on disk and are marked skip-worktree, so git does not show them"
+      . ' as deleted (a sparse checkout does this too)' if $missing;
     my @what = (['MERGE_HEAD', 'a merge'], ['rebase-merge', 'a rebase'], ['rebase-apply', 'a rebase or am'],
       ['CHERRY_PICK_HEAD', 'a cherry-pick'], ['REVERT_HEAD', 'a revert'], ['BISECT_LOG', 'a bisect']);
     my @paths = split /\n/, Git::ok(@wg, 'rev-parse', map { ('--git-path', $_->[0]) } @what);
@@ -299,6 +310,7 @@ sub verdicts_lines {
     $shallow = '';    # the whole range after VERDICTS_FROM is here
     @range = @ids[0 .. $at - 1];
     $since = 'after ' . short($conf->{VERDICTS_FROM});
+    return ['verdicts', 'SKIPPED', "no commit on $ref $since yet, so there was nothing to check"] unless @range;
   } else {
     my $oldest;
     for my $i (reverse 0 .. $#ids) {

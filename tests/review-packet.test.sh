@@ -265,6 +265,17 @@ else
 fi
 cp "$work/out" "$work/std.packet"
 std_token=$(sed -n '1s/^=== PACKET HEADER \([0-9a-f]\{16\}\) ===$/\1/p' "$work/std.packet")
+if grep -F -q 'and two # signs followed by [ (a CI runner command) as #\x23[.' "$work/std.packet"; then
+  pass "the header says in words what #\\x23[ stands for, so the escaper leaves the sentence alone"
+else
+  fail "the header says in words what #\\x23[ stands for" "$(sed -n '1,16p' "$work/std.packet")"
+fi
+(cd "$std" && env PERLIO=:crlf bash "$packet" --base main --criteria "$work/crit.txt" --checks "$work/checks.txt") >"$work/crlf.packet" 2>&1
+if cmp -s "$work/crlf.packet" "$work/std.packet"; then
+  pass "PERLIO=:crlf from the caller changes nothing in the packet"
+else
+  fail "PERLIO=:crlf from the caller changes nothing in the packet" "$(diff "$work/std.packet" "$work/crlf.packet" | head -10)"
+fi
 
 # the token is made from the packet's content: other criteria, another token
 printf 'other criteria\n' >"$work/crit2.txt"
