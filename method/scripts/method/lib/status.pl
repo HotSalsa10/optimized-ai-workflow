@@ -139,10 +139,11 @@ sub worktrees {
   return @w;
 }
 
-# work_lines AREA GIT...: the work report for one repository; GIT holds the
-# options that point git at it
+# work_lines AREA DIR: the work report for the repository whose working
+# tree has its top at DIR
 sub work_lines {
-  my ($area, @g) = @_;
+  my ($area, $dir) = @_;
+  my @g = ('-C', $dir);
   my @wts = worktrees(@g);
   die "git worktree list gave nothing\n" unless @wts;
   my (@parts, @linked);
@@ -477,7 +478,7 @@ sub repo_lines {
   my @g = ('-C', $path);
   my ($st, $out) = Git::run(@g, 'rev-parse', '--is-inside-work-tree', '--show-prefix');
   return [$area, 'LOOK', 'not the top folder of a git working tree'] unless !$st && $out eq "true\n\n";
-  return work_lines($area, @g);
+  return work_lines($area, $path);
 }
 
 sub main {
@@ -512,7 +513,7 @@ sub main {
     say_area('config', 'LOOK', $_) for @$problems[0 .. ($#$problems < 2 ? $#$problems : 2)];
     say_area('config', 'LOOK', 'and ' . (@$problems - 3) . ' more') if @$problems > 3;
   }
-  area('work', sub { work_lines('work', '-C', $top) });
+  area('work', sub { work_lines('work', $top) });
   area('verdicts', sub { verdicts_lines($conf) });
   area('records', \&records_lines);
   area('claude-code', \&claude_code_lines);

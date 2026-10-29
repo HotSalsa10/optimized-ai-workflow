@@ -361,26 +361,33 @@ sub report {
   $bad++;
 }
 
-# Every rule on one line of text.
-sub scan_line {
-  my ($path, $where, $line, $seen, $skip_seen) = @_;
+# rules_on TEXT HIT: every rule on TEXT; HIT is called with the kind, the
+# text found and whether it is a key or token
+sub rules_on {
+  my ($line, $hit) = @_;
   for my $i (0 .. $#token_rules) {
-    while ($line =~ /$token_cap[$i]/g) { report($path, $where, $token_rules[$i][1], $1, 1, $seen, $skip_seen) }
+    while ($line =~ /$token_cap[$i]/g) { $hit->($token_rules[$i][1], $1, 1) }
   }
   while ($line =~ /$quoted_cred/g) {
     my ($name, $value) = ($2, $3);
-    report($path, $where, 'hard-coded credential', $value, 0, $seen, $skip_seen) if cred_is_real($name, $value);
+    $hit->('hard-coded credential', $value, 0) if cred_is_real($name, $value);
   }
   if ($line =~ /$env_cred/) {
     my ($name, $value) = ($2, $3);
-    report($path, $where, 'credential in an env-style assignment', $value, 0, $seen, $skip_seen) if cred_is_real($name, $value);
+    $hit->('credential in an env-style assignment', $value, 0) if cred_is_real($name, $value);
   }
   while ($line =~ /($email_re)/g) {
     my $e = $1;
-    report($path, $where, 'email address (personal data)', $e, 0, $seen, $skip_seen) unless email_ok($e);
+    $hit->('email address (personal data)', $e, 0) unless email_ok($e);
   }
-  report($path, $where, 'phone number (personal data)', $_, 0, $seen, $skip_seen) for phone_hits($line);
-  report($path, $where, 'bank account number (IBAN)', $_, 0, $seen, $skip_seen) for iban_hits($line);
+  $hit->('phone number (personal data)', $_, 0) for phone_hits($line);
+  $hit->('bank account number (IBAN)', $_, 0) for iban_hits($line);
+}
+
+# Every rule on one line of text.
+sub scan_line {
+  my ($path, $where, $line, $seen, $skip_seen) = @_;
+  rules_on($line, sub { report($path, $where, @_, $seen, $skip_seen) });
 }
 
 # The runs of printable bytes in raw content, with every rule or keys only.
