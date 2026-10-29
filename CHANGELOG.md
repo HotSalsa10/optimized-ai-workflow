@@ -18,9 +18,9 @@ Nothing yet. Release 1 is being built.
 
 ### Added (step 2)
 
-- The method's first files, under `method/scripts/method/`: a JSON helper (`lib/json.pl get`), the verdict vocabulary (`verdicts.txt`) with its one reader, and `review-packet.sh`, which builds the one file a reviewer or security checker is given. The packet holds the criteria, the project's incident checklist from the merge base, the check output and the committed diff, never the author's own account. Git settings, file attributes, index flags and hand-changed stored files and folders cannot make it show something other than the commit, and its section markers carry a token no content can copy. The kinds of file it leaves out of the diff are listed by name, with their line counts.
+- The method's first files, under `method/scripts/method/`: a JSON helper (`lib/json.pl get`), the verdict vocabulary (`verdicts.txt`) with its one reader, and `review-packet.sh`, which builds the one file a reviewer or security checker is given. The packet holds the criteria, the project's incident checklist from the merge base, the check output and the committed diff, never the author's own account. Git settings, file attributes, index flags and hand-changed stored files, folders and commits cannot make it show something other than the commit, and its section markers carry a token no content can copy. The kinds of file it leaves out of the diff are listed by name, with their line counts.
 - validate.sh's perl syntax check also covers `method/scripts/`.
-- Tests: 3 new test files with 187 test cases, and 1 new plant.
+- Tests: 3 new test files with 210 test cases, and 1 new plant.
 
 ### Changed (step 1b, from the step 1 security check)
 
