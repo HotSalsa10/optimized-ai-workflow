@@ -143,6 +143,17 @@ expect "a file marked assume-unchanged is a LOOK" 1 "1 files are marked so git d
 st "$w"
 expect "a file marked skip-worktree that is on disk is a LOOK" 1 "1 files are marked so git does not compare them"
 (cd "$w" && git update-index --no-skip-worktree a.txt)
+(cd "$w" && git update-index --skip-worktree a.txt)
+rm "$w/a.txt"
+st "$w"
+expect "a skip-worktree file that is not on disk (a sparse checkout) is not a LOOK" 0 "work: PASS"
+(cd "$w" && git update-index --no-skip-worktree a.txt && git checkout -q a.txt)
+st "$w" GIT_INDEX_FILE="$work/no-index"
+expect "GIT_INDEX_FILE from the caller does not change what status reads" 0 "work: PASS"
+mkdir -p "$work/plib/Digest"
+printf 'die "a module from PERL5LIB was loaded\\n";\n1;\n' >"$work/plib/Digest/SHA.pm"
+st "$w" PERL5LIB="$work/plib"
+expect "modules on the caller's PERL5LIB are not loaded" 0 "perl: PASS"
 echo stashed >>"$w/a.txt"
 (cd "$w" && git stash -q)
 st "$w"
@@ -179,6 +190,17 @@ expect "a bisect in progress is a LOOK" 1 "a bisect is in progress" "1 commits n
 (cd "$w" && git checkout -q -b feature && cm "$w" 'Feature work\n' && git checkout -q main)
 st "$w"
 expect "a commit on a branch never pushed is a LOOK naming the branch" 1 "work: LOOK - 1 commits not pushed (on feature), as of the last fetch"
+st "$w" GIT_NAMESPACE=other
+expect "GIT_NAMESPACE from the caller does not hide branches" 1 "work: LOOK - 1 commits not pushed (on feature)"
+echo dirty >>"$cw/a.txt"
+st "$w" GIT_DIR="$cw/.git" GIT_WORK_TREE="$cw"
+expect "GIT_DIR and GIT_WORK_TREE from the caller do not point status elsewhere" 1 "work: LOOK - 1 commits not pushed (on feature)"
+case "$out" in *"uncommitted"*) fail "status read the other repository's changes" "$out" ;; esac
+(cd "$cw" && git checkout -q a.txt)
+for b in b1 b2 b3; do (cd "$w" && git checkout -q -b "$b" main && cm "$w" "$b\n" && git checkout -q main); done
+st "$w"
+expect "more than 3 branches are cut to 3 names and a count" 1 "4 commits not pushed (on b1, b2, b3 and 1 more)"
+(cd "$w" && git branch -q -D b1 b2 b3)
 (cd "$w" && git push -q -u origin feature 2>/dev/null)
 st "$w"
 expect "once pushed it is not" 0 "work: PASS"
@@ -197,6 +219,11 @@ expect "a change in a linked worktree is a LOOK naming it" 1 "worktree $p/linked
 st "$w"
 expect "a clean linked worktree is named in a PASS" 0 "work: PASS - nothing uncommitted, nothing unpushed (as of the last fetch); linked worktrees: $p/linked"
 (cd "$w" && git worktree remove --force "$p/linked" && git branch -q -D linked)
+(cd "$w" && git worktree add -q "$p/gone" -b gone origin/main 2>/dev/null)
+rm -rf "$p/gone"
+st "$w"
+expect "a linked worktree whose folder is gone is a LOOK" 1 "worktree $p/gone: its folder is gone (git worktree prune removes the entry)"
+(cd "$w" && git worktree prune && git branch -q -D gone)
 (cd "$w" && git remote remove origin)
 st "$w"
 expect "commits with no remote at all are a LOOK" 1 "work: LOOK - no remote: nothing is backed up (1 commits)"
@@ -244,6 +271,16 @@ for case in "only the trailer|Review-Verdict: approve\n|the message is only the 
   st "$vw"
   expect "a commit with $name is a LOOK with the reason" 1 "verdicts: LOOK - 1 commits" "$reason"
 done
+(cd "$vw" && git reset -q --hard "$accepted")
+cm "$vw" '\033[31mA subject that is far too long to show in full on one line of the report\n'
+(cd "$vw" && git push -q -f origin main 2>/dev/null)
+st "$vw"
+if [ "$code" -eq 1 ] && ! printf '%s\n' "$out" | grep -q "$(printf '\033')" \
+  && printf '%s\n' "$out" | grep -F -q 'the oldest, "\x1B[31mA subject that is far too long to show in full on on...": '; then
+  pass "a commit subject is shown escaped and cut to 60 characters"
+else
+  fail "a commit subject is shown escaped and cut to 60 characters" "$out"
+fi
 (cd "$vw" && git reset -q --hard "$accepted" && git push -q -f origin main 2>/dev/null)
 (cd "$vw" && git checkout -q -b task && cm "$vw" 'wip\n' && git push -q origin task 2>/dev/null && git checkout -q main)
 st "$vw"
@@ -268,6 +305,28 @@ expect "without a remote, main is the local main branch" 1 "verdicts: SKIPPED - 
 (cd "$nw" && git branch -q -m main trunk)
 st "$nw"
 expect "with no main branch at all the area is SKIPPED" 1 "verdicts: SKIPPED - no main branch (looked for origin/HEAD"
+
+oh=$(new_project) || abort_sandbox
+ohw="$oh/w"
+(cd "$ohw" && git checkout -q -b trunk && cm "$ohw" 'No verdict\n' && git push -q origin trunk 2>/dev/null && git checkout -q main && git remote set-head origin trunk)
+st "$ohw"
+expect "main is the branch origin/HEAD names" 1 "verdicts: LOOK - 1 commits on refs/remotes/origin/trunk"
+(
+  cd "$ohw" || exit 1
+  git remote set-head origin main
+  git checkout -q -b side
+  # dated an hour later, so that without --first-parent git would list it
+  # before the commit where the verdicts start
+  GIT_COMMITTER_DATE="$(($(date +%s) + 3600)) +0000" git commit -q --allow-empty -m 'wip, no verdict'
+  git checkout -q main
+  git merge -q --no-ff side -m "Merge side" -m "Review-Verdict: approve"
+  git push -q origin main 2>/dev/null
+) || fail "could not build the merge project"
+st "$ohw"
+expect "commits that came in through a merge are not judged; the merge is" 0 "verdicts: PASS - 2 commits on refs/remotes/origin/main"
+(cd "$oh" && git clone -q --depth 1 "file://$oh/remote.git" shallow 2>/dev/null)
+st "$oh/shallow"
+expect "a shallow clone says older commits were not read" 0 "; shallow history: older commits not read"
 
 # 4. records
 r=$(new_project) || abort_sandbox
@@ -296,6 +355,15 @@ st "$rw"
 expect "a malformed checks file is a LOOK naming the line" 1 "records: LOOK - checks/main.tsv line 2: expected 5 TAB-separated fields"
 rm -rf "$rw/checks"
 (cd "$rw" && git checkout -q TESTS.md)
+printf 'checks/\n' >"$rw/.gitignore"
+mkdir -p "$rw/checks"
+printf 'x\tany\t-\t^([0-9]+) passed\techo "1 passed"\n' >"$rw/checks/x.tsv"
+st "$rw"
+expect "a checks file git ignores is a LOOK" 1 "checks/x.tsv is ignored by git, so a clone would not have it"
+rm -rf "$rw/checks" "$rw/.gitignore"
+mkdir -p "$rw/sub/deeper"
+st "$rw/sub/deeper"
+expect "status run from a subfolder reads the records at the top" 0 "records: PASS - 9 records present"
 
 # 5. config
 mkdir -p "$rw/.claude"
@@ -304,6 +372,11 @@ st "$rw"
 expect "config problems are a LOOK, and the other areas still report" 1 \
   "config: LOOK - .claude/method.conf line 2: unknown key NOPE" "config: LOOK - .claude/method.conf line 3: is not KEY=VALUE" \
   "work: LOOK - 1 uncommitted entries" "repos: SKIPPED - .claude/method.conf has problems" "status: 2 areas need a look (config, work)"
+printf 'A=1\nB=1\nC=1\nD=1\nE=1\n' >"$rw/.claude/method.conf"
+st "$rw"
+expect "more than 3 config problems are cut to 3 and a count" 1 "config: LOOK - and 2 more"
+shown=$(printf '%s\n' "$out" | grep -c '^config: LOOK - ')
+if [ "$shown" -eq 4 ]; then pass "exactly 3 config problems are shown, then the count"; else fail "exactly 3 config problems are shown, then the count: $shown lines" "$out"; fi
 rm -rf "$rw/.claude"
 
 # 6. Claude Code, effort and perl
@@ -321,6 +394,22 @@ st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-211000"
 expect "versions compare as numbers, not as text" 0 "claude-code: PASS - 2.1.1000, floor 2.1.295"
 st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-22110"
 expect "an output that is not a Claude Code version is SKIPPED" 0 "claude-code: SKIPPED - the version could not be read"
+# shellcheck disable=SC2016 # a script for the stand-in to run
+printf '#!/bin/sh\nif read -r x; then echo "read: $x"; else echo "2.1.312 (Claude Code)"; fi\n' >"$work/cc/claude-stdin"
+printf '#!/bin/sh\necho "2.1.312 (Claude Code)"\nexit 1\n' >"$work/cc/claude-fails"
+chmod +x "$work/cc/claude-stdin" "$work/cc/claude-fails"
+printf 'hello\n' >"$work/hello"
+st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-stdin" <"$work/hello"
+expect "Claude Code is asked for its version with no input" 0 "claude-code: PASS - 2.1.312"
+st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-fails"
+expect "a version command that fails is SKIPPED" 0 "claude-code: SKIPPED - the version could not be read"
+mkdir -p "$work/m"
+cp -R "$root/method/scripts/method/." "$work/m/"
+printf 'claude_code_min=2.1\n' >"$work/m/REQUIRES"
+out=$(cd "$rw" && unset CLAUDE_CODE_EFFORT_LEVEL && CLAUDE_CODE_EXECPATH="$work/cc/claude-21312" bash "$work/m/status.sh" 2>&1)
+code=$?
+expect "an area that fails is a LOOK with its reason, and the next areas still report" 1 \
+  "claude-code: LOOK - could not be checked: REQUIRES line 1: claude_code_min: a version like 2.1.295" "effort: PASS" "perl: PASS"
 (cd "$work/cc" && cd "$rw" && unset CLAUDE_CODE_EFFORT_LEVEL && CLAUDE_CODE_EXECPATH=claude-21312 PATH="$work/cc:$PATH" bash "$status") >"$work/out" 2>&1
 code=$?
 out=$(cat "$work/out")
@@ -349,17 +438,25 @@ gw="$g/w"
 gsha=$(cd "$gw" && git rev-parse HEAD)
 mkdir -p "$work/gh"
 # gh_says JSON: the stand-in gh records how it was called and prints JSON
+# (SHA in the JSON becomes the commit gh was asked about)
 gh_says() {
   printf '%s\n' "$1" >"$work/gh/answer"
+  : >"$work/gh/args"
   cat >"$work/gh/gh" <<EOF
 #!/bin/sh
-printf '%s\n' "\$*" >"$work/gh/args"
+printf '%s\n' "\$*" >>"$work/gh/args"
 printf 'GH_REPO=%s GH_PROMPT_DISABLED=%s\n' "\${GH_REPO-unset}" "\${GH_PROMPT_DISABLED-unset}" >"$work/gh/env"
-cat "$work/gh/answer"
+sha=
+prev=
+for a in "\$@"; do
+  if [ "\$prev" = --commit ]; then sha=\$a; fi
+  prev=\$a
+done
+sed "s/SHA/\$sha/g" "$work/gh/answer"
 EOF
   chmod +x "$work/gh/gh"
 }
-run_ok() { printf '{"workflowName":"%s","status":"%s","conclusion":"%s","headSha":"%s"}' "$1" "$2" "$3" "${4:-$gsha}"; }
+run_ok() { printf '{"workflowName":"%s","status":"%s","conclusion":"%s","headSha":"%s"}' "$1" "$2" "$3" "${4:-SHA}"; }
 gh_says "[$(run_ok build completed success),$(run_ok lint completed failure),$(run_ok lint completed success)]"
 st "$gw" PATH="$work/gh:$PATH" GH_REPO=other/repo
 expect "a workflow whose newest run failed is a LOOK, even after another workflow passed" 1 "ci: LOOK - lint: failure for ${gsha%"${gsha#???????}"}"
@@ -387,11 +484,27 @@ expect "no run at all is SKIPPED" 0 "ci: SKIPPED - no CI run for "
 gh_says "not json"
 st "$gw" PATH="$work/gh:$PATH"
 expect "output that is not JSON is SKIPPED" 0 "ci: SKIPPED - unexpected gh output"
+gh_says "{}"
+st "$gw" PATH="$work/gh:$PATH"
+expect "JSON that is not a list of runs is SKIPPED" 0 "ci: SKIPPED - unexpected gh output"
+(cd "$gw" && git checkout -q -b ahead && cm "$gw" 'Ahead\n\nReview-Verdict: approve\n')
+ahead7=$(cd "$gw" && git rev-parse --short=7 HEAD)
+gh_says "[$(run_ok build completed success)]"
+st "$gw" PATH="$work/gh:$PATH"
+calls=$(wc -l <"$work/gh/args" | tr -d ' ')
+if [ "$calls" -eq 2 ] && printf '%s\n' "$out" | grep -F -q "ci: PASS - 1 workflows passed for $ahead7; main: 1 workflows passed for ${gsha%"${gsha#???????}"}"; then
+  pass "CI is read for HEAD and for main's tip"
+else
+  fail "CI is read for HEAD and for main's tip: $calls calls" "$out"
+fi
+(cd "$gw" && git checkout -q main && git branch -q -D ahead)
 mkdir -p "$work/nogh"
 for tool in bash git perl env; do ln -s "$(command -v "$tool")" "$work/nogh/$tool"; done
 st "$gw" PATH="$work/nogh"
 expect "without gh the area is SKIPPED" 0 "ci: SKIPPED - gh is not installed"
-printf '#!/bin/sh\nsleep 600\necho never\n' >"$work/gh/gh"
+# a sleep length of its own, so other test runs at the same time do not count
+nap="9$$"
+printf '#!/bin/sh\nsleep %s\necho never\n' "$nap" >"$work/gh/gh"
 start=$(date +%s)
 out=$(cd "$gw" && unset CLAUDE_CODE_EXECPATH CLAUDE_CODE_EFFORT_LEVEL && PATH="$work/gh:$PATH" bash "$status" 2>&1)
 code=$?
@@ -401,6 +514,9 @@ if [ "$took" -lt 25 ] && printf '%s\n' "$out" | grep -q '^ci: SKIPPED - gh did n
 else
   fail "a gh that hangs is stopped within the time limit: ${took}s" "$out"
 fi
+# shellcheck disable=SC2009 # pgrep is not on every system the tests run on
+left=$(ps -A -o args= 2>/dev/null | grep -c "^sleep $nap\$")
+if [ "$left" -eq 0 ]; then pass "what a stopped gh started is stopped too"; else fail "what a stopped gh started is stopped too: $left left"; fi
 
 # 8. other repositories
 o=$(new_project) || abort_sandbox
@@ -420,6 +536,12 @@ expect "a missing repository elsewhere is a LOOK" 1 "repo ../missing: LOOK - not
 echo dirty >>"$o/site/a.txt"
 st "$ow"
 expect "a change in another repository is a LOOK" 1 "repo ../site: LOOK - 1 uncommitted entries"
+(cd "$o/site" && git checkout -q a.txt && git bisect start >/dev/null 2>&1)
+st "$ow"
+expect "work in progress in another repository is found there" 1 "repo ../site: LOOK - a bisect is in progress"
+case "$out" in *"work: LOOK"*) fail "the other repository's bisect was reported for this one" "$out" ;; esac
+(cd "$o/site" && git bisect reset -q >/dev/null 2>&1)
+echo dirty >>"$o/site/a.txt"
 mkdir -p "$ow/evil/objects" "$ow/evil/refs/heads"
 printf 'ref: refs/heads/main\n' >"$ow/evil/HEAD"
 printf '[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tworktree = ..\n\tfsmonitor = %s\n' "$work/fsmonitor" >"$ow/evil/config"

@@ -538,6 +538,20 @@ sub main {
 
   my $started = open_log();
   print "run-checks: log $log_path\n";
+  # from here on, an error (git failing, say) still ends the log with END
+  my $exit = eval { run_all($conf, $checks, $here, $where, $started) };
+  if (!defined $exit) {
+    (my $err = $@) =~ s/\n\z//;
+    stop(Esc::line($err));
+  }
+  prune_logs();
+  exit $exit;
+}
+
+# run_all CONF CHECKS HERE WHERE STARTED: runs every check after the log is
+# open, writes the end of the screen and the log; the exit code
+sub run_all {
+  my ($conf, $checks, $here, $where, $started) = @_;
   my $note = ignore_local();
   my $before = fingerprint();
   my $dirty = %{ $before->{e} } ? 1 : 0;
@@ -592,8 +606,7 @@ sub main {
   print {$LOG} "$last\nEND\texit $exit\n";
   close $LOG;
   undef $LOG;
-  prune_logs();
-  exit $exit;
+  return $exit;
 }
 
 main() unless caller;

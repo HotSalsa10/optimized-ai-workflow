@@ -49,6 +49,7 @@ ck() { printf '%s<T>any<T>-<T>^([0-9]+) passed<T>%s' "$1" "$2"; }
 tsv() {
   d=$1
   shift
+  mkdir -p "$d/checks"
   printf '%s\n' "$@" | perl -pe 's/<T>/\t/g' >"$d/checks/main.tsv"
   (cd "$d" && git add -A && git commit -q -m checks)
 }
@@ -326,7 +327,7 @@ in_log "the accepted key is counted" "RESULT${T}secrets${T}PASS${T}pass${T}-${T}
 # 6. fresh-clone
 f=$(new_repo) || abort_sandbox
 tsv "$f" "$(ck unit 'echo "1 passed"')"
-printf '*.local\n__pycache__/\n*.cache\n.claude/settings.local.json\nCLAUDE.local.md\n' >"$f/.gitignore"
+printf '*.local\n__pycache__/\n*.cache\nsettings.local.json\nCLAUDE.local.md\n' >"$f/.gitignore"
 (cd "$f" && git add -A && git commit -q -m ignores)
 printf 'x\n' >"$f/src/x.local"
 printf 'x\n' >"$f/notes.local"
@@ -403,9 +404,18 @@ else
 fi
 mkdir -p "$work/plib/Digest"
 printf 'die "a module from PERL5LIB was loaded\\n";\n1;\n' >"$work/plib/Digest/SHA.pm"
-tsv "$t" "$(ck perl5lib "[ \"\$PERL5LIB\" = '$work/plib' ] && echo '1 passed'")"
+tsv "$t" "$(ck perl5lib "[ \"\$PERL5LIB\" = '$work/plib' ] && [ -z \"\${METHOD_CALLER_PERL5LIB+x}\" ] && echo '1 passed'")"
 run "$t" PERL5LIB="$work/plib"
 expect "the caller's PERL5LIB reaches a check but not the method's own perl" 0 "run-checks: PASS - 4 passed"
+# shellcheck disable=SC2016 # the check's own shell expands it
+tsv "$t" "$(ck stale '[ -z "${PERL5LIB+x}" ] && echo "1 passed"')"
+run "$t" METHOD_CALLER_PERL5LIB=/stale
+expect "a METHOD_CALLER_PERL5LIB the caller had set is not passed on as PERL5LIB" 0 "run-checks: PASS - 4 passed"
+printf 'abc' >"$work/abc"
+# shellcheck disable=SC2016
+tsv "$t" "$(ck stdin 'n=$(wc -c | tr -d " "); echo "$n passed"')"
+run "$t" <"$work/abc"
+expect "a check reads nothing from the caller's input" 3 "stdin: SKIPPED - it passed, but its count is 0"
 
 # 9. the log folder
 g=$(new_repo) || abort_sandbox
@@ -419,7 +429,10 @@ else
 fi
 in_log "the log says it wrote the .gitignore" "note wrote .method/local/.gitignore"
 printf '*\n# kept\n' >"$g/.method/local/.gitignore"
+chmod 755 "$g/.method/local/logs"
 run "$g"
+mode=$(perl -e 'printf "%o", (stat $ARGV[0])[2] & 0777' "$g/.method/local/logs")
+if [ "$mode" = 700 ]; then pass "a logs folder others can read is made private again"; else fail "a logs folder others can read is made private again: mode $mode"; fi
 if [ "$(cat "$g/.method/local/.gitignore")" = "*
 # kept" ] && ! grep -q '^note' "$logf"; then
   pass "an existing .gitignore that does the job is left alone"
@@ -432,14 +445,17 @@ printf '# mine\n' >"$h/.method/local/.gitignore"
 run "$h"
 if [ "$(cat "$h/.method/local/.gitignore")" = "# mine" ]; then pass "a .gitignore that does not ignore the folder is never overwritten"; else fail "a .gitignore is never overwritten"; fi
 in_log "the log says the .gitignore was left as it is" "note .method/local/.gitignore exists but does not make git ignore the folder"
+expect "logs git does not ignore are not counted as changes by the checks" 3 "passed: secrets fresh-clone tree-unchanged"
 logs="$g/.method/local/logs"
 n=1
 while [ "$n" -le 25 ]; do
   : >"$logs/$(printf 'run-checks-20200101T0000%02dZ-%010d.log' "$n" "$n")"
   n=$((n + 1))
 done
-: >"$logs/run-checks-old.log"
+: >"$logs/run-checks-1999.log"
 : >"$logs/run-checks-20190101T000000Z-0000000001.log"
+: >"$work/outside"
+ln -s "$work/outside" "$logs/run-checks-20190101T000001Z-0000000001.log"
 (cd "$g" && git add -f .method/local/logs/run-checks-20190101T000000Z-0000000001.log && git commit -q -m tracked-log)
 run "$g"
 left=0
@@ -448,12 +464,22 @@ for l in "$logs"/run-checks-[0-9]*Z-[0-9]*.log; do
     run-checks-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].log) left=$((left + 1)) ;;
   esac
 done
-if [ "$left" -eq 21 ] && [ -f "$logf" ] && [ -f "$logs/run-checks-old.log" ] && [ -f "$logs/run-checks-20190101T000000Z-0000000001.log" ] \
+if [ "$left" -eq 22 ] && [ -f "$logf" ] && [ -f "$logs/run-checks-1999.log" ] && [ -f "$logs/run-checks-20190101T000000Z-0000000001.log" ] \
+  && [ -L "$logs/run-checks-20190101T000001Z-0000000001.log" ] \
   && [ ! -f "$logs/run-checks-20200101T000001Z-0000000001.log" ] && [ -f "$first_log" ]; then
-  pass "the newest 20 logs are kept; look-alikes and tracked files are never deleted"
+  pass "the newest 20 logs are kept; look-alikes, links and tracked files are never deleted"
 else
-  fail "the newest 20 logs are kept; look-alikes and tracked files are never deleted: $left left" "$(ls "$logs")"
+  fail "the newest 20 logs are kept; look-alikes, links and tracked files are never deleted: $left left" "$(ls -l "$logs")"
 fi
+fl=$(new_repo) || abort_sandbox
+mkdir -p "$fl/.method/local/logs"
+n=1
+while [ "$n" -le 25 ]; do
+  : >"$fl/.method/local/logs/$(printf 'run-checks-20990101T0000%02dZ-%010d.log' "$n" "$n")"
+  n=$((n + 1))
+done
+run "$fl"
+if [ -f "$logf" ]; then pass "the current log is never pruned, even when it is the oldest"; else fail "the current log is never pruned, even when it is the oldest" "$(ls "$fl/.method/local/logs")"; fi
 
 # 10. the screen
 many=""
@@ -503,6 +529,122 @@ else
   fail "escape codes, :: commands and a fake RESULT line in output are made harmless" "$out
 $(cat "$logf")"
 fi
+
+# 11. more edges, from the planted-break run
+e=$(new_repo) || abort_sandbox
+mkdir -p "$e/checks/dir.tsv"
+printf 'x\n' >"$e/checks/dir.tsv/x"
+printf 'not a checks line\n' >"$e/checks/.hidden.tsv"
+tsv "$e" "$(ck unit 'echo "1 passed"')"
+run "$e"
+expect "a folder named like a checks file and a hidden checks file are not read" 0 "run-checks: PASS - 4 passed"
+(cd "$e" && git rm -rq checks/dir.tsv checks/.hidden.tsv && git commit -qm clean)
+tsv "$e" "$(ck wideutf "perl -e 'print \"x\", \"\\xC3\\xA9\" x 1000, \"\\n\"; exit 1'")" \
+  "$(ck widectl "perl -e 'print \"\\x01\" x 200, \"\\n\"; exit 1'")" "$(ck bidi "printf '\\342\\200\\256evil\\n'; exit 1")"
+run "$e"
+if [ "$code" -eq 1 ] && printf '%s\n' "$out" | perl -ne 'utf8::decode($_) or exit 1' \
+  && printf '%s\n' "$out" | grep -q '^  \(\\x01\)\{1,\} ([0-9]* bytes cut)$' && printf '%s\n' "$out" | grep -F -q '  \u{202E}evil'; then
+  pass "cut lines end on a whole character and a whole escape, and invisible characters are shown"
+else
+  fail "cut lines end on a whole character and a whole escape, and invisible characters are shown" "$out"
+fi
+tsv "$e" "$(ck osc "printf '\\033]0;title\\007\\033M5 passed\\n'")"
+run "$e"
+if [ "$code" -eq 0 ] && [ "$(result osc | cut -f 1,4)" = "PASS${T}5" ]; then pass "title and cursor codes around a count are removed"; else fail "title and cursor codes around a count are removed" "$out"; fi
+tsv "$e" "$(ck leak "echo \"the key: $fake\"; exit 1")"
+run "$e"
+if [ "$code" -eq 1 ] && ! printf '%s\n' "$out" | grep -F -q -- "$fake" && ! grep -F -q -- "$fake" "$logf" && printf '%s\n' "$out" | grep -F -q 'sk-a...('; then
+  pass "a key in a failing check's output is masked on screen and in the log"
+else
+  fail "a key in a failing check's output is masked on screen and in the log" "$out"
+fi
+many=""
+n=1
+while [ "$n" -le 12 ]; do
+  many="$many$(printf 'ci%s<T>ci<T>-<T>%s<T>echo "1 passed"' "$n" "$P")
+"
+  n=$((n + 1))
+done
+# shellcheck disable=SC2086 # one line per check
+(IFS='
+'
+  tsv "$e" $many)
+run "$e"
+expect "at most 10 SKIPPED lines are shown, then how many more" 3 "and 2 more SKIPPED, see the log"
+shown=$(printf '%s\n' "$out" | grep -c '^ci[0-9]*: SKIPPED - ')
+if [ "$shown" -eq 10 ]; then pass "exactly 10 SKIPPED lines are shown"; else fail "exactly 10 SKIPPED lines are shown: $shown" "$out"; fi
+tabname=$(printf 'a\tb.tsv')
+rm -f "$e/checks/main.tsv"
+printf '%s\n' "$(ck tab 'echo "1 passed"')" | perl -pe 's/<T>/\t/g' >"$e/checks/$tabname"
+(cd "$e" && git add -A && git commit -q -m tab)
+run "$e"
+fields=$(grep "^RESULT${T}tab${T}" "$logf" | awk -F "$T" '{ print NF }')
+if [ "$code" -eq 0 ] && [ "$fields" = 7 ]; then pass "a TAB in a checks file name cannot add a field to a RESULT line"; else fail "a TAB in a checks file name cannot add a field to a RESULT line: $fields fields" "$(grep '^RESULT' "$logf")"; fi
+(cd "$e" && git rm -q "checks/$tabname" && git commit -q -m untab)
+tsv "$e" "$(ck corrupt 'printf garbage >.git/index; echo "1 passed"')"
+run "$e"
+if [ "$code" -eq 2 ] && [ "$last" = "run-checks: FAIL - git status failed; the run stopped" ] && [ "$(tail -n 1 "$logf")" = "END${T}exit 2" ] \
+  && [ -z "$(find "$e/.method/local" -name '*.out')" ]; then
+  pass "a git failure during the run ends it with exit 2, END in the log and no leftover files"
+else
+  fail "a git failure during the run ends it with exit 2, END in the log and no leftover files: exit $code" "$out
+$(tail -n 3 "$logf")
+$(find "$e/.method/local" -name '*.out')"
+fi
+(cd "$e" && rm -f .git/index && git reset -q)
+ln -s a.txt "$e/src/link"
+tsv "$e" "$(ck relink 'ln -sfn b.txt src/link && : >scratch/two && echo "1 passed"')"
+mkdir -p "$e/scratch"
+: >"$e/scratch/one"
+ln -sfn c.txt "$e/src/link"
+run "$e"
+expect "a check that repoints a changed link or adds a file to an untracked folder fails tree-unchanged" 1 \
+  "changed during the run: scratch/two" "changed during the run: src/link"
+sm=$(new_repo) || abort_sandbox
+(
+  cd "$e" || exit 1
+  git checkout -q src/link
+  rm -rf scratch
+  git -c protocol.file.allow=always submodule -q add "$sm" lib 2>/dev/null
+  git -C lib config user.name Test
+  git -C lib config user.email test@example.invalid
+  git commit -q -m sub
+) || fail "could not build the submodule repo"
+tsv "$e" "$(ck inner '(cd lib && git commit -q --allow-empty -m inner) && echo "1 passed"')"
+run "$e"
+expect "a check that commits inside a submodule fails tree-unchanged" 1 "changed during the run: lib"
+lo=$(new_repo) || abort_sandbox
+tsv "$lo" "$(ck unit 'echo "1 passed"')"
+printf 'tmp1/\nsrc/a/\nsrc/data/\n*.local\n*.cache\n' >"$lo/.gitignore"
+printf 'PRODUCT_PATHS=src\nLOCAL_ONLY=t*p\nLOCAL_ONLY=a?b\nLOCAL_ONLY=src/data\nLOCAL_ONLY=cache\n' >"$lo/.claude/method.conf"
+(cd "$lo" && git add -A && git commit -q -m local-only)
+mkdir -p "$lo/src/tmp1" "$lo/src/a" "$lo/src/data"
+: >"$lo/src/tmp1/xp"
+: >"$lo/src/a/b"
+: >"$lo/src/data/x"
+: >"$lo/src/database.local"
+: >"$lo/src/build.cache"
+run "$lo"
+expect "LOCAL_ONLY wildcards stay inside one name, paths match whole names, and a bare name matches a whole name" 1 \
+  "ignored by git, so not in a clone: src/tmp1/xp" "ignored by git, so not in a clone: src/a/b" \
+  "ignored by git, so not in a clone: src/database.local" "ignored by git, so not in a clone: src/build.cache"
+case "$out" in *"src/data/x"*) fail "a LOCAL_ONLY path covers what is under it" "$out" ;; *) pass "a LOCAL_ONLY path covers what is under it" ;; esac
+bin=$(new_sandbox_dir) || abort_sandbox
+repos="$repos $bin"
+(cd "$bin" && git init -q && git config user.name Test && git config user.email test@example.invalid && printf '\000\001\002' >data.bin && git add -A && git commit -q -m bin)
+run "$bin"
+expect "with no tracked text file the secrets check is SKIPPED" 3 "secrets: SKIPPED - examined no tracked text file"
+rm -f "$e/src/a.txt"
+run "$e"
+expect "a tracked file deleted from disk is not a scan error" 0 "passed: secrets "
+(cd "$e" && git checkout -q src/a.txt)
+# built from pieces, so this file holds no phone number
+n1="+1415""555013"
+got=$(printf '%s and %s2\n' "$n1" "$n1" | perl "$root/method/scripts/method/lib/secrets.pl" --mask 2>&1)
+if [ "$got" = "  ***(11 chars) and ***(12 chars)" ]; then pass "the mask covers the longer of two numbers that start alike"; else fail "the mask covers the longer of two numbers that start alike" "$got"; fi
+got=$(cd "$e" && perl "$root/method/scripts/method/lib/secrets.pl" --repo allow.txt extra 2>&1)
+code=$?
+if [ "$code" -ne 0 ] && printf '%s\n' "$got" | grep -q 'secrets: usage:'; then pass "the scan's --repo mode takes no file names"; else fail "the scan's --repo mode takes no file names: exit $code" "$got"; fi
 
 for d in $repos; do drop_sandbox "$d"; done
 drop_sandbox "$work"

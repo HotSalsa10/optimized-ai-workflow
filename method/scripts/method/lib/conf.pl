@@ -47,7 +47,8 @@ sub check_path {
   my ($p, $lone_dot_ok) = @_;
   return '.' if $lone_dot_ok && ($p eq '.' || $p eq './');
   $p =~ s{/\z}{};
-  return undef if $p eq '' || $p =~ m{\A/} || $p =~ /\A[A-Za-z]:/ || $p =~ /\A[:-]/ || $p =~ /[*?\[\\]/;
+  # an absolute path has an empty first part, which the loop below refuses
+  return undef if $p eq '' || $p =~ /\A[A-Za-z]:/ || $p =~ /\A[:-]/ || $p =~ /[*?\[\\]/;
   for my $seg (split m{/}, $p, -1) {
     return undef if $seg eq '' || $seg eq '.' || $seg eq '..';
   }

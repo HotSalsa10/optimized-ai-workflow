@@ -29,7 +29,7 @@ Nothing yet. Release 1 is being built.
 - `.claude/method.conf` settings (PRODUCT_PATHS, LOCAL_ONLY, REPOS, VERDICTS_FROM) with one reader, `lib/conf.pl`, and `REQUIRES` with the Claude Code floor.
 - The commit trailer check, `lib/verdicts.pl check-trailer`, used by status.
 - Shared helpers `lib/git.pl` (every git call, with the settings that could change what git shows turned off) and `lib/esc.pl` (the one line escaper), taken out of the review packet, whose output is unchanged.
-- Tests: 3 new test files and 21 more trailer cases, 233 test cases in all.
+- Tests: 3 new test files and 21 more trailer cases, 276 test cases in all.
 
 ### Changed (step 3)
 
