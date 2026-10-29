@@ -14,9 +14,6 @@ use Cwd ();
 use Digest::SHA ();
 use File::Basename qw(dirname);
 use File::Spec;
-use File::Temp qw(tempdir);
-use IO::Handle ();
-use IPC::Open2 ();
 
 # Raw bytes in and out, whatever PERL_UNICODE or PERL5OPT asked for.
 binmode STDIN, ':raw';
@@ -24,7 +21,10 @@ binmode STDOUT, ':raw';
 binmode STDERR, ':raw';
 utf8::encode($_) for grep { utf8::is_utf8($_) } @ARGV;
 
-require File::Spec->catfile(dirname(File::Spec->rel2abs(__FILE__)), 'verdicts.pl');
+# verdicts.pl: the vocabulary; git.pl: the one git runner, which also clears
+# the variables that would point git elsewhere; esc.pl: the one escaper
+my $lib = dirname(File::Spec->rel2abs(__FILE__));
+require File::Spec->catfile($lib, $_) for qw(verdicts.pl git.pl esc.pl);
 
 my $CHECKLIST = 'docs/incident-checklist.md';
 my ($CHECKS_HEAD, $CHECKS_TAIL) = (50, 150);
@@ -72,34 +72,11 @@ $MAGIC{$_} = qr/\A\x7FELF/ for qw(so o);
 $MAGIC{$_} = qr/\A(?:\xCF\xFA\xED\xFE|\xCE\xFA\xED\xFE|\xCA\xFE\xBA\xBE)/ for qw(dylib);
 
 # esc_line: the one choke point every line inside a section passes through
-# (M113). Each byte that is not part of valid UTF-8 is shown as \xNN,
-# control characters other than TAB as \xNN, and every other control,
-# format, private-use, unassigned, invisible (default ignorable), line or
-# paragraph separator character as \u{XXXX}, so no text is hidden,
-# reordered or split. Then === that opens the line, also after blanks, marks
-# or a diff sign, gets a backslash in front. The section markers also carry
-# a token no content can know (see the end of this file).
-sub esc_line {
-  my ($bytes) = @_;
-  my $s = '';
-  # runs of UTF-8 as RFC 3629 defines it (no overlong forms, no surrogates,
-  # nothing above U+10FFFF) are decoded; any other byte is shown on its own
-  while ($bytes =~ /\G(?:((?:[\x00-\x7F]|[\xC2-\xDF][\x80-\xBF]|\xE0[\xA0-\xBF][\x80-\xBF]|[\xE1-\xEC\xEE\xEF][\x80-\xBF]{2}
-      |\xED[\x80-\x9F][\x80-\xBF]|\xF0[\x90-\xBF][\x80-\xBF]{2}|[\xF1-\xF3][\x80-\xBF]{3}|\xF4[\x80-\x8F][\x80-\xBF]{2})+)|(.))/gsx) {
-    if (defined $1) {
-      my $run = $1;
-      utf8::decode($run);
-      $s .= $run;
-    } else {
-      $s .= sprintf '\\x%02X', ord $2;
-    }
-  }
-  $s =~ s/([\x00-\x08\x0A-\x1F\x7F])/sprintf('\\x%02X', ord $1)/ge;
-  $s =~ s/((?!\t)[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Default_Ignorable_Code_Point}\p{Zl}\p{Zp}])/sprintf('\\u{%04X}', ord $1)/ge;
-  $s =~ s/\A([+\- \t\p{Zs}\p{Mn}\p{Mc}\p{Me}\x{2800}]*)(\\*===)/$1\\$2/;
-  utf8::encode($s);
-  return $s;
-}
+# (M113), lib/esc.pl's Esc::line: control, format and invisible characters
+# and bytes that are not UTF-8 are shown escaped, and === that opens a line
+# gets a backslash. The section markers also carry a token no content can
+# know (see the end of this file).
+sub esc_line { return Esc::line($_[0]) }
 
 sub fail {
   my ($code, $msg) = @_;
@@ -138,41 +115,27 @@ sub read_file {
 my $criteria = defined $opt{criteria} ? read_file($opt{criteria}, 'criteria') : undef;
 my $checks_text = defined $opt{checks} ? read_file($opt{checks}, 'check output') : undef;
 
-# --- git, with settings that could change what it shows switched off ---
-delete @ENV{qw(GIT_DIFF_OPTS GIT_EXTERNAL_DIFF GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS
-  GIT_ICASE_PATHSPECS GIT_REPLACE_REF_BASE)};
-# git finds the repository from the current folder, as the reviewer does
-delete @ENV{qw(GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
-  GIT_ALTERNATE_OBJECT_DIRECTORIES)};
-$ENV{GIT_NO_REPLACE_OBJECTS} = 1;    # local replace refs would change the content shown
-$ENV{GIT_GRAFT_FILE} = File::Spec->catfile(tempdir(CLEANUP => 1), 'none');    # and so would grafts
-# a commit-graph file is a local file that could also misreport history; a
-# file-system monitor is a local program that would run inside the builder;
-# paths are never pathspec magic
-my @GIT = ('git', '--no-optional-locks', '--literal-pathspecs', '-c', 'core.commitGraph=false',
-  '-c', 'core.fsmonitor=false', '-c', 'diff.suppressBlankEmpty=false');
+# --- git, through lib/git.pl: its settings that could change what git shows
+# are switched off, and replace refs, grafts, commit-graph files and a
+# file-system monitor are not used ---
+# git_die: a git.pl error as this script's exit 2
+sub git_die {
+  my ($err) = @_;
+  $err =~ s/\n\z//;
+  fail(2, $err);
+}
 
-# run_git ARGS: (exit status, standard output). git's own messages are
-# dropped, because they can quote file names raw.
+# run_git ARGS: (exit status, standard output).
 sub run_git {
-  my @cmd = (@GIT, @_);
-  my $pid = open(my $fh, '-|');
-  fail(2, 'cannot run git') unless defined $pid;
-  if (!$pid) {
-    open STDERR, '>', File::Spec->devnull;
-    open STDIN, '<', File::Spec->devnull;
-    exec { $cmd[0] } @cmd or exit 127;
-  }
-  binmode $fh;
-  my $out = do { local $/; <$fh> };
-  close $fh;
-  return ($?, defined $out ? $out : '');
+  my @r = eval { Git::run(@_) };
+  git_die($@) unless @r;
+  return @r;
 }
 
 # git_ok ARGS: standard output of a git call that must succeed.
 sub git_ok {
-  my ($st, $out) = run_git(@_);
-  fail(2, "git $_[0] failed") if $st;
+  my $out = eval { Git::ok(@_) };
+  git_die($@) unless defined $out;
   return $out;
 }
 
@@ -195,47 +158,17 @@ sub is_ancestor {
 
 my $zero = qr/\A0+\z/;
 
-# object_id TYPE CONTENT LIKE: the id git gives CONTENT, in the hash that
-# the id LIKE uses (SHA-1, or SHA-256 for a 64-digit id).
-sub object_id {
-  my ($type, $c, $like) = @_;
-  my $data = "$type " . length($c) . "\0" . $c;
-  return length($like) == 64 ? Digest::SHA::sha256_hex($data) : Digest::SHA::sha1_hex($data);
-}
+# object_id TYPE CONTENT LIKE: the id git gives CONTENT (lib/git.pl).
+sub object_id { return Git::object_id(@_) }
 
-# stored TYPE ID: a stored object's content, checked against its id. git
-# does not check a stored file, folder or parent commit when it reads one,
-# so an object changed by hand could otherwise pass for the committed one.
-# Objects are read through one `git cat-file --batch`, so reading many of
-# them costs one git process.
-my (%stored_cache, $batch_in, $batch_out);
+# stored TYPE ID: a stored object's content, checked against its id
+# (lib/git.pl). git does not check a stored file, folder or parent commit
+# when it reads one, so an object changed by hand could otherwise pass for
+# the committed one.
 sub stored {
-  my ($type, $id) = @_;
-  return $stored_cache{$id} if exists $stored_cache{$id};
-  if (!$batch_in) {
-    open my $saved, '>&', \*STDERR or fail(2, 'cannot run git');
-    open STDERR, '>', File::Spec->devnull;    # git's messages can quote names raw
-    my $pid = eval { IPC::Open2::open2($batch_out, $batch_in, @GIT, 'cat-file', '--batch') };
-    open STDERR, '>&', $saved;
-    fail(2, 'cannot run git cat-file') unless $pid;
-    binmode $batch_out;
-    binmode $batch_in;
-    $batch_in->autoflush(1);
-  }
-  print {$batch_in} "$id\n";
-  my $head = <$batch_out>;
-  # the id check below also covers the type and the right object: both are
-  # part of what the id is made from
-  fail(2, "cannot read the stored $type $id") unless defined $head && $head =~ /\A[0-9a-f]+ [a-z]+ ([0-9]+)\n\z/;
-  my ($size, $c) = ($1, '');
-  while (length $c < $size) {
-    read($batch_out, $c, $size - length $c, length $c) or fail(2, "cannot read the stored $type $id");
-  }
-  read($batch_out, my $nl, 1);
-  fail(2, "cannot read the stored $type $id") unless defined $nl && $nl eq "\n";
-  fail(2, "a stored $type does not match its id ($id); the repository's object store is damaged or was changed by hand")
-    unless object_id($type, $c, $id) eq $id;
-  return $stored_cache{$id} = $c;
+  my $c = eval { Git::cat(@_) };
+  git_die($@) unless defined $c;
+  return $c;
 }
 
 sub blob {
@@ -557,8 +490,8 @@ sub content_diff {
   return one_sided('-', blob($a)) if defined $a && !defined $b;
   return one_sided('+', blob($b)) if defined $b && !defined $a;
   return '' if !defined $a || $a eq $b;
-  my $d = git_ok('diff', '--no-ext-diff', '--no-textconv', '--no-color', '--text', '--unified=3',
-    '--inter-hunk-context=0', '--diff-algorithm=myers', '--indent-heuristic', $a, $b);
+  my $d = git_ok('-c', 'diff.suppressBlankEmpty=false', 'diff', '--no-ext-diff', '--no-textconv', '--no-color',
+    '--text', '--unified=3', '--inter-hunk-context=0', '--diff-algorithm=myers', '--indent-heuristic', $a, $b);
   my $at = index($d, "\n@@");
   fail(2, "git showed no change for $f->{path}, although its content changed") if $at < 0;
   $d = substr($d, $at + 1);

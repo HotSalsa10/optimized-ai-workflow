@@ -10,7 +10,7 @@
 # Known false positives go in scripts/dev/scan-allow.txt, one per line:
 #   <path><TAB><id><TAB><reason>
 # Run "bash scripts/dev/scan-secrets.sh --ids" to see each finding's id.
-# The rules live in scripts/dev/lib/secrets.pl.
+# The rules live in method/scripts/method/lib/secrets.pl.
 set -u
 # perl reads bytes here; these settings would change how it reads them
 unset PERL_UNICODE PERL5OPT
@@ -44,7 +44,7 @@ if [ "${#files[@]}" -eq 0 ]; then
   exit 1
 fi
 
-out=$(perl scripts/dev/lib/secrets.pl --staged $ids scripts/dev/scan-allow.txt "${files[@]}" 2>&1) || {
+out=$(perl method/scripts/method/lib/secrets.pl --staged $ids scripts/dev/scan-allow.txt "${files[@]}" 2>&1) || {
   printf '%s\n' "$out"
   echo "secrets: FAIL - the scan itself did not run"
   exit 2

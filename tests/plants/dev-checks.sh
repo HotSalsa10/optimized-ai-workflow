@@ -716,7 +716,7 @@ fi
 drop_sandbox "$sb"
 
 # 50. the mask filter that validate sends other tools' output through
-out=$(printf 'tool said %s\n::warning::spoof\nan escape %s[2K here ##[error]x\ncall %s today\na C1 control \302\233 here\n%s="Xy7p\\x41Q2rLm9Kq"\n\302\240::error::nbsp\n' "$key" "$esc_char" "+41"" 79 123 45 67" "DB_PASS""WORD" | perl "$(repo_root)/scripts/dev/lib/secrets.pl" --mask)
+out=$(printf 'tool said %s\n::warning::spoof\nan escape %s[2K here ##[error]x\ncall %s today\na C1 control \302\233 here\n%s="Xy7p\\x41Q2rLm9Kq"\n\302\240::error::nbsp\n' "$key" "$esc_char" "+41"" 79 123 45 67" "DB_PASS""WORD" | perl "$(repo_root)/method/scripts/method/lib/secrets.pl" --mask)
 if printf '%s\n' "$out" | grep -F -q -e "$key" -e "79 123 45 67" -e "Q2rLm9Kq"; then
   fail "the mask filter printed a key, a phone number or a credential holding an escape in full" "$out"
 elif printf '%s\n' "$out" | grep -q '^[[:space:]]*::' || printf '%s\n' "$out" | grep -F -q -e '##[' -e "$esc_char" -e "$(printf '\302\233')" -e "$(printf '\302\240::')"; then
@@ -728,13 +728,14 @@ else
 fi
 
 # 51. a helper whose result cannot be read is a failure, never a pass
-for pair in "scan-secrets.sh secrets.pl" "lint-portability.sh portability.pl" "lint-workflows.sh workflows.pl" "check-rule-map.sh rule-map.pl"; do
+for pair in "scan-secrets.sh method/scripts/method/lib/secrets.pl" "lint-portability.sh scripts/dev/lib/portability.pl" \
+  "lint-workflows.sh scripts/dev/lib/workflows.pl" "check-rule-map.sh scripts/dev/lib/rule-map.pl"; do
   wrapper=${pair% *}
   helper=${pair#* }
   sb=$(make_sandbox) || abort_sandbox
-  printf 'print "EXAMINED 1\\nSTAGED 0\\nACTIONS 0\\nROWS 1\\nBAD 0\\nBAD 1\\nALLOWED 0\\nSKIPPED 0\\nSKIPPED_NAMES\\nSUMMARY x\\n";\n' >"$sb/scripts/dev/lib/$helper"
-  (cd "$sb" && git add "scripts/dev/lib/$helper")
-  if expect_landed "count plant $wrapper" grep -q "BAD 1" "$sb/scripts/dev/lib/$helper"; then
+  printf 'print "EXAMINED 1\\nSTAGED 0\\nACTIONS 0\\nROWS 1\\nBAD 0\\nBAD 1\\nALLOWED 0\\nSKIPPED 0\\nSKIPPED_NAMES\\nSUMMARY x\\n";\n' >"$sb/$helper"
+  (cd "$sb" && git add "$helper")
+  if expect_landed "count plant $wrapper" grep -q "BAD 1" "$sb/$helper"; then
     out=$(cd "$sb" && bash "scripts/dev/$wrapper" 2>&1)
     code=$?
     case "$code:$out" in

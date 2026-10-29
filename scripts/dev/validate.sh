@@ -27,7 +27,7 @@ skipped=0
 failed_names=""
 
 masked() {
-  perl scripts/dev/lib/secrets.pl --mask
+  perl method/scripts/method/lib/secrets.pl --mask
 }
 
 run_check() {
