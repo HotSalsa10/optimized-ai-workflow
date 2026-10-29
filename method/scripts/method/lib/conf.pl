@@ -59,7 +59,6 @@ sub check_repo_path {
   $p =~ s{/\z}{};
   my $rest = $p;
   $rest =~ s{\A(?:\.\./)+}{};
-  return undef if $rest eq '..';
   return defined check_path($rest, 0) ? $p : undef;
 }
 

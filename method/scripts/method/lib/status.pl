@@ -319,7 +319,7 @@ sub claude_code_lines {
   return ['claude-code', 'SKIPPED', 'CLAUDE_CODE_EXECPATH is not an absolute path, so it was not run']
     unless File::Spec->file_name_is_absolute($p);
   my ($req, $problems) = Conf::requires(dirname($lib));
-  die "REQUIRES: $problems->[0]\n" if @$problems;
+  die "$problems->[0]\n" if @$problems;
   my $floor = $req->{claude_code_min};
   die "REQUIRES has no claude_code_min\n" unless defined $floor;
   my ($st, $out) = run_limited(Time::HiRes::time() + $VERSION_SECONDS, undef, $p, '--version');

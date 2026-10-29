@@ -72,10 +72,9 @@ sub trailer_problem {
   my $values = join(', ', words('trailer', @rows), map {"$_ - <reason>"} words('trailer-reason', @rows));
   $msg =~ s/\r\n/\n/g;
   return 'the message holds a carriage return (CR) that is not part of a line end' if $msg =~ /\r/;
+  # paragraphs are runs of lines that are not blank, so blank lines at the
+  # start and the end count for nothing
   my @lines = split /\n/, $msg, -1;
-  shift @lines while @lines && $lines[0] =~ /\A[ \t]*\z/;
-  pop @lines while @lines && $lines[-1] =~ /\A[ \t]*\z/;
-  return "the message is empty; it needs a subject and a last line $key: <value>" unless @lines;
   my (@paras, $open);
   for my $l (@lines) {
     if ($l =~ /\A[ \t]*\z/) { $open = 0; next }
@@ -83,6 +82,7 @@ sub trailer_problem {
     $open = 1;
     push @{ $paras[-1] }, $l;
   }
+  return "the message is empty; it needs a subject and a last line $key: <value>" unless @paras;
   my @key_lines = grep { index($_, "$key:") == 0 } @lines;
   return "no line starts with $key:; the last line must be $key: <value>" unless @key_lines;
   my $last = $paras[-1];
