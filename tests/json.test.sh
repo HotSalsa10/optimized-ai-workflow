@@ -90,7 +90,7 @@ if [ "$got" = "1$(perl -e 'print "0" x 400')" ]; then pass "a number too big for
 for n in -9223372036854775809 -9999999999999999999 18446744073709551616 99999999999999999999 1e99999999999 1e-99999999999 -1e10001; do
   exits_with "the number $n, which cannot print exactly or in full, exits 2" 2 "{\"a\":$n}" a
 done
-exits_with "such a number deep inside the printed value exits 2" 2 '{"a":{"b":[1,1e1000000000]}}' a
+exits_with "such a number deep inside the printed value exits 2" 2 '{"a":{"b":[1,1e10001]}}' a
 for n in -9223372036854775808 18446744073709551615 -10000000000000000000 100000000000000000000; do
   got=$(printf '{"a":%s}' "$n" | perl "$json" get a 2>&1)
   if [ "$got" = "$n" ]; then pass "the integer $n prints exactly"; else fail "the integer $n prints exactly" "$got"; fi
