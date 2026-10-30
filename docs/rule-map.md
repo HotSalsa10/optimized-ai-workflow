@@ -13,7 +13,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M005 | Do not start work until the owner says go | incident | method/.claude/skills/start/SKILL.md | step 6 |
 | M006 | Plan first: read everything, write nothing, mark VERIFIED and INFERRED, wait | incident | method/.claude/skills/plan-first/SKILL.md | step 6 |
 | M007 | Update the records before review, so one review covers one change | incident | method/.claude/skills/finish/SKILL.md | step 6 |
-| M008 | The verdict comes before the merge | incident | method/scripts/method/done-check.sh | step 4 |
+| M008 | The verdict comes before the merge | incident | method/scripts/method/done-check.sh | done |
 | M009 | Act on the verdict; at most 3 review rounds, then re-plan | incident; research: Claude Code team | method/.claude/agents/method/reviewer.md | step 6 |
 | M010 | When scripts change, run the guards' own tests | incident | method/scripts/method/run-checks.sh | step 7 |
 | M011 | Commit with the verdict trailer, push, show status | incident | method/.claude/skills/finish/SKILL.md | step 6 |
@@ -49,7 +49,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M041 | A check that has not been seen to fail is untested: plant the defect and watch it go red | incident | TESTS.md | done |
 | M042 | Plant, verify and revert are three separate commands, never chained | incident | method/.claude/skills/checks/SKILL.md | step 6 |
 | M043 | After reverting a plant, diff the touched files and confirm your own work is still there | incident | method/.claude/skills/checks/SKILL.md | step 6 |
-| M044 | Break the code under test on purpose; a parameter that never takes two values is a warning sign | incident | method/scripts/method/mutate-changed.sh | step 4b |
+| M044 | Break the code under test on purpose | incident | method/scripts/method/mutate-changed.sh | step 4b |
 | M045 | Twelve questions before trusting a new check | incident | method/.claude/skills/checks/SKILL.md | step 6 |
 | M046 | Four questions about every claim: reach, measured counts, closed or narrowed, survives re-derivation | incident | method/.claude/agents/method/reporter.md | step 6 |
 | M047 | Write the question in words before computing; two agreeing methods can answer the wrong question | incident | method/.claude/rules/method/method.md | step 6 |
@@ -94,7 +94,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M086 | Unproven serious or security findings go on an unresolved list; they are never dropped | research: evidence critique | method/.claude/agents/method/reviewer.md | step 6 |
 | M087 | High-risk changes get Deep review: several independent finders and a vote on each finding | research: Claude Code team | method/.claude/skills/finish/SKILL.md | step 6 |
 | M088 | People add a review layer and never replace the reviewer agents; they look at intent and risk before the AI findings | research: layered review; decision A8 | method/.claude/rules/method/method.md | step 6 |
-| M089 | "No findings" never counts as a pass on its own | research: Anthropic docs | method/scripts/method/done-check.sh | step 4 |
+| M089 | "No findings" never counts as a pass on its own | research: Anthropic docs | method/scripts/method/done-check.sh | done |
 | M090 | The reviewer checks for gaming: edited tests or expected values, skipped tests, answers hard-coded to tests, special cases, faked or display-only features | research: ImpossibleBench, harness post | method/.claude/agents/method/reviewer.md | step 6 |
 | M091 | The planner checks feasibility; "impossible or contradictory" is an acceptable answer; no hard-coding to tests | research: reward hacking studies | method/.claude/agents/method/planner.md | step 6 |
 | M092 | A fresh agent writes an acceptance check after the build, from the spec, and runs it through the real user path | research: harness post | method/.claude/agents/method/reporter.md | step 6 |
@@ -113,7 +113,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M105 | No Claude Code mods during method work | research: mods docs | method/.claude/rules/method/owner.md | step 6 |
 | M106 | An approval covers one exact version; any new commit voids it | research: Claude Code team | method/.claude/hooks/method/gate-receipt.sh | step 5 |
 | M107 | An agent's approval never counts as a person's | research: Claude Code team | method/.claude/rules/method/method.md | step 6 |
-| M108 | A branch must be up to date with main before it merges | research: merge queue | method/scripts/method/done-check.sh | step 4 |
+| M108 | A branch must be up to date with main before it merges | research: merge queue | method/scripts/method/done-check.sh | done |
 | M109 | A person is accountable for every change that ships | research: Claude Code team | method/.claude/rules/method/method.md | step 6 |
 | M110 | Improvement by hand: /research, /research-update every 2 to 4 weeks, a model-release checklist, pruning | decision A21 | method/.claude/skills/research-update/SKILL.md | later |
 | M111 | Every rule records its reason and its one home | incident: same rule twice | scripts/dev/check-rule-map.sh | done |
@@ -127,3 +127,4 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M119 | Give the whole task in one message with the finish line and the stops; keep going unless input is needed or a step is destructive | research: claude.dev | method/.claude/rules/method/method.md | step 6 |
 | M120 | /explain writes a plain explainer of any part of a project | research: Claude Code team | method/.claude/skills/explain/SKILL.md | step 6 |
 | M121 | A failed read means "could not read", never "nothing found" | research: claude.dev | method/.claude/rules/method/method.md | step 6 |
+| M122 | Every input a plan's tests use takes at least two values, one of them not the default; a parameter that never does is a warning sign | incident | method/scripts/method/done-check.sh | step 6 |

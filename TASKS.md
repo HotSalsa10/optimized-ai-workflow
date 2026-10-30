@@ -120,7 +120,17 @@ Rules: M008, M089, M108. Step 4b (mutate-changed.sh) takes M044 and the new M122
 
 - [x] Design written first, then critiqued before any code: 4 independent critics (correctness, adversary, scope, callers) found 53 problems, and a skeptic tried to refute each serious one. None was refuted. Several were lowered, and many fixes were corrected. The main changes: a CRLF or `$Id$` that git's checkout writes from the commit's own .gitattributes counts as the commit (on Linux too), while one that only this machine's settings explain is a change; only `approve` is ready; a check skipped here never counts; logs are matched by files and parents, so writing down the verdict does not void the run; a VERDICTS_FROM move is judged by what it accepts (A30); shallow and single-branch clones get the right advice; no `--base`.
 - [x] Split: the mutation wrapper grew too large for one review (a journal for stopped runs, file times for build caches, a control run, repeat runs, its own settings and log format), so it becomes step 4b, as step 1 had 1b.
-- [ ] Build: restructures first (tree.pl out of packet.pl; main_ref, exact, merge_base and the verdict range into git.pl and verdicts.pl), then behaviour.
+- [x] Build: two restructuring commits first (lib/tree.pl out of the review packet; main_ref, exact, merge_base, message and the range of judged commits into lib/git.pl and lib/verdicts.pl), each with the packet and status byte for byte the same; then `done-check.sh` with `lib/done.pl`, the byte comparison in run-checks' fingerprint (Tree::differences, streamed, with the conversions the commit's own .gitattributes asks for), the `ready` kind, main_ref ignoring an origin/HEAD that names the task branch, and no lazy fetch. DECISIONS A33 to A39. Tests: done-check 68, and new cases in run-checks, the packet, status and the vocabulary (781 in all).
+- [ ] Planted-break run.
+- [ ] Review round 1 (fresh-context review and security check).
+
+Notes for later steps, from the step 4 design critique:
+- Step 5: the guard allows a landing only when what lands is the commit done-check named (`git push <remote> HEAD:<main>`, or `gh pr merge --match-head-commit <id>` after checking the PR's base); it denies done-check's exit 3, other refspecs, a local merge on main and the MCP merge tools. Under a squash or merge commit the binding is "the PR head is the judged commit"; the line on main stays status's check (A30). Guard rule 4 (no merge unless --ready passes) is not installed anywhere until done-check reads receipts. The receipt is keyed to the files of the merged or rebased version (M106). The commit guard refuses a commit while mutate-changed's journal names a mutant (step 4b).
+- Step 6: /finish fetches main and the whole history before --ready. Whether a LIGHT task's fixes after its one round (A11) may merge without an approving round is a tier rule; until then SPEC R4 applies. The baseline ("introduced by this change") is built with the reviewer's stopping rule. How a mutation survivor is "listed with a reason" must exist before anything gates on mutate-changed's exit 1.
+- Step 7: setup sets VERDICTS_FROM on adoption, which done-check's verdicts start passes; squash-only merges; the managed .gitattributes block (CRLF for `*.ps1`) is accepted by done-check on Linux.
+- Step 9: "Ready to merge" judges `github.event.pull_request.head.sha` with `fetch-depth: 0`, never GitHub's test merge commit (it has no verdict line, and main is always its parent). Running the head's own done-check is a stopgap until Release 2 runs the base branch's (M118), whose method-gate goes red when the head changes the method's files, method.conf or checks/*.tsv (with the sync and touches-method exceptions of plan v3 critique #2). done-check's elsewhere condition then reads CI's result, and a record of the local run for local-only checks.
+- A change of its own to fresh-clone (M050's home): flag ignored files outside PRODUCT_PATHS whose ignore rule is not in the commit (.git/info/exclude, core.excludesFile, an untracked .gitignore).
+- SPEC R4's floor: a person's approval of the plan and of the merge has no mechanized record planned yet (candidate: an owner record written by a hook that --ready requires, plan v3 critique #4). An open decision for steps 5 and 6.
 
 ## Step 4b: mutate-changed.sh
 
@@ -128,4 +138,4 @@ Rules: M044 (the mutation half), M122 (new, the parameter half, step 6). Designe
 
 ## Next
 
-Step 4: the build.
+Step 4: the planted-break run, then review round 1.
