@@ -8,7 +8,9 @@
 # GIT_OBJECT_DIRECTORY, GIT_ALTERNATE_OBJECT_DIRECTORIES, GIT_SHALLOW_FILE,
 # GIT_IMPLICIT_WORK_TREE, GIT_PREFIX, GIT_INTERNAL_SUPER_PREFIX,
 # GIT_NAMESPACE, GIT_DIFF_OPTS, GIT_EXTERNAL_DIFF, GIT_REPLACE_REF_BASE and
-# the GIT_*_PATHSPECS settings. Replace refs and grafts are turned off. So
+# the GIT_*_PATHSPECS settings. Replace refs and grafts are turned off. A
+# partial clone does not fetch a missing object (GIT_NO_LAZY_FETCH, git 2.44
+# and later; older git still may), so reading stays local. So
 # git finds the repository from the current folder, as a reader of the
 # files there does.
 #
@@ -25,7 +27,9 @@
 #                       the null device, because git's messages can quote
 #                       file names raw
 #   Git::ok(ARGS)       standard output, or dies "git <command> failed"
-#   Git::cat(TYPE, ID)  a stored object's content, checked against its id
+#   Git::cat(TYPE, ID, ONCE, MAX)  a stored object's content, checked against
+#                       its id; ONCE: not kept for a later read; MAX: undef
+#                       when it is larger than MAX bytes (read and dropped)
 #   Git::object_id(TYPE, CONTENT, LIKE)  the id git gives CONTENT
 #   Git::top()          (TOP, PROBLEM): the top folder of the working tree
 #                       git finds from the current folder; PROBLEM is undef,
@@ -43,7 +47,9 @@
 #                       set to git's defaults
 #   Git::exact(REF)     the commit id of a full ref name, or undef
 #   Git::main_ref()     (main's full ref name, its commit id), or () when
-#                       there is none: origin/HEAD, then @Git::MAIN_REFS
+#                       there is none: origin/HEAD (unless it names HEAD's
+#                       own branch), then @Git::MAIN_REFS; Git::no_main()
+#                       says where it looked
 #   Git::merge_base(A, B)  ('ok', ids), ('none', what to do) or ('error')
 #   Git::message(ID)    a commit's message, checked against its id
 package Git;
@@ -61,6 +67,7 @@ delete @ENV{qw(GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_CONFIG GI
   GIT_NAMESPACE GIT_DIFF_OPTS GIT_EXTERNAL_DIFF GIT_REPLACE_REF_BASE
   GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS)};
 $ENV{GIT_NO_REPLACE_OBJECTS} = 1;
+$ENV{GIT_NO_LAZY_FETCH} = 1;    # a partial clone never fetches a missing object (git 2.44 and later)
 $ENV{GIT_GRAFT_FILE} = File::Spec->catfile(tempdir(CLEANUP => 1), 'none');
 
 our @GIT = ('git', '--no-optional-locks', '--literal-pathspecs', '-c', 'core.commitGraph=false',
@@ -197,7 +204,7 @@ sub object_id {
 # so reading many of them costs one git process.
 my (%cache, $batch_in, $batch_out);
 sub cat {
-  my ($type, $id, $once) = @_;    # ONCE: not kept for a later read
+  my ($type, $id, $once, $max) = @_;    # ONCE: not kept for a later read
   return $cache{$id} if exists $cache{$id};
   if (!$batch_in) {
     open my $saved, '>&', \*STDERR or die "cannot run git\n";
@@ -215,6 +222,14 @@ sub cat {
   # part of what the id is made from
   die "cannot read the stored $type $id\n" unless defined $head && $head =~ /\A[0-9a-f]+ [a-z]+ ([0-9]+)\n\z/;
   my ($size, $c) = ($1, '');
+  if (defined $max && $size > $max) {
+    my $left = $size + 1;    # and the newline after it
+    while ($left > 0) {
+      my $n = read($batch_out, my $buf, $left < 65536 ? $left : 65536) or die "cannot read the stored $type $id\n";
+      $left -= $n;
+    }
+    return undef;
+  }
   while (length $c < $size) {
     read($batch_out, $c, $size - length $c, length $c) or die "cannot read the stored $type $id\n";
   }
@@ -237,14 +252,31 @@ sub exact {
   return $cst || $c !~ /\A([0-9a-f]+)\n\z/ ? undef : $1;
 }
 
+# own_branch REF: REF is HEAD's own branch, its namesake on origin, or its
+# upstream; a single-branch clone, or git remote set-head, can point
+# origin/HEAD there, and then it is not main
+sub own_branch {
+  my ($ref) = @_;
+  my ($st, $b) = run('symbolic-ref', '-q', 'HEAD');
+  return 0 if $st;
+  chomp $b;
+  return 1 if $ref eq $b;
+  my ($name) = $b =~ m{\Arefs/heads/(.+)\z}s or return 0;
+  return 1 if $ref eq "refs/remotes/origin/$name";
+  my ($ust, $up) = run('rev-parse', '--symbolic-full-name', "$b\@{upstream}");
+  chomp $up;
+  return !$ust && $ref eq $up ? 1 : 0;
+}
+
 # the refs main_ref tries after origin/HEAD, in order
 our @MAIN_REFS = qw(refs/remotes/origin/main refs/heads/main refs/remotes/origin/master refs/heads/master);
 
 # main_ref: (the full name of main, its commit), or () when there is none
+# (origin/HEAD is not taken when it names HEAD's own branch, see own_branch)
 sub main_ref {
   my ($st, $t) = run('symbolic-ref', '-q', 'refs/remotes/origin/HEAD');
   $t =~ s/\n\z//;
-  if (!$st && $t =~ m{\Arefs/remotes/origin/\S+\z}) {
+  if (!$st && $t =~ m{\Arefs/remotes/origin/\S+\z} && !own_branch($t)) {
     my $id = exact($t);
     return ($t, $id) if defined $id;
   }
@@ -253,6 +285,12 @@ sub main_ref {
     return ($ref, $id) if defined $id;
   }
   return;
+}
+
+# no_main: where main_ref looked, and how to fetch main when it is missing
+sub no_main {
+  return 'looked for origin/HEAD, ' . join(', ', @MAIN_REFS)
+    . '; in a single-branch or shallow clone, fetch it: git fetch origin main:refs/remotes/origin/main';
 }
 
 # merge_base A B: ('ok', every merge base, the one git picks first);

@@ -30,6 +30,8 @@
 #   Conf::read(ROOT)           (values, problems) for ROOT/.claude/method.conf;
 #                              a missing file means every key is unset; a key
 #                              on a line with a problem stays unset
+#   Conf::read_text(TEXT, LABEL)  (values, problems) for a method.conf held in
+#                              TEXT (a committed one, say)
 #   Conf::requires(DIR)        (values, problems) for DIR/REQUIRES
 #   Conf::check_path(PATH, LONE_DOT_OK)  the path without a trailing "/", or
 #                              undef when it breaks the path rules
@@ -68,6 +70,7 @@ sub parse {
   my ($file, $label, $keys) = @_;
   my (%v, @problems, %lines);
   open my $fh, '<:raw', $file or return (\%v, ["$label: cannot read the file"]);
+  local $/ = "\n";    # whatever the caller set
   my $n = 0;
   while (my $l = <$fh>) {
     $n++;
@@ -150,6 +153,13 @@ sub read {
   return ({}, []) unless -e $file;
   return ({}, ['.claude/method.conf: not a regular file']) unless -f $file;
   return parse($file, '.claude/method.conf', \%CONF_KEYS);
+}
+
+# read_text TEXT LABEL: (values, problems) for a .claude/method.conf held in
+# TEXT, such as the one in a commit
+sub read_text {
+  my ($text, $label) = @_;
+  return parse(\$text, $label, \%CONF_KEYS);
 }
 
 sub requires {

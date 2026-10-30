@@ -20,7 +20,7 @@ our %CALLER_ENV;
 BEGIN { %CALLER_ENV = %ENV }
 
 my $lib = dirname(File::Spec->rel2abs(__FILE__));
-require File::Spec->catfile($lib, $_) for qw(git.pl esc.pl conf.pl);
+require File::Spec->catfile($lib, $_) for qw(git.pl esc.pl conf.pl tree.pl);
 
 our @RESERVED = qw(secrets fresh-clone tree-unchanged project-checks);
 my $LOCAL = '.method/local';
@@ -261,10 +261,14 @@ sub check_env {
 # does not ignore that is changed, untracked, or marked so git does not
 # compare it (assume-unchanged, or skip-worktree, also with the file gone
 # from disk: a sparse checkout, or a deletion hidden that way; also inside
-# submodules, Git::flagged), and every submodule folder whose changes git
-# cannot see (Git::submodules), each with its mode and the SHA-256 of what
-# is on disk (.method/local left out). git status runs with no filter
-# program and no stat shortcut (Git::status_options).
+# submodules, Git::flagged), every submodule folder whose changes git cannot
+# see (Git::submodules), and every tracked file whose bytes on disk are not
+# the commit's (lib/tree.pl's Tree::differences: a CR that git status does
+# not see, because a line-end setting converts it, counts), each with its
+# mode and the SHA-256 of what is on disk (.method/local left out). git
+# status runs with no filter program and no stat shortcut
+# (Git::status_options). Also returns kinds (path => {kind => 1}, for
+# plain reports), converted and no_conversion (from Tree::differences).
 sub fingerprint {
   require Digest::SHA;    # loaded here, so status.pl can load this file without it
   my ($st, $head) = Git::run('rev-parse', '-q', '--verify', 'HEAD^{commit}');
@@ -281,10 +285,15 @@ sub fingerprint {
   my @subs = Git::submodules('.');
   push @paths, map { [$_->[0], "submodule: $_->[2]"] } grep { defined $_->[2] } @subs;
   push @paths, [$_->[0], "flag $_->[1]"] for Git::flagged('.', \@subs);
-  my %e;
+  my $d = $head eq 'none' ? { list => [], converted => [] } : Tree::differences($head);
+  push @paths, map { [$_->[0], "differs: $_->[1]"] } @{ $d->{list} };
+  my (%e, %kinds);
   for my $p (@paths) {
     my ($path, $why) = @$p;
     next if index($path, "$LOCAL/") == 0;
+    my $kind = $why =~ /\Adiffers: (.*)\z/s ? $1 : $why =~ /\Asubmodule: / ? 'submodule' : $why =~ /\Aflag / ? 'flag'
+      : $why eq '??' ? 'untracked' : 'changed';
+    $kinds{$path}{$kind} = 1;
     my $h = '-';
     my @s = lstat $path;
     if (-l _) {
@@ -296,7 +305,8 @@ sub fingerprint {
     }
     $e{$path} = join ' ', grep { defined } $e{$path}, $why, (@s ? sprintf('%o', $s[2]) : '-'), $h;
   }
-  return { head => $head, branch => $branch, refs => $refs, e => \%e };
+  return { head => $head, branch => $branch, refs => $refs, e => \%e, kinds => \%kinds,
+    converted => $d->{converted}, no_conversion => $d->{no_conversion} };
 }
 
 sub tracked_count {
@@ -493,6 +503,60 @@ sub prune_logs {
     my $p = "$LOGS/$name";
     unlink $p unless $p eq $log_path;
   }
+}
+
+# log_files: the run-checks logs, oldest first by name (the writer's UTC time,
+# then its process id, the order prune_logs keeps): untracked regular files
+# named exactly like a log
+sub log_files {
+  opendir my $d, $LOGS or return ();
+  my @logs = sort grep { $_ =~ $LOG_NAME } readdir $d;
+  closedir $d;
+  my %tracked = map { $_ => 1 } split /\0/, Git::ok('ls-files', '-z', '--', $LOGS);
+  return grep { !$tracked{$_} && !-l $_ && -f _ } map {"$LOGS/$_"} @logs;
+}
+
+# read_log PATH: a run-checks log as {started, commit, tree (clean or
+# uncommitted changes), where (CI or local), system, results => [{id,
+# status, kind, runs_in, examined, detail}], last (the screen's last line),
+# end (the exit code; undef when the log has no END line: the run was cut
+# off)}, or {problem => why}. The one reader of the log, next to its writer
+# (M048). A check's output is indented and escaped in the log, so no line of
+# it can pass for one of these.
+sub read_log {
+  my ($path) = @_;
+  open my $fh, '<:raw', $path or return { problem => 'it cannot be read' };
+  local $/ = "\n";
+  my @lines = <$fh>;
+  close $fh;
+  my $cut = @lines && $lines[-1] !~ /\n\z/;    # written up to the moment it was cut off
+  pop @lines if $cut;
+  s/\n\z// for @lines;
+  my %log = (results => []);
+  my @head = (['', qr/\Arun-checks log\z/], ['started', qr/\Astarted ([0-9T:Z-]+)\z/],
+    ['commit', qr/\Acommit ([0-9a-f]{40}|[0-9a-f]{64}|none)\z/], ['tree', qr/\Atree at start (clean|uncommitted changes)\z/],
+    ['where', qr/\Awhere (CI|local)\z/], ['system', qr/\Asystem (.*)\z/s]);
+  for my $i (0 .. $#head) {
+    my ($name, $re) = @{ $head[$i] };
+    return { problem => 'it is not a run-checks log (its header is not one)' } unless defined $lines[$i] && $lines[$i] =~ $re;
+    $log{$name} = $1 if length $name;
+  }
+  for my $n ($#head + 1 .. $#lines) {
+    my $l = $lines[$n];
+    return { problem => 'a line follows its END line' } if defined $log{end};
+    next if $l =~ /\A  / || $l =~ /\A=== CHECK [a-z0-9-]+ ===\z/ || ($l =~ /\Anote / && !@{ $log{results} });
+    if ($l =~ /\ARESULT\t/) {
+      my @f = split /\t/, $l, -1;
+      return { problem => "line " . ($n + 1) . ' is not a RESULT line' }
+        unless @f == 7 && $f[2] =~ /\A(?:PASS|FAIL|SKIPPED)\z/;
+      push @{ $log{results} }, { id => $f[1], status => $f[2], kind => $f[3], runs_in => $f[4], examined => $f[5], detail => $f[6] };
+      next;
+    }
+    if ($l =~ /\Arun-checks: (?:PASS|FAIL|SKIPPED) - /) { $log{last} = $l; next }
+    if ($l =~ /\AEND\texit ([0-9]+)\z/ && defined $log{last}) { $log{end} = $1; next }
+    return { problem => "line " . ($n + 1) . ' is not a run-checks log line' };
+  }
+  return \%log;
 }
 
 # --- main ---

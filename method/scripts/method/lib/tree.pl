@@ -1,7 +1,9 @@
 #!/usr/bin/env perl
 # A commit's folders and files, each read through lib/git.pl's Git::cat and
 # so checked against its id, and the one rule "the files on disk are the
-# commit" (M048). The review packet uses it; callers load lib/git.pl first.
+# commit" (M048). The review packet, run-checks and done-check use it;
+# callers load lib/git.pl first. Digest::SHA is loaded only when a file is
+# hashed, so status can still load this file and report it missing.
 #
 #   Tree::stored(TYPE, ID)    a stored object's content, checked against its id
 #   Tree::blob(ID)            a file's content ('' for the all-zero id)
@@ -13,7 +15,9 @@
 #   Tree::check_trees(A, B)   every folder a comparison of A and B reads is checked
 #   Tree::changed(FROM, TO)   the changed files, each {st, m1, m2, o1, o2, path, old}
 #   Tree::blob_diff(A, B, N)  the hunks between two files, N lines of context
-#   Tree::differences(COMMIT) how the files on disk differ from COMMIT
+#   Tree::differences(COMMIT) how the files on disk differ from COMMIT; a
+#                       CRLF or an $Id$ that git's checkout writes from the
+#                       commit's own .gitattributes is the commit's
 #
 # An error goes to $Tree::FAIL when a caller set it (the packet turns it into
 # its own exit code), else it dies with the message.
@@ -163,44 +167,128 @@ sub blob_diff {
   return $d;
 }
 
+# A file larger than this that differs from the commit is not read whole:
+# it counts as content.
+my $BIG = 64 * 1024 * 1024;
+
+# stream_id PATH ID SIZE: 1 when the file holds the blob ID (read as a stream,
+# so a large file is never held in memory), 0 when not, undef when it cannot
+# be read
+sub stream_id {
+  my ($p, $id, $size) = @_;
+  require Digest::SHA;
+  my $d = Digest::SHA->new(length($id) == 64 ? 256 : 1)->add("blob $size\0");
+  open my $fh, '<:raw', $p or return undef;
+  my $ok = eval { $d->addfile($fh); 1 };
+  close $fh;
+  return undef unless $ok;
+  return $d->hexdigest eq $id ? 1 : 0;
+}
+
+sub stream_sha256 {
+  my ($p) = @_;
+  require Digest::SHA;
+  open my $fh, '<:raw', $p or return '';
+  my $h = eval { Digest::SHA->new(256)->addfile($fh)->hexdigest };
+  close $fh;
+  return defined $h ? $h : '';
+}
+
+# conversion_problem: '' when git can be asked for the bytes its checkout
+# writes from a commit's own attributes, else why not. git reads
+# .git/info/attributes even when told to take attributes from a commit, so
+# that file must hold no rule; and --attr-source needs git 2.42.
+my $git_version_ok;
+sub conversion_problem {
+  if (!defined $git_version_ok) {
+    my ($st, $v) = Git::run('version');
+    my ($maj, $min) = $v =~ /\Agit version ([0-9]+)\.([0-9]+)/;
+    $git_version_ok = !$st && defined $maj && ($maj > 2 || ($maj == 2 && $min >= 42)) ? 1 : 0;
+  }
+  return 'git 2.42 or later is needed to tell a conversion the commit asks for from an edit' unless $git_version_ok;
+  my ($st, $path) = Git::run('rev-parse', '--git-path', 'info/attributes');
+  return 'git did not name its info/attributes file' if $st || $path !~ s/\n\z//;
+  return '' unless -e $path || -l $path;
+  open my $fh, '<:raw', $path or return 'cannot read .git/info/attributes';
+  while (my $l = <$fh>) {
+    next if $l =~ /\A[ \t]*(?:#.*)?\r?\n?\z/;
+    close $fh;
+    return '.git/info/attributes holds rules, so a conversion cannot be told from an edit';
+  }
+  close $fh;
+  return '';
+}
+
+# checkout_bytes COMMIT PATH: the bytes git's checkout writes for PATH from
+# COMMIT's own attributes, or undef. Only git's built-in conversions apply
+# (line ends, ident, working-tree-encoding): every filter driver is off
+# (Git::status_options), the system and personal attribute files are not
+# read, attributes come from COMMIT, not the disk, and this machine's
+# line-end settings are pinned off.
+sub checkout_bytes {
+  my ($commit, $p) = @_;
+  require File::Spec;
+  local $ENV{GIT_ATTR_NOSYSTEM} = 1;
+  my ($st, $out) = Git::run('-c', 'core.autocrlf=false', '-c', 'core.eol=lf', '-c',
+    'core.attributesFile=' . File::Spec->devnull, "--attr-source=$commit", Git::status_options(),
+    'cat-file', '--filters', "$commit:$p");
+  return $st ? undef : $out;
+}
+
 # differences COMMIT: how the files on disk differ from COMMIT's, as
-# {list => [[PATH, KIND], ...], lfs => [PATH, ...]}, sorted by path.
-# A file is the commit's when it holds the same bytes, or, for Git LFS,
-# content whose SHA-256 is the one the stored pointer names (listed in lfs).
-# KIND: missing (not on disk); link (a symlink whose target differs);
-# type (not a regular file); unreadable; cr (the same bytes once CRLF line
-# ends become LF); content (anything else). Submodules are not compared.
+# {list => [[PATH, KIND], ...], lfs => [PATH, ...], converted => [PATH, ...],
+# no_conversion => why conversions could not be told apart, or undef},
+# sorted by path. A file is COMMIT's when it holds the same bytes; for Git
+# LFS, content whose SHA-256 is the one the stored pointer names (listed in
+# lfs); or exactly the bytes git's own checkout writes from COMMIT's
+# attributes (listed in converted: a CRLF or an $Id$ a committed
+# .gitattributes asks for), never a conversion that only this machine's
+# settings explain. KIND: missing (not on disk); link (a symlink whose target
+# differs, a symlink where a file was, or a file where a symlink was); type
+# (not a regular file); unreadable; cr (the same bytes once CRLF line ends
+# become LF); content (anything else, also a file over 64 MB that differs).
+# Submodules are not compared.
 sub differences {
   my ($commit) = @_;
-  my (@list, @lfs);
+  my (@list, @lfs, @converted, $no_conv);
   my %files = %{ all_files($commit) };
   for my $p (sort keys %files) {
     my ($mode, $id) = @{ $files{$p} };
     next if $mode eq '160000';
-    if (!(-l $p || -e _)) { push @list, [$p, 'missing']; next }
-    if ($mode eq '120000' && -l $p) {
-      my $target = readlink $p;
+    my @st = lstat $p;
+    if (!@st) { push @list, [$p, 'missing']; next }
+    if (-l _) {
+      my $target = $mode eq '120000' ? readlink $p : undef;
       push @list, [$p, 'link'] unless defined $target && $target eq blob($id);
       next;
     }
-    if (!-f $p) { push @list, [$p, 'type']; next }
+    if ($mode eq '120000') { push @list, [$p, 'link']; next }
+    if (!-f _) { push @list, [$p, 'type']; next }
+    my $same = stream_id($p, $id, $st[7]);
+    if (!defined $same) { push @list, [$p, 'unreadable']; next }
+    next if $same;
+    my $c = eval { Git::cat('blob', $id, 1, 1024) };
+    oops($@) if $@;
+    my ($oid, $osize) = defined $c
+      ? $c =~ m{\Aversion https://git-lfs\.github\.com/spec/v1\noid sha256:([0-9a-f]{64})\nsize ([0-9]+)\n\z} : ();
+    if (defined $oid && $osize == $st[7] && stream_sha256($p) eq $oid) { push @lfs, $p; next }
+    if ($st[7] > $BIG) { push @list, [$p, 'content']; next }
     my $disk;
     if (open my $fh, '<:raw', $p) {
       $disk = do { local $/; <$fh> };
       close $fh;
     }
     if (!defined $disk) { push @list, [$p, 'unreadable']; next }
-    next if Git::object_id('blob', $disk, $id) eq $id;
+    $no_conv = conversion_problem() unless defined $no_conv;
+    if ($no_conv eq '') {
+      my $want = checkout_bytes($commit, $p);
+      if (defined $want && $want eq $disk) { push @converted, $p; next }
+    }
     (my $lf = $disk) =~ s/\r\n/\n/g;
     if (Git::object_id('blob', $lf, $id) eq $id) { push @list, [$p, 'cr']; next }
-    my ($oid) = blob($id) =~ m{\Aversion https://git-lfs\.github\.com/spec/v1\noid sha256:([0-9a-f]{64})\nsize [0-9]+\n\z};
-    if (defined $oid) {
-      require Digest::SHA;
-      if (Digest::SHA::sha256_hex($disk) eq $oid) { push @lfs, $p; next }
-    }
     push @list, [$p, 'content'];
   }
-  return { list => \@list, lfs => \@lfs };
+  return { list => \@list, lfs => \@lfs, converted => \@converted,
+    no_conversion => defined $no_conv && $no_conv ne '' ? $no_conv : undef };
 }
-
 1;

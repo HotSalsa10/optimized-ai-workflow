@@ -6,7 +6,7 @@
 # Usage:
 #   perl verdicts.pl words KIND   prints the words of one kind, one per line
 #                                 (KIND: verdict, trailer-key, trailer,
-#                                 trailer-reason)
+#                                 trailer-reason, ready)
 #   perl verdicts.pl check-trailer
 #                                 reads one commit message on standard input;
 #                                 exit 0 when it ends with a valid trailer,
@@ -33,7 +33,7 @@ use warnings;
 use File::Basename qw(dirname);
 use File::Spec;
 
-my %kinds = map { $_ => 1 } qw(verdict trailer-key trailer trailer-reason);
+my %kinds = map { $_ => 1 } qw(verdict trailer-key trailer trailer-reason ready);
 
 # rows: the file's entries in order, each [KIND, WORDS, MEANING]. Dies with
 # a message when the file is missing or malformed. Read once per process.
@@ -42,6 +42,7 @@ sub rows {
   return @rows_read if @rows_read;
   my $path = File::Spec->catfile(dirname(dirname(File::Spec->rel2abs(__FILE__))), 'verdicts.txt');
   open my $fh, '<:raw', $path or die "cannot read verdicts.txt\n";
+  local $/ = "\n";    # whatever the caller set
   my (@rows, %count);
   my $n = 0;
   while (my $line = <$fh>) {
@@ -58,6 +59,10 @@ sub rows {
   close $fh;
   die "verdicts.txt: expected exactly one trailer-key line\n" unless ($count{'trailer-key'} || 0) == 1;
   die "verdicts.txt: expected at least one verdict line\n" unless $count{verdict};
+  my %alone = map { ($_->[1] => 1) } grep { $_->[0] eq 'trailer' } @rows;
+  for my $r (grep { $_->[0] eq 'ready' } @rows) {
+    die "verdicts.txt: the ready word $r->[1] is not a trailer word (a ready word stands alone)\n" unless $alone{ $r->[1] };
+  }
   return @rows_read = @rows;
 }
 
@@ -65,6 +70,23 @@ sub rows {
 sub words {
   my ($kind, @rows) = @_;
   return map { $_->[1] } grep { $_->[0] eq $kind } @rows;
+}
+
+# trailer_word MESSAGE: the word of a valid message's trailer value, its
+# reason dropped, or undef when trailer_problem finds a problem
+sub trailer_word {
+  my ($msg) = @_;
+  return undef if defined trailer_problem($msg);
+  my @rows = rows();
+  my ($key) = words('trailer-key', @rows);
+  my %alone = map { $_ => 1 } words('trailer', @rows);
+  (my $m = $msg) =~ s/\r\n/\n/g;
+  my ($line) = grep { index($_, "$key:") == 0 } split /\n/, $m;
+  $line =~ s/[ \t]+\z//;
+  my ($value) = $line =~ /\A\Q$key\E: (.*)\z/s;
+  return $value if $alone{$value};
+  my ($word) = $value =~ /\A(\S+) -/s;
+  return $word;
 }
 
 sub trailer_problem {
@@ -127,7 +149,7 @@ sub main {
   my $words = defined $cmd && $cmd eq 'words' && defined $kind && $kinds{$kind} && !@rest;
   my $check = defined $cmd && $cmd eq 'check-trailer' && !defined $kind;
   unless ($words || $check) {
-    print STDERR "verdicts: usage: verdicts.pl words verdict|trailer-key|trailer|trailer-reason, or verdicts.pl check-trailer <MESSAGE\n";
+    print STDERR "verdicts: usage: verdicts.pl words verdict|trailer-key|trailer|trailer-reason|ready, or verdicts.pl check-trailer <MESSAGE\n";
     exit 2;
   }
   my @rows = eval { rows() };

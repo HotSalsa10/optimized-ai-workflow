@@ -985,6 +985,34 @@ got=$(cd "$e" && perl "$root/method/scripts/method/lib/secrets.pl" --repo allow.
 code=$?
 if [ "$code" -ne 0 ] && printf '%s\n' "$got" | grep -q 'secrets: usage:'; then pass "the scan's --repo mode takes no file names"; else fail "the scan's --repo mode takes no file names: exit $code" "$got"; fi
 
+# the files on disk are compared byte for byte with the commit (lib/tree.pl):
+# a CR that git status does not see, because a line-end setting converts it
+# back, is a change; a CRLF the commit's own .gitattributes asks for is not
+lr=$(new_repo) || abort_sandbox
+printf '#!/bin/sh\nset -e\nfalse\necho reached\n' >"$lr/src/t.sh"
+printf '@echo off\necho hi\n' >"$lr/src/run.bat"
+printf '*.bat text eol=crlf\n' >"$lr/.gitattributes"
+(cd "$lr" && git add -A 2>/dev/null && git commit -q -m scripts)
+tsv "$lr" "$(ck unit 'echo 1 passed')"
+rm -f "$lr/src/run.bat" && (cd "$lr" && git checkout -q -- src/run.bat 2>/dev/null)
+if grep -q "$(printf '\r')" "$lr/src/run.bat"; then pass "setup: git's checkout wrote CRLF into a committed eol=crlf file"; else fail "setup: git's checkout wrote CRLF"; fi
+run "$lr"
+expect "a CRLF the commit's .gitattributes asks for is the commit: the start is clean" 0 "run-checks: PASS - 4 passed; where local"
+in_log "its log says the tree was clean at the start" "tree at start clean"
+(cd "$lr" && git config core.autocrlf true)
+perl -pi -e 's/\n/\r\n/' "$lr/src/t.sh"
+(cd "$lr" && git add src/t.sh 2>/dev/null)
+st_short=$(cd "$lr" && git status --porcelain)
+run "$lr"
+if [ -z "$st_short" ]; then pass "setup: core.autocrlf hides a CRLF set -e script from git status"; else fail "setup: core.autocrlf hides the CRLF" "$st_short"; fi
+expect "a CRLF script that core.autocrlf hides from git status is an uncommitted change" 0 "where local; on uncommitted changes"
+in_log "its log says so at the start" "tree at start uncommitted changes"
+rm -f "$lr/src/t.sh" && (cd "$lr" && git config --unset core.autocrlf && git checkout -q -- src/t.sh && git reset -q)
+tsv "$lr" "$(ck unit 'perl -pi -e "s/\\n/\\r\\n/" src/t.sh && git -c core.autocrlf=true add src/t.sh 2>/dev/null && echo 1 passed')"
+run "$lr"
+expect "a check that adds CRs and hides them with git add fails tree-unchanged" 1 "tree-unchanged: FAIL - the checks changed 1 files"
+in_log "and the log names the file" "changed during the run: src/t.sh"
+
 for d in $repos; do drop_sandbox "$d"; done
 drop_sandbox "$work"
 echo "tests: run-checks: $tests_pass passed, $tests_fail failed, $tests_skip skipped"

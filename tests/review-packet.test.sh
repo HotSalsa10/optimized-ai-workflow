@@ -915,6 +915,14 @@ else
   skip "a CR added to one line under core.autocrlf: git status sees the edit here"
 fi
 (cd "$eol" && git config core.autocrlf false && rm -f plain.txt && git checkout -q -- plain.txt)
+(cd "$eol" && printf '* text=auto\nrun.bat text eol=crlf\n' >.gitattributes && printf '@echo off\n' >run.bat && git add -A 2>/dev/null &&
+  git commit -qm bat && rm -f run.bat && git checkout -q -- run.bat 2>/dev/null)
+build "$eol" --base main
+expect "a CRLF the commit's own .gitattributes asks for is the commit, so it is not refused" 0 "FILE A run.bat"
+case "$out" in
+  *"differ from the commit only by a CR"*) fail "and it is not named as a CR difference" "$out" ;;
+  *) pass "and it is not named as a CR difference" ;;
+esac
 # shellcheck disable=SC2016 # $1 is for the script being written
 printf '#!/bin/sh\ncat >/dev/null\ngit cat-file blob "HEAD:$1"\n' >"$eol/.git/clean-hide.sh"
 # shellcheck disable=SC2016 # $Id$ is meant literally

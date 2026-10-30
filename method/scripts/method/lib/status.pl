@@ -264,8 +264,7 @@ sub verdicts_lines {
   my ($conf) = @_;
   my $note = 'task-branch commits are not read; done-check checks the change at merge';
   my ($ref, $tip) = Git::main_ref();
-  return ['verdicts', 'SKIPPED', 'no main branch (looked for origin/HEAD, refs/remotes/origin/main, refs/heads/main,'
-    . " refs/remotes/origin/master, refs/heads/master); $note"] unless defined $ref;
+  return ['verdicts', 'SKIPPED', 'no main branch (' . Git::no_main() . "); $note"] unless defined $ref;
   my ($key) = Verdicts::words('trailer-key', Verdicts::rows());
   my $j = Verdicts::judged($tip, $conf->{VERDICTS_FROM});
   my $shallow = $j->{shallow} ? '; shallow history: older commits not read' : '';

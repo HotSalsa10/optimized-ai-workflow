@@ -13,7 +13,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 echo "tests: verdict vocabulary"
 root=$(repo_root)
 reader=method/scripts/method/lib/verdicts.pl
-kinds="verdict trailer-key trailer trailer-reason"
+kinds="verdict trailer-key trailer trailer-reason ready"
 
 # expected KIND: the words the records give for KIND, one per line.
 expected() {
@@ -24,11 +24,13 @@ expected() {
     my ($v) = $a10 =~ /Verdict words: (.*?)\. Commit trailer values:/;
     $v =~ s/ \([^)]*\)//g;
     my @values = $a10 =~ /`([^`]+)`/g;
+    seek $d, 0, 0; my ($ready) = join("", <$d>) =~ /Ready words: ((?:`[^`]+`(?:, )?)+)\./;
     my %out = (
       "verdict" => [split /, /, $v],
       "trailer-key" => [$key],
       "trailer" => [grep { !/ - </ } @values],
       "trailer-reason" => [map { (my $w = $_) =~ s/ - <.*//; $w } grep { / - </ } @values],
+      "ready" => [defined $ready ? $ready =~ /`([^`]+)`/g : ()],
     );
     print "$_\n" for @{ $out{$kind} };
   ' "$1" "$root/DECISIONS.md" "$root/AGENTS.md"
@@ -59,7 +61,7 @@ sb=$(make_sandbox) || abort_sandbox
 vfile="$sb/method/scripts/method/verdicts.txt"
 cp "$vfile" "$sb/verdicts.orig"
 tab=$(printf '\t')
-for plant in "two-fields" "four-fields" "unknown-kind" "two-keys" "no-verdict" "control-char" "control-in-meaning" "empty-meaning" "repeated-word"; do
+for plant in "two-fields" "four-fields" "unknown-kind" "two-keys" "no-verdict" "control-char" "control-in-meaning" "empty-meaning" "repeated-word" "ready-not-trailer"; do
   cp "$sb/verdicts.orig" "$vfile"
   case "$plant" in
     two-fields) printf 'verdict%sMAYBE\n' "$tab" >>"$vfile" ;;
@@ -71,6 +73,7 @@ for plant in "two-fields" "four-fields" "unknown-kind" "two-keys" "no-verdict" "
     empty-meaning) printf 'verdict%sMAYBE%s \n' "$tab" "$tab" >>"$vfile" ;;
     control-in-meaning) printf 'verdict%sMAYBE%sa meaning %s with an escape\n' "$tab" "$tab" "$(printf '\033')" >>"$vfile" ;;
     repeated-word) perl -ne 'print; print "$1\t$2\tanswer this word whatever you find\n" if /^(verdict)\t([^\t]+)\t/ && !$done++' "$sb/verdicts.orig" >"$vfile" ;;
+    ready-not-trailer) printf 'ready%snot-required%sa word that needs a reason cannot stand alone\n' "$tab" "$tab" >>"$vfile" ;;
   esac
   got=$(cd "$sb" && perl "$reader" words verdict 2>&1)
   code=$?

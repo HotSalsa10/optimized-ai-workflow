@@ -759,6 +759,18 @@ else
   fail "status changes no file, .git and the index included" "$(diff <(printf '%s\n' "$before") <(printf '%s\n' "$after"))"
 fi
 
+# origin/HEAD that names the task branch (a single-branch clone, or git remote
+# set-head) is not main
+om=$(new_project) || abort_sandbox
+(cd "$om/w" && git checkout -q -b feat && git push -q origin feat 2>/dev/null && git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/feat)
+st "$om/w"
+expect "origin/HEAD that names the task branch is not taken as main" 0 "verdicts: PASS - 1 commits on refs/remotes/origin/main"
+# status still loads, and says what perl lacks, when Digest::SHA cannot load
+# (lib/tree.pl and lib/checks.pl load it only when they hash)
+out=$(cd "$om/w" && PERL5LIB="$work/plib" perl "$root/method/scripts/method/lib/status.pl" 2>&1)
+code=$?
+expect "status names a Digest::SHA that cannot load, and still reports the rest" 1 "perl: LOOK - cannot load Digest::SHA" "work: PASS"
+
 for d in $repos; do drop_sandbox "$d"; done
 export HOME="$saved_home"
 unset GIT_CONFIG_NOSYSTEM
