@@ -909,7 +909,8 @@ printf 'plain\r\nmore\n' >"$eol/plain.txt"
 (cd "$eol" && git add plain.txt)
 if [ -z "$(cd "$eol" && git status --porcelain --untracked-files=no)" ]; then
   build "$eol" --base main
-  expect "a CR added to one line, which core.autocrlf makes look committed, is refused" 1 "the working copy of plain.txt is not what was committed"
+  expect "a file that differs from the commit only by CRs, which core.autocrlf makes look committed, is named in the header" 0 \
+    "On disk, 1 tracked files differ from the commit only by a CR before some or all line ends" "set -e off in a shell script): plain.txt"
 else
   skip "a CR added to one line under core.autocrlf: git status sees the edit here"
 fi

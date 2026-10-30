@@ -261,9 +261,10 @@ sub check_env {
 # does not ignore that is changed, untracked, or marked so git does not
 # compare it (assume-unchanged, or skip-worktree, also with the file gone
 # from disk: a sparse checkout, or a deletion hidden that way; also inside
-# submodules, Git::flagged), each with its mode and the SHA-256 of what is
-# on disk (.method/local left out). git status runs with no filter program
-# and no stat shortcut (Git::status_options).
+# submodules, Git::flagged), and every submodule folder whose changes git
+# cannot see (Git::submodules), each with its mode and the SHA-256 of what
+# is on disk (.method/local left out). git status runs with no filter
+# program and no stat shortcut (Git::status_options).
 sub fingerprint {
   require Digest::SHA;    # loaded here, so status.pl can load this file without it
   my ($st, $head) = Git::run('rev-parse', '-q', '--verify', 'HEAD^{commit}');
@@ -277,7 +278,9 @@ sub fingerprint {
   for my $rec (split /\0/, $out) {
     push @paths, [substr($rec, 3), substr($rec, 0, 2)] if length $rec >= 4;
   }
-  push @paths, [$_->[0], "flag $_->[1]"] for Git::flagged('.');
+  my @subs = Git::submodules('.');
+  push @paths, map { [$_->[0], "submodule: $_->[2]"] } grep { defined $_->[2] } @subs;
+  push @paths, [$_->[0], "flag $_->[1]"] for Git::flagged('.', \@subs);
   my %e;
   for my $p (@paths) {
     my ($path, $why) = @$p;

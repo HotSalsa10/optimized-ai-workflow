@@ -79,9 +79,10 @@ sub parse {
     my ($k, $val) = $l =~ /\A([A-Za-z][A-Za-z0-9_]*)=(.*)\z/;
     if (!defined $k) { $problem->('is not KEY=VALUE'); next }
     my $kind = $keys->{$k};
-    # a name that is not one word of letters in one case, of at most 30, may
-    # be a pasted secret that ends in =
-    if (!$kind && $k !~ /\A(?:[A-Z_]{1,30}|[a-z_]{1,30})\z/) {
+    # a name that is not one word of letters in one case, of at most 16 (the
+    # key names are shorter), may be a pasted secret that ends in = (an AWS
+    # key id is 20)
+    if (!$kind && $k !~ /\A(?:[A-Z_]{1,16}|[a-z_]{1,16})\z/) {
       $problem->('an unknown key, not shown: it does not look like a key name, so it may be a pasted value');
       next;
     }

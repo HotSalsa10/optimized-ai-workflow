@@ -168,7 +168,9 @@ sub work_lines {
     my $n = () = $st =~ /\0/g;
     push @parts, "$where$n uncommitted entries (a new folder counts once)" if $n;
     my ($marked, $missing) = (0, 0);
-    for my $e (Git::flagged($wt->{worktree})) {
+    my @subs = Git::submodules($wt->{worktree});
+    push @parts, "${where}submodule $_->[0]: $_->[2]" for grep { defined $_->[2] } @subs;
+    for my $e (Git::flagged($wt->{worktree}, \@subs)) {
       my ($path, $tag) = @$e;
       if ($tag =~ /\A[a-z]\z/) { $marked++; next }
       if (-e "$wt->{worktree}/$path" || -l "$wt->{worktree}/$path") { $marked++ } else { $missing++ }

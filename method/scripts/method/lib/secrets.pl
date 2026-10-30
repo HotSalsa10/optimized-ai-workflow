@@ -6,16 +6,16 @@
 # Usage:
 #   perl secrets.pl --repo [--ids] ALLOW_FILE
 #       Run from the repo root: scans every tracked file that is a regular
-#       file on disk (git ls-files, so no file name goes on a command line),
-#       with everything --staged adds. After the count lines it prints
-#       "RESULT PASS|FAIL|SKIPPED <reason>": FAIL on any finding or unreadable
-#       file, SKIPPED when it examined no text file, else PASS.
-#   perl secrets.pl [--staged] [--ids] ALLOW_FILE FILE...
-#       Scans each FILE. With --staged (run from the repo root), also scans the
-#       staged copy of every tracked file whose staged copy differs from the
-#       working tree, so a secret that is staged but no longer on disk is seen;
-#       the name of every tracked entry (also links, folders of other repos
-#       and files missing from disk); and the stored target of every symlink.
+#       file on disk (git ls-files, so no file name goes on a command line);
+#       the staged copy of every tracked file whose stored content is not the
+#       file on disk, so a secret that is staged but no longer on disk is
+#       seen; the name of every tracked entry (also links, folders of other
+#       repos and files missing from disk); and the stored target of every
+#       symlink. After the count lines it prints "RESULT PASS|FAIL|SKIPPED
+#       <reason>": FAIL on any finding or unreadable file, SKIPPED when it
+#       examined no text file, else PASS.
+#   perl secrets.pl [--ids] ALLOW_FILE FILE...
+#       Scans each FILE.
 #       With --ids, each finding also shows the ID to put in ALLOW_FILE.
 #       Prints one line per finding (masked, never in full), "NOTE ..." lines,
 #       then "EXAMINED n", "STAGED n", "BAD n", "ALLOWED n", "SKIPPED n", "SKIPPED_NAMES ...".
@@ -63,21 +63,21 @@ sub say_line {
   print "$s\n";
 }
 
-my ($staged, $show_ids, $mask_mode, $repo_mode) = (0, 0, 0, 0);
+my ($show_ids, $mask_mode, $repo_mode) = (0, 0, 0);
 while (@ARGV && $ARGV[0] =~ /^--/) {
   my $opt = shift @ARGV;
-  if ($opt eq '--staged') { $staged = 1 }
-  elsif ($opt eq '--ids') { $show_ids = 1 }
+  if ($opt eq '--ids') { $show_ids = 1 }
   elsif ($opt eq '--mask') { $mask_mode = 1 }
-  elsif ($opt eq '--repo') { $repo_mode = $staged = 1 }
+  elsif ($opt eq '--repo') { $repo_mode = 1 }
   else { die "secrets: unknown option " . esc($opt) . "\n" }
 }
 
 # Keys and tokens with a recognisable shape. A shape marked 1 counts only
-# where no letter or digit comes right before it.
+# where no letter or digit comes right before it in a file; one marked 2
+# also in the output mask (sk- ends many words: task-, disk-, risk-).
 my @token_rules = (
   [qr/sk-ant-[A-Za-z0-9_-]{20,}/, 'Anthropic API key', 0],
-  [qr/sk-(?:proj-)?[A-Za-z0-9]{32,}/, 'OpenAI-style API key', 1],
+  [qr/sk-(?:proj-)?[A-Za-z0-9]{32,}/, 'OpenAI-style API key', 2],
   [qr/gh[pousr]_[A-Za-z0-9]{36,}/, 'GitHub token', 1],
   [qr/github_pat_[A-Za-z0-9_]{40,}/, 'GitHub fine-grained token', 1],
   [qr/AKIA[0-9A-Z]{16}(?![0-9A-Z])/, 'AWS access key', 1],
@@ -89,7 +89,7 @@ my @token_rules = (
 # takes a shape glued to a word (an escape in a spelling it does not know,
 # such as %1B or &#27;, leaves the key right after a letter)
 my @token_cap = map { $_->[2] ? qr/(?<![A-Za-z0-9])($_->[0])/ : qr/($_->[0])/ } @token_rules;
-my @token_mask = map { qr/($_->[0])/ } @token_rules;
+my @token_mask = map { $_->[2] == 2 ? qr/(?<![A-Za-z0-9])($_->[0])/ : qr/($_->[0])/ } @token_rules;
 
 # Credentials assigned to a name that contains a credential word, also as
 # part of a longer name (DB_PASSWORD, client_secret). Names are capped at 64
@@ -226,7 +226,7 @@ my $pem_end = qr/-----END (?:[A-Z]+ )*PRIVATE KEY(?: BLOCK)?-----/;
 # -v's ^[), with the rest of its sequence ([31m, (B). Then any escape
 # written as text (\n, \t, \x09). A word right after one has a letter
 # before it, which hides a key from every rule.
-my $esc_text = qr/(?:\\(?:x0*1[bB]|x\{0*1[bB]\}|u001[bB]|u\{0*1[bB]\}|0?33|27|ESC|[eE]|c\[)|\^\[)(?:\[[0-?]*[ -\/]*[@-~]|[ -\/]+[0-~])?/;
+my $esc_text = qr/(?:\\(?:x0*1[bB]|x\{0*1[bB]\}|u001[bB]|u\{0*1[bB]\}|0?33|27|ESC|[eE]|c\[)|\^\[)(?:\[[0-?]*[ -\/]*[@-~]|[()*][0-~])?/;
 my $text_code = qr/$esc_text|\\(?:x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|u\{[0-9A-Fa-f]{1,6}\}|[0-7]{1,3}|[abefnrtv])(?:\[[0-?]*[ -\/]*[@-~])?/;
 # plain TEXT: TEXT with every terminal code and every ESC written as text
 # taken out (\n and \t stay: they part words, they do not colour them)
@@ -255,20 +255,26 @@ sub mask_pass {
 # colour code such as ESC[31m or one written as text such as \x1b[31m ends
 # a word without leaving a space. The terminal codes are masked too, so a
 # key inside one (a link's address) is not let through. Last, a key with a
-# code inside it (grep's highlighting, a coloured diff) is whole only with
-# the codes taken out: when that copy still holds something to mask, the
-# text is shown without its codes, masked, and with every text the pieces
-# gave masked in it first (without the code, a key that followed one would
-# be glued to the word before it).
+# code inside it (grep's highlighting, a coloured diff, also one after the
+# length its rule needs) is whole only with the codes taken out: when that
+# copy shows a find the pieces did not give (or more of one), the text is
+# shown without its codes, masked whole first, then with every text the
+# pieces gave masked in it too (without the code, a value that followed
+# one would be glued to the word before it).
 sub mask_text {
   my ($t) = @_;
   local $MASKED = [];
   my $s = mask_pass($t);
   $s = join '', map { /\A$text_code\z/ ? $_ : mask_pass($_) } split /($text_code|$term_code)/, $s;
   my @found = @$MASKED;
-  my $plain = plain($s);
-  return $s if $plain eq $s || mask_pass($plain) eq $plain;
-  return mask_text(mask_found(plain($t), @found));
+  my $p = plain($t);
+  return $s if $p eq $t;
+  $MASKED = [];
+  my $q = mask_pass($p);
+  my %left;
+  $left{ $_->[0] }++ for @found;
+  return $s unless grep { --$left{ $_->[0] } < 0 } @$MASKED;
+  return mask_text(mask_found($q, @found));
 }
 
 # --mask: a filter for other tools' output. A private key's body lines hold
@@ -279,7 +285,7 @@ sub mask_text {
 # window of a longer output), and they are masked too.
 if ($mask_mode) {
   # (any length: a key's last body line, and a PGP key's =XXXX checksum
-  # line, are short; + and = also cover a diff of a key file)
+  # line, are short; + also covers the added lines of a diff of a key file)
   my $body = qr/\A[ \t]*[A-Za-z0-9+\/=]+[ \t]*\z/;
   my ($in_key, @held) = (0);
   my $out = sub { say_line('  ' . $_[0]) };
@@ -325,7 +331,7 @@ sub git_pipe {
 }
 
 my $allow_file = shift @ARGV;
-die "secrets: usage: secrets.pl --repo [--ids] ALLOW_FILE, or secrets.pl [--staged] [--ids] ALLOW_FILE FILE...\n"
+die "secrets: usage: secrets.pl --repo [--ids] ALLOW_FILE, or secrets.pl [--ids] ALLOW_FILE FILE...\n"
   unless defined $allow_file && !($repo_mode && @ARGV);
 if ($repo_mode) {
   local $/ = "\0";
@@ -522,7 +528,7 @@ sub read_raw {
   return defined $bytes ? $bytes : '';
 }
 
-# With --staged, every tracked name is scanned as text, once. It is shown
+# With --repo, every tracked name is scanned as text, once. It is shown
 # masked, so a key or an email in a name is never printed in full.
 my %name_done;
 sub scan_name {
@@ -531,12 +537,12 @@ sub scan_name {
   scan_line($path, 'a tracked file name (' . mask_text($path) . ')', $path, {}, 0);
 }
 
-# With --staged, a staged copy is scanned whenever the bytes on disk are not
+# With --repo, a staged copy is scanned whenever the bytes on disk are not
 # that stored file, or the file is not on disk. git's own comparison is not
 # used: it trusts its stat cache, so a staged secret could hide behind a
 # restored time stamp, and git diff writes the index and runs its hook.
 my (@index, %like, %disk_id);    # index entries [path, mode, id]; path => an id; path => its bytes' id
-if ($staged) {
+if ($repo_mode) {
   local $/ = "\0";
   my $l = git_pipe('ls-files', '-s', '-z');
   while (my $e = <$l>) {
@@ -556,7 +562,7 @@ for my $file (@ARGV) {
   scan_content($file, mask_text($file), $bytes);
 }
 
-if ($staged) {
+if ($repo_mode) {
   my @blobs;
   for my $x (@index) {
     my ($path, $mode, $oid) = @$x;
@@ -571,7 +577,7 @@ if ($staged) {
     my ($path, $oid, $kind) = @$b;
     my $before = $examined;
     # one git process for every stored file, each checked against its id
-    scan_content($path, mask_text($path) . $kind, Git::cat('blob', $oid));
+    scan_content($path, mask_text($path) . $kind, Git::cat('blob', $oid, 1));
     $staged_examined += $examined - $before;
   }
 }

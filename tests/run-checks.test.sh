@@ -820,8 +820,12 @@ printf '%s\n' "'\\x1b[1m$ak\\x1b[0m'" "'\\x1B[33m$tok\\x1B[39m'" "\"\\u001b[31m$
   "'\\x1b[01;31m\\x1b[K$ak1\\x1b[m\\x1b[K$ak2'" "x\\ny $ak" "x\\nbo.smith@""gmail.com" \
   "\"\\033[31m$ak\"" "'\\e[1m$tok'" "^[[K$ak" "\"\\u{1b}[1m$tok\"" "a\\t$ak" "\$'\\E[1m$tok'" "\"\\ESC[1m$ak\"" \
   "$tok x\\n$ak" 're.sub(r"\bpass''word=[^&\s]+&yz", "", s)' '"+12\t3456\t7890"' "\"\\x1b(B$ak\"" "'$ak1\\u{1b}[1m$ak2'" \
-  "$(perl -e 'print join(" ", map { "u$_\@gm" . "ail.com" } 1..101), " x\\nbo.x\@gm", "ail.com bo.x\@gm", "ail.com"')" >"$r3/out.txt"
+  "$(perl -e 'print join(" ", map { "u$_\@gm" . "ail.com" } 1..101), " x\\nbo.x\@gm", "ail.com bo.x\@gm", "ail.com"')" \
+  "'$ak1\\033[1m$ak2'" "'$ak1\\27[1m$ak2'" "'$ak1\\c[[1m$ak2'" "'$ak1\\x{1b}[1m$ak2'" "'\\x{1b}[1m$ak'" "'\\c[[1m$tok'" \
+  "name\\e$ph x" >"$r3/out.txt"
 pgb="-----BEGIN PGP PRIV""ATE KEY BLOCK-----"
+# a Slack token whose head alone already matches its rule (a code after it hides the rest)
+sl="xox""b-1234567890123-1234567890123-"
 pge="-----END PGP PRIV""ATE KEY BLOCK-----"
 # the key's last body line is short, as a real key's often is
 printf '%s\n\nlQOYBF%s\n%s\nGh78\n=Wx7z\n%s\nafter the key\n{"key":"%s\\n\\nlQOYBF%s\\n%s"}\n' "$pgb" "$(perl -e 'print "Ab12" x 15')" \
@@ -831,11 +835,12 @@ printf '%s\n\nlQOYBF%s\n%s\nGh78\n=Wx7z\n%s\nafter the key\n{"key":"%s\\n\\nlQOY
 # odd: escapes in spellings the mask does not split at (URL and HTML forms)
 # shellcheck disable=SC2016 # the checks' own shell expands these
 tsv "$r3" "$(ck glued "printf 'x\\033[31m%s\\033[0m\\nx\\033[31m%s\\nx\\033[1m%s\\nx\\033[31m%s\\033[0m and +1415\\033[1m5550132\\nx\\033[31m%s\\033[0m and %s\\033[1m%s\\n' $ak $ph $ib $ak $ph $ak1 $ak2; exit 1")" \
-  "$(ck odd "printf '%%1B[1m%s\\n&#27;[1m%s\\n' $tok $ak; exit 1")" \
+  "$(ck odd "printf '%%1B[1m%s\\n&#27;[1m%s\\ntask-0123456789abcdef0123456789abcdef\\n' $tok $ak; exit 1")" \
+  "$(ck long "printf 'token=%s\\033[7mAbCdEfGhIjKlAbCdEfGhIjKl\\033[27m\\nt=%s\\033[7mAbCdEfGhIjKlAbCdEfGhIjKl\\033[27m and %s\\033[1m%s\\n%s and %s\\033[1m%s\\n' $sl $sl $ak1 $ak2 $ak $ak1 $ak2; exit 1")" \
   "$(ck repr 'cat out.txt; exit 1')" "$(ck pgp 'cat pgp.txt; exit 1')" "$(ck pgpend 'sed -n "4,\$p" pgp.txt; exit 1')"
 run "$r3"
 leaked=""
-for v in "$ak" "$tok" "$ph" "$ib" "$ak2" 5550132 Ab12Ab12 Cd34Cd34 Ef56Ef56; do
+for v in "$ak" "$tok" "$ph" "$ib" "$ak2" 5550132 Ab12Ab12 Cd34Cd34 Ef56Ef56 AbCdEfGhIjKl; do
   if printf '%s\n' "$out" | grep -F -q -- "$v" || grep -F -q -- "$v" "$logf"; then leaked="$leaked [$v]"; fi
 done
 if [ "$code" -eq 1 ] && [ -z "$leaked" ]; then
@@ -844,12 +849,13 @@ else
   fail "values after a letter and a colour code, after escapes written as text, or in a PGP key block are masked: shown in full:$leaked" "$out"
 fi
 in_log "the shown lines keep what is not secret" '  x\x1B[31mAKIA...(20 chars)' "  '\\x1B[33mghp_...(40 chars)\\x1B[39m'" '  line\n***(22 chars)' \
-  "  after the key" '  xAKIA...(20 chars) and ***(12 chars)' '  "+12\t3456\t7890"' '  x***(12 chars) and AKIA...(20 chars)'
+  "  after the key" '  xAKIA...(20 chars) and ***(12 chars)' '  "+12\t3456\t7890"' '  x***(12 chars) and AKIA...(20 chars)' \
+  '  task-0123456789abcdef0123456789abcdef'
 in_log "the secrets check finds a key after an escape written as text (each spelling), and a PGP private key, in a tracked file" \
   "out.txt:1: AWS access key" "out.txt:2: GitHub token" "out.txt:3: phone number" "out.txt:4: bank account number" \
   "out.txt:8: AWS access key" "out.txt:9: GitHub token" "out.txt:10: AWS access key" "out.txt:11: GitHub token" \
   "out.txt:12: AWS access key" "out.txt:13: GitHub token" "out.txt:14: AWS access key" "out.txt:15: AWS access key" \
-  "out.txt:18: AWS access key" "pgp.txt:1: private key"
+  "out.txt:18: AWS access key" "out.txt:25: AWS access key" "out.txt:26: GitHub token" "out.txt:27: phone number" "pgp.txt:1: private key"
 if grep -q 'out.txt:16:' "$logf"; then
   fail "a credential name after an escape written as text is not read as the start of a line" "$(grep 'out.txt:16:' "$logf")"
 else
@@ -919,6 +925,20 @@ run "$r3"
 expect "a check that deletes a file inside a submodule and hides it with skip-worktree fails tree-unchanged" 1 \
   "changed during the run: lib/src/a.txt"
 (cd "$r3/lib" && git update-index --no-skip-worktree src/a.txt && git checkout -q src/a.txt)
+tsv "$r3" "$(ck unit 'echo "1 passed"')"
+mv "$r3/lib/.git" "$work/r3lib.git"
+run "$r3"
+expect "a submodule folder that holds files but no .git counts as uncommitted" 0 "on uncommitted changes"
+mv "$work/r3lib.git" "$r3/lib/.git"
+tsv "$r3" "$(ck nogit 'mv lib/.git lib/.git-away && echo "1 passed"')"
+run "$r3"
+expect "a check that takes a submodule's .git away fails tree-unchanged" 1 "changed during the run: lib"
+mv "$r3/lib/.git-away" "$r3/lib/.git"
+tsv "$r3" "$(ck unit 'echo "1 passed"')"
+(cd "$r3/lib" && git config status.showUntrackedFiles no && : >new.txt)
+run "$r3"
+expect "an untracked file inside a submodule that hides untracked files counts as uncommitted" 0 "on uncommitted changes"
+rm -f "$r3/lib/new.txt"
 (cd "$r3" && git rm -q -f lib && rm -rf .git/modules/lib && git commit -q -m "no sub")
 printf '# nothing accepted\n' >"$work/allow.txt"
 ln -s "$work/allow.txt" "$r3/checks/scan-allow.txt"

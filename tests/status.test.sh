@@ -720,6 +720,22 @@ st "$smw"
 expect "an edit hidden by assume-unchanged inside a submodule is a LOOK" 1 \
   "work: LOOK - 1 files are marked so git does not compare them (assume-unchanged or skip-worktree, also inside submodules)"
 (cd "$smw/lib" && git update-index --no-assume-unchanged a.txt && git checkout -q a.txt)
+mv "$smw/lib/.git" "$work/lib.git"
+echo hidden >>"$smw/lib/a.txt"
+st "$smw"
+expect "a submodule folder that holds files but no .git is a LOOK" 1 \
+  "work: LOOK - submodule lib: holds files but no .git, so git cannot see a change in it"
+mv "$work/lib.git" "$smw/lib/.git"
+(cd "$smw/lib" && git checkout -q a.txt)
+(cd "$smw" && git clone -q "$lib/remote.git" "$sm/libcopy" 2>/dev/null && git -C lib config core.worktree "$sm/libcopy")
+st "$smw"
+expect "a submodule whose .git points git at another working folder is a LOOK" 1 \
+  "work: LOOK - submodule lib: its .git points git at another working folder"
+(cd "$smw" && git -C lib config --unset core.worktree)
+(cd "$smw/lib" && git config status.showUntrackedFiles no && : >new.txt)
+st "$smw"
+expect "an untracked file inside a submodule that hides untracked files is a LOOK" 1 "work: LOOK - 1 uncommitted entries"
+rm -f "$smw/lib/new.txt"
 (cd "$lib" && git clone -q --separate-git-dir "$lib/sep.git" remote.git sep 2>/dev/null) || fail "could not clone with --separate-git-dir"
 st "$lib/sep"
 expect "a clone made with --separate-git-dir is read" 0 "work: PASS - nothing uncommitted, nothing unpushed"

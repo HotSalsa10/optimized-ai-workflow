@@ -87,7 +87,9 @@ sub top {
 
 sub status_options {
   my @g = @_;
-  my @o = ('-c', 'core.trustctime=true', '-c', 'core.checkStat=default');
+  # (also passed to the git status git runs inside each submodule, where a
+  # status.showUntrackedFiles=no of its own would hide its untracked files)
+  my @o = ('-c', 'core.trustctime=true', '-c', 'core.checkStat=default', '-c', 'status.showUntrackedFiles=normal');
   my ($st, $names) = run(@g, 'config', '--name-only', '-z', '--get-regexp', '^filter\.');
   return @o if $st;
   for my $name (split /\0/, $names) {
@@ -120,20 +122,35 @@ sub ok {
   return $out;
 }
 
-# submodules DIR: [path relative to DIR, folder] for every submodule
-# checked out in the repository whose working tree has its top at DIR,
-# nested ones too (up to 8 deep)
+# submodules DIR: [path relative to DIR, folder, problem] for every
+# submodule folder that holds anything in the repository whose working tree
+# has its top at DIR, nested ones too (up to 8 deep). PROBLEM is undef for
+# a submodule that is checked out; otherwise it says why git cannot see a
+# change in the folder (git's own status then reports nothing for it). Only
+# checked-out submodules are walked into.
 sub submodules {
   my ($dir, $prefix, $depth) = @_;
   ($prefix, $depth) = ('', 0) unless defined $prefix;
-  my @s;
+  my (@s, %seen);
   for my $rec (split /\0/, ok('-C', $dir, 'ls-files', '-s', '-z')) {
     my ($meta, $path) = split /\t/, $rec, 2;
-    next unless defined $path && $meta =~ /\A160000 /;
+    # a merge conflict lists a path up to three times
+    next unless defined $path && $meta =~ /\A160000 / && !$seen{$path}++;
     my $sub = "$dir/$path";
-    next unless -e "$sub/.git";
-    push @s, ["$prefix$path", $sub];
-    push @s, submodules($sub, "$prefix$path/", $depth + 1) if $depth < 7;
+    my $problem;
+    if (!-e "$sub/.git") {
+      opendir my $dh, $sub or next;
+      next unless grep { $_ ne '.' && $_ ne '..' } readdir $dh;    # empty: not checked out
+      $problem = 'holds files but no .git, so git cannot see a change in it';
+    } else {
+      my ($st, $top) = run('-C', $sub, 'rev-parse', '--show-toplevel');
+      my @here = stat $sub;
+      my @there = !$st && $top =~ /\A(.+)\n\z/ ? stat $1 : ();
+      $problem = 'its .git points git at another working folder (or git cannot read it), so git cannot see a change in it'
+        unless @here && @there && $here[0] == $there[0] && $here[1] == $there[1];
+    }
+    push @s, ["$prefix$path", $sub, $problem];
+    push @s, submodules($sub, "$prefix$path/", $depth + 1) if !defined $problem && $depth < 7;
   }
   return @s;
 }
@@ -141,13 +158,15 @@ sub submodules {
 # flagged DIR: [path, tag] for every index entry marked so git does not
 # compare it with the file on disk (assume-unchanged: a lower-case tag;
 # skip-worktree: S), in the repository whose working tree has its top at
-# DIR and in every submodule checked out in it: git's own status of a
-# submodule obeys the submodule's flags. Paths are relative to DIR. No
-# program from the repository runs.
+# DIR and in every submodule checked out in it (SUBS: submodules(DIR), when
+# the caller has it already): git's own status of a submodule obeys the
+# submodule's flags. Paths are relative to DIR. No program from the
+# repository runs.
 sub flagged {
-  my ($dir) = @_;
+  my ($dir, $subs) = @_;
+  $subs = [submodules($dir)] unless $subs;
   my @f;
-  for my $r (['', $dir], map { ["$_->[0]/", $_->[1]] } submodules($dir)) {
+  for my $r (['', $dir], map { ["$_->[0]/", $_->[1]] } grep { !defined $_->[2] } @$subs) {
     my ($prefix, $d) = @$r;
     for my $rec (split /\0/, ok('-C', $d, 'ls-files', '-v', '-z')) {
       my ($tag, $path) = split / /, $rec, 2;
@@ -163,17 +182,17 @@ sub flagged {
 sub object_id {
   my ($type, $c, $like) = @_;
   require Digest::SHA;
-  my $data = "$type " . length($c) . "\0" . $c;
-  return length($like) == 64 ? Digest::SHA::sha256_hex($data) : Digest::SHA::sha1_hex($data);
+  # (added in two parts, so a large file is not copied)
+  return Digest::SHA->new(length($like) == 64 ? 256 : 1)->add("$type " . length($c) . "\0")->add($c)->hexdigest;
 }
 
-# cat TYPE ID: git does not check a stored file, folder or parent commit
+# cat TYPE ID [ONCE]: git does not check a stored file, folder or parent commit
 # when it reads one, so an object changed by hand could otherwise pass for
 # the committed one. Objects are read through one `git cat-file --batch`,
 # so reading many of them costs one git process.
 my (%cache, $batch_in, $batch_out);
 sub cat {
-  my ($type, $id) = @_;
+  my ($type, $id, $once) = @_;    # ONCE: not kept for a later read
   return $cache{$id} if exists $cache{$id};
   if (!$batch_in) {
     open my $saved, '>&', \*STDERR or die "cannot run git\n";
@@ -198,6 +217,7 @@ sub cat {
   die "cannot read the stored $type $id\n" unless defined $nl && $nl eq "\n";
   die "a stored $type does not match its id ($id); the repository's object store is damaged or was changed by hand\n"
     unless object_id($type, $c, $id) eq $id;
+  return $c if $once;
   return $cache{$id} = $c;
 }
 
