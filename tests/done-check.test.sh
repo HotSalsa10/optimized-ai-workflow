@@ -297,6 +297,26 @@ expect "setup: READY with a submodule" 0 "done-check: READY - "
 dc "$w"
 expect "a submodule moved after the run fails files" 1 "done-check: files: FAIL" "sub"
 (cd "$w/sub" && git checkout -q -)
+# inside a submodule too: a CR its own core.autocrlf hides, and an edit its
+# own filter hides (the filter never runs)
+(cd "$w/sub" && git config core.autocrlf true && perl -pi -e 's/\n/\r\n/' s.txt && git add s.txt 2>/dev/null)
+dc "$w"
+expect "a CR inside a submodule, hidden by the submodule's own core.autocrlf, fails files" 1 \
+  "with CRs before line ends that the commit's .gitattributes does not ask for" "sub/s.txt"
+(cd "$w/sub" && git config --unset core.autocrlf && rm -f s.txt && git checkout -q -- s.txt && git reset -q)
+sgd=$(cd "$w/sub" && git rev-parse --git-dir)
+case "$sgd" in /*) ;; *) sgd="$w/sub/$sgd" ;; esac
+mkdir -p "$sgd/info"
+printf '* filter=x\n' >"$sgd/info/attributes"
+(cd "$w/sub" && git config filter.x.clean "touch $work/subfilter-ran; git cat-file blob HEAD:%f" && echo edited >s.txt && git add s.txt)
+rm -f "$work/subfilter-ran"
+dc "$w"
+expect "an edit inside a submodule, hidden by the submodule's own filter, fails files" 1 "done-check: files: FAIL" "sub/s.txt"
+if [ -e "$work/subfilter-ran" ]; then fail "and the submodule's filter never runs"; else pass "and the submodule's filter never runs"; fi
+rm -f "$sgd/info/attributes"
+(cd "$w/sub" && git config --unset filter.x.clean && git checkout -q -- s.txt && git reset -q)
+dc "$w"
+expect "setup: READY again with the submodule as committed" 0 "done-check: READY - "
 
 # --- up to date (M108) ---
 (cd "$p" && git clone -q remote.git other 2>/dev/null && cd other && echo later >>README && git commit -q -am "Later" -m "$OK" && git push -q origin main 2>/dev/null)
@@ -327,9 +347,45 @@ expect "a shallow clone that holds main's tip passes up to date" 1 "done-check: 
 dc "$p/single"
 expect "origin/HEAD that names the task branch is not main; no main says how to fetch it" 1 \
   "done-check: up to date: FAIL - no main branch here (looked for origin/HEAD" "git fetch origin main:refs/remotes/origin/main"
-(cd "$p/single" && git checkout -q -b work --track origin/feat 2>/dev/null)
-dc "$p/single"
-expect "origin/HEAD that names the branch's upstream, under another name, is not main either" 1 "done-check: up to date: FAIL - no main branch here"
+
+# a default branch other than main: a branch made from it tracks it (git's
+# default), and it is still main
+for def in develop trunk; do
+  dv=$(new_sandbox_dir) || abort_sandbox
+  repos="$repos $dv"
+  (
+    cd "$dv" || exit 1
+    git init -q --bare remote.git
+    git --git-dir=remote.git symbolic-ref HEAD "refs/heads/$def"
+    git init -q seed
+    cd seed || exit 1
+    mkdir -p checks .claude src
+    printf 'unit\tany\t-\t(\\d+) ok\techo 3 ok\n' >checks/project.tsv
+    printf 'PRODUCT_PATHS=src\n' >.claude/method.conf
+    printf 'x = 1\n' >src/a.txt
+    git add -A
+    git commit -q -m "Start" -m "$OK"
+    git remote add origin ../remote.git
+    if [ "$def" = develop ]; then git push -q origin main 2>/dev/null; fi
+    git checkout -q -b "$def"
+    git commit -q --allow-empty -m "Default" -m "$OK"
+    git push -q origin "$def" 2>/dev/null
+    cd .. && git clone -q remote.git w 2>/dev/null && cd w || exit 1
+    git checkout -q -b feat "origin/$def" 2>/dev/null
+    echo y >src/b.txt
+    git add -A
+    git commit -q -m "Feature" -m "$OK"
+  ) || abort_sandbox
+  up=$(cd "$dv/w" && git rev-parse --abbrev-ref 'feat@{upstream}' 2>/dev/null)
+  if [ "$up" = "origin/$def" ]; then pass "setup: the branch tracks origin/$def"; else fail "setup: the branch tracks origin/$def" "$up"; fi
+  rc "$dv/w"
+  dc "$dv/w"
+  expect "a branch that tracks the default branch $def still has it as main" 0 "done-check: up to date: PASS - main is refs/remotes/origin/$def"
+done
+(cd "$dv/seed" && git commit -q --allow-empty -m "Default moves" -m "$OK" && git push -q origin trunk 2>/dev/null)
+(cd "$dv/w" && git fetch -q origin)
+dc "$dv/w"
+expect "and when that default branch moves on, the branch is not up to date" 1 "done-check: up to date: FAIL - refs/remotes/origin/trunk has 1 commits this branch does not"
 
 # --- checks (M089) ---
 q=$(new_project) || abort_sandbox
@@ -644,8 +700,11 @@ expect "a move over a commit with no verdict line passes, naming it on the READY
 (cd "$z" && git push -q origin feat 2>/dev/null)
 (cd "$vb" && git clone -q --depth 2 -b feat "file://$vb/remote.git" shallow 2>/dev/null)
 (cd "$vb/shallow" && git fetch -q --depth 1 origin main:refs/remotes/origin/main 2>/dev/null)
+rc "$vb/shallow"
 dc "$vb/shallow"
-expect "a changed value in a shallow clone could not be checked" 1 "done-check: up to date: PASS" "which is not in this shallow history of refs/remotes/origin/main; could not check"
+expect "a changed value in a shallow clone could not be checked, and it alone fails" 1 \
+  "done-check: verdicts start: FAIL - this change moves VERDICTS_FROM from " "which is not in this shallow history of refs/remotes/origin/main; could not check" \
+  "done-check: NOT READY - 1 conditions failed (verdicts start)"
 gv=$(git version | perl -ne 'print /(\d+)\.(\d+)/ && ($1 > 2 || ($1 == 2 && $2 >= 44)) ? 1 : 0')
 if [ "$gv" = 1 ]; then
   (cd "$vb" && git --git-dir=remote.git config uploadpack.allowFilter true && git clone -q --filter=blob:none -b feat "file://$vb/remote.git" partial 2>/dev/null)
@@ -683,6 +742,7 @@ repos="$repos $va"
   git init -q --bare remote.git
   git init -q w
   cd w || exit 1
+  git commit -q --allow-empty -m "Older"
   mkdir -p checks .claude src
   printf 'unit\tany\t-\t(\\d+) ok\techo 3 ok\n' >checks/project.tsv
   printf 'PRODUCT_PATHS=src\n' >.claude/method.conf
@@ -701,6 +761,83 @@ rc "$u"
 dc "$u"
 expect "adopting the method (VERDICTS_FROM set on a main with no verdict line) is READY" 0 \
   "this change moves VERDICTS_FROM from unset to ${c0%"${c0#???????}"}; it accepts no commit without a valid verdict line" "done-check: READY - "
+(cd "$u" && git push -q origin feat 2>/dev/null)
+(cd "$va" && git clone -q --depth 1 -b feat "file://$va/remote.git" shallow 2>/dev/null)
+(cd "$va/shallow" && git fetch -q --depth 1 origin main:refs/remotes/origin/main 2>/dev/null && git fetch -q --deepen=1 origin feat 2>/dev/null)
+rc "$va/shallow"
+dc "$va/shallow"
+expect "adoption in a shallow history could not be checked: older commits with a verdict line may be cut off" 1 \
+  "done-check: up to date: PASS" "could not check what it accepts: the history here is shallow" "done-check: NOT READY - 1 conditions failed (verdicts start)"
+
+# a method.conf with a problem on main is read as status reads it, so the
+# change that fixes it can be ready
+vp=$(new_sandbox_dir) || abort_sandbox
+repos="$repos $vp"
+(
+  cd "$vp" || exit 1
+  git init -q --bare remote.git
+  git init -q w
+  cd w || exit 1
+  mkdir -p checks .claude src
+  printf 'unit\tany\t-\t(\\d+) ok\techo 3 ok\n' >checks/project.tsv
+  printf 'PRODUCT_PATHS=src\nBOGUS=1\n' >.claude/method.conf
+  printf 'x = 1\n' >src/a.txt
+  git add -A
+  git commit -q -m "Project" -m "Review-Verdict: approve"
+  git remote add origin ../remote.git
+  git push -q -u origin main 2>/dev/null
+  git remote set-head origin main
+  git checkout -q -b feat
+  printf 'PRODUCT_PATHS=src\n' >.claude/method.conf
+  git commit -q -am "Fix the settings" -m "Review-Verdict: approve"
+) || abort_sandbox
+rc "$vp/w"
+dc "$vp/w"
+expect "a change that fixes a method.conf with a problem on main is READY" 0 "done-check: verdicts start: PASS - VERDICTS_FROM is unset both on main and in this change" "done-check: READY - "
+
+# Git LFS: content on disk counts as the commit only where the commit asks for LFS
+lp=$(new_project) || abort_sandbox
+l="$lp/w"
+# a stand-in for git-lfs's clean filter: the pointer names the content's hash
+cat >"$l/.git/lfs-clean.sh" <<'EOS'
+#!/bin/sh
+exec perl -MDigest::SHA -e 'binmode STDIN; local $/; my $c = <STDIN>; $c = "" unless defined $c; printf "version https://git-lfs.github.com/spec/v1\noid sha256:%s\nsize %d\n", Digest::SHA::sha256_hex($c), length $c'
+EOS
+(cd "$l" && git config filter.lfs.clean "sh .git/lfs-clean.sh" && git config filter.lfs.smudge cat && printf 'src/data.bin filter=lfs\n' >.gitattributes &&
+  printf 'content\n' >src/data.bin && git add -A && git commit -q -m "LFS" -m "$OK" && touch -t 202001010000 src/data.bin && git update-index -q --refresh)
+if (cd "$l" && git cat-file blob HEAD:src/data.bin | grep -q '^version https://git-lfs'); then pass "setup: the commit stores an LFS pointer"; else fail "setup: the commit stores an LFS pointer"; fi
+rc "$l"
+dc "$l"
+expect "an LFS file the commit's .gitattributes asks for is the commit" 0 "done-check: files: PASS" "done-check: READY - "
+(cd "$l" && git rm -q --cached .gitattributes && rm -f .gitattributes && git commit -q -m "No more LFS" -m "$OK")
+dc "$l"
+expect "LFS content on disk whose path the commit no longer marks for LFS is not the commit (a clone gets the pointer)" 1 \
+  "done-check: files: FAIL" "with bytes that are not the commit's" "src/data.bin"
+printf 'src/data.bin filter=lfs\n' >"$l/.git/info/attributes"
+dc "$l"
+expect "and an LFS rule only in .git/info/attributes does not make it the commit" 1 "src/data.bin" ".git/info/attributes holds rules"
+rm -f "$l/.git/info/attributes"
+
+# a tracked file in .method/local is compared like any other
+(cd "$l" && git checkout -q main 2>/dev/null; git checkout -q -b helper && mkdir -p .method/local && printf 'exit 1\n' >.method/local/helper.sh &&
+  git add -f .method/local/helper.sh && git commit -q -m "A helper" -m "$OK")
+printf 'exit 0\n' >"$l/.method/local/helper.sh"
+dc "$l"
+expect "an edit to a tracked file in .method/local fails files" 1 "done-check: files: FAIL" ".method/local/helper.sh"
+
+# a library that does not load, and a file that does not compile, are
+# "could not check" (exit 2), never a pass and never a bare perl error
+mkdir -p "$work/broken"
+cp -R "$root/method/scripts/method" "$work/broken/"
+rm -f "$work/broken/method/lib/tree.pl"
+out=$(cd "$u" && bash "$work/broken/method/done-check.sh" --ready 2>&1)
+code=$?
+expect "a library that does not load is could-not-check (exit 2)" 2 "done-check: NOT READY - could not check: a library of the method did not load"
+cp "$root/method/scripts/method/lib/tree.pl" "$work/broken/method/lib/tree.pl"
+printf 'sub {\n' >>"$work/broken/method/lib/done.pl"
+out=$(cd "$u" && bash "$work/broken/method/done-check.sh" --ready 2>&1)
+code=$?
+expect "done.pl that does not compile is could-not-check (exit 2), with that last line" 2 "done-check: NOT READY - could not check: perl stopped with exit"
 
 # --- exit codes ---
 (cd "$u" && git checkout -q main)

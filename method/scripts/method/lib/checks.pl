@@ -262,12 +262,13 @@ sub check_env {
 # compare it (assume-unchanged, or skip-worktree, also with the file gone
 # from disk: a sparse checkout, or a deletion hidden that way; also inside
 # submodules, Git::flagged), every submodule folder whose changes git cannot
-# see (Git::submodules), and every tracked file whose bytes on disk are not
-# the commit's (lib/tree.pl's Tree::differences: a CR that git status does
-# not see, because a line-end setting converts it, counts), each with its
-# mode and the SHA-256 of what is on disk (.method/local left out). git
-# status runs with no filter program and no stat shortcut
-# (Git::status_options). Also returns kinds (path => {kind => 1}, for
+# see (Git::submodules), and every tracked file, also inside checked-out
+# submodules, whose bytes on disk are not the commit's (lib/tree.pl's
+# Tree::differences: a CR that git status does not see, because a line-end
+# setting converts it, counts), each with its mode and the SHA-256 of what
+# is on disk (untracked files in .method/local left out: the method's own).
+# git status runs with no filter program, a submodule's own included, and
+# no stat shortcut (Git::status_options_all). Also returns kinds (path => {kind => 1}, for
 # plain reports), converted and no_conversion (from Tree::differences).
 sub fingerprint {
   require Digest::SHA;    # loaded here, so status.pl can load this file without it
@@ -276,21 +277,21 @@ sub fingerprint {
   my ($bst, $branch) = Git::run('symbolic-ref', '-q', 'HEAD');
   $branch = $bst ? 'detached' : (split /\n/, $branch)[0];
   my $refs = Git::ok('for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads/', 'refs/tags/');
-  my $out = Git::ok(Git::status_options(), 'status', '--porcelain=v1', '-z', '--no-renames',
+  my @subs = Git::submodules('.');
+  my $out = Git::ok(Git::status_options_all('.', \@subs), 'status', '--porcelain=v1', '-z', '--no-renames',
     '--untracked-files=all', '--ignore-submodules=none');
   my @paths;
   for my $rec (split /\0/, $out) {
     push @paths, [substr($rec, 3), substr($rec, 0, 2)] if length $rec >= 4;
   }
-  my @subs = Git::submodules('.');
   push @paths, map { [$_->[0], "submodule: $_->[2]"] } grep { defined $_->[2] } @subs;
   push @paths, [$_->[0], "flag $_->[1]"] for Git::flagged('.', \@subs);
-  my $d = $head eq 'none' ? { list => [], converted => [] } : Tree::differences($head);
+  my $d = $head eq 'none' ? { list => [], converted => [] } : Tree::differences($head, { submodules => 1 });
   push @paths, map { [$_->[0], "differs: $_->[1]"] } @{ $d->{list} };
   my (%e, %kinds);
   for my $p (@paths) {
     my ($path, $why) = @$p;
-    next if index($path, "$LOCAL/") == 0;
+    next if index($path, "$LOCAL/") == 0 && $why eq '??';    # the method's own files; a tracked one counts
     my $kind = $why =~ /\Adiffers: (.*)\z/s ? $1 : $why =~ /\Asubmodule: / ? 'submodule' : $why =~ /\Aflag / ? 'flag'
       : $why eq '??' ? 'untracked' : 'changed';
     $kinds{$path}{$kind} = 1;
@@ -492,15 +493,9 @@ sub ignore_local {
 # prune_logs: keeps the newest run-checks logs; deletes only untracked
 # regular files named exactly like a log, never the current one
 sub prune_logs {
-  opendir my $d, $LOGS or return;
-  my @logs = sort grep { $_ =~ $LOG_NAME } readdir $d;
-  closedir $d;
-  my $tracked = eval { Git::ok('ls-files', '-z', '--', $LOGS) };
-  return unless defined $tracked;
-  my %tracked = map { $_ => 1 } split /\0/, $tracked;
-  my @cand = grep { my $p = "$LOGS/$_"; !$tracked{$p} && !-l $p && -f _ } @logs;
-  for my $name (@cand[0 .. $#cand - $KEEP_LOGS]) {
-    my $p = "$LOGS/$name";
+  my @logs = eval { log_files() };    # (it dies when git fails: then nothing is pruned)
+  return if $@;
+  for my $p (@logs[0 .. $#logs - $KEEP_LOGS]) {
     unlink $p unless $p eq $log_path;
   }
 }
@@ -558,6 +553,10 @@ sub read_log {
   }
   return \%log;
 }
+
+# place: where the checks run, ('ci', 'CI') when CI=true, else ('local',
+# 'local'); the one rule for it (run-checks and done-check)
+sub place { return ($ENV{CI} || '') eq 'true' ? ('ci', 'CI') : ('local', 'local') }
 
 # --- main ---
 
@@ -647,8 +646,7 @@ sub main {
     print 'run-checks: ' . Esc::line($_) . "\n" for @$tp;
     stop('checks/*.tsv has problems (above); no check was run');
   }
-  my $here = ($ENV{CI} || '') eq 'true' ? 'ci' : 'local';
-  my $where = $here eq 'ci' ? 'CI' : 'local';
+  my ($here, $where) = place();
 
   my $started = open_log();
   print "run-checks: log $log_path\n";

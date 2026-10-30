@@ -74,4 +74,12 @@ case "$0" in
   */*) here=${0%/*} ;;
   *) here=. ;;
 esac
-exec perl "$here/lib/done.pl" "$@"
+perl "$here/lib/done.pl" "$@"
+st=$?
+case $st in
+  0 | 1 | 2 | 3) exit "$st" ;;
+esac
+# perl itself stopped (a file of the method that does not compile, a
+# signal), so nothing was checked
+echo "done-check: NOT READY - could not check: perl stopped with exit $st"
+exit 2

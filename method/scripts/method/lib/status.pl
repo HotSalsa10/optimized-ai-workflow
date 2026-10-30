@@ -163,12 +163,13 @@ sub work_lines {
     }
     next if $wt->{bare};
     my @wg = (@g, '-C', $wt->{worktree});
-    my $st = Git::ok(@wg, Git::status_options(@wg), 'status', '--porcelain=v1', '-z', '--no-renames',
-      '--untracked-files=normal', '--ignore-submodules=none');
+    my @subs = Git::submodules($wt->{worktree});
+    # (a filter set only inside a submodule is off too: Git::status_options_all)
+    my $st = Git::ok(@wg, Git::status_options_all($wt->{worktree}, \@subs), 'status', '--porcelain=v1', '-z',
+      '--no-renames', '--untracked-files=normal', '--ignore-submodules=none');
     my $n = () = $st =~ /\0/g;
     push @parts, "$where$n uncommitted entries (a new folder counts once)" if $n;
     my ($marked, $missing) = (0, 0);
-    my @subs = Git::submodules($wt->{worktree});
     push @parts, "${where}submodule $_->[0]: $_->[2]" for grep { defined $_->[2] } @subs;
     for my $e (Git::flagged($wt->{worktree}, \@subs)) {
       my ($path, $tag) = @$e;

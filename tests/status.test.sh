@@ -175,7 +175,7 @@ cp "$w/.git/index" "$work/index.keep"
 printf 'garbage' >"$w/.git/index"
 st "$w"
 expect "an area that fails is a LOOK naming the git command, and the next areas still report" 1 \
-  "work: LOOK - could not be checked: git status failed" "verdicts: PASS" "perl: PASS"
+  "work: LOOK - could not be checked: git ls-files failed" "verdicts: PASS" "perl: PASS"
 cp "$work/index.keep" "$w/.git/index"
 (cd "$w" && git update-index --assume-unchanged a.txt)
 echo hidden >>"$w/a.txt"
@@ -765,6 +765,15 @@ om=$(new_project) || abort_sandbox
 (cd "$om/w" && git checkout -q -b feat && git push -q origin feat 2>/dev/null && git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/feat)
 st "$om/w"
 expect "origin/HEAD that names the task branch is not taken as main" 0 "verdicts: PASS - 1 commits on refs/remotes/origin/main"
+# a branch made from a default branch other than main tracks it (git's
+# default), and that branch is still main
+tk=$(new_project) || abort_sandbox
+(cd "$tk/w" && git checkout -q -b trunk && git push -q origin trunk 2>/dev/null && git --git-dir=../remote.git symbolic-ref HEAD refs/heads/trunk &&
+  git push -q origin --delete main 2>/dev/null && git branch -q -D main && git remote set-head origin -a >/dev/null && git fetch -q --prune origin &&
+  git checkout -q -b feat origin/trunk 2>/dev/null)
+st "$tk/w"
+expect "a branch that tracks the default branch trunk still has it as main" 0 "verdicts: PASS - 1 commits on refs/remotes/origin/trunk"
+
 # status still loads, and says what perl lacks, when Digest::SHA cannot load
 # (lib/tree.pl and lib/checks.pl load it only when they hash)
 out=$(cd "$om/w" && PERL5LIB="$work/plib" perl "$root/method/scripts/method/lib/status.pl" 2>&1)

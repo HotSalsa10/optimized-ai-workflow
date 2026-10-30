@@ -15,7 +15,8 @@
 #   Tree::check_trees(A, B)   every folder a comparison of A and B reads is checked
 #   Tree::changed(FROM, TO)   the changed files, each {st, m1, m2, o1, o2, path, old}
 #   Tree::blob_diff(A, B, N)  the hunks between two files, N lines of context
-#   Tree::differences(COMMIT) how the files on disk differ from COMMIT; a
+#   Tree::differences(COMMIT, OPTIONS) how the files on disk differ from
+#                       COMMIT ({submodules => 1}: inside submodules too); a
 #                       CRLF or an $Id$ that git's checkout writes from the
 #                       commit's own .gitattributes is the commit's
 #
@@ -235,26 +236,61 @@ sub checkout_bytes {
   return $st ? undef : $out;
 }
 
-# differences COMMIT: how the files on disk differ from COMMIT's, as
+# lfs_paths COMMIT PATH...: the PATHs that COMMIT's own attributes mark
+# filter=lfs, read like checkout_bytes reads them (the system and personal
+# attribute files off, attributes from COMMIT). Paths go to git in pieces,
+# so no command line gets long.
+sub lfs_paths {
+  my ($commit, @paths) = @_;
+  require File::Spec;
+  local $ENV{GIT_ATTR_NOSYSTEM} = 1;
+  my %lfs;
+  while (@paths) {
+    my ($len, @chunk) = (0);
+    while (@paths && ($len == 0 || $len + length($paths[0]) < 12000)) {
+      $len += length($paths[0]) + 1;
+      push @chunk, shift @paths;
+    }
+    my ($st, $out) = Git::run('-c', 'core.attributesFile=' . File::Spec->devnull, "--attr-source=$commit",
+      'check-attr', '-z', 'filter', '--', @chunk);
+    return () if $st;
+    my @f = split /\0/, $out, -1;
+    while (@f >= 3) {
+      my ($p, undef, $v) = splice @f, 0, 3;
+      $lfs{$p} = 1 if $v eq 'lfs';
+    }
+  }
+  return %lfs;
+}
+
+# differences COMMIT [OPTIONS]: how the files on disk differ from COMMIT's, as
 # {list => [[PATH, KIND], ...], lfs => [PATH, ...], converted => [PATH, ...],
 # no_conversion => why conversions could not be told apart, or undef},
-# sorted by path. A file is COMMIT's when it holds the same bytes; for Git
-# LFS, content whose SHA-256 is the one the stored pointer names (listed in
-# lfs); or exactly the bytes git's own checkout writes from COMMIT's
-# attributes (listed in converted: a CRLF or an $Id$ a committed
-# .gitattributes asks for), never a conversion that only this machine's
-# settings explain. KIND: missing (not on disk); link (a symlink whose target
-# differs, a symlink where a file was, or a file where a symlink was); type
+# sorted by path. A file is COMMIT's when it holds the same bytes; for a
+# path COMMIT's own attributes mark filter=lfs, content whose SHA-256 is the
+# one the stored pointer names (listed in lfs); or exactly the bytes git's
+# own checkout writes from COMMIT's attributes (listed in converted: a CRLF
+# or an $Id$ a committed .gitattributes asks for), never a conversion, or an
+# LFS rule, that only this machine's settings explain. KIND: missing (not on
+# disk); link (a symlink whose target differs, a symlink where a file was,
+# or a file where a symlink was, as core.symlinks=false writes it); type
 # (not a regular file); unreadable; cr (the same bytes once CRLF line ends
-# become LF); content (anything else, also a file over 64 MB that differs).
-# Submodules are not compared.
+# become LF); content (anything else, also a file over 64 MB that differs);
+# submodule (a checked-out submodule whose recorded commit cannot be read
+# there). OPTIONS {submodules => 1}: also compare each checked-out
+# submodule with the commit COMMIT records for it, in the same way, and
+# report its paths under the submodule's path (a submodule whose .git is
+# missing or points elsewhere is left to Git::submodules); otherwise
+# submodules are not compared.
 sub differences {
-  my ($commit) = @_;
-  my (@list, @lfs, @converted, $no_conv);
+  my ($commit, $opt, $depth) = @_;
+  $opt ||= {};
+  $depth ||= 0;
+  my (@list, @lfs, @lfs_cand, @converted, @subs, $no_conv);
   my %files = %{ all_files($commit) };
   for my $p (sort keys %files) {
     my ($mode, $id) = @{ $files{$p} };
-    next if $mode eq '160000';
+    if ($mode eq '160000') { push @subs, [$p, $id]; next }
     my @st = lstat $p;
     if (!@st) { push @list, [$p, 'missing']; next }
     if (-l _) {
@@ -271,7 +307,7 @@ sub differences {
     oops($@) if $@;
     my ($oid, $osize) = defined $c
       ? $c =~ m{\Aversion https://git-lfs\.github\.com/spec/v1\noid sha256:([0-9a-f]{64})\nsize ([0-9]+)\n\z} : ();
-    if (defined $oid && $osize == $st[7] && stream_sha256($p) eq $oid) { push @lfs, $p; next }
+    if (defined $oid && $osize == $st[7] && stream_sha256($p) eq $oid) { push @lfs_cand, $p; next }
     if ($st[7] > $BIG) { push @list, [$p, 'content']; next }
     my $disk;
     if (open my $fh, '<:raw', $p) {
@@ -288,7 +324,38 @@ sub differences {
     if (Git::object_id('blob', $lf, $id) eq $id) { push @list, [$p, 'cr']; next }
     push @list, [$p, 'content'];
   }
-  return { list => \@list, lfs => \@lfs, converted => \@converted,
+  # LFS content on disk is the commit's only where the commit itself asks
+  # for LFS; a rule only this machine has would leave a clone the pointer
+  if (@lfs_cand) {
+    $no_conv = conversion_problem() unless defined $no_conv;
+    my %ok = $no_conv eq '' ? lfs_paths($commit, @lfs_cand) : ();
+    for my $p (@lfs_cand) {
+      if ($ok{$p}) { push @lfs, $p } else { push @list, [$p, 'content'] }
+    }
+  }
+  if ($opt->{submodules}) {
+    require Cwd;
+    for my $s (@subs) {
+      my ($p, $g) = @$s;
+      next unless $depth < 8 && -e "$p/.git";    # not checked out: no files here to compare
+      my ($st, $top) = Git::run('-C', $p, 'rev-parse', '--show-toplevel');
+      my @here = stat $p;
+      my @there = !$st && $top =~ /\A(.+)\n\z/ ? stat $1 : ();
+      next unless @here && @there && $here[0] == $there[0] && $here[1] == $there[1];
+      my $back = Cwd::getcwd();
+      chdir $p or do { push @list, [$p, 'unreadable']; next };
+      my $d = eval { local $FAIL; differences($g, $opt, $depth + 1) };
+      chdir $back or oops('cannot return to the repository folder');
+      if (!$d) { push @list, [$p, 'submodule']; next }
+      push @list, map { ["$p/$_->[0]", $_->[1]] } @{ $d->{list} };
+      push @lfs, map {"$p/$_"} @{ $d->{lfs} };
+      push @converted, map {"$p/$_"} @{ $d->{converted} };
+      $no_conv = "in submodule $p, $d->{no_conversion}" if defined $d->{no_conversion} && !(defined $no_conv && $no_conv ne '');
+    }
+  }
+  @list = sort { $a->[0] cmp $b->[0] } @list;
+  return { list => \@list, lfs => [sort @lfs], converted => [sort @converted],
     no_conversion => defined $no_conv && $no_conv ne '' ? $no_conv : undef };
 }
+
 1;

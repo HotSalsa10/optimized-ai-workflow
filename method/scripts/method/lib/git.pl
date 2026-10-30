@@ -45,6 +45,8 @@
 #                       program that could hide an edit, like a file-system
 #                       monitor), and core.trustctime and core.checkStat are
 #                       set to git's defaults
+#   Git::status_options_all(DIR, SUBS)  the same for DIR and every checked-out
+#                       submodule, so no submodule's own filter runs either
 #   Git::exact(REF)     the commit id of a full ref name, or undef
 #   Git::main_ref()     (main's full ref name, its commit id), or () when
 #                       there is none: origin/HEAD (unless it names HEAD's
@@ -58,7 +60,6 @@ use warnings;
 use Cwd ();
 use File::Basename ();
 use File::Spec;
-use File::Temp qw(tempdir);
 use IO::Handle ();
 use IPC::Open2 ();
 
@@ -68,7 +69,7 @@ delete @ENV{qw(GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_CONFIG GI
   GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS)};
 $ENV{GIT_NO_REPLACE_OBJECTS} = 1;
 $ENV{GIT_NO_LAZY_FETCH} = 1;    # a partial clone never fetches a missing object (git 2.44 and later)
-$ENV{GIT_GRAFT_FILE} = File::Spec->catfile(tempdir(CLEANUP => 1), 'none');
+$ENV{GIT_GRAFT_FILE} = File::Spec->catfile(File::Spec->devnull, 'none');    # a grafts file that cannot exist, so none is read and nothing is written
 
 our @GIT = ('git', '--no-optional-locks', '--literal-pathspecs', '-c', 'core.commitGraph=false',
   '-c', 'core.fsmonitor=false', '-c', 'safe.bareRepository=explicit');
@@ -202,20 +203,24 @@ sub object_id {
 # when it reads one, so an object changed by hand could otherwise pass for
 # the committed one. Objects are read through one `git cat-file --batch`,
 # so reading many of them costs one git process.
-my (%cache, $batch_in, $batch_out);
+my (%cache, %batch);    # one batch process per repository folder (submodules have their own)
 sub cat {
   my ($type, $id, $once, $max) = @_;    # ONCE: not kept for a later read
   return $cache{$id} if exists $cache{$id};
-  if (!$batch_in) {
+  my $here = Cwd::getcwd();
+  if (!$batch{$here}) {
+    my ($o, $i);
     open my $saved, '>&', \*STDERR or die "cannot run git\n";
     open STDERR, '>', File::Spec->devnull;    # git's messages can quote names raw
-    my $pid = eval { IPC::Open2::open2($batch_out, $batch_in, @GIT, 'cat-file', '--batch') };
+    my $pid = eval { IPC::Open2::open2($o, $i, @GIT, 'cat-file', '--batch') };
     open STDERR, '>&', $saved;
     die "cannot run git cat-file\n" unless $pid;
-    binmode $batch_out;
-    binmode $batch_in;
-    $batch_in->autoflush(1);
+    binmode $o;
+    binmode $i;
+    $i->autoflush(1);
+    $batch{$here} = [$o, $i];
   }
+  my ($batch_out, $batch_in) = @{ $batch{$here} };
   print {$batch_in} "$id\n";
   my $head = <$batch_out>;
   # the id check below also covers the type and the right object: both are
@@ -252,9 +257,11 @@ sub exact {
   return $cst || $c !~ /\A([0-9a-f]+)\n\z/ ? undef : $1;
 }
 
-# own_branch REF: REF is HEAD's own branch, its namesake on origin, or its
-# upstream; a single-branch clone, or git remote set-head, can point
-# origin/HEAD there, and then it is not main
+# own_branch REF: REF is HEAD's own branch or its namesake on origin; git
+# remote set-head, or a clone of a working copy on that branch, can point
+# origin/HEAD there, and then it is not main. (A branch's upstream is no
+# reason: `git checkout -b feat origin/develop` makes the default branch the
+# upstream.)
 sub own_branch {
   my ($ref) = @_;
   my ($st, $b) = run('symbolic-ref', '-q', 'HEAD');
@@ -262,15 +269,7 @@ sub own_branch {
   chomp $b;
   return 1 if $ref eq $b;
   my ($name) = $b =~ m{\Arefs/heads/(.+)\z}s or return 0;
-  return 1 if $ref eq "refs/remotes/origin/$name";
-  # (for-each-ref also lists refs below the name, so the exact one is picked)
-  my ($ust, $out) = run('for-each-ref', '--format=%(refname)%00%(upstream)', $b);
-  return 0 if $ust;
-  for my $l (split /\n/, $out) {
-    my ($name2, $up) = split /\0/, $l, 2;
-    return 1 if $name2 eq $b && defined $up && $up ne '' && $ref eq $up;
-  }
-  return 0;
+  return $ref eq "refs/remotes/origin/$name" ? 1 : 0;
 }
 
 # the refs main_ref tries after origin/HEAD, in order
@@ -290,6 +289,20 @@ sub main_ref {
     return ($ref, $id) if defined $id;
   }
   return;
+}
+
+# status_options_all DIR SUBS: status_options for DIR and for every
+# checked-out submodule in SUBS (Git::submodules), so a filter set only
+# inside a submodule is off too when git status reads it (the -c options
+# reach the git status git runs there)
+sub status_options_all {
+  my ($dir, $subs) = @_;
+  my (@o, %seen);
+  for my $g (['-C', $dir], map { ['-C', $_->[1]] } grep { !defined $_->[2] } @$subs) {
+    my @x = status_options(@$g);
+    while (my ($c, $v) = splice @x, 0, 2) { push @o, $c, $v unless $seen{$v}++ }
+  }
+  return @o;
 }
 
 # no_main: where main_ref looked, and how to fetch main when it is missing

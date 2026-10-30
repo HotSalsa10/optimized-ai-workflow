@@ -11,7 +11,13 @@ use File::Basename qw(dirname);
 use File::Spec;
 
 my $lib = dirname(File::Spec->rel2abs(__FILE__));
-require File::Spec->catfile($lib, $_) for qw(git.pl esc.pl conf.pl tree.pl verdicts.pl checks.pl);
+# a library that cannot load is "could not check" too (done-check.sh also
+# turns any other exit into that)
+if (!eval { require File::Spec->catfile($lib, $_) for qw(git.pl esc.pl conf.pl tree.pl verdicts.pl checks.pl); 1 }) {
+  (my $e = $@) =~ s/[^\x20-\x7e]+/ /g;
+  print "done-check: NOT READY - could not check: a library of the method did not load: $e\n";
+  exit 2;
+}
 
 my $CONF = '.claude/method.conf';
 my $MAX_NAMES = 3;
@@ -55,16 +61,16 @@ sub commit_info {
   return ($tree, [$head =~ /^parent ([0-9a-f]+)$/mg]);
 }
 
-# conf_value COMMIT: (VERDICTS_FROM in COMMIT's .claude/method.conf, or
-# undef when unset), or (undef, problem)
+# conf_value COMMIT: VERDICTS_FROM in COMMIT's .claude/method.conf, or undef,
+# read as status reads it: a file that is not a regular one sets nothing, and
+# a line with a problem leaves its key unset (status and run-checks report
+# those problems; refusing here would also block the change that fixes them)
 sub conf_value {
   my ($commit) = @_;
   my $e = Tree::lookup($commit, $CONF);
-  return (undef) unless $e;
-  return (undef, "$CONF in " . short($commit) . ' is not a regular file') unless $e->[0] =~ /\A100(?:644|755)\z/;
-  my ($v, $p) = Conf::read_text(Tree::blob($e->[1]), "$CONF in " . short($commit));
-  return (undef, "$CONF in " . short($commit) . ' has problems (status.sh names them)') if @$p;
-  return ($v->{VERDICTS_FROM});
+  return undef unless $e && $e->[0] =~ /\A100(?:644|755)\z/;
+  my ($v) = Conf::read_text(Tree::blob($e->[1]), "$CONF in " . short($commit));
+  return $v->{VERDICTS_FROM};
 }
 
 my (@failed, @ready_notes, $ready_log);
@@ -247,9 +253,8 @@ sub verdicts_start_condition {
   my ($head, $ref, $tip, $up_to_date) = @_;
   my $area = 'verdicts start';
   return report($area, 0, 'no main branch to compare with', 'fetch main, then run done-check again') unless defined $ref;
-  my ($new, $np) = conf_value($head);
-  my ($old, $op) = conf_value($tip);
-  return report($area, 0, "could not check: $_", 'fix it') for grep { defined } $np, $op;
+  my $new = conf_value($head);
+  my $old = conf_value($tip);
   my $show = sub { defined $_[0] ? short($_[0]) : 'unset' };
   return report($area, 1, 'VERDICTS_FROM is ' . $show->($new) . ' both on main and in this change')
     if (defined $new ? $new : '') eq (defined $old ? $old : '');
@@ -306,8 +311,7 @@ sub run {
     say_line("NOTHING TO MERGE - $head is ${ref}'s tip or behind it ($tip)");
     exit 3;
   }
-  my $here = ($ENV{CI} || '') eq 'true' ? 'ci' : 'local';
-  my $where = $here eq 'ci' ? 'CI' : 'local';
+  my ($here, $where) = Checks::place();
 
   files_condition($head);
   my $up = up_to_date_condition($head, $ref, $tip);

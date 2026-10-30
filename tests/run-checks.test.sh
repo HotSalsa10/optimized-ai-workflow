@@ -600,7 +600,7 @@ if [ "$code" -eq 0 ] && [ "$fields" = 7 ]; then pass "a TAB in a checks file nam
 (cd "$e" && git rm -q "checks/$tabname" && git commit -q -m untab)
 tsv "$e" "$(ck corrupt 'printf garbage >.git/index; echo "1 passed"')"
 run "$e"
-if [ "$code" -eq 2 ] && [ "$last" = "run-checks: FAIL - git status failed; the run stopped" ] && [ "$(tail -n 1 "$logf")" = "END${T}exit 2" ] \
+if [ "$code" -eq 2 ] && [ "$last" = "run-checks: FAIL - git ls-files failed; the run stopped" ] && [ "$(tail -n 1 "$logf")" = "END${T}exit 2" ] \
   && [ -z "$(find "$e/.method/local" -name '*.out')" ]; then
   pass "a git failure during the run ends it with exit 2, END in the log and no leftover files"
 else
