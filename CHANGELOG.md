@@ -33,7 +33,7 @@ Nothing yet. Release 1 is being built.
 
 ### Changed (step 3)
 
-- The secret scan moved into the method (`method/scripts/method/lib/secrets.pl`), lists the tracked files itself, and runs about 7 times faster with the same findings. Its mask (`--mask`) now covers the whole of a phone number or IBAN that starts like a shorter one (it used to leave the last digits), and a key, phone number or IBAN right after a terminal colour code, or right after an escape written as text, as a test runner prints a string (`\x1b[1m`, `\u001b[31m`, `\n`). The scan also finds a key after such an escape in a file, and an armored PGP private key.
+- The secret scan moved into the method (`method/scripts/method/lib/secrets.pl`), lists the tracked files itself, and runs about 7 times faster with the same findings. Its mask (`--mask`) now covers the whole of a phone number or IBAN that starts like a shorter one (it used to leave the last digits), and a key, phone number or IBAN right after a terminal colour code, or right after an escape written as text, as a test runner prints a string (`\x1b[1m`, `\u001b[31m`, `\n`). A key or token is masked also when it is glued to a word. The scan also finds a key after such an escape in a file, and an armored PGP private key. It reads the staged copy of a file whenever its content is not the file on disk (it used to ask git, which trusts its stat cache), reports a find in both copies once, and never writes the index.
 
 ### Changed (step 1b, from the step 1 security check)
 
