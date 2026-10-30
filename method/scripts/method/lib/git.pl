@@ -21,11 +21,12 @@
 # local program that would run inside the caller and could hide changes)
 # and safe.bareRepository=explicit (a folder laid out like a repository,
 # committed inside another one, is never used as one; git 2.38 or later).
-# Git::run also adds core.ignoreCase=false where the file system tells case
-# apart (Git::case_pin): there a true value can only have been copied from a
-# Mac or Windows, and it would hide an untracked file whose name differs from
-# a tracked one only by case. Where the file system folds case, git's own
-# setting stays, so ignore and attribute patterns match as git matches them.
+# Git::run also adds core.ignoreCase=false where the working tree's file
+# system tells case apart (Git::case_pin): there a true value would hide an
+# untracked file whose name differs from a tracked one only by case. Where it
+# folds case, git's own setting stays, so ignore and attribute patterns match
+# as git matches them. (Git::cat and secrets.pl use @GIT directly: their
+# commands do not read core.ignoreCase.)
 # A caller adds its own -c options in front of the git command.
 #
 #   Git::run(ARGS)      (exit status, standard output); stdin and stderr on
@@ -62,8 +63,10 @@
 #                       Git::no_main_action() what to do
 #   Git::main_remote()  (that remote's name), (undef) with no remote, or
 #                       ('', WHY) when it cannot be told
-#   Git::hint_name(NAME)  NAME when it is safe in a command to copy and
-#                       paste, else <remote>
+#   Git::hint_name(NAME, PLACEHOLDER)  NAME when it is safe in a command to
+#                       copy and paste, else PLACEHOLDER (<remote>)
+#   Git::fetched(REMOTE, REF)  1 when REMOTE's fetch settings write REF, so
+#                       git fetch moves it
 #   Git::merge_base(A, B)  ('ok', ids), ('none', what to do) or ('error')
 #   Git::message(ID)    a commit's message, checked against its id
 package Git;
@@ -126,21 +129,27 @@ sub status_options {
   return @o;
 }
 
-# case_pin: (-c core.ignoreCase=false), or () where the file system folds
-# case: there the repository's config file and the same name in capitals are
-# one file (git itself probes the file system this way when it makes a
-# repository). Found once, with the first git call; when it cannot be told,
-# the pin stays.
+# case_pin: (-c core.ignoreCase=false), or () where the working tree's file
+# system folds case: there the top folder and the same name with its case
+# flipped, in the folder above, are one folder. (The working tree decides: a
+# case twin can sit there only where it tells case apart, and where it folds,
+# git's own setting matches patterns as checkout does.) Found once, with the
+# first git call; when it cannot be told (a name with no letters), the pin
+# stays.
 my $case_pin;
 sub case_pin {
   return @$case_pin if $case_pin;
   $case_pin = [];    # (the probe's own git call runs without it)
-  my ($st, $dir) = run('rev-parse', '--git-common-dir');
+  my ($st, $top) = run('rev-parse', '--show-toplevel');
   my $folds;
-  if (!$st && $dir =~ s/\n\z//) {
-    my @a = stat File::Spec->catfile($dir, 'config');
-    my @b = stat File::Spec->catfile($dir, 'CONFIG');
-    $folds = @a && @b && $a[0] == $b[0] && $a[1] == $b[1];
+  if (!$st && $top =~ s/\n\z//) {
+    my ($vol, $dirs, $name) = File::Spec->splitpath($top);
+    (my $flipped = $name) =~ tr/a-zA-Z/A-Za-z/;
+    if ($flipped ne $name) {
+      my @a = stat $top;
+      my @b = stat File::Spec->catpath($vol, $dirs, $flipped);
+      $folds = @a && @b && $a[0] == $b[0] && $a[1] == $b[1];
+    }
   }
   $case_pin = $folds ? [] : ['-c', 'core.ignoreCase=false'];
   return @$case_pin;
@@ -315,7 +324,7 @@ sub main_remote {
   my ($st, $out) = run('config', '-z', '--get-regexp', '^remote\..*\.url$');
   return ('', 'error') if $st && $st >> 8 != 1;    # (1: no such setting)
   my %r;
-  for my $e (split /\0/, $out) { $r{$1} = 1 if $e =~ /\Aremote\.(.+)\.url\n/s }
+  for my $e (split /\0/, $out) { $r{$1} = 1 if $e =~ /\Aremote\.([^\n]+)\.url\n/ }
   my @r = sort keys %r;
   if (!@r) {
     my ($rst, $refs) = run('for-each-ref', '--count=1', '--format=%(refname)', 'refs/remotes/');
@@ -326,11 +335,33 @@ sub main_remote {
   return @r == 1 ? ($r[0]) : ('', 'several');
 }
 
-# hint_name NAME: NAME when it is safe in a command the owner copies and
-# pastes, else <remote> (git allows ; $ and | in a remote's name)
+# hint_name NAME [PLACEHOLDER]: NAME when it is safe in a command the owner
+# copies and pastes, else PLACEHOLDER (<remote>; git allows ; $ and | in a
+# remote's or a branch's name)
 sub hint_name {
-  my ($n) = @_;
-  return $n =~ m{\A[A-Za-z0-9_][A-Za-z0-9._-]*(?:/[A-Za-z0-9._-]+)*\z} ? $n : '<remote>';
+  my ($n, $ph) = @_;
+  return $n =~ m{\A[A-Za-z0-9_][A-Za-z0-9._-]*(?:/[A-Za-z0-9._-]+)*\z} ? $n : defined $ph ? $ph : '<remote>';
+}
+
+# fetched REMOTE REF: 1 when one of REMOTE's fetch settings (remote.NAME.fetch)
+# writes REF, so that git fetch moves it; a ref fetched by hand into place (git
+# fetch origin main:refs/remotes/origin/main in a single-branch clone) is
+# never moved again
+sub fetched {
+  my ($remote, $ref) = @_;
+  my ($st, $out) = run('config', '-z', '--get-all', "remote.$remote.fetch");
+  return 0 if $st;
+  for my $spec (split /\0/, $out) {
+    next if $spec =~ /\A\^/;    # (a negative refspec writes nothing)
+    $spec =~ s/\A\+//;
+    my (undef, $dst) = split /:/, $spec, 2;
+    next unless defined $dst && $dst ne '';
+    return 1 if $dst eq $ref;
+    my ($pre, $suf) = $dst =~ /\A([^*]*)\*([^*]*)\z/ or next;
+    return 1 if length($ref) > length($pre) + length($suf) && substr($ref, 0, length $pre) eq $pre
+      && substr($ref, length($ref) - length $suf) eq $suf;
+  }
+  return 0;
 }
 
 # main_refs: (the remote, why it cannot be told, the refs main_ref tries
@@ -391,8 +422,9 @@ sub no_main {
   return 'looked for ' . join(', ', @refs) . '; this repository has no remote' unless defined $r;
   return $CANNOT_TELL{$why} if $r eq '';
   my $h = hint_name($r);
-  return "looked for $r/HEAD, " . join(', ', @refs) . "; in a single-branch or shallow clone, fetch it: git fetch $h"
-    . " main:refs/remotes/$h/main (or push main to $r first, if it does not have it yet)";
+  return "looked for $r/HEAD, " . join(', ', @refs) . "; in a single-branch or shallow clone, fetch it and keep it"
+    . " fetched: git remote set-branches --add $h main && git fetch $h (or push main to $r first, if it does not have it"
+    . ' yet)';
 }
 
 # no_main_action: what to do when main is missing
@@ -400,7 +432,8 @@ sub no_main_action {
   my ($r, $why) = main_refs();
   return 'make a branch named main (or rename the default branch: git branch -m NAME main)' unless defined $r;
   return 'name the remote that holds main origin (git remote rename NAME origin)' if $r eq '' && $why eq 'several';
-  return 'set up the remote that holds main (git remote add origin URL) and fetch it' if $r eq '' && $why eq 'refs';
+  return 'set up the remote that holds main (git remote add origin URL, or git remote set-url origin URL when origin is'
+    . ' there without one) and fetch it' if $r eq '' && $why eq 'refs';
   return 'check the repository\'s git settings' if $r eq '';
   return 'fetch main';
 }

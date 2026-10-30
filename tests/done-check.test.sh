@@ -196,17 +196,34 @@ if [ -z "$(cd "$w" && git status --porcelain)" ]; then pass "setup: git status i
 dc "$w"
 expect "an untracked case twin of a tracked file fails files under core.ignoreCase=true" 1 "untracked, and not ignored by git: src/A.txt"
 rm -f "$w/src/A.txt"
-# where the file system tells case apart, ignore patterns match case exactly;
-# where it folds case (simulated: the config file is also CONFIG), git's own
-# core.ignoreCase stays, so a pattern of another case still ignores a file
+# where the working tree's file system tells case apart, ignore patterns
+# match case exactly; where it folds case (simulated: the top folder's name
+# with its case flipped, W, is the same folder), git's own core.ignoreCase
+# stays, so a pattern of another case still ignores a file
 printf '*.LOG\n' >>"$w/.git/info/exclude"
 : >"$w/src/debug.log"
 dc "$w"
 expect "on a file system that tells case apart, *.LOG does not ignore debug.log" 1 "untracked, and not ignored by git: src/debug.log"
-ln "$w/.git/config" "$w/.git/CONFIG"
+mkdir "$p/W"
+dc "$w"
+expect "a separate folder W next to w is not the same folder, so the pin stays" 1 "untracked, and not ignored by git: src/debug.log"
+rmdir "$p/W"
+ln -s w "$p/W"
 dc "$w"
 expect "on one that folds case, git's own core.ignoreCase stays, so *.LOG ignores debug.log as git does" 0 "done-check: READY - "
-rm -f "$w/.git/CONFIG" "$w/src/debug.log"
+rm -f "$p/W"
+# a linked worktree is probed by its own top folder
+(cd "$w" && git worktree add -q "$p/wt" 2>/dev/null)
+: >"$p/wt/src/debug.log"
+dc "$p/wt"
+expect "in a linked worktree on a file system that tells case apart, *.LOG does not ignore debug.log" 1 \
+  "untracked, and not ignored by git: src/debug.log"
+ln -s wt "$p/WT"
+dc "$p/wt"
+expect "in a linked worktree on one that folds case, *.LOG ignores debug.log" 1 "done-check: files: PASS"
+rm -f "$p/WT"
+(cd "$w" && git worktree remove --force "$p/wt" && git branch -q -D wt)
+rm -f "$w/src/debug.log"
 perl -ni -e 'print unless /^\*\.LOG$/' "$w/.git/info/exclude"
 (cd "$w" && git config --unset core.ignoreCase)
 
@@ -420,7 +437,17 @@ expect "a shallow clone that holds main's tip passes up to date" 1 "done-check: 
 (cd "$p/single" && git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/feat)
 dc "$p/single"
 expect "origin/HEAD that names the task branch is not main; no main says how to fetch it" 1 \
-  "done-check: up to date: FAIL - no main branch here (looked for origin/HEAD" "git fetch origin main:refs/remotes/origin/main"
+  "done-check: up to date: FAIL - no main branch here (looked for origin/HEAD" "git remote set-branches --add origin main && git fetch origin"
+# a main fetched by hand into a ref that the fetch settings do not name is
+# never moved by a later git fetch, so it does not count
+(cd "$p/single" && git fetch -q origin main:refs/remotes/origin/main 2>/dev/null)
+dc "$p/single"
+expect "a main fetched by hand that git fetch never moves fails up to date, with the command that keeps it fetched" 1 \
+  "done-check: up to date: FAIL - refs/remotes/origin/main is not moved by git fetch" \
+  "done-check: next: keep main fetched (git remote set-branches --add origin main && git fetch origin), then run done-check again"
+(cd "$p/single" && git remote set-branches --add origin main && git fetch -q origin 2>/dev/null)
+dc "$p/single"
+lacks "once the fetch settings name main, it counts" "is not moved by git fetch"
 
 # a default branch other than main: a branch made from it tracks it (git's
 # default), and it is still main
@@ -495,8 +522,14 @@ expect "a shallow clone from a remote named up is told to fetch from up" 1 \
   git update-ref -d 'refs/remotes/u;x/main')
 dc "$q/semi"
 expect "a remote named with shell syntax is not written into the fetch command" 1 \
-  "git fetch <remote> main:refs/remotes/<remote>/main (or push main to u;x first"
+  "git remote set-branches --add <remote> main && git fetch <remote> (or push main to u;x first"
 lacks "and the command holds no part of that name" "git fetch u;x"
+# shellcheck disable=SC2016 # the name is meant literally
+(cd "$q/semi" && git remote rename 'u;x' 'a$(b)')
+dc "$q/semi"
+expect "nor is a remote named with \$( )" 1 "git remote set-branches --add <remote> main && git fetch <remote>"
+# shellcheck disable=SC2016 # the name is meant literally
+lacks "and the command holds no part of that name either" '--add a$(b)'
 (cd "$q" && git clone -q --depth 1 --no-single-branch -o 'u;x' -b feat "file://$q/remote.git" semishallow 2>/dev/null)
 dc "$q/semishallow"
 expect "nor into the command that fetches the whole history" 1 "fetch the whole history (git fetch --unshallow <remote>)"
@@ -510,12 +543,12 @@ expect "with several remotes and none named origin there is no main, and done-ch
 dc "$q/upc"
 expect "with a remote that has no main, the local main does not stand in for it" 1 \
   "done-check: up to date: FAIL - no main branch here (looked for origin/HEAD, refs/remotes/origin/main, refs/remotes/origin/master" \
-  "git fetch origin main:refs/remotes/origin/main" "done-check: next: fetch main, then run done-check again"
+  "git remote set-branches --add origin main && git fetch origin" "done-check: next: fetch main, then run done-check again"
 (cd "$q/upc" && git config --remove-section remote.origin)
 dc "$q/upc"
 expect "with remote-tracking branches but no remote set up, the local main does not stand in either" 1 \
   "done-check: up to date: FAIL - no main branch here (this repository has remote-tracking branches but no remote set up" \
-  "done-check: next: set up the remote that holds main (git remote add origin URL) and fetch it, then run done-check again"
+  "done-check: next: set up the remote that holds main (git remote add origin URL, or git remote set-url origin URL when origin is there without one) and fetch it, then run done-check again"
 (cd "$q/upc" && git for-each-ref --format='%(refname)' refs/remotes/ | while read -r r; do git update-ref -d "$r"; done)
 dc "$q/upc"
 expect "with no remote at all, main is the local main, and the line says so" 1 \
@@ -842,7 +875,7 @@ expect "a VERDICTS_FROM in a method.conf stored in Git LFS fails verdicts start"
 # filter cannot be read as status reads it, so a move away from it (here to
 # a plain file, past an unreviewed hotfix) could not be checked
 cp "$vs/lc/.git/lfs-clean.sh" "$work/lfs-clean.sh"
-for kind in submodule lfs filter; do
+for kind in submodule lfs filter encoding; do
   mo=$(new_sandbox_dir) || abort_sandbox
   repos="$repos $mo"
   (
@@ -866,8 +899,11 @@ for kind in submodule lfs filter; do
       filter)
         git config filter.strip.clean "sed /VERDICTS_FROM/d" && git config filter.strip.smudge cat &&
           printf '.claude/method.conf filter=strip\n' >.gitattributes ;;
+      encoding)
+        printf '.claude/method.conf working-tree-encoding=UTF-16LE\n' >.gitattributes ;;
     esac
     if [ "$kind" != submodule ]; then mkdir -p .claude && printf 'PRODUCT_PATHS=src\nVERDICTS_FROM=%s\n' "$start" >.claude/method.conf; fi
+    if [ "$kind" = encoding ]; then perl -pi -e 's/(.)/$1\0/gs' .claude/method.conf; fi
     git add -A
     git commit -q -m "Settings" -m "Review-Verdict: approve"
     git commit -q --allow-empty -m "Hotfix"
@@ -883,13 +919,33 @@ for kind in submodule lfs filter; do
   case $kind in
     submodule) why='.claude is a submodule' ;;
     lfs) why='the file is stored as a Git LFS pointer' ;;
-    *) why="the commit's .gitattributes gives the file a filter" ;;
+    filter) why="the commit's .gitattributes gives the file a filter" ;;
+    *) why="the commit's .gitattributes gives the file a working-tree-encoding" ;;
   esac
   rc "$mo/w"
   dc "$mo/w"
   expect "main's VERDICTS_FROM kept as a $kind cannot be read as status reads it, so the move could not be checked" 1 \
     "done-check: verdicts start: FAIL - VERDICTS_FROM on main (refs/remotes/origin/main " ") cannot be read as status reads it: $why; could not check"
+  if [ "$kind" = filter ]; then
+    # where git cannot read main's own attributes (here: a rule in
+    # .git/info/attributes), a .gitattributes that names a filter counts
+    printf '*.psd binary\n' >"$mo/w/.git/info/attributes"
+    dc "$mo/w"
+    expect "and so it is when .git/info/attributes holds a rule, so main's attributes cannot be read" 1 \
+      "cannot be read as status reads it: .gitattributes names a filter, an encoding or a macro, which cannot be read for the file here (.git/info/attributes holds rules"
+    rm -f "$mo/w/.git/info/attributes"
+  fi
 done
+# a change that adds an encoding rule for method.conf and leaves its bytes as
+# they are holds the old value now, but status reads it through the encoding
+# once it is checked out
+(cd "$vs" && git clone -q remote.git we 2>/dev/null && cd we && git checkout -q -b feat &&
+  printf '.claude/method.conf working-tree-encoding=UTF-16LE\n' >>.gitattributes && git add .gitattributes &&
+  git commit -q -m "An encoding rule" -m "$OK")
+rc "$vs/we"
+dc "$vs/we"
+expect "a change that gives method.conf an encoding fails verdicts start" 1 \
+  "done-check: verdicts start: FAIL - VERDICTS_FROM in this change cannot be read as status will read it once checked out: the commit's .gitattributes gives the file a working-tree-encoding"
 # main's own VERDICTS_FROM is not on its first-parent history
 vo=$(new_sandbox_dir) || abort_sandbox
 repos="$repos $vo"
@@ -950,7 +1006,7 @@ expect "a move over a commit with no verdict line passes, naming it on the READY
   "; accepts 1 commit on main without a valid verdict line: ${b1%"${b1#???????}"}"
 (cd "$z" && git push -q origin feat 2>/dev/null)
 (cd "$vb" && git clone -q --depth 2 -b feat "file://$vb/remote.git" shallow 2>/dev/null)
-(cd "$vb/shallow" && git fetch -q --depth 1 origin main:refs/remotes/origin/main 2>/dev/null)
+(cd "$vb/shallow" && git remote set-branches --add origin main && git fetch -q --depth 1 origin main 2>/dev/null)
 rc "$vb/shallow"
 dc "$vb/shallow"
 expect "a changed value in a shallow clone could not be checked, and it alone fails" 1 \
@@ -1015,7 +1071,7 @@ expect "adopting the method (VERDICTS_FROM set on a main with no verdict line) i
   "this change moves VERDICTS_FROM from unset to ${c0%"${c0#???????}"}; it accepts no commit without a valid verdict line" "done-check: READY - "
 (cd "$u" && git push -q origin feat 2>/dev/null)
 (cd "$va" && git clone -q --depth 1 -b feat "file://$va/remote.git" shallow 2>/dev/null)
-(cd "$va/shallow" && git fetch -q --depth 1 origin main:refs/remotes/origin/main 2>/dev/null && git fetch -q --deepen=1 origin feat 2>/dev/null)
+(cd "$va/shallow" && git remote set-branches --add origin main && git fetch -q --depth 1 origin main 2>/dev/null && git fetch -q --deepen=1 origin feat 2>/dev/null)
 rc "$va/shallow"
 dc "$va/shallow"
 expect "adoption in a shallow history could not be checked: older commits with a verdict line may be cut off" 1 \

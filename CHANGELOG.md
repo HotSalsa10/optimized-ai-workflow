@@ -36,15 +36,15 @@ Nothing yet. Release 1 is being built.
 - `done-check.sh --ready`: says whether a change is ready to merge, from the commit, the files on disk, main, the run-checks log and the head commit's verdict line, so nobody has to read test output. Six conditions each need positive evidence: the files are the commit; the branch has main's tip; the newest run of these files passed; no check is left that runs only in the other place; the verdict line approves; and any move of VERDICTS_FROM names the commits it accepts. READY names what it rests on (a local log and a typed verdict line, until steps 5 and 9); NOT READY says what to do next.
 - `lib/tree.pl`, taken out of the review packet with its output unchanged: one rule for "the files on disk are the commit", now used by the packet, run-checks and done-check.
 - The verdict vocabulary gains a `ready` kind: only `approve` makes a change ready (DECISIONS A33).
-- Tests: 1 new test file and new cases in four others, 880 test cases in all.
+- Tests: 1 new test file and new cases in four others, 890 test cases in all.
 
 ### Changed (step 4)
 
 - run-checks compares the bytes of every tracked file with the commit at its start and in tree-unchanged, so a CR that core.autocrlf hides from git status is a change; a CRLF or $Id$ that the commit's own .gitattributes asks for is not, on Linux too (DECISIONS A36).
-- Main is no longer taken from an origin/HEAD that names the task branch itself. It is read from origin, or from the only remote (one with a URL) when none is named origin; a local main or master counts only when there is no remote and no remote-tracking branch at all, since git fetch never moves it (status too). git never fetches a missing object while the method reads (git 2.44 and later).
+- Main is no longer taken from an origin/HEAD that names the task branch itself. It is read from origin, or from the only remote (one with a URL) when none is named origin; a local main or master counts only when there is no remote and no remote-tracking branch at all, since git fetch never moves it (status too). done-check also needs the remote's fetch settings to name main's ref. git never fetches a missing object while the method reads (git 2.44 and later).
 - The review packet now accepts a CRLF or $Id$ that the commit's own .gitattributes asks for (on Linux too), and refuses four cases it accepted before: Git LFS content whose path the commit does not mark for LFS, a committed symlink written as a plain file (core.symlinks=false), a file over 64 MB that differs only by CRs, and a file missing a CR that the commit's eol=crlf rule asks for once it is added (git status then shows nothing; the packet names it and how to fix it).
 - status turns off a filter set only inside a submodule (also one whose .git points at another folder), as run-checks and done-check do.
-- Where the file system tells case apart, every git call through lib/git.pl pins core.ignoreCase=false, so a setting copied from a Mac or Windows cannot hide an untracked file whose name differs from a tracked one only by case; where the file system folds case, git's own setting stays.
+- Where the working tree's file system tells case apart, every git call made through Git::run pins core.ignoreCase=false, so a setting copied from a Mac or Windows cannot hide an untracked file whose name differs from a tracked one only by case; where the file system folds case, git's own setting stays.
 - The mutation wrapper is split out of step 4 into step 4b, and rule M044's second half becomes M122 (DECISIONS A39).
 
 ### Changed (step 3)

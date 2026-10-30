@@ -83,8 +83,10 @@ sub conf_value {
 # conf_unreadable COMMIT: why the .claude/method.conf COMMIT stores may not be
 # what status reads from disk once COMMIT is checked out (.claude is a
 # submodule; the file is a Git LFS pointer; the commit's own .gitattributes
-# gives it a filter or an encoding), or undef. (HEAD's file is compared with
-# the disk itself; with git older than 2.42 the attributes are not read.)
+# gives it a filter or an encoding), or undef. Where git cannot read the
+# commit's own attributes (git older than 2.42, or rules in
+# .git/info/attributes), any .gitattributes on the path that names a filter,
+# an encoding or a macro counts.
 sub conf_unreadable {
   my ($commit) = @_;
   my $d = Tree::lookup($commit, '.claude');
@@ -92,7 +94,17 @@ sub conf_unreadable {
   my $e = Tree::lookup($commit, $CONF);
   return undef unless $e && $e->[0] =~ /\A100(?:644|755)\z/;
   return 'the file is stored as a Git LFS pointer' if Tree::blob($e->[1]) =~ m{\Aversion https://git-lfs\.github\.com/spec/};
-  my $a = Tree::attributes($commit, $CONF, 'filter', 'working-tree-encoding') or return undef;
+  my $a = Tree::attributes($commit, $CONF, 'filter', 'working-tree-encoding');
+  if (!$a) {
+    my $cp = Tree::conversion_problem();
+    for my $g ('.gitattributes', '.claude/.gitattributes') {
+      my $ge = Tree::lookup($commit, $g);
+      next unless $ge && $ge->[0] =~ /\A100(?:644|755)\z/ && Tree::blob($ge->[1]) =~ /filter|working-tree-encoding|\[attr\]/;
+      return "$g names a filter, an encoding or a macro, which cannot be read for the file here ("
+        . ($cp ne '' ? $cp : 'git check-attr failed') . ')';
+    }
+    return undef;
+  }
   for my $k ('filter', 'working-tree-encoding') {
     my $v = $a->{$k};
     return "the commit's .gitattributes gives the file a $k" if defined $v && $v ne 'unspecified' && $v ne 'unset';
@@ -165,6 +177,15 @@ sub up_to_date_condition {
   my ($head, $ref, $tip) = @_;
   return report('up to date', 0, 'no main branch here (' . Git::no_main() . ')', Git::no_main_action() . ', then run done-check again')
     unless defined $ref;
+  # a remote's ref counts only when git fetch moves it
+  my ($r) = Git::main_remote();
+  my ($branch) = defined $r && $r ne '' ? $ref =~ m{\Arefs/remotes/\Q$r\E/(.+)\z}s : ();
+  if (defined $branch && !Git::fetched($r, $ref)) {
+    my ($hr, $hb) = (Git::hint_name($r), Git::hint_name($branch, '<branch>'));
+    return report('up to date', 0, "$ref is not moved by git fetch (the fetch settings of $r do not name it: a"
+      . ' single-branch clone, or a ref fetched by hand), so it can be behind main',
+      "keep main fetched (git remote set-branches --add $hr $hb && git fetch $hr), then run done-check again");
+  }
   # a local main only when there is no remote (Git::main_refs)
   my $when = $ref =~ m{\Arefs/heads/} ? 'a local branch: this repository has no remote' : 'as of the last fetch';
   return report('up to date', 1, "main is $ref " . short($tip) . " ($when; done-check does not fetch)")
@@ -312,6 +333,9 @@ sub verdicts_start_condition {
     . ' or the file goes through Git LFS or another filter, so the commit does not hold what status reads)',
     'keep .claude/method.conf a plain file committed in this repository')
     if (defined $dv ? $dv : '') ne (defined $new ? $new : '');
+  my $hwhy = conf_unreadable($head);
+  return report($area, 0, "VERDICTS_FROM in this change cannot be read as status will read it once checked out: $hwhy",
+    'keep .claude/method.conf a plain file committed in this repository') if defined $hwhy;
   my $why = conf_unreadable($tip);
   return report($area, 0, "VERDICTS_FROM on main ($ref " . short($tip) . ") cannot be read as status reads it: $why;"
     . ' could not check', 'keep .claude/method.conf a plain file committed on main (the change that makes it one cannot be'

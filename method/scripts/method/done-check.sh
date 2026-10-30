@@ -20,8 +20,9 @@
 #                  machine's settings explain is a change (lib/tree.pl).
 #   up to date     main's tip is in this branch (M108), as of the last
 #                  fetch; done-check never fetches. Main is lib/git.pl's
-#                  Git::main_ref (origin's, or the only remote's; a local
-#                  main only when there is no remote); there is no --base. A shallow history that
+#                  Git::main_ref (origin's, or the only remote's with a URL,
+#                  at a ref git fetch moves; a local main only when there
+#                  is no remote and no remote-tracking branch); no --base. A shallow history that
 #                  cannot tell says so instead of "merge main".
 #   checks         the newest run-checks log of these files from this place
 #                  (CI when CI=true, else local) passed: its last line PASS,
