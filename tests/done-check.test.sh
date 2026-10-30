@@ -504,6 +504,21 @@ printf 'unit\tany\t-\t(\\d+) ok\n' >"$v/checks/project.tsv"
 amend "$v" "$OK"
 dc "$v"
 expect "a checks file with problems fails elsewhere too" 1 "done-check: elsewhere: FAIL - checks/*.tsv has problems"
+printf 'unit\tany\t-\t(\\d+) ok\ttest ! -e flaky.marker && echo 3 ok\ncorrupt\tany\t-\t(\\d+) ok\tprintf garbage >.git/index; echo 1 ok\n' >"$v/checks/project.tsv"
+(cd "$v" && git add -A)
+amend "$v" "$OK"
+rc "$v"
+(cd "$v" && rm -f .git/index && git reset -q)
+dc "$v"
+expect "a run that stopped (exit 2) with no FAIL result is not a pass" 1 "did not pass (exit 2)"
+if [ "$(id -u)" -ne 0 ]; then
+  chmod 000 "$v/src/a.txt"
+  dc "$v"
+  expect "a tracked file that cannot be read fails files" 1 "done-check: files: FAIL" "unreadable: src/a.txt"
+  chmod 644 "$v/src/a.txt"
+else
+  skip "a tracked file that cannot be read (root reads every file)"
+fi
 printf 'unit\tany\t-\t(\\d+) ok\ttest ! -e flaky.marker && echo 3 ok\n' >"$v/checks/project.tsv"
 (cd "$v" && git add -A)
 amend "$v" "$OK"
@@ -631,6 +646,14 @@ expect "a move over a commit with no verdict line passes, naming it on the READY
 (cd "$vb/shallow" && git fetch -q --depth 1 origin main:refs/remotes/origin/main 2>/dev/null)
 dc "$vb/shallow"
 expect "a changed value in a shallow clone could not be checked" 1 "done-check: up to date: PASS" "which is not in this shallow history of refs/remotes/origin/main; could not check"
+gv=$(git version | perl -ne 'print /(\d+)\.(\d+)/ && ($1 > 2 || ($1 == 2 && $2 >= 44)) ? 1 : 0')
+if [ "$gv" = 1 ]; then
+  (cd "$vb" && git --git-dir=remote.git config uploadpack.allowFilter true && git clone -q --filter=blob:none -b feat "file://$vb/remote.git" partial 2>/dev/null)
+  dc "$vb/partial"
+  expect "in a partial clone done-check never fetches a missing object: it cannot check (exit 2)" 2 "done-check: NOT READY - could not check: cannot read the stored blob"
+else
+  skip "a partial clone never fetches (GIT_NO_LAZY_FETCH needs git 2.44)"
+fi
 (cd "$z" && git reset -q --hard origin/main)
 setvf "$z" ""
 rc "$z"

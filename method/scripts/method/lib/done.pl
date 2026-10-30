@@ -112,8 +112,8 @@ sub files_condition {
   my @parts = map { scalar(@{ $by{$_} }) . " $KIND_WORDS{$_}: " . names(@{ $by{$_} }) } grep { $by{$_} } @KIND_ORDER;
   my $why = $fp->{no_conversion} && ($by{cr} || $by{content}) ? "; $fp->{no_conversion}" : '';
   return report('files', 0, "$n paths are not commit " . short($head) . ': ' . join('; ', @parts) . $why,
-    'commit, restore or remove them; a CR the commit does not ask for: remove it, or put the line-end rule in'
-    . ' .gitattributes in a reviewed change');
+    'commit, restore or remove them' . ($by{cr} ? '; a CR the commit does not ask for: remove it, or put the line-end rule'
+    . ' in .gitattributes in a reviewed change' : ''));
 }
 
 # --- 2. up to date (M108) ---
