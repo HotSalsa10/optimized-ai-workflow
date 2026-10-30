@@ -28,10 +28,11 @@ sub say_line { print Esc::line("done-check: $_[0]"), "\n" }
 
 # stop REASON: the check could not be made (exit 2); the last line still
 # says NOT READY, so a reader of the last line alone never takes it as ready
+my $judged;    # HEAD and main, once known, for the could-not-check line
 sub stop {
   my ($reason) = @_;
   $reason =~ s/\n\z//;
-  say_line("NOT READY - could not check: $reason");
+  say_line("NOT READY - could not check: $reason" . (defined $judged ? "; $judged" : ''));
   exit 2;
 }
 
@@ -91,6 +92,7 @@ my %KIND_WORDS = (
   untracked => 'untracked, and not ignored by git',
   cr => "with CRs before line ends that the commit's .gitattributes does not ask for (core.autocrlf, core.eol or"
     . ' .git/info/attributes on this machine can write them)',
+  lf => "with LF line ends where the commit's .gitattributes asks for CRLF",
   content => 'with bytes that are not the commit\'s (edited; or changed by a filter, which done-check does not copy)',
   missing => 'missing from disk (a sparse checkout, or a deletion hidden by skip-worktree)',
   link => 'a link that is not the committed one, or a file or link in place of the other',
@@ -100,7 +102,7 @@ my %KIND_WORDS = (
   submodule => 'submodules that cannot be compared with the commit (no .git of their own, a .git that points'
     . ' elsewhere, or the commit recorded for them is not in them)',
 );
-my @KIND_ORDER = qw(changed untracked cr content missing link type unreadable flag submodule);
+my @KIND_ORDER = qw(changed untracked cr lf content missing link type unreadable flag submodule);
 
 sub files_condition {
   my ($head) = @_;
@@ -112,15 +114,18 @@ sub files_condition {
   my $n = keys %{ $fp->{kinds} };
   if (!$n) {
     my $conv = @{ $fp->{converted} };
+    my $lfs = @{ $fp->{lfs} };
     return report('files', 1, 'the tracked files on disk are commit ' . short($head) . ', byte for byte'
       . ($conv ? ", $conv of them as the commit's .gitattributes asks (line ends or \$Id\$)" : '')
+      . ($lfs ? ", $lfs of them Git LFS content the commit's .gitattributes asks for" : '')
       . "; nothing untracked outside git's ignore rules");
   }
   my @parts = map { scalar(@{ $by{$_} }) . " $KIND_WORDS{$_}: " . names(@{ $by{$_} }) } grep { $by{$_} } @KIND_ORDER;
   my $why = $fp->{no_conversion} && ($by{cr} || $by{content}) ? "; $fp->{no_conversion}" : '';
   return report('files', 0, "$n paths are not commit " . short($head) . ': ' . join('; ', @parts) . $why,
     'commit, restore or remove them' . ($by{cr} ? '; a CR the commit does not ask for: remove it, or put the line-end rule'
-    . ' in .gitattributes in a reviewed change' : ''));
+    . ' in .gitattributes in a reviewed change' : '')
+    . ($by{lf} ? '; a missing CR the commit asks for: restore the file (git checkout -- FILE)' : ''));
 }
 
 # --- 2. up to date (M108) ---
@@ -150,7 +155,7 @@ sub checks_condition {
   my ($head, $where) = @_;
   my ($head_tree, $head_parents) = commit_info($head);
   stop('HEAD cannot be read') unless defined $head_tree;
-  my (@match, @gone, $unreadable_after);
+  my (@match, @gone, @gone_after, $unreadable_after);
   for my $path (Checks::log_files()) {
     my $log = Checks::read_log($path);
     if ($log->{problem}) { $unreadable_after = $path; next }
@@ -158,13 +163,14 @@ sub checks_condition {
     my $same = $log->{commit} eq $head;
     if (!$same) {
       my ($tree, $parents) = commit_info($log->{commit});
-      if (!defined $tree) { push @gone, $path; next }
+      if (!defined $tree) { push @gone, $path; push @gone_after, $path; next }
       $same = $tree eq $head_tree
         && ("@$parents" eq "@$head_parents" || ancestor($log->{commit}, $head));
     }
     next unless $same;
     push @match, [$path, $log];
     undef $unreadable_after;
+    @gone_after = ();
   }
   my $run = 'run the checks: bash scripts/method/run-checks.sh';
   if (!@match) {
@@ -187,6 +193,12 @@ sub checks_condition {
     . ' not a pass: ' . names(@skip), "make them run, then $run") if @skip;
   return report('checks', 0, "the last run of these files ($log->{started}) did not pass (exit $log->{end})", $run)
     unless $log->{end} == 0 && $log->{last} =~ /\Arun-checks: PASS - /;
+  # a newer run whose commit is gone (an amended twin, pruned) may have
+  # failed; its result cannot be tied to these files, so it is named
+  if (@gone_after) {
+    push @ready_notes, scalar(@gone_after) . ' newer runs name commits that are no longer in this repository, so'
+      . ' whether they were runs of these files cannot be told';
+  }
   # earlier complete runs of the same files that started clean and failed
   my @runs = grep { defined $_->[1]{end} && $_->[1]{tree} eq 'clean' } @match;
   my %flaky;
@@ -201,11 +213,10 @@ sub checks_condition {
     my $note = "$bad of " . scalar(@runs) . ' runs of these files failed: ' . names(sort keys %flaky)
       . '; a check that fails sometimes is a finding for the review';
     push @ready_notes, $note;
-    $ready_log = $log->{started};
-    return report('checks', 1, "$where run-checks log of $log->{started} at $at; a local claim (RISKS #11); $note");
   }
   $ready_log = $log->{started};
-  return report('checks', 1, "$where run-checks log of $log->{started} at $at; a local claim (RISKS #11)");
+  return report('checks', 1, "$where run-checks log of $log->{started} at $at; a local claim (RISKS #11)"
+    . join('', map {"; $_"} @ready_notes));
 }
 
 # --- 4. elsewhere (M089): a check that runs only in the other place has no
@@ -308,6 +319,7 @@ sub run {
   my ($hst, $head) = Git::run('rev-parse', '-q', '--verify', 'HEAD^{commit}');
   stop('HEAD is not a commit yet') if $hst || $head !~ s/\n\z//;
   my ($ref, $tip) = Git::main_ref();
+  $judged = "$head against " . (defined $ref ? "$ref $tip" : 'no main branch');
   if (defined $ref && ancestor($head, $tip)) {
     say_line("NOTHING TO MERGE - $head is ${ref}'s tip or behind it ($tip)");
     exit 3;

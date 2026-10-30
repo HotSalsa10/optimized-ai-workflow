@@ -74,6 +74,10 @@ case "$0" in
   */*) here=${0%/*} ;;
   *) here=. ;;
 esac
+if [ ! -f "$here/lib/done.pl" ]; then
+  echo "done-check: NOT READY - could not check: lib/done.pl is not next to done-check.sh"
+  exit 2
+fi
 perl "$here/lib/done.pl" "$@"
 st=$?
 case $st in

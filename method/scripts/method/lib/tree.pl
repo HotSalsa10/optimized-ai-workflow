@@ -275,7 +275,8 @@ sub lfs_paths {
 # disk); link (a symlink whose target differs, a symlink where a file was,
 # or a file where a symlink was, as core.symlinks=false writes it); type
 # (not a regular file); unreadable; cr (the same bytes once CRLF line ends
-# become LF); content (anything else, also a file over 64 MB that differs);
+# become LF); lf (the same, but with fewer CRs than the commit's own eol
+# rule asks for); content (anything else, also a file over 64 MB that differs);
 # submodule (a checked-out submodule whose recorded commit cannot be read
 # there). OPTIONS {submodules => 1}: also compare each checked-out
 # submodule with the commit COMMIT records for it, in the same way, and
@@ -316,12 +317,17 @@ sub differences {
     }
     if (!defined $disk) { push @list, [$p, 'unreadable']; next }
     $no_conv = conversion_problem() unless defined $no_conv;
+    my $want;
     if ($no_conv eq '') {
-      my $want = checkout_bytes($commit, $p);
+      $want = checkout_bytes($commit, $p);
       if (defined $want && $want eq $disk) { push @converted, $p; next }
     }
     (my $lf = $disk) =~ s/\r\n/\n/g;
-    if (Git::object_id('blob', $lf, $id) eq $id) { push @list, [$p, 'cr']; next }
+    if (Git::object_id('blob', $lf, $id) eq $id) {
+      # fewer CRs than the commit's own eol rule asks for, or more
+      push @list, [$p, defined $want && ($want =~ tr/\r//) > ($disk =~ tr/\r//) ? 'lf' : 'cr'];
+      next;
+    }
     push @list, [$p, 'content'];
   }
   # LFS content on disk is the commit's only where the commit itself asks

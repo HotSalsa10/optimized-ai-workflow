@@ -298,7 +298,9 @@ sub main_ref {
 sub status_options_all {
   my ($dir, $subs) = @_;
   my (@o, %seen);
-  for my $g (['-C', $dir], map { ['-C', $_->[1]] } grep { !defined $_->[2] } @$subs) {
+  # (a submodule with a problem too: git status still reads it, and git -C
+  # reads its own settings even when its .git points elsewhere)
+  for my $g (['-C', $dir], map { ['-C', $_->[1]] } grep { -e "$_->[1]/.git" } @$subs) {
     my @x = status_options(@$g);
     while (my ($c, $v) = splice @x, 0, 2) { push @o, $c, $v unless $seen{$v}++ }
   }

@@ -280,6 +280,12 @@ echo edited >>"$f/data.dat"
 dc "$f"
 expect "a file under a filter that differs is a change" 1 "done-check: files: FAIL" "data.dat"
 if [ -e "$work/smudge-ran" ]; then fail "the filter's program never runs"; else pass "the filter's program never runs"; fi
+perl -pi -e 's/\r\n/\n/ if $. == 1' "$f/run.bat"
+(cd "$f" && git update-index -q --refresh 2>/dev/null)
+dc "$f"
+expect "a CR missing where the commit's eol=crlf rule asks for one is named for what it is, with the fix" 1 \
+  "with LF line ends where the commit's .gitattributes asks for CRLF: run.bat" "restore the file (git checkout -- FILE)"
+rm -f "$f/run.bat" && (cd "$f" && git checkout -q -- run.bat)
 (cd "$f" && git config --unset filter.x.smudge && git checkout -q -- data.dat)
 dc "$f"
 expect "setup: the fresh clone is READY again" 0 "done-check: READY - "
@@ -327,6 +333,33 @@ fi
 dc "$w"
 expect "a submodule whose recorded commit is not in it fails files, saying it cannot be compared" 1 "done-check: files: FAIL" "submodules that cannot be compared" "sub"
 (cd "$w" && git reset -q --hard HEAD~1)
+# an untracked file inside a submodule that hides untracked files from its
+# own git status still counts
+(cd "$w/sub" && git config status.showUntrackedFiles no)
+: >"$w/sub/new.txt"
+dc "$w"
+expect "an untracked file inside a submodule set to hide untracked files fails files" 1 "done-check: files: FAIL" "sub"
+rm -f "$w/sub/new.txt"
+(cd "$w/sub" && git config --unset status.showUntrackedFiles)
+# a filter set inside a submodule whose .git points at another folder never
+# runs either
+sgd=$(cd "$w/sub" && git rev-parse --absolute-git-dir)
+mkdir -p "$work/elsewhere" "$sgd/info"
+# the same size as the committed "two", so git must read it, through the filter
+printf 'one\n' >"$work/elsewhere/s.txt"
+touch -t 202001010000 "$work/elsewhere/s.txt"
+printf '* filter=x\n' >"$sgd/info/attributes"
+git --git-dir="$sgd" config filter.x.clean "touch $work/subfilter2-ran; cat"
+git --git-dir="$sgd" config core.worktree "$work/elsewhere"
+rm -f "$work/subfilter2-ran"
+dc "$w"
+expect "a submodule whose .git points at another folder fails files" 1 "done-check: files: FAIL" "sub"
+if [ -e "$work/subfilter2-ran" ]; then fail "and its filter never runs"; else pass "and its filter never runs"; fi
+git --git-dir="$sgd" config --unset core.worktree
+git --git-dir="$sgd" config --unset filter.x.clean
+rm -f "$sgd/info/attributes"
+dc "$w"
+expect "setup: READY again after the submodule's .git is set back" 0 "done-check: READY - "
 
 # --- up to date (M108) ---
 (cd "$p" && git clone -q remote.git other 2>/dev/null && cd other && echo later >>README && git commit -q -am "Later" -m "$OK" && git push -q origin main 2>/dev/null)
@@ -428,6 +461,17 @@ if (cd "$v" && git cat-file -e "$x" 2>/dev/null); then fail "setup: the run's co
 dc "$v"
 expect "a log whose commit was pruned does not count, and is named" 1 "logs name commits that are no longer in this repository"
 rc "$v"
+# a newer run whose commit is gone (an empty verdict commit, then dropped and
+# pruned) is named, since its result cannot be tied to these files
+xa=$(cd "$v" && git rev-parse HEAD)
+msg "$v" 'Verdict again\n\n%s\n' "$OK"
+: >"$v/flaky.marker"
+rc "$v"
+rm -f "$v/flaky.marker"
+(cd "$v" && git reset -q --hard "$xa" && git reflog expire --expire=now --all && git gc -q --prune=now 2>/dev/null)
+dc "$v"
+expect "a newer run whose commit is gone is named on the READY line" 0 "done-check: READY - " \
+  "1 newer runs name commits that are no longer in this repository"
 : >"$v/flaky.marker"
 rc "$v"
 dc "$v"
@@ -738,7 +782,8 @@ src="$z/.git/objects/$(printf '%s' "$other" | cut -c1-2)/$(printf '%s' "$other" 
 if [ -f "$obj" ] && [ -f "$src" ]; then
   cp "$obj" "$work/obj.saved" && chmod u+w "$obj" && cp "$src" "$obj"
   dc "$z"
-  expect "a stored file changed by hand stops done-check with exit 2 (could not check)" 2 "done-check: NOT READY - could not check: " "does not match its id"
+  expect "a stored file changed by hand stops done-check with exit 2 (could not check)" 2 "done-check: NOT READY - could not check: " "does not match its id" \
+    "against refs/remotes/origin/main"
   cp "$work/obj.saved" "$obj"
 else
   fail "setup: the objects are loose files"
@@ -818,7 +863,7 @@ EOS
 if (cd "$l" && git cat-file blob HEAD:src/data.bin | grep -q '^version https://git-lfs'); then pass "setup: the commit stores an LFS pointer"; else fail "setup: the commit stores an LFS pointer"; fi
 rc "$l"
 dc "$l"
-expect "an LFS file the commit's .gitattributes asks for is the commit" 0 "done-check: files: PASS" "done-check: READY - "
+expect "an LFS file the commit's .gitattributes asks for is the commit" 0 "done-check: files: PASS" "1 of them Git LFS content the commit's .gitattributes asks for" "done-check: READY - "
 (cd "$l" && git rm -q --cached .gitattributes && rm -f .gitattributes && git commit -q -m "No more LFS" -m "$OK")
 dc "$l"
 expect "LFS content on disk whose path the commit no longer marks for LFS is not the commit (a clone gets the pointer)" 1 \
@@ -858,6 +903,10 @@ printf 'sub {\n' >>"$work/broken/method/lib/done.pl"
 out=$(cd "$u" && bash "$work/broken/method/done-check.sh" --ready 2>&1)
 code=$?
 expect "done.pl that does not compile is could-not-check (exit 2), with that last line" 2 "done-check: NOT READY - could not check: perl stopped with exit"
+rm -f "$work/broken/method/lib/done.pl"
+out=$(cd "$u" && bash "$work/broken/method/done-check.sh" --ready 2>&1)
+code=$?
+expect "a missing done.pl is could-not-check (exit 2), with that last line" 2 "done-check: NOT READY - could not check: lib/done.pl is not next to done-check.sh"
 
 # --- exit codes ---
 (cd "$u" && git checkout -q main)

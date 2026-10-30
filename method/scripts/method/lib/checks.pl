@@ -269,7 +269,7 @@ sub check_env {
 # is on disk (untracked files in .method/local left out: the method's own).
 # git status runs with no filter program, a submodule's own included, and
 # no stat shortcut (Git::status_options_all). Also returns kinds (path => {kind => 1}, for
-# plain reports), converted and no_conversion (from Tree::differences).
+# plain reports), converted, lfs and no_conversion (from Tree::differences).
 sub fingerprint {
   require Digest::SHA;    # loaded here, so status.pl can load this file without it
   my ($st, $head) = Git::run('rev-parse', '-q', '--verify', 'HEAD^{commit}');
@@ -307,7 +307,7 @@ sub fingerprint {
     $e{$path} = join ' ', grep { defined } $e{$path}, $why, (@s ? sprintf('%o', $s[2]) : '-'), $h;
   }
   return { head => $head, branch => $branch, refs => $refs, e => \%e, kinds => \%kinds,
-    converted => $d->{converted}, no_conversion => $d->{no_conversion} };
+    converted => $d->{converted}, lfs => $d->{lfs} || [], no_conversion => $d->{no_conversion} };
 }
 
 sub tracked_count {
