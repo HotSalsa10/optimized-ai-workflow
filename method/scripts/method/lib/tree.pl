@@ -15,6 +15,7 @@
 #   Tree::check_trees(A, B)   every folder a comparison of A and B reads is checked
 #   Tree::changed(FROM, TO)   the changed files, each {st, m1, m2, o1, o2, path, old}
 #   Tree::blob_diff(A, B, N)  the hunks between two files, N lines of context
+#   Tree::added_lines(A, B)  the numbers of the lines in file B that are not in A
 #   Tree::attributes(COMMIT, PATH, ATTR...)  PATH's attributes from COMMIT's own
 #                             .gitattributes, or undef
 #   Tree::differences(COMMIT, OPTIONS) how the files on disk differ from
@@ -170,6 +171,20 @@ sub blob_diff {
   $d = substr($d, $at + 1);
   $d =~ s/^(\@\@ -[0-9]+(?:,[0-9]+)? \+[0-9]+(?:,[0-9]+)? \@\@).*$/$1/mg;
   return $d;
+}
+
+# added_lines A B: the numbers of the lines in file B that are not in file A
+# (both compared by id, as blob_diff compares them, with no context)
+sub added_lines {
+  my ($a, $b) = @_;
+  my $d = blob_diff($a, $b, 0);
+  return () unless defined $d;
+  my @n;
+  while ($d =~ /^\@\@ -[0-9]+(?:,[0-9]+)? \+([0-9]+)(?:,([0-9]+))? \@\@$/mg) {
+    my ($from, $count) = ($1, defined $2 ? $2 : 1);
+    push @n, $from .. $from + $count - 1;
+  }
+  return @n;
 }
 
 # A file larger than this that differs from the commit is not read whole:

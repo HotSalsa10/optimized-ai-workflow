@@ -78,6 +78,10 @@ conf_is "a trailing / is dropped" 'PRODUCT_PATHS=src/\nREPOS=../site/\n' 'V PROD
 V REPOS=../site'
 conf_is "PRODUCT_PATHS may be the whole repo, with a LOCAL_ONLY path anywhere" 'PRODUCT_PATHS=.\nLOCAL_ONLY=data/private\n' 'V LOCAL_ONLY=data/private
 V PRODUCT_PATHS=.'
+conf_is "MUTATE_PATHS (also the whole repo) and MUTATION_CHECKS are lists" 'MUTATE_PATHS=src\nMUTATE_PATHS=.\nMUTATION_CHECKS=unit\nMUTATION_CHECKS=api-2\n' 'V MUTATE_PATHS=src
+V MUTATE_PATHS=.
+V MUTATION_CHECKS=unit
+V MUTATION_CHECKS=api-2'
 conf_is "a 64-digit VERDICTS_FROM is accepted" 'VERDICTS_FROM=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n' \
   'V VERDICTS_FROM=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
 conf_is "a bad line leaves the other lines read" 'PRODUCT_PATHS=src\nNOPE=zq\nLOCAL_ONLY=__pycache__\n' 'V LOCAL_ONLY=__pycache__
@@ -123,6 +127,8 @@ conf_bad "a LOCAL_ONLY path outside PRODUCT_PATHS" 'PRODUCT_PATHS=src\nLOCAL_ONL
 conf_bad "a LOCAL_ONLY path that only starts like a PRODUCT_PATHS entry" 'PRODUCT_PATHS=src\nLOCAL_ONLY=srczq/private\n' 2 "must lie under"
 conf_bad "a LOCAL_ONLY path with no PRODUCT_PATHS" 'LOCAL_ONLY=zq/private\n' 1 "must lie under"
 conf_bad "a LOCAL_ONLY path breaking the path rules" 'PRODUCT_PATHS=.\nLOCAL_ONLY=zq/../x\n' 2 "a name like"
+conf_bad "a MUTATE_PATHS path breaking the path rules" 'MUTATE_PATHS=zq/../x\n' 1 "MUTATE_PATHS: a relative path"
+conf_bad "a MUTATION_CHECKS value that is not a check id" 'MUTATION_CHECKS=Unit Tests\n' 1 "MUTATION_CHECKS: a check id from checks/*.tsv"
 for bad in zq0123 0123456789abcdef0123456789abcdef0123456 0123456789ABCDEF0123456789ABCDEF01234567 0123456789abcdef0123456789abcdef01234567zq; do
   conf_bad "VERDICTS_FROM refuses $bad" "VERDICTS_FROM=$bad\n" 1 "a full commit id"
 done

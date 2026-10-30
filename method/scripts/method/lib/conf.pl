@@ -23,6 +23,11 @@
 #   REPOS          (list) other repositories status reports on, relative to
 #                  the repo root (may start with ../)
 #   VERDICTS_FROM  a full commit id on main; status checks verdicts after it
+#   MUTATE_PATHS   (list) paths mutate-changed.sh mutates, as PRODUCT_PATHS
+#                  ("." is the whole repo); unset, it mutates nothing
+#   MUTATION_CHECKS (list) the ids of the checks in checks/*.tsv that
+#                  mutate-changed.sh runs against each mutant (the fast
+#                  tests); unset, it runs none
 # Paths: no absolute path, no "..", "." or empty segment (but PRODUCT_PATHS
 # may be the lone "."; REPOS may start with ".." segments), no leading ":"
 # or "-", none of * ? [ \. A trailing "/" is dropped.
@@ -42,7 +47,8 @@ use strict;
 use warnings;
 use File::Spec;
 
-my %CONF_KEYS = (PRODUCT_PATHS => 'list', LOCAL_ONLY => 'list', REPOS => 'list', VERDICTS_FROM => 'one');
+my %CONF_KEYS = (PRODUCT_PATHS => 'list', LOCAL_ONLY => 'list', REPOS => 'list', VERDICTS_FROM => 'one',
+  MUTATE_PATHS => 'list', MUTATION_CHECKS => 'list');
 my %REQUIRES_KEYS = (claude_code_min => 'one');
 
 sub check_path {
@@ -123,7 +129,8 @@ sub parse {
 
 sub check_value {
   my ($k, $val) = @_;
-  if ($k eq 'PRODUCT_PATHS') { return check_path($val, 1) }
+  if ($k eq 'PRODUCT_PATHS' || $k eq 'MUTATE_PATHS') { return check_path($val, 1) }
+  if ($k eq 'MUTATION_CHECKS') { return $val =~ /\A[a-z][a-z0-9-]*\z/ ? $val : undef }
   if ($k eq 'REPOS') { return check_repo_path($val) }
   if ($k eq 'LOCAL_ONLY') {
     return check_path($val, 0) if $val =~ m{/};
@@ -140,6 +147,7 @@ sub value_rule {
   my ($k) = @_;
   return 'a full commit id (40 or 64 hex characters)' if $k eq 'VERDICTS_FROM';
   return 'a version like 2.1.295' if $k eq 'claude_code_min';
+  return 'a check id from checks/*.tsv (lower-case letters, digits and -, starting with a letter)' if $k eq 'MUTATION_CHECKS';
   return 'a name like __pycache__ or *.pyc, or a path under a product path' if $k eq 'LOCAL_ONLY';
   return 'a relative path with no ., .. or empty part, no leading : or -, and none of * ? [ \\';
 }

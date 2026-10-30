@@ -38,6 +38,12 @@ Nothing yet. Release 1 is being built.
 - The verdict vocabulary gains a `ready` kind: only `approve` makes a change ready (DECISIONS A33).
 - Tests: 1 new test file and new cases in four others, 890 test cases in all.
 
+### Added (step 4b)
+
+- `mutate-changed.sh --list`: plans the mutants for the lines this branch adds (step 4b.2; running them comes in 4b.3): which changed lines get which small text change, in an order that reaches every changed file first, with the reasons files are skipped. It writes nothing and runs no check. New settings MUTATE_PATHS and MUTATION_CHECKS (DECISIONS A40).
+- `Tree::added_lines`: the lines a file adds, from the same fixed diff the review packet uses.
+- Tests: 1 new test file (mutate plan), 3 config cases and 1 packet case; 939 test cases in all.
+
 ### Changed (step 4b)
 
 - The review packet finds moved files up to git's default limit whatever a local diff.renameLimit says (a low one turned moves into deletes and adds).
