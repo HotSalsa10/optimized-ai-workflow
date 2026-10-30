@@ -114,6 +114,12 @@ Rules: M001, M002, M003, M050, M051, M066, M077.
 - Known misses listed in TESTS.md Known limits, to fix when a step touches those checks.
 - The portability lint flags every $( ) that runs onto the next line; narrow it if it gets in the way.
 
+## Step 4: done-check.sh and mutate-changed.sh
+
+Rules: M008, M044, M089, M108.
+
+- [ ] Design written first (done-check --ready over the commit, the files on disk, main, the run-checks log and the verdict; mutate-changed as a text mutator over the changed lines; one shared "the files on disk are the commit" rule), then critiqued before any code.
+
 ## Next
 
-Step 4: done-check.sh and mutate-changed.sh.
+Step 4: the design critique, then the build.
