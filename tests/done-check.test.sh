@@ -150,8 +150,8 @@ before=$(manifest "$w")
 dc "$w"
 after=$(manifest "$w")
 expect "READY after run-checks and an amend that only adds the verdict line, with no new run (exit 0)" 0 \
-  "done-check: files: PASS - the tracked files on disk are commit $h7, byte for byte; nothing untracked outside git's ignore rules" \
-  "done-check: up to date: PASS - main is refs/remotes/origin/main ${main%"${main#???????}"} as of the last fetch; done-check does not fetch" \
+  "done-check: files: PASS - the tracked files on disk are commit $h7, byte for byte; nothing untracked that git lists outside its ignore rules" \
+  "done-check: up to date: PASS - main is refs/remotes/origin/main ${main%"${main#???????}"} (as of the last fetch; done-check does not fetch)" \
   "done-check: checks: PASS - local run-checks log of " "the same files as HEAD; a local claim (RISKS #11)" \
   "done-check: elsewhere: PASS - every check in checks/*.tsv runs here (1)" \
   "done-check: verdict: PASS - approve, as typed in commit $h7; not yet backed by a review receipt (step 5)" \
@@ -177,8 +177,8 @@ expect "READY with an empty verdict commit on top of the run's commit" 0 "the sa
 echo more >>"$w/src/a.txt"
 dc "$w"
 expect "an edit fails files, with the next step (exit 1)" 1 \
-  "done-check: files: FAIL - 1 paths are not commit" "changed or staged (git status lists them): src/a.txt" \
-  "done-check: next: commit, restore or remove them" "done-check: NOT READY - 1 conditions failed (files); $(cd "$w" && git rev-parse HEAD) against refs/remotes/origin/main"
+  "done-check: files: FAIL - 1 path is not commit" "changed or staged (git status lists them): src/a.txt" \
+  "done-check: next: commit, restore or remove them" "done-check: NOT READY - 1 condition failed (files); $(cd "$w" && git rev-parse HEAD) against refs/remotes/origin/main"
 (cd "$w" && git checkout -q -- src/a.txt)
 : >"$w/src/new.txt"
 dc "$w"
@@ -188,6 +188,15 @@ rm -f "$w/src/new.txt"
 dc "$w"
 expect "a file git ignores does not fail files" 0 "done-check: READY - "
 rm -f "$w/flaky2.marker"
+# core.ignoreCase=true (as copied from a Mac or Windows) would hide an
+# untracked file whose name differs from a tracked one only by case
+(cd "$w" && git config core.ignoreCase true)
+: >"$w/src/A.txt"
+if [ -z "$(cd "$w" && git status --porcelain)" ]; then pass "setup: git status itself hides the case twin"; else fail "setup: git status itself hides the case twin" "$(cd "$w" && git status --porcelain)"; fi
+dc "$w"
+expect "an untracked case twin of a tracked file fails files under core.ignoreCase=true" 1 "untracked, and not ignored by git: src/A.txt"
+rm -f "$w/src/A.txt"
+(cd "$w" && git config --unset core.ignoreCase)
 
 # a project with a committed line-end rule and a script
 printf '*.sh text eol=lf\n' >"$w/.gitattributes"
@@ -280,15 +289,25 @@ echo edited >>"$f/data.dat"
 dc "$f"
 expect "a file under a filter that differs is a change" 1 "done-check: files: FAIL" "data.dat"
 if [ -e "$work/smudge-ran" ]; then fail "the filter's program never runs"; else pass "the filter's program never runs"; fi
+(cd "$f" && git config --unset filter.x.smudge && git checkout -q -- data.dat)
+dc "$f"
+expect "setup: the fresh clone is READY again" 0 "done-check: READY - "
 perl -pi -e 's/\r\n/\n/ if $. == 1' "$f/run.bat"
 (cd "$f" && git update-index -q --refresh 2>/dev/null)
 dc "$f"
 expect "a CR missing where the commit's eol=crlf rule asks for one is named for what it is, with the fix" 1 \
-  "with LF line ends where the commit's .gitattributes asks for CRLF: run.bat" "restore the file (git checkout -- FILE)"
-rm -f "$f/run.bat" && (cd "$f" && git checkout -q -- run.bat)
-(cd "$f" && git config --unset filter.x.smudge && git checkout -q -- data.dat)
+  "with LF line ends where the commit's .gitattributes asks for CRLF: run.bat" \
+  "delete the file and check it out again (rm FILE && git checkout -- FILE)"
+(cd "$f" && git add run.bat)
+if [ -z "$(cd "$f" && git status --porcelain)" ]; then pass "setup: once the file is added, git status shows nothing"; else fail "setup: once the file is added, git status shows nothing" "$(cd "$f" && git status --porcelain)"; fi
 dc "$f"
-expect "setup: the fresh clone is READY again" 0 "done-check: READY - "
+expect "and once it is added it is still named" 1 "with LF line ends where the commit's .gitattributes asks for CRLF: run.bat"
+(cd "$f" && git checkout -q -- run.bat)
+dc "$f"
+expect "setup: git checkout alone leaves it as it is" 1 "with LF line ends where the commit's .gitattributes asks for CRLF: run.bat"
+rm -f "$f/run.bat" && (cd "$f" && git checkout -q -- run.bat)
+dc "$f"
+expect "following the advice makes it the commit again" 0 "done-check: READY - "
 
 # a submodule moved after the run
 s="$p/sub"
@@ -366,7 +385,7 @@ expect "setup: READY again after the submodule's .git is set back" 0 "done-check
 (cd "$w" && git fetch -q origin)
 dc "$w"
 expect "main moved on: up to date fails, with the whole next step" 1 \
-  "done-check: up to date: FAIL - refs/remotes/origin/main has 1 commits this branch does not (as of the last fetch)" \
+  "done-check: up to date: FAIL - refs/remotes/origin/main has 1 commit this branch does not (as of the last fetch)" \
   "done-check: next: merge refs/remotes/origin/main into this branch, run the checks, have the merged version reviewed, and end the merge commit with its own verdict line"
 (cd "$w" && git merge -q --no-edit origin/main 2>/dev/null)
 rc "$w"
@@ -428,7 +447,38 @@ done
 (cd "$dv/seed" && git commit -q --allow-empty -m "Default moves" -m "$OK" && git push -q origin trunk 2>/dev/null)
 (cd "$dv/w" && git fetch -q origin)
 dc "$dv/w"
-expect "and when that default branch moves on, the branch is not up to date" 1 "done-check: up to date: FAIL - refs/remotes/origin/trunk has 1 commits this branch does not"
+expect "and when that default branch moves on, the branch is not up to date" 1 "done-check: up to date: FAIL - refs/remotes/origin/trunk has 1 commit this branch does not"
+
+# main comes from the remote when it is not named origin, and a local main,
+# which git fetch never moves, never stands in for it while there is a remote
+q=$(new_project) || abort_sandbox
+(cd "$q/w" && git push -q origin feat 2>/dev/null)
+(cd "$q" && git clone -q -o up -b feat remote.git upc 2>/dev/null && cd upc && git branch -q main up/main)
+(cd "$q/w" && git checkout -q main && git commit -q --allow-empty -m "Later" -m "$OK" && git push -q origin main 2>/dev/null && git checkout -q feat)
+(cd "$q/upc" && git fetch -q up)
+if [ "$(cd "$q/upc" && git rev-parse main)" != "$(cd "$q/upc" && git rev-parse up/main)" ]; then
+  pass "setup: the local main is behind the fetched up/main"
+else
+  fail "setup: the local main is behind the fetched up/main"
+fi
+dc "$q/upc"
+expect "with a remote named up, main is up's, not the local main that git fetch left behind" 1 \
+  "done-check: up to date: FAIL - refs/remotes/up/main has 1 commit this branch does not (as of the last fetch)"
+(cd "$q/upc" && git remote add other ../remote.git)
+dc "$q/upc"
+expect "with several remotes and none named origin there is no main, and done-check says why" 1 \
+  "done-check: up to date: FAIL - no main branch here (this repository has several remotes and none is named origin" \
+  "git remote rename NAME origin"
+(cd "$q/upc" && git remote remove other && git remote rename up origin && git symbolic-ref -d refs/remotes/origin/HEAD &&
+  git update-ref -d refs/remotes/origin/main)
+dc "$q/upc"
+expect "with a remote that has no main, the local main does not stand in for it" 1 \
+  "done-check: up to date: FAIL - no main branch here (looked for origin/HEAD, refs/remotes/origin/main, refs/remotes/origin/master" \
+  "git fetch origin main:refs/remotes/origin/main"
+(cd "$q/upc" && git remote remove origin)
+dc "$q/upc"
+expect "with no remote at all, main is the local main, and the line says so" 1 \
+  "done-check: up to date: PASS - main is refs/heads/main" "(a local branch: this repository has no remote; done-check does not fetch)"
 
 # --- checks (M089) ---
 q=$(new_project) || abort_sandbox
@@ -459,7 +509,7 @@ printf 'Change, amended\n\n%s\n' "$OK" >"$work/msg"
 (cd "$v" && git reflog expire --expire=now --all && git gc -q --prune=now 2>/dev/null)
 if (cd "$v" && git cat-file -e "$x" 2>/dev/null); then fail "setup: the run's commit is pruned"; else pass "setup: the run's commit is pruned"; fi
 dc "$v"
-expect "a log whose commit was pruned does not count, and is named" 1 "logs name commits that are no longer in this repository"
+expect "a log whose commit was pruned does not count, and is named" 1 "logs that name a commit no longer in this repository: "
 rc "$v"
 # a newer run whose commit is gone (an empty verdict commit, then dropped and
 # pruned) is named, since its result cannot be tied to these files
@@ -471,7 +521,7 @@ rm -f "$v/flaky.marker"
 (cd "$v" && git reset -q --hard "$xa" && git reflog expire --expire=now --all && git gc -q --prune=now 2>/dev/null)
 dc "$v"
 expect "a newer run whose commit is gone is named on the READY line" 0 "done-check: READY - " \
-  "1 newer runs name commits that are no longer in this repository"
+  "newer runs that name a commit no longer in this repository: 1 (whether they were runs of these files cannot be told)"
 : >"$v/flaky.marker"
 rc "$v"
 dc "$v"
@@ -483,6 +533,14 @@ dc "$v"
 expect "a fail then a pass of the same files is READY, naming the failure" 0 \
   "runs of these files failed: unit; a check that fails sometimes is a finding for the review" "done-check: READY - " \
   "; 1 of 3 runs of these files failed: unit"
+# logs are not read through a linked folder, which run-checks never writes
+# through either (another clone's logs could stand in)
+mv "$v/.method/local/logs" "$work/linked-logs" && ln -s "$work/linked-logs" "$v/.method/local/logs"
+dc "$v"
+expect "logs behind a linked logs folder do not count" 1 "done-check: checks: FAIL - no run-checks log of these files"
+rm -f "$v/.method/local/logs" && mv "$work/linked-logs" "$v/.method/local/logs"
+dc "$v"
+expect "setup: READY again with the folder back" 0 "done-check: READY - "
 newest=$(newest_log "$v")
 sed '$d' "$v/$newest" | sed '$d' >"$v/.method/local/logs/run-checks-29991231T235959Z-0000000001.log"
 dc "$v"
@@ -524,7 +582,7 @@ rc "$v"
 rc_ok "setup: a CI-only check is not for here, so run-checks passes locally"
 dc "$v"
 expect "a CI-only check has no result here, so it is not READY" 1 "done-check: checks: PASS" \
-  "done-check: elsewhere: FAIL - 1 checks run only in CI and done-check reads no CI result yet (step 9): integ"
+  "done-check: elsewhere: FAIL - 1 check runs only in CI and done-check reads no CI result yet (step 9): integ"
 printf 'unit\tany\t-\t(\\d+) ok\ttest ! -e flaky.marker && echo 3 ok\npriv\tlocal\t-\t(\\d+) ok\techo 0 ok; exit 1\n' >"$v/checks/project.tsv"
 (cd "$v" && git add -A)
 amend "$v" "$OK"
@@ -532,7 +590,7 @@ rc "$v" CI=true
 rc_ok "setup: with CI=true, a local-only check is not for here"
 dc "$v" CI=true
 expect "CI=true for both: a local-only check has no result, so it is not READY" 1 \
-  "done-check: elsewhere: FAIL - 1 checks run only locally, and no record of a local run is read yet: priv"
+  "done-check: elsewhere: FAIL - 1 check runs only locally, and no record of a local run is read yet: priv"
 printf 'unit\tany\t-\t(\\d+) ok\ttest ! -e flaky.marker && echo 3 ok\n' >"$v/checks/project.tsv"
 (cd "$v" && git add -A)
 amend "$v" "$OK"
@@ -543,7 +601,7 @@ amend "$v" 'Review-Verdict: request-changes-open - round 3 fixes checked by test
 dc "$v"
 expect "an open verdict line is not READY, and names the owner's way forward" 1 \
   "done-check: verdict: FAIL - the verdict line says request-changes-open (changes are still open; the reason names them): no review approved this version (SPEC R4)" \
-  "re-plan or the owner decides (DECISIONS A7, A10)" "done-check: NOT READY - 1 conditions failed (verdict)"
+  "re-plan or the owner decides (DECISIONS A7, A10)" "done-check: NOT READY - 1 condition failed (verdict)"
 amend "$v" 'Review-Verdict: request-changes-resolved'
 dc "$v"
 expect "a resolved verdict line is not READY: no review approved the fixes" 1 "the verdict line says request-changes-resolved"
@@ -693,6 +751,38 @@ setvf "$y" "$r0"
 (cd "$y" && git fetch -q origin)
 dc "$y"
 expect "a VERDICTS_FROM move is judged only once the branch is up to date" 1 "done-check: verdicts start: FAIL - this change moves VERDICTS_FROM; judged once the branch is up to date with main"
+# VERDICTS_FROM is read as status reads it (A37): the file on disk must be
+# the one the commit stores, so a move cannot hide in a submodule or in LFS
+(cd "$vs" && git clone -q remote.git sm 2>/dev/null && cd sm && git checkout -q -b feat)
+tipv=$(cd "$vs/sm" && git rev-parse HEAD)
+(git init -q "$vs/confsub" && cd "$vs/confsub" && printf 'PRODUCT_PATHS=src\nVERDICTS_FROM=%s\n' "$tipv" >method.conf &&
+  git add -A && git commit -q -m conf)
+(cd "$vs/sm" && git rm -q -r .claude && git submodule add -q "$vs/confsub" .claude 2>/dev/null && git add -A)
+msg "$vs/sm" 'Settings in a submodule\n\n%s\n' "$OK"
+rc "$vs/sm"
+rc_ok "setup: run-checks passes with the settings in a submodule"
+dc "$vs/sm"
+expect "a VERDICTS_FROM set in a .claude submodule, which the commit does not hold, fails verdicts start" 1 \
+  "done-check: verdicts start: FAIL - VERDICTS_FROM is ${tipv%"${tipv#???????}"} in .claude/method.conf on disk, but unset in the file commit" \
+  "keep .claude/method.conf a plain file committed in this repository"
+(cd "$vs" && git clone -q remote.git lc 2>/dev/null && cd lc && git checkout -q -b feat)
+# a stand-in for git-lfs's clean filter: the pointer names the content's hash
+cat >"$vs/lc/.git/lfs-clean.sh" <<'EOS'
+#!/bin/sh
+exec perl -MDigest::SHA -e 'binmode STDIN; local $/; my $c = <STDIN>; $c = "" unless defined $c; printf "version https://git-lfs.github.com/spec/v1\noid sha256:%s\nsize %d\n", Digest::SHA::sha256_hex($c), length $c'
+EOS
+(cd "$vs/lc" && git config filter.lfs.clean "sh .git/lfs-clean.sh" && git config filter.lfs.smudge cat &&
+  printf '.claude/method.conf filter=lfs\n' >.gitattributes && printf 'PRODUCT_PATHS=src\nVERDICTS_FROM=%s\n' "$tipv" >.claude/method.conf &&
+  git add -A && git commit -q -m "Settings in LFS" -m "$OK" && touch -t 202001010000 .claude/method.conf && git update-index -q --refresh)
+if (cd "$vs/lc" && git cat-file blob HEAD:.claude/method.conf | grep -q '^version https://git-lfs'); then
+  pass "setup: the commit stores an LFS pointer for method.conf"
+else
+  fail "setup: the commit stores an LFS pointer for method.conf"
+fi
+rc "$vs/lc"
+dc "$vs/lc"
+expect "a VERDICTS_FROM in a method.conf stored in Git LFS fails verdicts start" 1 "done-check: files: PASS" \
+  "done-check: verdicts start: FAIL - VERDICTS_FROM is ${tipv%"${tipv#???????}"} in .claude/method.conf on disk, but unset in the file commit"
 # main's own VERDICTS_FROM is not on its first-parent history
 vo=$(new_sandbox_dir) || abort_sandbox
 repos="$repos $vo"
@@ -749,8 +839,8 @@ setvf "$z" "$b1"
 rc "$z"
 dc "$z"
 expect "a move over a commit with no verdict line passes, naming it on the READY line (A30)" 0 \
-  "done-check: verdicts start: PASS - this change moves VERDICTS_FROM from ${b0%"${b0#???????}"} to ${b1%"${b1#???????}"}; it accepts 1 commits on main without a valid verdict line: ${b1%"${b1#???????}"}" \
-  "; accepts 1 commits on main without a valid verdict line: ${b1%"${b1#???????}"}"
+  "done-check: verdicts start: PASS - this change moves VERDICTS_FROM from ${b0%"${b0#???????}"} to ${b1%"${b1#???????}"}; it accepts 1 commit on main without a valid verdict line: ${b1%"${b1#???????}"}" \
+  "; accepts 1 commit on main without a valid verdict line: ${b1%"${b1#???????}"}"
 (cd "$z" && git push -q origin feat 2>/dev/null)
 (cd "$vb" && git clone -q --depth 2 -b feat "file://$vb/remote.git" shallow 2>/dev/null)
 (cd "$vb/shallow" && git fetch -q --depth 1 origin main:refs/remotes/origin/main 2>/dev/null)
@@ -758,7 +848,7 @@ rc "$vb/shallow"
 dc "$vb/shallow"
 expect "a changed value in a shallow clone could not be checked, and it alone fails" 1 \
   "done-check: verdicts start: FAIL - this change moves VERDICTS_FROM from " "which is not in this shallow history of refs/remotes/origin/main; could not check" \
-  "done-check: NOT READY - 1 conditions failed (verdicts start)"
+  "done-check: NOT READY - 1 condition failed (verdicts start)"
 gv=$(git version | perl -ne 'print /(\d+)\.(\d+)/ && ($1 > 2 || ($1 == 2 && $2 >= 44)) ? 1 : 0')
 if [ "$gv" = 1 ]; then
   (cd "$vb" && git --git-dir=remote.git config uploadpack.allowFilter true && git clone -q --filter=blob:none -b feat "file://$vb/remote.git" partial 2>/dev/null)
@@ -772,7 +862,7 @@ setvf "$z" ""
 rc "$z"
 dc "$z"
 expect "removing it so a commit with no line leaves the range names that commit" 0 \
-  "from ${b0%"${b0#???????}"} to unset; it accepts 1 commits on main without a valid verdict line: ${b1%"${b1#???????}"}"
+  "from ${b0%"${b0#???????}"} to unset; it accepts 1 commit on main without a valid verdict line: ${b1%"${b1#???????}"}"
 # an error while checking (here a stored file that does not match its id)
 # is exit 2, never a pass
 confid=$(cd "$z" && git rev-parse origin/main:.claude/method.conf)
@@ -822,7 +912,7 @@ expect "adopting the method (VERDICTS_FROM set on a main with no verdict line) i
 rc "$va/shallow"
 dc "$va/shallow"
 expect "adoption in a shallow history could not be checked: older commits with a verdict line may be cut off" 1 \
-  "done-check: up to date: PASS" "could not check what it accepts: the history here is shallow" "done-check: NOT READY - 1 conditions failed (verdicts start)"
+  "done-check: up to date: PASS" "could not check what it accepts: the history here is shallow" "done-check: NOT READY - 1 condition failed (verdicts start)"
 
 # a method.conf with a problem on main is read as status reads it, so the
 # change that fixes it can be ready

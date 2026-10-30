@@ -502,8 +502,10 @@ sub prune_logs {
 
 # log_files: the run-checks logs, oldest first by name (the writer's UTC time,
 # then its process id, the order prune_logs keeps): untracked regular files
-# named exactly like a log
+# named exactly like a log; none when a folder on the way is a link, which
+# run-checks never writes through (open_log)
 sub log_files {
+  for my $f ('.method', $LOCAL, $LOGS) { return () if -l $f }
   opendir my $d, $LOGS or return ();
   my @logs = sort grep { $_ =~ $LOG_NAME } readdir $d;
   closedir $d;

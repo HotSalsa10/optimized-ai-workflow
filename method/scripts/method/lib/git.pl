@@ -18,8 +18,10 @@
 # index), --literal-pathspecs (a path is never pathspec magic),
 # core.commitGraph=false (a commit-graph file is a local file that could
 # misreport history), core.fsmonitor=false (a file-system monitor is a
-# local program that would run inside the caller and could hide changes)
-# and safe.bareRepository=explicit (a folder laid out like a repository,
+# local program that would run inside the caller and could hide changes),
+# core.ignoreCase=false (a setting copied from a Mac or Windows would hide an
+# untracked file whose name differs from a tracked one only by case) and
+# safe.bareRepository=explicit (a folder laid out like a repository,
 # committed inside another one, is never used as one; git 2.38 or later).
 # A caller adds its own -c options in front of the git command.
 #
@@ -49,9 +51,13 @@
 #                       submodule, so no submodule's own filter runs either
 #   Git::exact(REF)     the commit id of a full ref name, or undef
 #   Git::main_ref()     (main's full ref name, its commit id), or () when
-#                       there is none: origin/HEAD (unless it names HEAD's
-#                       own branch), then @Git::MAIN_REFS; Git::no_main()
-#                       says where it looked
+#                       there is none: from origin, or the only remote when
+#                       there is no origin, its HEAD (unless it names HEAD's
+#                       own branch), then its main and master; local main and
+#                       master only when there is no remote (Git::main_refs);
+#                       Git::no_main() says where it looked
+#   Git::main_remote()  that remote's name, undef (no remote) or '' (several,
+#                       none named origin)
 #   Git::merge_base(A, B)  ('ok', ids), ('none', what to do) or ('error')
 #   Git::message(ID)    a commit's message, checked against its id
 package Git;
@@ -72,7 +78,7 @@ $ENV{GIT_NO_LAZY_FETCH} = 1;    # a partial clone never fetches a missing object
 $ENV{GIT_GRAFT_FILE} = File::Spec->catfile(File::Spec->devnull, 'none');    # a grafts file that cannot exist, so none is read and nothing is written
 
 our @GIT = ('git', '--no-optional-locks', '--literal-pathspecs', '-c', 'core.commitGraph=false',
-  '-c', 'core.fsmonitor=false', '-c', 'safe.bareRepository=explicit');
+  '-c', 'core.fsmonitor=false', '-c', 'core.ignoreCase=false', '-c', 'safe.bareRepository=explicit');
 
 # the git command in ARGS, after any -c NAME=VALUE and -C FOLDER pairs
 sub command_name {
@@ -257,34 +263,57 @@ sub exact {
   return $cst || $c !~ /\A([0-9a-f]+)\n\z/ ? undef : $1;
 }
 
-# own_branch REF: REF is HEAD's own branch or its namesake on origin; git
-# remote set-head, or a clone of a working copy on that branch, can point
-# origin/HEAD there, and then it is not main. (A branch's upstream is no
-# reason: `git checkout -b feat origin/develop` makes the default branch the
-# upstream.)
+# own_branch REF REMOTE: REF is HEAD's own branch or its namesake on REMOTE;
+# git remote set-head, or a clone of a working copy on that branch, can
+# point REMOTE/HEAD there, and then it is not main. (A branch's upstream is
+# no reason: `git checkout -b feat origin/develop` makes the default branch
+# the upstream.)
 sub own_branch {
-  my ($ref) = @_;
+  my ($ref, $remote) = @_;
   my ($st, $b) = run('symbolic-ref', '-q', 'HEAD');
   return 0 if $st;
   chomp $b;
   return 1 if $ref eq $b;
   my ($name) = $b =~ m{\Arefs/heads/(.+)\z}s or return 0;
-  return $ref eq "refs/remotes/origin/$name" ? 1 : 0;
+  return $ref eq "refs/remotes/$remote/$name" ? 1 : 0;
 }
 
-# the refs main_ref tries after origin/HEAD, in order
-our @MAIN_REFS = qw(refs/remotes/origin/main refs/heads/main refs/remotes/origin/master refs/heads/master);
+# main_remote: the remote main is read from: origin, or the only remote when
+# there is no origin; undef when there is no remote, '' when there are
+# several and none is origin (or git remote failed)
+sub main_remote {
+  my ($st, $out) = run('remote');
+  return '' if $st;
+  my @r = split /\n/, $out;
+  return undef unless @r;
+  return 'origin' if grep { $_ eq 'origin' } @r;
+  return @r == 1 ? $r[0] : '';
+}
+
+# main_refs: (the remote, the refs main_ref tries after REMOTE/HEAD, in
+# order). With a remote, only its branches: a local main is never moved by
+# git fetch, so it can be behind the main that was fetched. Local branches
+# count only when there is no remote at all.
+sub main_refs {
+  my $r = main_remote();
+  return (undef, qw(refs/heads/main refs/heads/master)) unless defined $r;
+  return ('') if $r eq '';
+  return ($r, "refs/remotes/$r/main", "refs/remotes/$r/master");
+}
 
 # main_ref: (the full name of main, its commit), or () when there is none
-# (origin/HEAD is not taken when it names HEAD's own branch, see own_branch)
+# (REMOTE/HEAD is not taken when it names HEAD's own branch, see own_branch)
 sub main_ref {
-  my ($st, $t) = run('symbolic-ref', '-q', 'refs/remotes/origin/HEAD');
-  $t =~ s/\n\z//;
-  if (!$st && $t =~ m{\Arefs/remotes/origin/\S+\z} && !own_branch($t)) {
-    my $id = exact($t);
-    return ($t, $id) if defined $id;
+  my ($r, @refs) = main_refs();
+  if (defined $r && $r ne '') {
+    my ($st, $t) = run('symbolic-ref', '-q', "refs/remotes/$r/HEAD");
+    $t =~ s/\n\z//;
+    if (!$st && $t =~ m{\Arefs/remotes/\Q$r\E/\S+\z} && !own_branch($t, $r)) {
+      my $id = exact($t);
+      return ($t, $id) if defined $id;
+    }
   }
-  for my $ref (@MAIN_REFS) {
+  for my $ref (@refs) {
     my $id = exact($ref);
     return ($ref, $id) if defined $id;
   }
@@ -307,10 +336,14 @@ sub status_options_all {
   return @o;
 }
 
-# no_main: where main_ref looked, and how to fetch main when it is missing
+# no_main: where main_ref looked, and how to get main when it is missing
 sub no_main {
-  return 'looked for origin/HEAD, ' . join(', ', @MAIN_REFS)
-    . '; in a single-branch or shallow clone, fetch it: git fetch origin main:refs/remotes/origin/main';
+  my ($r, @refs) = main_refs();
+  return 'looked for ' . join(', ', @refs) . '; this repository has no remote' unless defined $r;
+  return 'this repository has several remotes and none is named origin, so which one holds main cannot be told;'
+    . ' name that one origin (git remote rename NAME origin)' if $r eq '';
+  return "looked for $r/HEAD, " . join(', ', @refs) . "; in a single-branch or shallow clone, fetch it: git fetch $r"
+    . " main:refs/remotes/$r/main (or push main to $r first, if it does not have it yet)";
 }
 
 # merge_base A B: ('ok', every merge base, the one git picks first);

@@ -252,6 +252,10 @@ for my $d (@{ $diffs->{list} }) {
   fail(1, "the working copy of $p is not a regular file; commit or restore it") if $kind eq 'type';
   fail(2, "cannot read $p") if $kind eq 'unreadable';
   if ($kind eq 'cr') { push @eol_only, $p; next }
+  # (git status does not see it once the file is added, and git checkout
+  # leaves it as it is while the index matches its time stamps)
+  fail(1, "the working copy of $p lacks a CR before some line ends that its commit's .gitattributes asks for; delete it"
+    . ' and check it out again (rm FILE && git checkout -- FILE), then build the packet again') if $kind eq 'lf';
   fail(1, "the working copy of $p is not what was committed (edited; hidden from git by a flag, a file-system monitor or a stat-cache setting; or changed by a filter, ident or encoding setting); commit or restore it");
 }
 

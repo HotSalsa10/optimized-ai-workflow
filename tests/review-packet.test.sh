@@ -928,7 +928,19 @@ printf '@echo off\r\necho more\n' >"$eol/run.bat"
 build "$eol" --base main
 expect "a file that lacks a CR the commit's eol=crlf rule asks for is refused: it is an edit, and git status sees it" 1 \
   "tracked files have uncommitted or staged changes"
+(cd "$eol" && git add run.bat)
+if [ -z "$(cd "$eol" && git status --porcelain --untracked-files=no)" ]; then
+  pass "setup: once the file is added, git status shows nothing"
+else
+  fail "setup: once the file is added, git status shows nothing" "$(cd "$eol" && git status --porcelain --untracked-files=no)"
+fi
+build "$eol" --base main
+expect "once it is added it is still refused, with its own reason and a fix that works" 1 \
+  "the working copy of run.bat lacks a CR before some line ends that its commit's .gitattributes asks for" \
+  "delete it and check it out again (rm FILE && git checkout -- FILE)"
 (cd "$eol" && rm -f run.bat && git checkout -q -- run.bat)
+build "$eol" --base main
+expect "following that fix builds the packet again" 0 "FILE A run.bat"
 # shellcheck disable=SC2016 # $1 is for the script being written
 printf '#!/bin/sh\ncat >/dev/null\ngit cat-file blob "HEAD:$1"\n' >"$eol/.git/clean-hide.sh"
 # shellcheck disable=SC2016 # $Id$ is meant literally

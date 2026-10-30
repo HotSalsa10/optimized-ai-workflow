@@ -43,6 +43,12 @@ sub names {
   return join(', ', @n[0 .. $MAX_NAMES - 1]) . ' and ' . (@n - $MAX_NAMES) . ' more';
 }
 
+# count N ONE MANY: "N ONE" when N is 1, else "N MANY"
+sub count {
+  my ($n, $one, $many) = @_;
+  return "$n " . ($n == 1 ? $one : $many);
+}
+
 # ancestor A B: 1 when A is an ancestor of B (or B itself), 0 when not
 sub ancestor {
   my ($a, $b) = @_;
@@ -118,14 +124,20 @@ sub files_condition {
     return report('files', 1, 'the tracked files on disk are commit ' . short($head) . ', byte for byte'
       . ($conv ? ", $conv of them as the commit's .gitattributes asks (line ends or \$Id\$)" : '')
       . ($lfs ? ", $lfs of them Git LFS content the commit's .gitattributes asks for" : '')
-      . "; nothing untracked outside git's ignore rules");
+      . "; nothing untracked that git lists outside its ignore rules");
   }
   my @parts = map { scalar(@{ $by{$_} }) . " $KIND_WORDS{$_}: " . names(@{ $by{$_} }) } grep { $by{$_} } @KIND_ORDER;
   my $why = $fp->{no_conversion} && ($by{cr} || $by{content}) ? "; $fp->{no_conversion}" : '';
-  return report('files', 0, "$n paths are not commit " . short($head) . ': ' . join('; ', @parts) . $why,
+  return report('files', 0, count($n, 'path is', 'paths are') . ' not commit ' . short($head) . ': ' . join('; ', @parts) . $why,
     'commit, restore or remove them' . ($by{cr} ? '; a CR the commit does not ask for: remove it, or put the line-end rule'
     . ' in .gitattributes in a reviewed change' : '')
-    . ($by{lf} ? '; a missing CR the commit asks for: restore the file (git checkout -- FILE)' : ''));
+    . ($by{lf} ? '; a missing CR the commit asks for: delete the file and check it out again (rm FILE && git checkout -- FILE)' : ''));
+}
+
+# unshallow: the command that fetches the whole history from main's remote
+sub unshallow {
+  my $r = Git::main_remote();
+  return 'git fetch --unshallow' . (defined $r && $r ne '' ? " $r" : '');
 }
 
 # --- 2. up to date (M108) ---
@@ -133,11 +145,13 @@ sub up_to_date_condition {
   my ($head, $ref, $tip) = @_;
   return report('up to date', 0, 'no main branch here (' . Git::no_main() . ')', 'fetch main, then run done-check again')
     unless defined $ref;
-  return report('up to date', 1, "main is $ref " . short($tip) . ' as of the last fetch; done-check does not fetch')
+  # a local main only when there is no remote (Git::main_refs)
+  my $when = $ref =~ m{\Arefs/heads/} ? 'a local branch: this repository has no remote' : 'as of the last fetch';
+  return report('up to date', 1, "main is $ref " . short($tip) . " ($when; done-check does not fetch)")
     if ancestor($tip, $head);
   my ($sh) = Git::ok('rev-parse', '--is-shallow-repository') =~ /\A(\w+)/;
   return report('up to date', 0, "the history here is shallow, so whether $ref is merged cannot be told",
-    'fetch the whole history (git fetch --unshallow origin), then run done-check again')
+    'fetch the whole history (' . unshallow() . '), then run done-check again')
     if defined $sh && $sh eq 'true';
   my ($mst) = Git::merge_base($tip, $head);
   stop('git merge-base failed') if $mst eq 'error';
@@ -145,7 +159,7 @@ sub up_to_date_condition {
     'this branch does not grow from main; start it from main') if $mst eq 'none';
   my $behind = Git::ok('rev-list', '--count', "$head..$tip");
   chomp $behind;
-  return report('up to date', 0, "$ref has $behind commits this branch does not (as of the last fetch)",
+  return report('up to date', 0, "$ref has " . count($behind, 'commit', 'commits') . " this branch does not ($when)",
     "merge $ref into this branch, run the checks, have the merged version reviewed, and end the merge commit"
     . ' with its own verdict line');
 }
@@ -175,7 +189,7 @@ sub checks_condition {
   my $run = 'run the checks: bash scripts/method/run-checks.sh';
   if (!@match) {
     return report('checks', 0, 'no run-checks log of these files (commit ' . short($head) . ") from here ($where)"
-      . (@gone ? '; ' . scalar(@gone) . ' logs name commits that are no longer in this repository' : ''), $run);
+      . (@gone ? '; logs that name a commit no longer in this repository: ' . scalar(@gone) : ''), $run);
   }
   return report('checks', 0, 'a run-checks log newer than the last one of these files cannot be read (cut off before'
     . ' its header was written?)', $run) if defined $unreadable_after;
@@ -196,8 +210,8 @@ sub checks_condition {
   # a newer run whose commit is gone (an amended twin, pruned) may have
   # failed; its result cannot be tied to these files, so it is named
   if (@gone_after) {
-    push @ready_notes, scalar(@gone_after) . ' newer runs name commits that are no longer in this repository, so'
-      . ' whether they were runs of these files cannot be told';
+    push @ready_notes, 'newer runs that name a commit no longer in this repository: ' . scalar(@gone_after)
+      . ' (whether they were runs of these files cannot be told)';
   }
   # earlier complete runs of the same files that started clean and failed
   my @runs = grep { defined $_->[1]{end} && $_->[1]{tree} eq 'clean' } @match;
@@ -228,10 +242,10 @@ sub elsewhere_condition {
   my @other = map { $_->{id} } grep { $_->{runs_in} ne 'any' && $_->{runs_in} ne $here } @$checks;
   return report('elsewhere', 1, @$checks ? 'every check in checks/*.tsv runs here (' . scalar(@$checks) . ')'
     : 'checks/*.tsv lists no check that runs only elsewhere') unless @other;
-  return report('elsewhere', 0, scalar(@other) . ' checks run only in CI and done-check reads no CI result yet (step 9): '
+  return report('elsewhere', 0, count(scalar(@other), 'check runs', 'checks run') . ' only in CI and done-check reads no CI result yet (step 9): '
     . names(@other), 'these checks have not been seen to pass; until done-check reads their result, it cannot say READY here')
     if $here eq 'local';
-  return report('elsewhere', 0, scalar(@other) . ' checks run only locally, and no record of a local run is read yet: '
+  return report('elsewhere', 0, count(scalar(@other), 'check runs', 'checks run') . ' only locally, and no record of a local run is read yet: '
     . names(@other), 'these checks have not been seen to pass; until done-check reads their result, it cannot say READY here');
 }
 
@@ -268,6 +282,15 @@ sub verdicts_start_condition {
   my $new = conf_value($head);
   my $old = conf_value($tip);
   my $show = sub { defined $_[0] ? short($_[0]) : 'unset' };
+  # status reads the file on disk (A37); the commit is read here, so the two
+  # must agree (a submodule, Git LFS or another filter can keep them apart)
+  my ($disk) = Conf::read('.');
+  my $dv = $disk->{VERDICTS_FROM};
+  return report($area, 0, 'VERDICTS_FROM is ' . $show->($dv) . ' in .claude/method.conf on disk, but '
+    . $show->($new) . ' in the file commit ' . short($head) . ' stores (an uncommitted edit; or .claude is a submodule,'
+    . ' or the file goes through Git LFS or another filter, so the commit does not hold what status reads)',
+    'keep .claude/method.conf a plain file committed in this repository')
+    if (defined $dv ? $dv : '') ne (defined $new ? $new : '');
   return report($area, 1, 'VERDICTS_FROM is ' . $show->($new) . ' both on main and in this change')
     if (defined $new ? $new : '') eq (defined $old ? $old : '');
   return report($area, 0, 'this change moves VERDICTS_FROM; judged once the branch is up to date with main',
@@ -276,21 +299,21 @@ sub verdicts_start_condition {
   my $jn = Verdicts::judged($tip, $new);
   if ($jn->{problem}) {
     return report($area, 0, "$moves, which is not in this shallow history of $ref; could not check",
-      'fetch more history (git fetch --unshallow origin)') if $jn->{shallow};
+      'fetch more history (' . unshallow() . ')') if $jn->{shallow};
     return report($area, 0, "$moves, which is not on ${ref}'s first-parent history, so status would report LOOK after"
       . ' the merge', 'set VERDICTS_FROM to a commit on main');
   }
   my $jo = Verdicts::judged($tip, $old);
   return report($area, 0, "$moves; could not check what it accepts: " . ($jo->{problem} && !$jo->{shallow}
     ? "the old value is not on ${ref}'s first-parent history" : 'the history here is shallow, so older commits were not read'),
-    'fetch more history (git fetch --unshallow origin)') if $jo->{problem} || $jo->{shallow} || $jn->{shallow};
+    'fetch more history (' . unshallow() . ')') if $jo->{problem} || $jo->{shallow} || $jn->{shallow};
   my %still = map { ($_ => 1) } @{ $jn->{ids} };
   my @accepted = grep { !$still{$_} && defined Verdicts::trailer_problem(Git::message($_)) } @{ $jo->{ids} };
   return report($area, 1, "$moves; it accepts no commit without a valid verdict line") unless @accepted;
   # DECISIONS A30: older commits are accepted by moving VERDICTS_FROM in a
   # reviewed change; the verdict condition asks for that review, and the
   # READY line names what is accepted
-  my $note = 'accepts ' . scalar(@accepted) . " commits on main without a valid verdict line: "
+  my $note = 'accepts ' . count(scalar(@accepted), 'commit', 'commits') . ' on main without a valid verdict line: '
     . join(', ', map { short($_) } @accepted[0 .. ($#accepted < 4 ? $#accepted : 4)]) . (@accepted > 5 ? ' ...' : '');
   push @ready_notes, $note;
   return report($area, 1, "$moves; it $note");
@@ -336,7 +359,7 @@ sub run {
   my $against = defined $ref ? "$ref $tip" : 'no main branch';
   if (@failed) {
     say_line("next: $failed[0][1]");
-    say_line('NOT READY - ' . scalar(@failed) . ' conditions failed (' . join(', ', map { $_->[0] } @failed)
+    say_line('NOT READY - ' . count(scalar(@failed), 'condition', 'conditions') . ' failed (' . join(', ', map { $_->[0] } @failed)
       . "); $head against $against");
     exit 1;
   }

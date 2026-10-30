@@ -357,12 +357,16 @@ nw="$n/w"
 (cd "$nw" && git commit -q --amend -m "Records, no verdict" && git push -q -f origin main 2>/dev/null)
 st "$nw"
 expect "with no verdict anywhere the area is SKIPPED" 0 "verdicts: SKIPPED - no commit on refs/remotes/origin/main carries a Review-Verdict line yet; task-branch commits are not read"
+(cd "$nw" && git remote rename origin up)
+st "$nw"
+expect "with a remote not named origin, main is that remote's" 0 "verdicts: SKIPPED - no commit on refs/remotes/up/main carries a Review-Verdict line yet"
+(cd "$nw" && git remote rename up origin)
 (cd "$nw" && git remote remove origin)
 st "$nw"
 expect "without a remote, main is the local main branch" 1 "verdicts: SKIPPED - no commit on refs/heads/main"
 (cd "$nw" && git branch -q -m main trunk)
 st "$nw"
-expect "with no main branch at all the area is SKIPPED" 1 "verdicts: SKIPPED - no main branch (looked for origin/HEAD"
+expect "with no main branch at all the area is SKIPPED" 1 "verdicts: SKIPPED - no main branch (looked for refs/heads/main, refs/heads/master; this repository has no remote"
 
 oh=$(new_project) || abort_sandbox
 ohw="$oh/w"
