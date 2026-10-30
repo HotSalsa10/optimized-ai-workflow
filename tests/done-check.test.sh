@@ -464,6 +464,15 @@ fi
 dc "$q/upc"
 expect "with a remote named up, main is up's, not the local main that git fetch left behind" 1 \
   "done-check: up to date: FAIL - refs/remotes/up/main has 1 commit this branch does not (as of the last fetch)"
+(cd "$q/upc" && git symbolic-ref refs/remotes/up/HEAD refs/remotes/up/feat)
+dc "$q/upc"
+expect "and an up/HEAD that names the task branch is not main either" 1 \
+  "done-check: up to date: FAIL - refs/remotes/up/main has 1 commit this branch does not"
+(cd "$q/upc" && git symbolic-ref refs/remotes/up/HEAD refs/remotes/up/main)
+(cd "$q" && git clone -q --depth 1 --no-single-branch -o up -b feat "file://$q/remote.git" upshallow 2>/dev/null)
+dc "$q/upshallow"
+expect "a shallow clone from a remote named up is told to fetch from up" 1 \
+  "done-check: up to date: FAIL - the history here is shallow" "fetch the whole history (git fetch --unshallow up)"
 (cd "$q/upc" && git remote add other ../remote.git)
 dc "$q/upc"
 expect "with several remotes and none named origin there is no main, and done-check says why" 1 \
