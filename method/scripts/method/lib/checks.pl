@@ -128,7 +128,7 @@ sub temp_file {
   my $path = sprintf '%s/run-checks-%d-%d.out', $LOCAL, $$, ++$temp_n;
   unlink $path;
   sysopen my $fh, $path, O_WRONLY | O_CREAT | O_EXCL, 0600
-    or stop('cannot create an output file in .method/local (did a check delete the folder, with git clean -x say?)');
+    or die "cannot create an output file in .method/local (did a check delete the folder, with git clean -x say?)\n";
   close $fh;
   push @temps, $path;
   return $path;
@@ -143,7 +143,7 @@ END { unlink @temps if defined $parent_pid && $$ == $parent_pid }
 sub run_to_file {
   my ($env, $argv, $out) = @_;
   my $pid = fork;
-  stop('cannot start a process') unless defined $pid;
+  die "cannot start a process\n" unless defined $pid;
   if (!$pid) {
     %ENV = %$env if $env;
     open STDIN, '<', File::Spec->devnull or POSIX::_exit(127);
@@ -157,9 +157,9 @@ sub run_to_file {
 
 sub write_lines {
   my ($path, @lines) = @_;
-  open my $fh, '>>:raw', $path or stop('cannot write an output file in .method/local');
+  open my $fh, '>>:raw', $path or die "cannot write an output file in .method/local\n";
   print {$fh} map { "$_\n" } @lines;
-  close $fh or stop('cannot write an output file in .method/local');
+  close $fh or die "cannot write an output file in .method/local\n";
 }
 
 # mask_file FILE SUB: each line of FILE (split at LF or CRLF), masked by
@@ -420,8 +420,18 @@ sub check_tree_unchanged {
     detail => "HEAD, its branch, the branches and tags, and the files on disk are as they were before the checks ran" };
 }
 
+# check_project CHECK HERE ENV OUT: one project check, run by run-checks
 sub check_project {
   my ($c, $here, $env, $out) = @_;
+  my $skip = applies($c, $here, $env);
+  return $skip if $skip;
+  return judge($c, run_to_file($env, ['bash', '-o', 'pipefail', '-c', $c->{command}], $out), $out);
+}
+
+# applies CHECK HERE ENV: the SKIPPED result when CHECK is not for this place
+# (not-here) or lacks what it needs (needs), else undef
+sub applies {
+  my ($c, $here, $env) = @_;
   my $at = "$c->{file} line $c->{line}";
   if ($c->{runs_in} ne 'any' && $c->{runs_in} ne $here) {
     my $only = $c->{runs_in} eq 'ci' ? 'in CI only' : 'locally only';
@@ -436,7 +446,15 @@ sub check_project {
     my $why = $kind eq 'cmd' ? 'is not on PATH' : $kind eq 'env' ? 'is not set' : 'does not exist';
     return { status => 'SKIPPED', kind => 'needs', examined => '-', detail => "needs $kind:$what, which $why ($at)" };
   }
-  my $st = run_to_file($env, ['bash', '-o', 'pipefail', '-c', $c->{command}], $out);
+  return undef;
+}
+
+# judge CHECK STATUS OUT: the result of a check that ended with wait STATUS
+# and wrote OUT: a signal or a non-zero exit fails; exit 0 passes only with
+# a count of 1 or more (the last output line its pattern matches)
+sub judge {
+  my ($c, $st, $out) = @_;
+  my $at = "$c->{file} line $c->{line}";
   return { status => 'FAIL', kind => 'exit', examined => '-', detail => 'killed by signal ' . ($st & 127) . " ($at)" }
     if $st & 127;
   return { status => 'FAIL', kind => 'exit', examined => '-', detail => 'exit ' . ($st >> 8) . " ($at)" } if $st;

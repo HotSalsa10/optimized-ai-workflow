@@ -38,6 +38,10 @@ Nothing yet. Release 1 is being built.
 - The verdict vocabulary gains a `ready` kind: only `approve` makes a change ready (DECISIONS A33).
 - Tests: 1 new test file and new cases in four others, 890 test cases in all.
 
+### Changed (step 4b)
+
+- run-checks' way of running one project check is split into parts (whether it applies here, and how its end is judged) that mutate-changed.sh will share; internal, with run-checks' output byte for byte the same.
+
 ### Changed (step 4)
 
 - run-checks compares the bytes of every tracked file with the commit at its start and in tree-unchanged, so a CR that core.autocrlf hides from git status is a change; a CRLF or $Id$ that the commit's own .gitattributes asks for is not, on Linux too (DECISIONS A36).
