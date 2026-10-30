@@ -21,9 +21,10 @@ binmode STDERR, ':raw';
 utf8::encode($_) for grep { utf8::is_utf8($_) } @ARGV;
 
 # verdicts.pl: the vocabulary; git.pl: the one git runner, which also clears
-# the variables that would point git elsewhere; esc.pl: the one escaper
+# the variables that would point git elsewhere; esc.pl: the one escaper;
+# tree.pl: a commit's checked folders and files, and the disk compared with them
 my $lib = dirname(File::Spec->rel2abs(__FILE__));
-require File::Spec->catfile($lib, $_) for qw(verdicts.pl git.pl esc.pl);
+require File::Spec->catfile($lib, $_) for qw(verdicts.pl git.pl esc.pl tree.pl);
 
 my $CHECKLIST = 'docs/incident-checklist.md';
 my ($CHECKS_HEAD, $CHECKS_TAIL) = (50, 150);
@@ -157,103 +158,11 @@ sub is_ancestor {
 
 my $zero = qr/\A0+\z/;
 
-# object_id TYPE CONTENT LIKE: the id git gives CONTENT (lib/git.pl).
-sub object_id { return Git::object_id(@_) }
-
-# stored TYPE ID: a stored object's content, checked against its id
-# (lib/git.pl). git does not check a stored file, folder or parent commit
-# when it reads one, so an object changed by hand could otherwise pass for
-# the committed one.
-sub stored {
-  my $c = eval { Git::cat(@_) };
-  git_die($@) unless defined $c;
-  return $c;
-}
-
-sub blob {
-  my ($id) = @_;
-  return $id =~ $zero ? '' : stored('blob', $id);
-}
-
-# tree_entries ID: the checked tree's entries, name => [mode, id].
-my %entries_cache;
-sub tree_entries {
-  my ($id) = @_;
-  return $entries_cache{$id} if $entries_cache{$id};
-  my $c = stored('tree', $id);
-  my $len = length($id) / 2;
-  my %e;
-  pos($c) = 0;
-  while (pos($c) < length $c) {
-    $c =~ /\G([0-9]+) ([^\0]*)\0(.{$len})/gcs or fail(2, "cannot read the stored tree $id");
-    $e{$2} = [$1, unpack('H*', $3)];
-  }
-  return $entries_cache{$id} = \%e;
-}
-
-sub root_tree {
-  my ($commit) = @_;
-  my $t = git_ok('rev-parse', '--verify', "$commit^{tree}");
-  chomp $t;
-  return $t;
-}
-
-# lookup COMMIT PATH: [mode, id] of PATH in COMMIT, read through checked
-# trees, or undef.
-sub lookup {
-  my ($commit, $path) = @_;
-  my $tree = root_tree($commit);
-  my @parts = split m{/}, $path, -1;
-  while (@parts) {
-    my $e = tree_entries($tree)->{ shift @parts };
-    return undef unless $e;
-    return $e unless @parts;
-    return undef unless $e->[0] eq '40000';
-    $tree = $e->[1];
-  }
-  return undef;
-}
-
-sub has_file {
-  my ($commit, $path) = @_;
-  my $e = lookup($commit, $path);
-  return $e && $e->[0] =~ /\A100(?:644|755)\z/;
-}
-
-# all_files COMMIT: every entry of COMMIT, path => [mode, id], read through
-# checked trees.
-sub all_files {
-  my %out;
-  my @todo = (['', root_tree($_[0])]);
-  while (my $t = shift @todo) {
-    my ($prefix, $tree) = @$t;
-    my $e = tree_entries($tree);
-    for my $n (keys %$e) {
-      my $p = length $prefix ? "$prefix/$n" : $n;
-      if ($e->{$n}[0] eq '40000') { push @todo, [$p, $e->{$n}[1]] }
-      else { $out{$p} = $e->{$n} }
-    }
-  }
-  return \%out;
-}
-
-# check_trees A B: every tree the comparison of commits A and B reads, on
-# both sides, is checked against its id.
-sub check_trees {
-  my @todo = ([root_tree($_[0]), root_tree($_[1])]);
-  while (my $pair = shift @todo) {
-    my ($x, $y) = @$pair;
-    next if defined $x && defined $y && $x eq $y;
-    my $ex = defined $x ? tree_entries($x) : {};
-    my $ey = defined $y ? tree_entries($y) : {};
-    my %names = map { ($_ => 1) } keys %$ex, keys %$ey;
-    for my $n (keys %names) {
-      my $tx = $ex->{$n} && $ex->{$n}[0] eq '40000' ? $ex->{$n}[1] : undef;
-      my $ty = $ey->{$n} && $ey->{$n}[0] eq '40000' ? $ey->{$n}[1] : undef;
-      push @todo, [$tx, $ty] if defined $tx || defined $ty;
-    }
-  }
-}
+# lib/tree.pl's errors are this script's exit 2
+{ no warnings 'once'; $Tree::FAIL = sub { fail(2, $_[0]) } }
+sub blob { return Tree::blob(@_) }
+sub lookup { return Tree::lookup(@_) }
+sub has_file { return Tree::has_file(@_) }
 
 # git's working copy must be the folder the reviewer reads (lib/git.pl's
 # Git::top). A core.worktree setting could point git at a clean copy elsewhere.
@@ -277,10 +186,10 @@ my $mb = $mbs[0];
 # part of the change. Moving it would take a changed commit after the merge
 # base, on HEAD's side or on the base's, so each of those is checked here.
 my %after_mb;
-stored('commit', $mb);
+Tree::stored('commit', $mb);
 for my $tip ($head, $base) {
   for my $c (split /\n/, git_ok('rev-list', $tip, "^$mb")) {
-    stored('commit', $c);
+    Tree::stored('commit', $c);
     $after_mb{$c} = 1 if $tip eq $head;
   }
 }
@@ -301,32 +210,11 @@ if (defined $opt{since}) {
   }
 }
 
-# changed FROM TO: the changed files, each {st, m1, m2, o1, o2, path, old},
-# sorted by name. Submodules are listed whatever .gitmodules or the settings
-# say, and the order is the same whatever a diff.orderFile setting says.
-sub changed {
-  my ($from_rev, $to_rev) = @_;
-  my $raw = git_ok('diff', '--raw', '-z', '--no-abbrev', '-M', '--ignore-submodules=none', $from_rev, $to_rev);
-  my @f = split /\0/, $raw, -1;
-  pop @f if @f && $f[-1] eq '';
-  my @files;
-  while (@f) {
-    my $meta = shift @f;
-    my ($m1, $m2, $o1, $o2, $s) = $meta =~ /\A:(\d{6}) (\d{6}) ([0-9a-f]+) ([0-9a-f]+) ([A-Z])\d*\z/
-      or fail(2, 'cannot read the list of changed files from git');
-    my $p = shift @f;
-    my $old = $p;
-    $p = shift @f if $s eq 'R' || $s eq 'C';
-    fail(2, 'cannot read the list of changed files from git') unless defined $p;
-    push @files, { st => $s, m1 => $m1, m2 => $m2, o1 => $o1, o2 => $o2, path => $p, old => $old };
-  }
-  return sort { $a->{path} cmp $b->{path} } @files;
-}
-
-check_trees($mb, $head);
-check_trees($from, $head) if $from ne $mb;
-my @whole = changed($mb, $head);
-my @files = $from eq $mb ? @whole : changed($from, $head);
+# every folder read below is checked against its id (lib/tree.pl)
+Tree::check_trees($mb, $head);
+Tree::check_trees($from, $head) if $from ne $mb;
+my @whole = Tree::changed($mb, $head);
+my @files = $from eq $mb ? @whole : Tree::changed($from, $head);
 if (!@files) {
   print STDERR "review-packet: nothing to review: the change shown has no changed files\n";
   exit 3;
@@ -341,48 +229,30 @@ fail(1, 'tracked files have uncommitted or staged changes; commit first, because
   if length $dirty;
 
 
-# check_disk: every file of HEAD holds its committed content on disk, as a
-# regular file: the same bytes, or the same bytes once CRLF line ends are
-# turned into LF (git's line-ending conversion; such files are named in the
-# header, because a CR changes what a shell script does), or, for Git LFS,
-# content
-# whose SHA-256 is the one the stored pointer names. Any other
-# difference is refused, also one that git status misses (a flag such as
-# skip-worktree, a file-system monitor, a stat cache told to ignore change
-# times) or that a filter, an ident attribute or an encoding setting would
-# explain away. A file missing from disk is allowed only outside the change
-# (a sparse checkout).
-my (%lfs, @eol_only);
+# Every file of HEAD must hold its committed content on disk, as a regular
+# file (lib/tree.pl's Tree::differences): the same bytes, or the same bytes
+# once CRLF line ends are turned into LF (git's line-ending conversion; such
+# files are named in the header, because a CR changes what a shell script
+# does), or, for Git LFS, content whose SHA-256 is the one the stored pointer
+# names. Any other difference is refused, also one that git status misses (a
+# flag such as skip-worktree, a file-system monitor, a stat cache told to
+# ignore change times) or that a filter, an ident attribute or an encoding
+# setting would explain away. A file missing from disk is allowed only outside
+# the change (a sparse checkout).
 my %in_change = map { ($_->{path} => 1) } @whole;
-my %head_files = %{ all_files($head) };
-for my $p (sort keys %head_files) {
-  my ($mode, $id) = @{ $head_files{$p} };
-  next if $mode eq '160000';
-  if (!(-l $p || -e _)) {
+my $diffs = Tree::differences($head);
+my %lfs = map { ($_ => 1) } @{ $diffs->{lfs} };
+my @eol_only;
+for my $d (@{ $diffs->{list} }) {
+  my ($p, $kind) = @$d;
+  if ($kind eq 'missing') {
     next unless $in_change{$p};
     fail(1, "$p is in the change but missing from the working copy (sparse checkout or skip-worktree); check it out, then build the packet again");
   }
-  if ($mode eq '120000' && -l $p) {
-    my $target = readlink $p;
-    fail(1, "the working copy of $p is not what was committed; commit or restore it") unless defined $target && $target eq blob($id);
-    next;
-  }
-  fail(1, "the working copy of $p is not a regular file; commit or restore it") unless -f $p;
-  open my $fh, '<:raw', $p or fail(2, "cannot read $p");
-  my $disk = do { local $/; <$fh> };
-  close $fh;
-  fail(2, "cannot read $p") unless defined $disk;
-  next if object_id('blob', $disk, $id) eq $id;
-  (my $lf = $disk) =~ s/\r\n/\n/g;
-  if (object_id('blob', $lf, $id) eq $id) {    # only line endings differ
-    push @eol_only, $p;
-    next;
-  }
-  my ($oid) = blob($id) =~ m{\Aversion https://git-lfs\.github\.com/spec/v1\noid sha256:([0-9a-f]{64})\nsize [0-9]+\n\z};
-  if (defined $oid && Digest::SHA::sha256_hex($disk) eq $oid) {
-    $lfs{$p} = 1;
-    next;
-  }
+  fail(1, "the working copy of $p is not what was committed; commit or restore it") if $kind eq 'link';
+  fail(1, "the working copy of $p is not a regular file; commit or restore it") if $kind eq 'type';
+  fail(2, "cannot read $p") if $kind eq 'unreadable';
+  if ($kind eq 'cr') { push @eol_only, $p; next }
   fail(1, "the working copy of $p is not what was committed (edited; hidden from git by a flag, a file-system monitor or a stat-cache setting; or changed by a filter, ident or encoding setting); commit or restore it");
 }
 
@@ -471,10 +341,8 @@ sub one_sided {
   return "@@ $range @@\n" . join('', map { "$sign$_\n" } @l) . $tail;
 }
 
-# content_diff: the hunks between two blobs, compared by id with fixed
-# options. A hunk header keeps only its line numbers: the function name git
-# adds after them comes from a diff driver that attributes and settings
-# choose.
+# content_diff: the hunks between two blobs (lib/tree.pl's Tree::blob_diff:
+# compared by id with fixed options, hunk headers cut to their numbers).
 sub content_diff {
   my ($f) = @_;
   my $a = $f->{o1} =~ $zero || $f->{m1} eq '160000' ? undef : $f->{o1};
@@ -482,12 +350,8 @@ sub content_diff {
   return one_sided('-', blob($a)) if defined $a && !defined $b;
   return one_sided('+', blob($b)) if defined $b && !defined $a;
   return '' if !defined $a || $a eq $b;
-  my $d = git_ok('-c', 'diff.suppressBlankEmpty=false', 'diff', '--no-ext-diff', '--no-textconv', '--no-color',
-    '--text', '--unified=3', '--inter-hunk-context=0', '--diff-algorithm=myers', '--indent-heuristic', $a, $b);
-  my $at = index($d, "\n@@");
-  fail(2, "git showed no change for $f->{path}, although its content changed") if $at < 0;
-  $d = substr($d, $at + 1);
-  $d =~ s/^(\@\@ -[0-9]+(?:,[0-9]+)? \+[0-9]+(?:,[0-9]+)? \@\@).*$/$1/mg;
+  my $d = Tree::blob_diff($a, $b, 3);
+  fail(2, "git showed no change for $f->{path}, although its content changed") unless defined $d;
   return $d;
 }
 
