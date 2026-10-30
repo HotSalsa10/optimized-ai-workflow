@@ -8,10 +8,11 @@
 # person should look; status never says FAIL and never blocks anything.
 #   config       problems in .claude/method.conf (only when there are any)
 #   work         uncommitted changes, files git is told not to compare (also
-#                ones gone from disk), a merge, rebase, cherry-pick, revert
-#                or bisect in progress, stashes and commits not pushed (as
-#                of the last fetch), in this repository and each of its
-#                linked worktrees
+#                ones gone from disk, and inside submodules), submodule
+#                folders whose changes git cannot see, a merge, rebase,
+#                cherry-pick, revert or bisect in progress, stashes and
+#                commits not pushed (as of the last fetch), in this
+#                repository and each of its linked worktrees
 #   verdicts     every commit on main's first-parent history since the first
 #                one with a Review-Verdict line (or after VERDICTS_FROM)
 #                ends with a valid trailer (lib/verdicts.pl check-trailer)
