@@ -308,7 +308,7 @@ sgd=$(cd "$w/sub" && git rev-parse --git-dir)
 case "$sgd" in /*) ;; *) sgd="$w/sub/$sgd" ;; esac
 mkdir -p "$sgd/info"
 printf '* filter=x\n' >"$sgd/info/attributes"
-(cd "$w/sub" && git config filter.x.clean "touch $work/subfilter-ran; git cat-file blob HEAD:%f" && echo edited >s.txt && git add s.txt)
+(cd "$w/sub" && git config filter.x.clean "touch $work/subfilter-ran; git cat-file blob HEAD:%f" && echo edited >s.txt && git add s.txt && touch -t 202001010000 s.txt)
 rm -f "$work/subfilter-ran"
 dc "$w"
 expect "an edit inside a submodule, hidden by the submodule's own filter, fails files" 1 "done-check: files: FAIL" "sub/s.txt"
@@ -317,6 +317,16 @@ rm -f "$sgd/info/attributes"
 (cd "$w/sub" && git config --unset filter.x.clean && git checkout -q -- s.txt && git reset -q)
 dc "$w"
 expect "setup: READY again with the submodule as committed" 0 "done-check: READY - "
+# a submodule whose recorded commit is not in it cannot be compared
+nothere=$(cd "$p/sub" && git commit-tree "$(git rev-parse "HEAD^{tree}")" -p HEAD -m "Elsewhere")
+if [ -n "$nothere" ] && (cd "$w" && git update-index --cacheinfo "160000,$nothere,sub" && git commit -q -m "Point sub elsewhere" -m "$OK"); then
+  pass "setup: the commit records a submodule commit that is not in the submodule"
+else
+  fail "setup: the commit records a submodule commit that is not in the submodule"
+fi
+dc "$w"
+expect "a submodule whose recorded commit is not in it fails files, saying it cannot be compared" 1 "done-check: files: FAIL" "submodules that cannot be compared" "sub"
+(cd "$w" && git reset -q --hard HEAD~1)
 
 # --- up to date (M108) ---
 (cd "$p" && git clone -q remote.git other 2>/dev/null && cd other && echo later >>README && git commit -q -am "Later" -m "$OK" && git push -q origin main 2>/dev/null)
@@ -817,6 +827,16 @@ printf 'src/data.bin filter=lfs\n' >"$l/.git/info/attributes"
 dc "$l"
 expect "and an LFS rule only in .git/info/attributes does not make it the commit" 1 "src/data.bin" ".git/info/attributes holds rules"
 rm -f "$l/.git/info/attributes"
+printf 'src/data.bin filter=lfs\n' >"$work/lfsattrs"
+(cd "$l" && git config core.attributesFile "$work/lfsattrs")
+dc "$l"
+expect "nor does an LFS rule only in a personal attributes file" 1 "done-check: files: FAIL" "src/data.bin"
+(cd "$l" && git config --unset core.attributesFile)
+printf 'data.bin filter=lfs\n' >"$l/src/.gitattributes"
+printf 'src/.gitattributes\n' >>"$l/.git/info/exclude"
+dc "$l"
+expect "nor an ignored .gitattributes on disk" 1 "done-check: files: FAIL" "src/data.bin"
+rm -f "$l/src/.gitattributes"
 
 # a tracked file in .method/local is compared like any other
 (cd "$l" && git checkout -q main 2>/dev/null; git checkout -q -b helper && mkdir -p .method/local && printf 'exit 1\n' >.method/local/helper.sh &&

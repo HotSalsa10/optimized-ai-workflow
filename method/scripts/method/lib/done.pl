@@ -97,7 +97,8 @@ my %KIND_WORDS = (
   type => 'not a regular file',
   unreadable => 'unreadable',
   flag => 'marked so git does not compare them (assume-unchanged or skip-worktree)',
-  submodule => 'submodules whose changes git cannot see',
+  submodule => 'submodules that cannot be compared with the commit (no .git of their own, a .git that points'
+    . ' elsewhere, or the commit recorded for them is not in them)',
 );
 my @KIND_ORDER = qw(changed untracked cr content missing link type unreadable flag submodule);
 

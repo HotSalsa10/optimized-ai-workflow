@@ -774,6 +774,21 @@ tk=$(new_project) || abort_sandbox
 st "$tk/w"
 expect "a branch that tracks the default branch trunk still has it as main" 0 "verdicts: PASS - 1 commits on refs/remotes/origin/trunk"
 
+# a filter set only inside a submodule is off when status reads it
+sf=$(new_project) || abort_sandbox
+(git init -q "$sf/subsrc" && cd "$sf/subsrc" && echo one >s.txt && git add -A && git -c user.name=Test -c user.email=test@example.invalid commit -q -m one)
+(cd "$sf/w" && git -c protocol.file.allow=always submodule add -q "$sf/subsrc" sub 2>/dev/null &&
+  git commit -q -m "Sub" -m "Review-Verdict: approve" && git push -q origin main 2>/dev/null)
+sgd=$(cd "$sf/w/sub" && git rev-parse --absolute-git-dir)
+mkdir -p "$sgd/info"
+printf '* filter=x\n' >"$sgd/info/attributes"
+(cd "$sf/w/sub" && git config filter.x.clean "touch $work/st-subfilter; cat >/dev/null; echo one" && echo edited >s.txt && git add s.txt && touch -t 202001010000 s.txt)
+if [ "$(cd "$sf/w/sub" && git --no-optional-locks status --porcelain)" = "" ]; then pass "setup: the submodule's own filter hides the edit from its own git status"; else fail "setup: the submodule's own filter hides the edit"; fi
+rm -f "$work/st-subfilter"
+st "$sf/w"
+expect "an edit inside a submodule that its own filter hides is uncommitted work" 1 "work: LOOK - 1 uncommitted entries"
+if [ -e "$work/st-subfilter" ]; then fail "and the submodule's filter never runs"; else pass "and the submodule's filter never runs"; fi
+
 # status still loads, and says what perl lacks, when Digest::SHA cannot load
 # (lib/tree.pl and lib/checks.pl load it only when they hash)
 out=$(cd "$om/w" && PERL5LIB="$work/plib" perl "$root/method/scripts/method/lib/status.pl" 2>&1)

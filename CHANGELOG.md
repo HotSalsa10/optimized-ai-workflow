@@ -36,7 +36,7 @@ Nothing yet. Release 1 is being built.
 - `done-check.sh --ready`: says whether a change is ready to merge, from the commit, the files on disk, main, the run-checks log and the head commit's verdict line, so nobody has to read test output. Six conditions each need positive evidence: the files are the commit; the branch has main's tip; the newest run of these files passed; no check is left that runs only in the other place; the verdict line approves; and any move of VERDICTS_FROM names the commits it accepts. READY names what it rests on (a local log and a typed verdict line, until steps 5 and 9); NOT READY says what to do next.
 - `lib/tree.pl`, taken out of the review packet with its output unchanged: one rule for "the files on disk are the commit", now used by the packet, run-checks and done-check.
 - The verdict vocabulary gains a `ready` kind: only `approve` makes a change ready (DECISIONS A33).
-- Tests: 1 new test file and new cases in four others, 806 test cases in all.
+- Tests: 1 new test file and new cases in four others, 833 test cases in all.
 
 ### Changed (step 4)
 
