@@ -18,11 +18,14 @@
 # index), --literal-pathspecs (a path is never pathspec magic),
 # core.commitGraph=false (a commit-graph file is a local file that could
 # misreport history), core.fsmonitor=false (a file-system monitor is a
-# local program that would run inside the caller and could hide changes),
-# core.ignoreCase=false (a setting copied from a Mac or Windows would hide an
-# untracked file whose name differs from a tracked one only by case) and
-# safe.bareRepository=explicit (a folder laid out like a repository,
+# local program that would run inside the caller and could hide changes)
+# and safe.bareRepository=explicit (a folder laid out like a repository,
 # committed inside another one, is never used as one; git 2.38 or later).
+# Git::run also adds core.ignoreCase=false where the file system tells case
+# apart (Git::case_pin): there a true value can only have been copied from a
+# Mac or Windows, and it would hide an untracked file whose name differs from
+# a tracked one only by case. Where the file system folds case, git's own
+# setting stays, so ignore and attribute patterns match as git matches them.
 # A caller adds its own -c options in front of the git command.
 #
 #   Git::run(ARGS)      (exit status, standard output); stdin and stderr on
@@ -55,9 +58,12 @@
 #                       there is no origin, its HEAD (unless it names HEAD's
 #                       own branch), then its main and master; local main and
 #                       master only when there is no remote (Git::main_refs);
-#                       Git::no_main() says where it looked
-#   Git::main_remote()  that remote's name, undef (no remote) or '' (several,
-#                       none named origin)
+#                       Git::no_main() says where it looked, and
+#                       Git::no_main_action() what to do
+#   Git::main_remote()  (that remote's name), (undef) with no remote, or
+#                       ('', WHY) when it cannot be told
+#   Git::hint_name(NAME)  NAME when it is safe in a command to copy and
+#                       paste, else <remote>
 #   Git::merge_base(A, B)  ('ok', ids), ('none', what to do) or ('error')
 #   Git::message(ID)    a commit's message, checked against its id
 package Git;
@@ -78,7 +84,7 @@ $ENV{GIT_NO_LAZY_FETCH} = 1;    # a partial clone never fetches a missing object
 $ENV{GIT_GRAFT_FILE} = File::Spec->catfile(File::Spec->devnull, 'none');    # a grafts file that cannot exist, so none is read and nothing is written
 
 our @GIT = ('git', '--no-optional-locks', '--literal-pathspecs', '-c', 'core.commitGraph=false',
-  '-c', 'core.fsmonitor=false', '-c', 'core.ignoreCase=false', '-c', 'safe.bareRepository=explicit');
+  '-c', 'core.fsmonitor=false', '-c', 'safe.bareRepository=explicit');
 
 # the git command in ARGS, after any -c NAME=VALUE and -C FOLDER pairs
 sub command_name {
@@ -120,8 +126,28 @@ sub status_options {
   return @o;
 }
 
+# case_pin: (-c core.ignoreCase=false), or () where the file system folds
+# case: there the repository's config file and the same name in capitals are
+# one file (git itself probes the file system this way when it makes a
+# repository). Found once, with the first git call; when it cannot be told,
+# the pin stays.
+my $case_pin;
+sub case_pin {
+  return @$case_pin if $case_pin;
+  $case_pin = [];    # (the probe's own git call runs without it)
+  my ($st, $dir) = run('rev-parse', '--git-common-dir');
+  my $folds;
+  if (!$st && $dir =~ s/\n\z//) {
+    my @a = stat File::Spec->catfile($dir, 'config');
+    my @b = stat File::Spec->catfile($dir, 'CONFIG');
+    $folds = @a && @b && $a[0] == $b[0] && $a[1] == $b[1];
+  }
+  $case_pin = $folds ? [] : ['-c', 'core.ignoreCase=false'];
+  return @$case_pin;
+}
+
 sub run {
-  my @cmd = (@GIT, @_);
+  my @cmd = (@GIT, case_pin(), @_);
   my $pid = open(my $fh, '-|');
   die "cannot run git\n" unless defined $pid;
   if (!$pid) {
@@ -278,33 +304,50 @@ sub own_branch {
   return $ref eq "refs/remotes/$remote/$name" ? 1 : 0;
 }
 
-# main_remote: the remote main is read from: origin, or the only remote when
-# there is no origin; undef when there is no remote, '' when there are
-# several and none is origin (or git remote failed)
+# main_remote: (the remote main is read from: origin, or the only remote when
+# none is named origin); (undef) when there is no remote at all; ('', WHY)
+# when which one cannot be told: several remotes and none is origin
+# (several), remote-tracking branches with no remote set up, as a fetch by
+# URL leaves (refs), or git failed (error). A remote counts only with a URL:
+# a remote.NAME.* setting alone, such as remote.origin.prune in a personal
+# settings file, is not one.
 sub main_remote {
-  my ($st, $out) = run('remote');
-  return '' if $st;
-  my @r = split /\n/, $out;
-  return undef unless @r;
-  return 'origin' if grep { $_ eq 'origin' } @r;
-  return @r == 1 ? $r[0] : '';
+  my ($st, $out) = run('config', '-z', '--get-regexp', '^remote\..*\.url$');
+  return ('', 'error') if $st && $st >> 8 != 1;    # (1: no such setting)
+  my %r;
+  for my $e (split /\0/, $out) { $r{$1} = 1 if $e =~ /\Aremote\.(.+)\.url\n/s }
+  my @r = sort keys %r;
+  if (!@r) {
+    my ($rst, $refs) = run('for-each-ref', '--count=1', '--format=%(refname)', 'refs/remotes/');
+    return ('', 'error') if $rst;
+    return $refs eq '' ? (undef) : ('', 'refs');
+  }
+  return ('origin') if $r{origin};
+  return @r == 1 ? ($r[0]) : ('', 'several');
 }
 
-# main_refs: (the remote, the refs main_ref tries after REMOTE/HEAD, in
-# order). With a remote, only its branches: a local main is never moved by
-# git fetch, so it can be behind the main that was fetched. Local branches
-# count only when there is no remote at all.
+# hint_name NAME: NAME when it is safe in a command the owner copies and
+# pastes, else <remote> (git allows ; $ and | in a remote's name)
+sub hint_name {
+  my ($n) = @_;
+  return $n =~ m{\A[A-Za-z0-9_][A-Za-z0-9._-]*(?:/[A-Za-z0-9._-]+)*\z} ? $n : '<remote>';
+}
+
+# main_refs: (the remote, why it cannot be told, the refs main_ref tries
+# after REMOTE/HEAD, in order). With a remote, only its branches: a local
+# main is never moved by git fetch, so it can be behind the main that was
+# fetched. Local branches count only when there is no remote at all.
 sub main_refs {
-  my $r = main_remote();
-  return (undef, qw(refs/heads/main refs/heads/master)) unless defined $r;
-  return ('') if $r eq '';
-  return ($r, "refs/remotes/$r/main", "refs/remotes/$r/master");
+  my ($r, $why) = main_remote();
+  return (undef, undef, qw(refs/heads/main refs/heads/master)) unless defined $r;
+  return ('', $why) if $r eq '';
+  return ($r, undef, "refs/remotes/$r/main", "refs/remotes/$r/master");
 }
 
 # main_ref: (the full name of main, its commit), or () when there is none
 # (REMOTE/HEAD is not taken when it names HEAD's own branch, see own_branch)
 sub main_ref {
-  my ($r, @refs) = main_refs();
+  my ($r, undef, @refs) = main_refs();
   if (defined $r && $r ne '') {
     my ($st, $t) = run('symbolic-ref', '-q', "refs/remotes/$r/HEAD");
     $t =~ s/\n\z//;
@@ -336,14 +379,30 @@ sub status_options_all {
   return @o;
 }
 
-# no_main: where main_ref looked, and how to get main when it is missing
+# no_main: where main_ref looked, and why main is missing
+my %CANNOT_TELL = (
+  several => 'this repository has several remotes and none is named origin, so which one holds main cannot be told',
+  refs => 'this repository has remote-tracking branches but no remote set up (fetched by URL?), so which one holds'
+    . ' main cannot be told',
+  error => 'git could not list the remotes',
+);
 sub no_main {
-  my ($r, @refs) = main_refs();
+  my ($r, $why, @refs) = main_refs();
   return 'looked for ' . join(', ', @refs) . '; this repository has no remote' unless defined $r;
-  return 'this repository has several remotes and none is named origin, so which one holds main cannot be told;'
-    . ' name that one origin (git remote rename NAME origin)' if $r eq '';
-  return "looked for $r/HEAD, " . join(', ', @refs) . "; in a single-branch or shallow clone, fetch it: git fetch $r"
-    . " main:refs/remotes/$r/main (or push main to $r first, if it does not have it yet)";
+  return $CANNOT_TELL{$why} if $r eq '';
+  my $h = hint_name($r);
+  return "looked for $r/HEAD, " . join(', ', @refs) . "; in a single-branch or shallow clone, fetch it: git fetch $h"
+    . " main:refs/remotes/$h/main (or push main to $r first, if it does not have it yet)";
+}
+
+# no_main_action: what to do when main is missing
+sub no_main_action {
+  my ($r, $why) = main_refs();
+  return 'make a branch named main (or rename the default branch: git branch -m NAME main)' unless defined $r;
+  return 'name the remote that holds main origin (git remote rename NAME origin)' if $r eq '' && $why eq 'several';
+  return 'set up the remote that holds main (git remote add origin URL) and fetch it' if $r eq '' && $why eq 'refs';
+  return 'check the repository\'s git settings' if $r eq '';
+  return 'fetch main';
 }
 
 # merge_base A B: ('ok', every merge base, the one git picks first);

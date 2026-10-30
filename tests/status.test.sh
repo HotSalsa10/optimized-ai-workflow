@@ -360,6 +360,10 @@ expect "with no verdict anywhere the area is SKIPPED" 0 "verdicts: SKIPPED - no 
 (cd "$nw" && git remote rename origin up)
 st "$nw"
 expect "with a remote not named origin, main is that remote's" 0 "verdicts: SKIPPED - no commit on refs/remotes/up/main carries a Review-Verdict line yet"
+(cd "$nw" && git symbolic-ref -d refs/remotes/up/HEAD && git update-ref -d refs/remotes/up/main)
+st "$nw"
+expect "with a remote that has no main, the local main does not stand in for it" 1 \
+  "verdicts: SKIPPED - no main branch (looked for up/HEAD, refs/remotes/up/main, refs/remotes/up/master"
 (cd "$nw" && git remote rename up origin)
 (cd "$nw" && git remote remove origin)
 st "$nw"

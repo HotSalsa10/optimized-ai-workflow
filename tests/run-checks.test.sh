@@ -705,6 +705,12 @@ echo hidden >>"$fl2/src/a.txt"
 run "$fl2"
 expect "an edit hidden by assume-unchanged is counted as uncommitted" 0 "on uncommitted changes"
 in_log "the log says the tree had uncommitted changes, not clean" "tree at start uncommitted changes"
+(cd "$fl2" && git update-index --no-assume-unchanged src/a.txt && git checkout -q src/a.txt && git config core.ignoreCase true)
+: >"$fl2/src/A.txt"
+run "$fl2"
+expect "an untracked case twin of a tracked file under core.ignoreCase=true is counted as uncommitted" 0 "on uncommitted changes"
+rm -f "$fl2/src/A.txt"
+(cd "$fl2" && git config --unset core.ignoreCase)
 (cd "$fl2" && git update-index --no-assume-unchanged src/a.txt && git checkout -q src/a.txt)
 tsv "$fl2" "$(ck rewrite 'echo changed >src/a.txt; echo "1 passed"')"
 (cd "$fl2" && git update-index --skip-worktree src/a.txt)

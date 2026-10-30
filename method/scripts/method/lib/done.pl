@@ -80,6 +80,26 @@ sub conf_value {
   return $v->{VERDICTS_FROM};
 }
 
+# conf_unreadable COMMIT: why the .claude/method.conf COMMIT stores may not be
+# what status reads from disk once COMMIT is checked out (.claude is a
+# submodule; the file is a Git LFS pointer; the commit's own .gitattributes
+# gives it a filter or an encoding), or undef. (HEAD's file is compared with
+# the disk itself; with git older than 2.42 the attributes are not read.)
+sub conf_unreadable {
+  my ($commit) = @_;
+  my $d = Tree::lookup($commit, '.claude');
+  return '.claude is a submodule' if $d && $d->[0] eq '160000';
+  my $e = Tree::lookup($commit, $CONF);
+  return undef unless $e && $e->[0] =~ /\A100(?:644|755)\z/;
+  return 'the file is stored as a Git LFS pointer' if Tree::blob($e->[1]) =~ m{\Aversion https://git-lfs\.github\.com/spec/};
+  my $a = Tree::attributes($commit, $CONF, 'filter', 'working-tree-encoding') or return undef;
+  for my $k ('filter', 'working-tree-encoding') {
+    my $v = $a->{$k};
+    return "the commit's .gitattributes gives the file a $k" if defined $v && $v ne 'unspecified' && $v ne 'unset';
+  }
+  return undef;
+}
+
 my (@failed, @ready_notes, $ready_log);
 
 # report AREA OK DETAIL NEXT: one condition's line; NEXT is what to do when
@@ -122,7 +142,7 @@ sub files_condition {
     my $conv = @{ $fp->{converted} };
     my $lfs = @{ $fp->{lfs} };
     return report('files', 1, 'the tracked files on disk are commit ' . short($head) . ', byte for byte'
-      . ($conv ? ", $conv of them as the commit's .gitattributes asks (line ends or \$Id\$)" : '')
+      . ($conv ? ", $conv of them as the commit's .gitattributes asks (line ends, \$Id\$ or an encoding)" : '')
       . ($lfs ? ", $lfs of them Git LFS content the commit's .gitattributes asks for" : '')
       . "; nothing untracked that git lists outside its ignore rules");
   }
@@ -136,14 +156,14 @@ sub files_condition {
 
 # unshallow: the command that fetches the whole history from main's remote
 sub unshallow {
-  my $r = Git::main_remote();
-  return 'git fetch --unshallow' . (defined $r && $r ne '' ? " $r" : '');
+  my ($r) = Git::main_remote();
+  return 'git fetch --unshallow' . (defined $r && $r ne '' ? ' ' . Git::hint_name($r) : '');
 }
 
 # --- 2. up to date (M108) ---
 sub up_to_date_condition {
   my ($head, $ref, $tip) = @_;
-  return report('up to date', 0, 'no main branch here (' . Git::no_main() . ')', 'fetch main, then run done-check again')
+  return report('up to date', 0, 'no main branch here (' . Git::no_main() . ')', Git::no_main_action() . ', then run done-check again')
     unless defined $ref;
   # a local main only when there is no remote (Git::main_refs)
   my $when = $ref =~ m{\Arefs/heads/} ? 'a local branch: this repository has no remote' : 'as of the last fetch';
@@ -278,7 +298,8 @@ sub verdict_condition {
 sub verdicts_start_condition {
   my ($head, $ref, $tip, $up_to_date) = @_;
   my $area = 'verdicts start';
-  return report($area, 0, 'no main branch to compare with', 'fetch main, then run done-check again') unless defined $ref;
+  return report($area, 0, 'no main branch to compare with', Git::no_main_action() . ', then run done-check again')
+    unless defined $ref;
   my $new = conf_value($head);
   my $old = conf_value($tip);
   my $show = sub { defined $_[0] ? short($_[0]) : 'unset' };
@@ -291,6 +312,10 @@ sub verdicts_start_condition {
     . ' or the file goes through Git LFS or another filter, so the commit does not hold what status reads)',
     'keep .claude/method.conf a plain file committed in this repository')
     if (defined $dv ? $dv : '') ne (defined $new ? $new : '');
+  my $why = conf_unreadable($tip);
+  return report($area, 0, "VERDICTS_FROM on main ($ref " . short($tip) . ") cannot be read as status reads it: $why;"
+    . ' could not check', 'keep .claude/method.conf a plain file committed on main (the change that makes it one cannot be'
+    . ' checked here: compare with status on main)') if defined $why;
   return report($area, 1, 'VERDICTS_FROM is ' . $show->($new) . ' both on main and in this change')
     if (defined $new ? $new : '') eq (defined $old ? $old : '');
   return report($area, 0, 'this change moves VERDICTS_FROM; judged once the branch is up to date with main',

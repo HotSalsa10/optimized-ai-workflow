@@ -15,6 +15,8 @@
 #   Tree::check_trees(A, B)   every folder a comparison of A and B reads is checked
 #   Tree::changed(FROM, TO)   the changed files, each {st, m1, m2, o1, o2, path, old}
 #   Tree::blob_diff(A, B, N)  the hunks between two files, N lines of context
+#   Tree::attributes(COMMIT, PATH, ATTR...)  PATH's attributes from COMMIT's own
+#                             .gitattributes, or undef
 #   Tree::differences(COMMIT, OPTIONS) how the files on disk differ from
 #                       COMMIT ({submodules => 1}: inside submodules too); a
 #                       CRLF or an $Id$ that git's checkout writes from the
@@ -261,6 +263,26 @@ sub lfs_paths {
     }
   }
   return %lfs;
+}
+
+# attributes COMMIT PATH ATTR...: {ATTR => value} for PATH from COMMIT's own
+# attributes, read like lfs_paths reads them; undef when git cannot be asked
+# that way (conversion_problem says why)
+sub attributes {
+  my ($commit, $path, @attrs) = @_;
+  return undef if conversion_problem() ne '';
+  require File::Spec;
+  local $ENV{GIT_ATTR_NOSYSTEM} = 1;
+  my ($st, $out) = Git::run('-c', 'core.attributesFile=' . File::Spec->devnull, "--attr-source=$commit",
+    'check-attr', '-z', @attrs, '--', $path);
+  return undef if $st;
+  my %v;
+  my @f = split /\0/, $out, -1;
+  while (@f >= 3) {
+    my (undef, $a, $v) = splice @f, 0, 3;
+    $v{$a} = $v;
+  }
+  return \%v;
 }
 
 # differences COMMIT [OPTIONS]: how the files on disk differ from COMMIT's, as

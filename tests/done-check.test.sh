@@ -196,6 +196,18 @@ if [ -z "$(cd "$w" && git status --porcelain)" ]; then pass "setup: git status i
 dc "$w"
 expect "an untracked case twin of a tracked file fails files under core.ignoreCase=true" 1 "untracked, and not ignored by git: src/A.txt"
 rm -f "$w/src/A.txt"
+# where the file system tells case apart, ignore patterns match case exactly;
+# where it folds case (simulated: the config file is also CONFIG), git's own
+# core.ignoreCase stays, so a pattern of another case still ignores a file
+printf '*.LOG\n' >>"$w/.git/info/exclude"
+: >"$w/src/debug.log"
+dc "$w"
+expect "on a file system that tells case apart, *.LOG does not ignore debug.log" 1 "untracked, and not ignored by git: src/debug.log"
+ln "$w/.git/config" "$w/.git/CONFIG"
+dc "$w"
+expect "on one that folds case, git's own core.ignoreCase stays, so *.LOG ignores debug.log as git does" 0 "done-check: READY - "
+rm -f "$w/.git/CONFIG" "$w/src/debug.log"
+perl -ni -e 'print unless /^\*\.LOG$/' "$w/.git/info/exclude"
 (cd "$w" && git config --unset core.ignoreCase)
 
 # a project with a committed line-end rule and a script
@@ -464,6 +476,11 @@ fi
 dc "$q/upc"
 expect "with a remote named up, main is up's, not the local main that git fetch left behind" 1 \
   "done-check: up to date: FAIL - refs/remotes/up/main has 1 commit this branch does not (as of the last fetch)"
+git config --global remote.origin.prune true
+dc "$q/upc"
+expect "a remote.origin setting in the personal settings file with no URL is not a remote" 1 \
+  "done-check: up to date: FAIL - refs/remotes/up/main has 1 commit this branch does not"
+git config --global --unset remote.origin.prune
 (cd "$q/upc" && git symbolic-ref refs/remotes/up/HEAD refs/remotes/up/feat)
 dc "$q/upc"
 expect "and an up/HEAD that names the task branch is not main either" 1 \
@@ -473,21 +490,41 @@ expect "and an up/HEAD that names the task branch is not main either" 1 \
 dc "$q/upshallow"
 expect "a shallow clone from a remote named up is told to fetch from up" 1 \
   "done-check: up to date: FAIL - the history here is shallow" "fetch the whole history (git fetch --unshallow up)"
+# a remote's name can hold shell syntax; it never goes into a command to paste
+(cd "$q" && git clone -q -o 'u;x' -b feat remote.git semi 2>/dev/null && cd semi && git symbolic-ref -d 'refs/remotes/u;x/HEAD' &&
+  git update-ref -d 'refs/remotes/u;x/main')
+dc "$q/semi"
+expect "a remote named with shell syntax is not written into the fetch command" 1 \
+  "git fetch <remote> main:refs/remotes/<remote>/main (or push main to u;x first"
+lacks "and the command holds no part of that name" "git fetch u;x"
+(cd "$q" && git clone -q --depth 1 --no-single-branch -o 'u;x' -b feat "file://$q/remote.git" semishallow 2>/dev/null)
+dc "$q/semishallow"
+expect "nor into the command that fetches the whole history" 1 "fetch the whole history (git fetch --unshallow <remote>)"
 (cd "$q/upc" && git remote add other ../remote.git)
 dc "$q/upc"
-expect "with several remotes and none named origin there is no main, and done-check says why" 1 \
+expect "with several remotes and none named origin there is no main, and done-check says why and what to do" 1 \
   "done-check: up to date: FAIL - no main branch here (this repository has several remotes and none is named origin" \
-  "git remote rename NAME origin"
+  "done-check: next: name the remote that holds main origin (git remote rename NAME origin), then run done-check again"
 (cd "$q/upc" && git remote remove other && git remote rename up origin && git symbolic-ref -d refs/remotes/origin/HEAD &&
   git update-ref -d refs/remotes/origin/main)
 dc "$q/upc"
 expect "with a remote that has no main, the local main does not stand in for it" 1 \
   "done-check: up to date: FAIL - no main branch here (looked for origin/HEAD, refs/remotes/origin/main, refs/remotes/origin/master" \
-  "git fetch origin main:refs/remotes/origin/main"
-(cd "$q/upc" && git remote remove origin)
+  "git fetch origin main:refs/remotes/origin/main" "done-check: next: fetch main, then run done-check again"
+(cd "$q/upc" && git config --remove-section remote.origin)
+dc "$q/upc"
+expect "with remote-tracking branches but no remote set up, the local main does not stand in either" 1 \
+  "done-check: up to date: FAIL - no main branch here (this repository has remote-tracking branches but no remote set up" \
+  "done-check: next: set up the remote that holds main (git remote add origin URL) and fetch it, then run done-check again"
+(cd "$q/upc" && git for-each-ref --format='%(refname)' refs/remotes/ | while read -r r; do git update-ref -d "$r"; done)
 dc "$q/upc"
 expect "with no remote at all, main is the local main, and the line says so" 1 \
   "done-check: up to date: PASS - main is refs/heads/main" "(a local branch: this repository has no remote; done-check does not fetch)"
+(cd "$q/upc" && git branch -q -m main trunk)
+dc "$q/upc"
+expect "with no remote and no main, done-check says to make one" 1 \
+  "done-check: up to date: FAIL - no main branch here (looked for refs/heads/main, refs/heads/master; this repository has no remote)" \
+  "done-check: next: make a branch named main (or rename the default branch: git branch -m NAME main), then run done-check again"
 
 # --- checks (M089) ---
 q=$(new_project) || abort_sandbox
@@ -550,6 +587,15 @@ expect "logs behind a linked logs folder do not count" 1 "done-check: checks: FA
 rm -f "$v/.method/local/logs" && mv "$work/linked-logs" "$v/.method/local/logs"
 dc "$v"
 expect "setup: READY again with the folder back" 0 "done-check: READY - "
+# (not $d: dc sets it)
+for ld in .method/local .method; do
+  mv "$v/$ld" "$work/linked-dir" && ln -s "$work/linked-dir" "$v/$ld"
+  dc "$v"
+  expect "logs behind a linked $ld folder do not count" 1 "done-check: checks: FAIL - no run-checks log of these files"
+  rm -f "$v/$ld" && mv "$work/linked-dir" "$v/$ld"
+done
+dc "$v"
+expect "setup: READY again with the folders back" 0 "done-check: READY - "
 newest=$(newest_log "$v")
 sed '$d' "$v/$newest" | sed '$d' >"$v/.method/local/logs/run-checks-29991231T235959Z-0000000001.log"
 dc "$v"
@@ -792,6 +838,58 @@ rc "$vs/lc"
 dc "$vs/lc"
 expect "a VERDICTS_FROM in a method.conf stored in Git LFS fails verdicts start" 1 "done-check: files: PASS" \
   "done-check: verdicts start: FAIL - VERDICTS_FROM is ${tipv%"${tipv#???????}"} in .claude/method.conf on disk, but unset in the file commit"
+# main's own VERDICTS_FROM kept in a .claude submodule, in Git LFS or under a
+# filter cannot be read as status reads it, so a move away from it (here to
+# a plain file, past an unreviewed hotfix) could not be checked
+cp "$vs/lc/.git/lfs-clean.sh" "$work/lfs-clean.sh"
+for kind in submodule lfs filter; do
+  mo=$(new_sandbox_dir) || abort_sandbox
+  repos="$repos $mo"
+  (
+    cd "$mo" || exit 1
+    git init -q --bare remote.git
+    git init -q w
+    cd w || exit 1
+    mkdir -p checks src
+    printf 'unit\tany\t-\t(\\d+) ok\techo 3 ok\n' >checks/project.tsv
+    printf 'x = 1\n' >src/a.txt
+    git add -A
+    git commit -q -m "Project" -m "Review-Verdict: approve"
+    start=$(git rev-parse HEAD)
+    case $kind in
+      submodule)
+        git init -q ../confsub && printf 'PRODUCT_PATHS=src\nVERDICTS_FROM=%s\n' "$start" >../confsub/method.conf &&
+          (cd ../confsub && git add -A && git commit -q -m conf) && git submodule add -q ../confsub .claude 2>/dev/null ;;
+      lfs)
+        git config filter.lfs.clean "sh $work/lfs-clean.sh" && git config filter.lfs.smudge cat &&
+          printf '.claude/method.conf filter=lfs\n' >.gitattributes ;;
+      filter)
+        git config filter.strip.clean "sed /VERDICTS_FROM/d" && git config filter.strip.smudge cat &&
+          printf '.claude/method.conf filter=strip\n' >.gitattributes ;;
+    esac
+    if [ "$kind" != submodule ]; then mkdir -p .claude && printf 'PRODUCT_PATHS=src\nVERDICTS_FROM=%s\n' "$start" >.claude/method.conf; fi
+    git add -A
+    git commit -q -m "Settings" -m "Review-Verdict: approve"
+    git commit -q --allow-empty -m "Hotfix"
+    git remote add origin ../remote.git
+    git push -q -u origin main 2>/dev/null
+    git remote set-head origin main
+    git checkout -q -b feat
+    if [ "$kind" = submodule ]; then git rm -q .claude && mkdir -p .claude; else git rm -q .gitattributes; fi
+    printf 'PRODUCT_PATHS=src\nVERDICTS_FROM=%s\n' "$(git rev-parse HEAD)" >.claude/method.conf
+    git add -A
+    git commit -q -m "Plain settings" -m "Review-Verdict: approve"
+  ) || abort_sandbox
+  case $kind in
+    submodule) why='.claude is a submodule' ;;
+    lfs) why='the file is stored as a Git LFS pointer' ;;
+    *) why="the commit's .gitattributes gives the file a filter" ;;
+  esac
+  rc "$mo/w"
+  dc "$mo/w"
+  expect "main's VERDICTS_FROM kept as a $kind cannot be read as status reads it, so the move could not be checked" 1 \
+    "done-check: verdicts start: FAIL - VERDICTS_FROM on main (refs/remotes/origin/main " ") cannot be read as status reads it: $why; could not check"
+done
 # main's own VERDICTS_FROM is not on its first-parent history
 vo=$(new_sandbox_dir) || abort_sandbox
 repos="$repos $vo"
