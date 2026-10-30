@@ -263,9 +263,14 @@ sub own_branch {
   return 1 if $ref eq $b;
   my ($name) = $b =~ m{\Arefs/heads/(.+)\z}s or return 0;
   return 1 if $ref eq "refs/remotes/origin/$name";
-  my ($ust, $up) = run('rev-parse', '--symbolic-full-name', "$b\@{upstream}");
-  chomp $up;
-  return !$ust && $ref eq $up ? 1 : 0;
+  # (for-each-ref also lists refs below the name, so the exact one is picked)
+  my ($ust, $out) = run('for-each-ref', '--format=%(refname)%00%(upstream)', $b);
+  return 0 if $ust;
+  for my $l (split /\n/, $out) {
+    my ($name2, $up) = split /\0/, $l, 2;
+    return 1 if $name2 eq $b && defined $up && $up ne '' && $ref eq $up;
+  }
+  return 0;
 }
 
 # the refs main_ref tries after origin/HEAD, in order

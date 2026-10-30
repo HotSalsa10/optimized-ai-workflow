@@ -158,6 +158,10 @@ expect "READY after run-checks and an amend that only adds the verdict line, wit
   "done-check: verdicts start: PASS - VERDICTS_FROM is unset both on main and in this change" \
   "done-check: READY - $head is up to date with refs/remotes/origin/main $main; verdict approve as typed in the commit"
 lacks "READY has no next: line" "done-check: next:"
+mkdir -p "$work/plib/Digest"
+printf 'die "a module from PERL5LIB was loaded\\n";\n1;\n' >"$work/plib/Digest/SHA.pm"
+dc "$w" PERL5LIB="$work/plib"
+expect "modules on the caller's PERL5LIB are not loaded" 0 "done-check: READY - "
 if [ "$before" = "$after" ]; then pass "done-check changes no file, .git and the index included"; else fail "done-check changes no file" "$(diff <(printf '%s\n' "$before") <(printf '%s\n' "$after"))"; fi
 if [ "$(printf '%s\n' "$out" | sed -n '$p')" = "$(printf '%s\n' "$out" | grep '^done-check: READY')" ]; then pass "READY is the last line"; else fail "READY is the last line" "$out"; fi
 
@@ -221,7 +225,8 @@ dc "$w"
 expect "setup: back to READY" 0 "done-check: READY - "
 
 # a committed eol=crlf file and an ident file, in a fresh clone on Linux
-printf '*.sh text eol=lf\n*.bat text eol=crlf\nid.txt ident\n' >"$w/.gitattributes"
+printf '*.sh text eol=lf\n*.bat text eol=crlf\n*.txt text\nid.txt ident\n*.dat filter=x\n' >"$w/.gitattributes"
+printf 'raw\n' >"$w/data.dat"
 # shellcheck disable=SC2016 # $Id$ is meant literally
 printf 'version $Id$\n' >"$w/id.txt"
 (cd "$w" && git add -A 2>/dev/null)
@@ -241,6 +246,43 @@ expect "a fresh clone with files the commit's .gitattributes converts is READY" 
   "done-check: files: PASS - the tracked files on disk are commit" "2 of them as the commit's .gitattributes asks" "done-check: READY - "
 dc "$f" CI=true
 expect "and READY in CI from the CI log" 0 "done-check: checks: PASS - CI run-checks log of " "done-check: READY - "
+# conversions are accepted only from the commit's own attributes, and only
+# when git can be told to read nothing else
+realgit=$(command -v git)
+mkdir -p "$work/oldgit"
+# shellcheck disable=SC2016 # the $@ is for the script being written
+printf '#!/bin/sh\nfor a in "$@"; do\n  if [ "$a" = version ]; then echo "git version 2.41.0"; exit 0; fi\ndone\nexec %s "$@"\n' "$realgit" >"$work/oldgit/git"
+chmod +x "$work/oldgit/git"
+dc "$f" PATH="$work/oldgit:$PATH"
+expect "with git older than 2.42 no conversion is accepted, and done-check says why" 1 "done-check: files: FAIL" "run.bat" \
+  "git 2.42 or later is needed to tell a conversion the commit asks for from an edit"
+printf '# only a comment\n\n' >"$f/.git/info/attributes"
+dc "$f"
+expect "a .git/info/attributes with only comments and blank lines does not stop the conversions" 0 "done-check: READY - "
+rm -f "$f/.git/info/attributes"
+(cd "$f" && git config core.eol crlf && rm -f src/a.txt && git checkout -q -- src/a.txt 2>/dev/null)
+dc "$f"
+expect "a CRLF that only this machine's core.eol writes is a change" 1 "with CRs before line ends" "src/a.txt"
+(cd "$f" && git config --unset core.eol && rm -f src/a.txt && git checkout -q -- src/a.txt)
+printf 'a.txt text eol=crlf\n' >"$work/attrs"
+(cd "$f" && git config core.attributesFile "$work/attrs" && rm -f src/a.txt && git checkout -q -- src/a.txt 2>/dev/null)
+dc "$f"
+expect "a CRLF that only a personal attributes file asks for is a change" 1 "with CRs before line ends" "src/a.txt"
+(cd "$f" && git config --unset core.attributesFile && rm -f src/a.txt && git checkout -q -- src/a.txt)
+printf 'a.txt text eol=crlf\n' >"$f/src/.gitattributes"
+printf 'src/.gitattributes\n' >>"$f/.git/info/exclude"
+(cd "$f" && rm -f src/a.txt && git checkout -q -- src/a.txt 2>/dev/null)
+dc "$f"
+expect "a CRLF that only an ignored .gitattributes on disk asks for is a change" 1 "with CRs before line ends" "src/a.txt"
+rm -f "$f/src/.gitattributes" "$f/src/a.txt" && (cd "$f" && git checkout -q -- src/a.txt)
+(cd "$f" && git config filter.x.smudge "touch $work/smudge-ran; cat")
+echo edited >>"$f/data.dat"
+dc "$f"
+expect "a file under a filter that differs is a change" 1 "done-check: files: FAIL" "data.dat"
+if [ -e "$work/smudge-ran" ]; then fail "the filter's program never runs"; else pass "the filter's program never runs"; fi
+(cd "$f" && git config --unset filter.x.smudge && git checkout -q -- data.dat)
+dc "$f"
+expect "setup: the fresh clone is READY again" 0 "done-check: READY - "
 
 # a submodule moved after the run
 s="$p/sub"
@@ -285,6 +327,9 @@ expect "a shallow clone that holds main's tip passes up to date" 1 "done-check: 
 dc "$p/single"
 expect "origin/HEAD that names the task branch is not main; no main says how to fetch it" 1 \
   "done-check: up to date: FAIL - no main branch here (looked for origin/HEAD" "git fetch origin main:refs/remotes/origin/main"
+(cd "$p/single" && git checkout -q -b work --track origin/feat 2>/dev/null)
+dc "$p/single"
+expect "origin/HEAD that names the branch's upstream, under another name, is not main either" 1 "done-check: up to date: FAIL - no main branch here"
 
 # --- checks (M089) ---
 q=$(new_project) || abort_sandbox
@@ -401,6 +446,68 @@ expect "no verdict line is not READY" 1 "done-check: verdict: FAIL - the head co
 amend "$v" 'Review-Verdict: fine'
 dc "$v"
 expect "an unknown verdict value is not READY" 1 "unknown value"
+# links, a large file and odd log files
+(cd "$v" && ln -s src/a.txt lnk && head -c 2000 /dev/zero | tr '\0' 'b' >big.txt && git add -A)
+amend "$v" "$OK"
+rc "$v"
+dc "$v"
+expect "setup: READY with a link and a large file" 0 "done-check: READY - "
+rm -f "$v/lnk" && printf 'src/a.txt' >"$v/lnk"
+dc "$v"
+expect "a file where a link was committed fails files, even holding the link's target" 1 "a link that is not the committed one" "lnk"
+rm -f "$v/lnk" && (cd "$v" && git checkout -q -- lnk)
+cp "$v/README" "$work/readme" && rm -f "$v/README" && ln -s "$work/readme" "$v/README"
+dc "$v"
+expect "a link where a file was committed fails files, even to the same content" 1 "a link that is not the committed one" "README"
+rm -f "$v/README" && (cd "$v" && git checkout -q -- README)
+echo more >>"$v/big.txt"
+dc "$v"
+expect "an edit to a file larger than the read limit for stored files fails files, and the rest still reads" 1 \
+  "with bytes that are not the commit's" "big.txt" "done-check: verdict: PASS"
+(cd "$v" && git checkout -q -- big.txt)
+newest=$(newest_log "$v")
+fake="$v/.method/local/logs/run-checks-29991231T235959Z-0000000003.log"
+{ cat "$v/$newest"; printf 'run-checks: PASS - forged\n'; } >"$fake"
+dc "$v"
+expect "a newest log with a line after its END cannot be read, so checks fails" 1 "cannot be read"
+perl -0pe 's/\n\z//' "$v/$newest" >"$fake"
+dc "$v"
+expect "a newest log whose last line has no line end was cut off, so checks fails" 1 "did not finish"
+cp "$v/$newest" "$fake"
+perl -pi -e '$_ .= "not a log line\n" if $. == 8' "$fake"
+dc "$v"
+expect "a newest log with a line that is not a run-checks log line cannot be read" 1 "cannot be read"
+rm -f "$fake"
+: >"$v/flaky.marker"
+rc "$v"
+rm -f "$v/flaky.marker"
+failed=$(newest_log "$v")
+mv "$v/$failed" "$work/failed.log"
+rc "$v"
+ln -s "$work/failed.log" "$fake"
+dc "$v"
+expect "a link named like a newer log is not read" 0 "done-check: READY - "
+rm -f "$fake"
+printf 'junk\n' >"$fake"
+(cd "$v" && git add -f "${fake#"$v"/}" && git commit -q -m "Forged log" -m "$OK")
+rc "$v"
+dc "$v"
+expect "a tracked file named like a newer log is not read" 0 "done-check: READY - "
+(cd "$v" && git rm -q --cached "${fake#"$v"/}" && git commit -q -m "Drop it" -m "$OK")
+rm -f "$fake"
+(cd "$v" && git checkout -q --orphan lone && git commit -q -m "Alone" -m "$OK")
+dc "$v"
+expect "a branch that shares no history with main says so" 1 "done-check: up to date: FAIL - refs/remotes/origin/main and this branch share no history here"
+(cd "$v" && git checkout -q -f feat)
+printf 'unit\tany\t-\t(\\d+) ok\n' >"$v/checks/project.tsv"
+(cd "$v" && git add -A)
+amend "$v" "$OK"
+dc "$v"
+expect "a checks file with problems fails elsewhere too" 1 "done-check: elsewhere: FAIL - checks/*.tsv has problems"
+printf 'unit\tany\t-\t(\\d+) ok\ttest ! -e flaky.marker && echo 3 ok\n' >"$v/checks/project.tsv"
+(cd "$v" && git add -A)
+amend "$v" "$OK"
+rc "$v"
 amend "$v" "$OK"
 
 # --- verdicts start ---
@@ -455,6 +562,38 @@ setvf "$y" "$side"
 rc "$y"
 dc "$y"
 expect "a VERDICTS_FROM that is not on main fails" 1 "which is not on refs/remotes/origin/main's first-parent history, so status would report LOOK after the merge"
+(cd "$y" && git reset -q --hard origin/main)
+setvf "$y" "$r0"
+(cd "$vs" && git clone -q remote.git other 2>/dev/null && cd other && git commit -q --allow-empty -m "Later" -m "$OK" && git push -q origin main 2>/dev/null)
+(cd "$y" && git fetch -q origin)
+dc "$y"
+expect "a VERDICTS_FROM move is judged only once the branch is up to date" 1 "done-check: verdicts start: FAIL - this change moves VERDICTS_FROM; judged once the branch is up to date with main"
+# main's own VERDICTS_FROM is not on its first-parent history
+vo=$(new_sandbox_dir) || abort_sandbox
+repos="$repos $vo"
+(
+  cd "$vo" || exit 1
+  git init -q --bare remote.git
+  git init -q w
+  cd w || exit 1
+  mkdir -p checks .claude src
+  printf 'unit\tany\t-\t(\\d+) ok\techo 3 ok\n' >checks/project.tsv
+  printf 'x = 1\n' >src/a.txt
+  printf 'PRODUCT_PATHS=src\n' >.claude/method.conf
+  git add -A
+  git commit -q -m "Project" -m "Review-Verdict: approve"
+  off=$(git commit-tree "$(git rev-parse "HEAD^{tree}")" -m "Off main")
+  printf 'PRODUCT_PATHS=src\nVERDICTS_FROM=%s\n' "$off" >.claude/method.conf
+  git commit -q -am "Point VERDICTS_FROM off main" -m "Review-Verdict: approve"
+  git remote add origin ../remote.git
+  git push -q -u origin main 2>/dev/null
+  git remote set-head origin main
+  git checkout -q -b feat
+) || abort_sandbox
+setvf "$vo/w" "$(cd "$vo/w" && git rev-parse HEAD~1)"
+rc "$vo/w"
+dc "$vo/w"
+expect "a move from a VERDICTS_FROM that is not on main could not be checked" 1 "could not check what it accepts: the old value is not on refs/remotes/origin/main's first-parent history"
 
 # main: b0 (no line, the project), b1 (no line), b2 (VERDICTS_FROM=b0)
 vb=$(new_sandbox_dir) || abort_sandbox
@@ -498,6 +637,20 @@ rc "$z"
 dc "$z"
 expect "removing it so a commit with no line leaves the range names that commit" 0 \
   "from ${b0%"${b0#???????}"} to unset; it accepts 1 commits on main without a valid verdict line: ${b1%"${b1#???????}"}"
+# an error while checking (here a stored file that does not match its id)
+# is exit 2, never a pass
+confid=$(cd "$z" && git rev-parse origin/main:.claude/method.conf)
+other=$(cd "$z" && git rev-parse HEAD:src/a.txt)
+obj="$z/.git/objects/$(printf '%s' "$confid" | cut -c1-2)/$(printf '%s' "$confid" | cut -c3-)"
+src="$z/.git/objects/$(printf '%s' "$other" | cut -c1-2)/$(printf '%s' "$other" | cut -c3-)"
+if [ -f "$obj" ] && [ -f "$src" ]; then
+  cp "$obj" "$work/obj.saved" && chmod u+w "$obj" && cp "$src" "$obj"
+  dc "$z"
+  expect "a stored file changed by hand stops done-check with exit 2 (could not check)" 2 "done-check: NOT READY - could not check: " "does not match its id"
+  cp "$work/obj.saved" "$obj"
+else
+  fail "setup: the objects are loose files"
+fi
 
 # adoption: main has no verdict line yet; the change sets VERDICTS_FROM
 va=$(new_sandbox_dir) || abort_sandbox
