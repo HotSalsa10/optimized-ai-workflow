@@ -411,6 +411,14 @@ if expect_landed "rule-map plant 6" grep -q "M996" "$sb/docs/rule-map.md"; then
 fi
 drop_sandbox "$sb"
 
+# 29b. a status that names no step is an error (a step may carry one letter, as 4b)
+sb=$(make_sandbox) || abort_sandbox
+printf '| M995 | planted rule | test | README.md | step 4bc |\n' >>"$sb/docs/rule-map.md"
+if expect_landed "rule-map plant 7" grep -q "M995" "$sb/docs/rule-map.md"; then
+  expect_red "rule-map red on a status that names no step" "$sb" "M995 has unknown status 'step 4bc'" bash scripts/dev/check-rule-map.sh
+fi
+drop_sandbox "$sb"
+
 # --- workflows --------------------------------------------------------------------------
 write_workflow() { # write_workflow FILE INDENT USES PERMISSIONS TIMEOUT(yes|no)
   i=$2

@@ -1,6 +1,6 @@
 # Rule map
 
-Every rule of the method, why it exists, and the one file where it lives. A rule whose status is `done` must have its ID in its home file (or the token after `@`, when given); `scripts/dev/check-rule-map.sh` fails otherwise. Other statuses name the build step that will add it (`step N`), Release 2 (`R2`) or later work (`later`).
+Every rule of the method, why it exists, and the one file where it lives. A rule whose status is `done` must have its ID in its home file (or the token after `@`, when given); `scripts/dev/check-rule-map.sh` fails otherwise. Other statuses name the build step that will add it (`step N`, or `step Nb` for a step split in two), Release 2 (`R2`) or later work (`later`).
 
 Sources: `incident` means the rule came from something that went wrong in the owner's original method. `research` names where the evidence came from; details are in docs/research/.
 
@@ -49,7 +49,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M041 | A check that has not been seen to fail is untested: plant the defect and watch it go red | incident | TESTS.md | done |
 | M042 | Plant, verify and revert are three separate commands, never chained | incident | method/.claude/skills/checks/SKILL.md | step 6 |
 | M043 | After reverting a plant, diff the touched files and confirm your own work is still there | incident | method/.claude/skills/checks/SKILL.md | step 6 |
-| M044 | Break the code under test on purpose; a parameter that never takes two values is a warning sign | incident | method/scripts/method/mutate-changed.sh | step 4 |
+| M044 | Break the code under test on purpose; a parameter that never takes two values is a warning sign | incident | method/scripts/method/mutate-changed.sh | step 4b |
 | M045 | Twelve questions before trusting a new check | incident | method/.claude/skills/checks/SKILL.md | step 6 |
 | M046 | Four questions about every claim: reach, measured counts, closed or narrowed, survives re-derivation | incident | method/.claude/agents/method/reporter.md | step 6 |
 | M047 | Write the question in words before computing; two agreeing methods can answer the wrong question | incident | method/.claude/rules/method/method.md | step 6 |

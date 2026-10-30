@@ -37,7 +37,7 @@ while (my $line = <$fh>) {
   }
   if ($id !~ /^M\d{3}$/) { say_line("rule-map: line $n has a malformed rule ID '$id'"); $bad++; next; }
   if ($seen{$id}++) { say_line("rule-map: $id appears more than once"); $bad++; }
-  if ($status !~ /^(?:done|step \d+|R2|later)$/) { say_line("rule-map: $id has unknown status '$status'"); $bad++; next; }
+  if ($status !~ /^(?:done|step \d+[a-z]?|R2|later)$/) { say_line("rule-map: $id has unknown status '$status'"); $bad++; next; }
   my $key = $status =~ /^step/ ? 'planned for a later step' : $status;
   $by_status{$key}++;
   next unless $status eq 'done';

@@ -10,7 +10,8 @@ Steps, each reviewed in a fresh context and committed with a verdict trailer:
 1b. Fixes from step 1's security check (TASKS.md), before step 2. The owner chose this.
 2. JSON helper, verdict vocabulary, review packet.
 3. run-checks.sh and status.sh.
-4. done-check.sh and the mutation wrapper.
+4. done-check.sh.
+4b. The mutation wrapper (mutate-changed.sh), split from step 4 after its design critique (TASKS.md).
 5. The three hooks, the settings fragment, a free test harness that proves the hooks fire.
 6. Method rules, agents (including the architect) and skills (including setup and design).
 7. Project templates, setup, sync, the money, ERPNext and documents packs, three example projects.

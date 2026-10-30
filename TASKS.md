@@ -114,12 +114,18 @@ Rules: M001, M002, M003, M050, M051, M066, M077.
 - Known misses listed in TESTS.md Known limits, to fix when a step touches those checks.
 - The portability lint flags every $( ) that runs onto the next line; narrow it if it gets in the way.
 
-## Step 4: done-check.sh and mutate-changed.sh
+## Step 4: done-check.sh
 
-Rules: M008, M044, M089, M108.
+Rules: M008, M089, M108. Step 4b (mutate-changed.sh) takes M044 and the new M122.
 
-- [ ] Design written first (done-check --ready over the commit, the files on disk, main, the run-checks log and the verdict; mutate-changed as a text mutator over the changed lines; one shared "the files on disk are the commit" rule), then critiqued before any code.
+- [x] Design written first, then critiqued before any code: 4 independent critics (correctness, adversary, scope, callers) found 53 problems, and a skeptic tried to refute each serious one. None was refuted. Several were lowered, and many fixes were corrected. The main changes: a CRLF or `$Id$` that git's checkout writes from the commit's own .gitattributes counts as the commit (on Linux too), while one that only this machine's settings explain is a change; only `approve` is ready; a check skipped here never counts; logs are matched by files and parents, so writing down the verdict does not void the run; a VERDICTS_FROM move is judged by what it accepts (A30); shallow and single-branch clones get the right advice; no `--base`.
+- [x] Split: the mutation wrapper grew too large for one review (a journal for stopped runs, file times for build caches, a control run, repeat runs, its own settings and log format), so it becomes step 4b, as step 1 had 1b.
+- [ ] Build: restructures first (tree.pl out of packet.pl; main_ref, exact, merge_base and the verdict range into git.pl and verdicts.pl), then behaviour.
+
+## Step 4b: mutate-changed.sh
+
+Rules: M044 (the mutation half), M122 (new, the parameter half, step 6). Designed and critiqued with step 4; built after step 4 closes.
 
 ## Next
 
-Step 4: the design critique, then the build.
+Step 4: the build.
