@@ -35,6 +35,7 @@ Rules every check follows:
 ## Planted breaks
 
 To check the checks, each guard was removed once in a throwaway copy, and the full test suite was run against it (in step 2's last two runs and in step 3, the tests of the file it changed).
+- Step 4b.2, repair loop 1: 18 removals of the guards it added, each run against the tests that guard the file. All 18 turned them red (one was planted again, as its first form did not compile and so proved nothing).
 - Step 4b.2: 25 removals of the guards it added (lib/mutate.pl, Tree::added_lines and the rename pin in Tree::changed, conf.pl's two keys), each run against the tests that guard the file. 24 turned them red on the first run; the 25th, MUTATE_PATHS not applied, did once a test had a changed file outside it.
 - Step 4b.1 (restructure): 9 removals of the guards in the moved check runner (applies, judge, and the helpers that now die), each run against the tests of run-checks, done-check and status. 8 turned them red. The 9th, a failed fork, cannot be caused here, as before the move.
 - Step 4, the fixes from the check of the last fix round: 7 removals (the working-tree probe compared with itself, and without the inode; every ref counted as fetched; wildcard fetch settings not matched; the fetch check not called; unread attributes counted as clean; HEAD's own file not checked). All 7 turned the tests red. Not planted: the tighter match of the remote's name in git config's output (a URL holding a newline and .url), which no test sets up.
