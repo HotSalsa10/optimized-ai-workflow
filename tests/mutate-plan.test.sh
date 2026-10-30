@@ -182,6 +182,10 @@ echo $1 \1
 a < b; a > b
 a+b
 android oregon untrue
+=====
+v = café1
+echo ${1}
+ls -lt x
 # x == 1
 // x == 1
 -- x == 1
@@ -228,7 +232,7 @@ else
   fail "each operator gets its mutant, and the look-alikes get none" "$(planned | LC_ALL=C sort -t: -k1,1 -k2,2n | diff "$work/ops.want" - | head -20)"
 fi
 expect "comment-like lines are counted, not mutated" 0 \
-  "44 changed lines in 2 files: 24 with a mutant, 8 comment-like, 12 with nothing to mutate"
+  "48 changed lines in 2 files: 24 with a mutant, 8 comment-like, 0 that delete or move files, 16 with nothing to mutate"
 
 # --- order and the cap ---
 p2=$(new_project) || abort_sandbox
@@ -274,19 +278,27 @@ expect "a pure move adds no line to mutate" 3 "SKIPPED - nothing-to-mutate"
 mp "$p3/m2" --list
 expect "a move in from outside MUTATE_PATHS adds no line to mutate" 3 "SKIPPED - nothing-to-mutate"
 
-# shell lines that delete or move get no logic mutant
+# nothing that deletes or moves files gets a mutant: a shell script or make
+# file that runs such a command anywhere is skipped whole (its guard can sit
+# on another line), and in any other file the line itself gets none
 # shellcheck disable=SC2016 # the scripts are written, not run
-printf '#!/bin/sh\n[ -n "$D" ] && rm -rf "$D"\n[ "$n" -ge 2 ] || exit 1\n' >"$w3/src/t.sh"
+printf '#!/bin/sh\n[ -n "$D" ] || exit 1\nrm -rf "$D"/*\n' >"$w3/src/t.sh"
 # shellcheck disable=SC2016 # the scripts are written, not run
-printf '#!/usr/bin/env bash\n[ -n "$D" ] && git clean -fdx\n' >"$w3/src/run"
-printf 'ok = d and rm(d)\n' >"$w3/src/t.py"
+printf '#!/usr/bin/env bash\n[ "$n" -ge 2 ] || exit 1\necho ok\n' >"$w3/src/run"
+printf 'clean:\n\t[ -d build ] && rm -rf build\n' >"$w3/src/Makefile"
+# shellcheck disable=SC2016 # the scripts are written, not run
+printf 'ok = d != "" and rm(d)\nx = [ "$D" != "" ] && git -C "$D" clean -fdx\ny = test -n "$D" || git --git-dir=g reset --hard\nflag = 1\n' >"$w3/src/t.py"
 feat "$w3" "Shell"
 mp "$w3" --list --max 1000
-lacks "in a shell script, a line that runs rm gets no && mutant" "src/t.sh:2:"
-lacks "nor one whose first line names bash and runs git clean" "src/run:2:"
-expect "but a test line that deletes nothing does, and so does such a line in another language" 0 \
-  "mutate-changed: planned: src/t.sh:3:8: '-ge' becomes '-gt'" "mutate-changed: planned: src/t.sh:3:16: '||' becomes '&&'" \
-  "mutate-changed: planned: src/t.py:1:8: 'and' becomes 'or'"
+lacks "a shell script whose guard is on the line before its rm gets no mutant at all" "src/t.sh:"
+lacks "nor does a make file that runs rm" "src/Makefile:"
+expect "and both are counted" 0 "files skipped: 2 a shell script or make file that deletes or moves files"
+lacks "in another file, a line that runs rm gets no mutant, != included" "src/t.py:1:"
+lacks "nor one that runs git -C DIR clean" "src/t.py:2:"
+lacks "nor one that runs git --git-dir=... reset" "src/t.py:3:"
+expect "but a shell script that deletes nothing gets its mutants, and so does another file's harmless line" 0 \
+  "mutate-changed: planned: src/run:2:8: '-ge' becomes '-gt'" "mutate-changed: planned: src/run:2:16: '||' becomes '&&'" \
+  "mutate-changed: planned: src/t.py:4:8: '1' becomes '0'" "3 that delete or move files"
 
 # files that are skipped, and why
 p4=$(new_project) || abort_sandbox
@@ -305,6 +317,12 @@ EOS
 (cd "$w4" && git config filter.lfs.clean "sh .git/lfs-clean.sh" && git config filter.lfs.smudge cat)
 printf 'x == 1\n' >"$w4/src/data.txt"
 printf 'if %%x%% == 1 echo y\n' >"$w4/src/run.bat"
+printf 'version https://git-lfs.github.com/spec/v1\noid sha256:%s\nsize 3\n' "$(printf '64%.0s' 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32)" >"$w4/src/fake.txt"
+# a file the commit puts in Git LFS whose disk copy is the stored blob (no
+# smudge): committed plain first, its LFS rule added after
+printf 'x == 1\n' >"$w4/src/ptr.txt"
+(cd "$w4" && git add src/ptr.txt && git commit -q -m "A plain file first" && touch -t 202001010000 src/ptr.txt &&
+  git update-index -q --refresh && printf 'ptr.txt filter=lfs\n' >>src/.gitattributes)
 feat "$w4" "Files to skip"
 rm -f "$w4/src/run.bat" && (cd "$w4" && git checkout -q -- src/run.bat)
 touch -t 202001010000 "$w4/src/data.txt"
@@ -314,8 +332,8 @@ if (cd "$w4" && od -c src/run.bat | grep -q '\\r'); then pass "setup: run.bat is
 mp "$w4" --list
 expect "a link, a NUL file, a file that is not UTF-8, one over 1 MB and one git converts are skipped and counted" 0 \
   "mutate-changed: planned: src/target.py:1:3: '==' becomes '!='" \
-  "files skipped: 2 converted by .gitattributes or in Git LFS, 1 larger than 1 MB, 1 left out (the method's or git's own files), 2 not UTF-8 text, 1 not a regular file"
-for f in link.py nul.py latin1.py big.py run.bat data.txt; do lacks "nothing planned in $f" "src/$f:"; done
+  "files skipped: 4 converted by .gitattributes or in Git LFS, 1 larger than 1 MB, 1 left out (the method's or git's own files), 2 not UTF-8 text, 1 not a regular file"
+for f in link.py nul.py latin1.py big.py run.bat data.txt ptr.txt fake.txt; do lacks "nothing planned in $f" "src/$f:"; done
 
 # the method's own files, and git's, are never mutated, even with MUTATE_PATHS=.
 p5=$(new_project) || abort_sandbox
@@ -328,12 +346,19 @@ printf 'unit\tany\t-\t(\\d+) ok\techo 3 ok\nb\tany\t-\t(\\d+) ok\ttest 1 -eq 1 &
 printf 'PRODUCT_PATHS=src\nMUTATE_PATHS=.\nMUTATION_CHECKS=unit\n# x == 1\n' >"$w5/.claude/method.conf"
 printf '*.log\n' >"$w5/src/.gitignore"
 printf 'top = 1\n' >"$w5/top.py"
+mkdir -p "$w5/.Claude" "$w5/Checks"
+printf 'x == 1\n' >"$w5/.Claude/x.py"
+printf 'x == 1\n' >"$w5/Checks/x.py"
+printf 'x == 1\n' >"$w5/src/.GitAttributes"
 feat "$w5" "Method files and a top file"
 MP="$w5/scripts/method/mutate-changed.sh" mp "$w5" --list
 expect "with MUTATE_PATHS=. the method's files, checks/, .claude/ and .gitignore are left out, and the rest is mutated" 0 \
-  "mutate-changed: planned: top.py:1:7: '1' becomes '0'" "4 left out (the method's or git's own files)"
+  "mutate-changed: planned: top.py:1:7: '1' becomes '0'" "7 left out (the method's or git's own files)"
 lacks "nothing in the method's folder" "scripts/method/"
 lacks "nothing in checks/" "checks/project.tsv:"
+lacks "nor in .Claude/ (any case: a file system that folds case opens .claude/)" ".Claude/"
+lacks "nor in Checks/" "Checks/"
+lacks "nor in .GitAttributes" ".GitAttributes"
 
 # git settings and attribute files on this machine change nothing, and run
 # nothing: a text conversion, diff settings, a non-ASCII name
@@ -365,6 +390,104 @@ case "$out" in
   *"$(printf '\033')"*) fail "and no raw escape reaches the screen" "$out" ;;
   *) pass "and no raw escape reaches the screen" ;;
 esac
+
+# a number of more than two digits never reaches the screen
+printf 'card = 4111111111111111\nparts = "4111-1111-1111-1111"\n' >"$w6/src/card.py"
+feat "$w6" "Numbers"
+mp "$w6" --list --max 1000
+expect "a number of more than two digits is shown by its length only" 0 \
+  "mutate-changed: planned: src/card.py:1:8: a 16-digit number becomes that number + 1" \
+  "mutate-changed: planned: src/card.py:2:10: a 4-digit number becomes that number + 1"
+lacks "and its digits never reach the screen" "4111"
+
+# --list writes nothing and runs nothing: no project check, filter, text
+# conversion, external diff, file-system monitor or hook, whatever this
+# machine's settings say
+p8=$(new_project) || abort_sandbox
+w8="$p8/w"
+printf '#!/bin/sh\ntouch %s/ran\ncat\n' "$work" >"$work/mark.sh"
+chmod +x "$work/mark.sh"
+printf 'unit\tany\tcmd:bash\t(\\d+) ok\ttouch %s/check-ran; echo 1 ok\n' "$work" >"$w8/checks/project.tsv"
+printf 'x == 1\n' >"$w8/src/a.py"
+printf '*.py diff=x filter=y\n' >"$w8/.gitattributes"
+feat "$w8" "Hostile settings"
+mkdir -p "$work/hooks"
+for h in post-checkout post-index-change reference-transaction pre-commit fsmonitor-watchman; do cp "$work/mark.sh" "$work/hooks/$h"; done
+(cd "$w8" && git config diff.x.textconv "$work/mark.sh" && git config diff.x.command "$work/mark.sh" &&
+  git config diff.external "$work/mark.sh" && git config filter.y.clean "$work/mark.sh" && git config filter.y.smudge "$work/mark.sh" &&
+  git config filter.y.process "$work/mark.sh" && git config core.fsmonitor "$work/mark.sh" && git config core.hooksPath "$work/hooks")
+before=$(cd "$p8" && find w -type f | LC_ALL=C sort | while read -r f; do cksum "$f"; done)
+rm -f "$work/ran" "$work/check-ran"
+mp "$w8" --list
+expect "setup: a plan under hostile settings" 0 "mutate-changed: planned: src/a.py:1:3: '==' becomes '!='"
+after=$(cd "$p8" && find w -type f | LC_ALL=C sort | while read -r f; do cksum "$f"; done)
+if [ "$before" = "$after" ]; then pass "no file in the project, .git included, is written or changed"; else fail "no file in the project, .git included, is written or changed" "$(printf '%s\n' "$before" >"$work/b"; printf '%s\n' "$after" | diff "$work/b" - | head -10)"; fi
+if [ -e "$work/check-ran" ]; then fail "the project check never runs"; else pass "the project check never runs"; fi
+if [ -e "$work/ran" ]; then fail "no filter, conversion, external diff, monitor or hook runs"; else pass "no filter, conversion, external diff, monitor or hook runs"; fi
+
+# errors: a stored file git cannot read, or one changed by hand, stop it
+# with a FAIL line (exit 2), never a bare git error
+p9=$(new_project) || abort_sandbox
+w9="$p9/w"
+printf 'def base(x):\n    return x == 2\n' >"$w9/src/base.py"
+feat "$w9" "Change"
+ob=$(cd "$w9" && git rev-parse main:src/base.py)
+nb=$(cd "$w9" && git rev-parse HEAD:src/base.py)
+obj="$w9/.git/objects/$(printf '%s' "$ob" | cut -c1-2)/$(printf '%s' "$ob" | cut -c3-)"
+src="$w9/.git/objects/$(printf '%s' "$nb" | cut -c1-2)/$(printf '%s' "$nb" | cut -c3-)"
+if [ -f "$obj" ] && [ -f "$src" ]; then
+  mv "$obj" "$work/obj.saved"
+  mp "$w9" --list
+  expect "a stored file git cannot read stops it with a FAIL line (exit 2)" 2 "mutate-changed: FAIL - cannot read the stored blob"
+  cp "$src" "$obj"
+  mp "$w9" --list
+  expect "a stored file changed by hand stops it too, before its lines could hide" 2 "mutate-changed: FAIL - " "does not match its id"
+  chmod u+w "$obj" && mv "$work/obj.saved" "$obj"
+else
+  fail "setup: the objects are loose files"
+fi
+mp "$w9" --list
+expect "setup: the plan works again" 0 "mutate-changed: planned: src/base.py:2:17: '2' becomes '3'"
+
+# a deleted file is neither counted nor skipped
+(cd "$w9" && printf 'y = 2\n' >src/new.py && git rm -q src/base.py)
+feat "$w9" "Delete one, add one"
+mp "$w9" --list
+expect "a deleted file is neither counted nor skipped" 0 "1 changed lines in 1 files"
+lacks "and it is not called a file that is not regular" "not a regular file"
+
+# settings: duplicate check ids count once; a MUTATE_PATHS entry that names
+# no tracked file is named
+printf 'PRODUCT_PATHS=src\nMUTATE_PATHS=src\nMUTATE_PATHS=srcc\nMUTATION_CHECKS=unit\nMUTATION_CHECKS=unit\n' >"$w9/.claude/method.conf"
+feat "$w9" "Settings with a typo"
+mp "$w9" --list
+expect "a MUTATE_PATHS entry that names no tracked file is named" 0 "MUTATE_PATHS entries that name no tracked file: srcc"
+lacks "and a check id given twice counts once" "checks: unit unit"
+
+# the method run from the top folder refuses: every file would be its own
+p10=$(new_project) || abort_sandbox
+w10="$p10/w"
+(cd "$w10" && cp -R "$root/method/scripts/method/lib" lib && cp "$root/method/scripts/method/mutate-changed.sh" . && printf 'y = 2\n' >src/new.py)
+feat "$w10" "The method at the top"
+MP="$w10/mutate-changed.sh" mp "$w10" --list
+expect "a copy run from the top folder refuses (exit 2)" 2 "mutate-changed: FAIL - mutate-changed.sh runs from the top folder"
+# a settings file git ignores stops it
+(cd "$w10" && git rm -q --cached .claude/method.conf && printf '.claude/method.conf\n' >>.git/info/exclude && git commit -q -m "Untrack the settings")
+mp "$w10" --list
+expect "a settings file git ignores stops it (exit 2)" 2 ".claude/method.conf is ignored by git" "mutate-changed: FAIL - a config file is ignored by git"
+
+# a link that becomes a file: every line is new, even one equal to the link's target
+p11=$(new_project) || abort_sandbox
+w11="$p11/w"
+(cd "$w11" && git checkout -q main && perl -e 'symlink "a = 1\n", "src/l.py" or die' && git add -A && git commit -q -m link &&
+  git push -q origin main 2>/dev/null && git checkout -q feat && git merge -q main 2>/dev/null && rm src/l.py &&
+  printf 'a = 1\nb = 2\n' >src/l.py && git add -A && git commit -q -m "Link to file")
+mp "$w11" --list
+expect "a link that becomes a file has every line planned" 0 "src/l.py:1:5: '1' becomes '0'" "src/l.py:2:5: '2' becomes '3'"
+# a branch with no history in common with main stops it
+(cd "$w11" && git checkout -q --orphan lone && git commit -q -m lone)
+mp "$w11" --list
+expect "a branch with no history in common with main stops it (exit 2)" 2 "share no history here"
 
 # no main
 p7=$(new_project) || abort_sandbox

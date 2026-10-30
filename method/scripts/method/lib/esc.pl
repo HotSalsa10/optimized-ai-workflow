@@ -18,6 +18,9 @@
 # ESC sequence (ESC, intermediate bytes, one final byte). run-checks strips
 # them before it reads a count; the secret mask splits text at them.
 # Esc::plain(TEXT): TEXT with every such sequence taken out.
+# Esc::utf8_ok(BYTES): every byte of BYTES is part of UTF-8 as RFC 3629
+# defines it (the rule Esc::line uses: no overlong forms, no surrogates,
+# nothing above U+10FFFF).
 package Esc;
 use strict;
 use warnings;
@@ -29,13 +32,23 @@ sub plain {
   return $s;
 }
 
+# one character of UTF-8 as RFC 3629 defines it: no overlong forms, no
+# surrogates, nothing above U+10FFFF
+our $UTF8_CHAR = qr/[\x00-\x7F]|[\xC2-\xDF][\x80-\xBF]|\xE0[\xA0-\xBF][\x80-\xBF]|[\xE1-\xEC\xEE\xEF][\x80-\xBF]{2}
+      |\xED[\x80-\x9F][\x80-\xBF]|\xF0[\x90-\xBF][\x80-\xBF]{2}|[\xF1-\xF3][\x80-\xBF]{3}|\xF4[\x80-\x8F][\x80-\xBF]{2}/x;
+
+# utf8_ok BYTES: BYTES are UTF-8 by that rule, every byte of them
+sub utf8_ok {
+  my ($b) = @_;
+  1 while $b =~ /\G(?:$UTF8_CHAR){1,4096}/gc;
+  return (pos($b) || 0) == length($b) ? 1 : 0;
+}
+
 sub line {
   my ($bytes) = @_;
   my $s = '';
-  # runs of UTF-8 as RFC 3629 defines it (no overlong forms, no surrogates,
-  # nothing above U+10FFFF) are decoded; any other byte is shown on its own
-  while ($bytes =~ /\G(?:((?:[\x00-\x7F]|[\xC2-\xDF][\x80-\xBF]|\xE0[\xA0-\xBF][\x80-\xBF]|[\xE1-\xEC\xEE\xEF][\x80-\xBF]{2}
-      |\xED[\x80-\x9F][\x80-\xBF]|\xF0[\x90-\xBF][\x80-\xBF]{2}|[\xF1-\xF3][\x80-\xBF]{3}|\xF4[\x80-\x8F][\x80-\xBF]{2})+)|(.))/gsx) {
+  # runs of such UTF-8 are decoded; any other byte is shown on its own
+  while ($bytes =~ /\G(?:((?:$UTF8_CHAR)+)|(.))/gs) {
     if (defined $1) {
       my $run = $1;
       utf8::decode($run);

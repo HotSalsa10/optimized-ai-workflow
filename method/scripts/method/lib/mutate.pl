@@ -45,12 +45,14 @@ sub usage {
 # excluded PATH METHOD: why PATH is never mutated, or undef. The method's own
 # files (the folder mutate-changed.sh runs from, .claude/, checks/), its
 # local folder (.method/), and git's own files, whose change would change
-# what git shows.
+# what git shows. Compared without case, as a file system that folds case
+# would open them.
 sub excluded {
   my ($p, $method) = @_;
-  return "the method's own files" if defined $method && ($p eq $method || index($p, "$method/") == 0);
-  return "the method's own files" if $p =~ m{\A(?:\.claude|checks|\.method)/};
-  return "git's own files" if $p =~ m{(?:\A|/)\.git(?:attributes|ignore|modules)\z};
+  my $lp = lc $p;
+  return "the method's own files" if defined $method && ($lp eq lc $method || index($lp, lc("$method/")) == 0);
+  return "the method's own files" if $lp =~ m{\A(?:\.claude|checks|\.method)/};
+  return "git's own files" if $lp =~ m{(?:\A|/)\.git(?:attributes|ignore|modules)\z};
   return undef;
 }
 
@@ -61,33 +63,45 @@ sub under {
 }
 
 # method_folder TOP: the folder mutate-changed.sh runs from, relative to TOP,
-# or undef when it is outside TOP (a method installed elsewhere)
+# or undef when it is outside TOP (a method installed elsewhere). Found by
+# walking up until a folder is TOP by device and inode, as Git::top does, so
+# a path typed in another case or through a link still finds it.
 sub method_folder {
   my ($top) = @_;
-  my $m = Cwd::realpath(dirname($lib));
-  my $t = Cwd::realpath($top);
-  return undef unless defined $m && defined $t;
-  return '.' if $m eq $t;
-  return undef unless index($m, "$t/") == 0;
-  return substr($m, length($t) + 1);
+  my @t = stat $top or return undef;
+  my $d = Cwd::realpath(dirname($lib));
+  return undef unless defined $d;
+  my @parts;
+  while (1) {
+    my @s = stat $d or return undef;
+    return @parts ? join('/', reverse @parts) : '.' if $s[0] == $t[0] && $s[1] == $t[1];
+    my $up = dirname($d);
+    return undef if $up eq $d;
+    push @parts, File::Basename::basename($d);
+    $d = $up;
+  }
 }
 
 # --- mutants: the text operators ---
 
-# shell FILE TEXT: a shell script, by its name or its first line
-sub shell {
+# shell_like FILE TEXT: a shell script or a make file, by its name or its
+# first line: its lines run commands
+sub shell_like {
   my ($p, $text) = @_;
-  return 1 if $p =~ /\.(?:sh|bash)\z/;
-  return $text =~ m{\A#![^\n]*\b(?:sh|bash|dash|ksh|zsh)\b} ? 1 : 0;
+  return 1 if $p =~ /\.(?:sh|bash|zsh|ksh|bats|fish|command|mk)\z/i || $p =~ m{(?:\A|/)(?:GNU)?[Mm]akefile\z};
+  return $text =~ m{\A#![^\n]*\b(?:sh|bash|dash|ksh|zsh|fish|make)\b} ? 1 : 0;
 }
 
 # comment-like LINE: its first non-blank text opens a comment in a common
 # language (#, //, --, /*, *, ;, %, <!--)
 sub comment_like { return $_[0] =~ m{\A[ \t]*(?:#|//|--|/\*|\*|;|%|<!--)} ? 1 : 0 }
 
-# a line a shell mutant must not touch: it deletes, moves or rewrites, so a
-# swapped && or test would run it when it was meant not to
-sub destructive { return $_[0] =~ /\b(?:rm|mv|dd|chmod)\b|\bgit\s+(?:clean|reset|push)\b/ ? 1 : 0 }
+# destructive TEXT: TEXT runs a command that deletes, moves or rewrites
+# files or history. A mutant runs with the session's rights, so a changed
+# condition would run it when it was meant not to.
+my $DESTRUCTIVE = qr/\b(?:rm|rmdir|unlink|mv|dd|chmod|chown|shred|truncate)\b|\bfind\b[^\n]*\s-delete\b
+  |\bgit\b(?:\s+(?:-[cC]\s+\S+|--?\S+))*\s+(?:clean|reset|push|checkout|restore|rm|branch)\b/x;
+sub destructive { return $_[0] =~ $DESTRUCTIVE ? 1 : 0 }
 
 # next_int N: N + 1 as decimal text (any length); 1 becomes 0, as 0 becomes 1
 sub next_int {
@@ -100,41 +114,53 @@ sub next_int {
   return join '', reverse @d;
 }
 
-# The operators, each [regex, replacement]; a regex captures the token in $1
-# at the position it changes. Kept in one table so the plan and the run use
-# the same mutants.
+# The operators, each [regex, replacement, kind]; a regex captures the token
+# in $1 at the position it changes. Kept in one table so the plan and the run
+# use the same mutants. A byte of 0x80 or more counts as a letter (part of a
+# non-ASCII letter).
 my @OPS = (
-  [qr/(===)/, sub {'!=='}], [qr/(!==)/, sub {'==='}],
+  [qr/(?<![=!])(===)(?!=)/, sub {'!=='}], [qr/(?<![=!])(!==)(?!=)/, sub {'==='}],
   [qr/(?<![=!<>])(==)(?!=)/, sub {'!='}], [qr/(!=)(?!=)/, sub {'=='}],
   [qr/(?<![<=])(<=)(?![>=])/, sub {'<'}], [qr/(?<![>=])(>=)(?!=)/, sub {'>'}],
   [qr/(?<=\s)(-(?:lt|le|gt|ge|eq|ne))(?=\s)/, sub { { '-lt' => '-le', '-le' => '-lt', '-gt' => '-ge', '-ge' => '-gt',
     '-eq' => '-ne', '-ne' => '-eq' }->{ $_[0] } }, 'test'],
-  [qr/(?<!&)(&&)(?![&=])/, sub {'||'}, 'logic'], [qr/(?<!\|)(\|\|)(?![|=])/, sub {'&&'}, 'logic'],
-  [qr/\b(and)\b/, sub {'or'}, 'logic'], [qr/\b(or)\b/, sub {'and'}, 'logic'],
+  [qr/(?<!&)(&&)(?![&=])/, sub {'||'}], [qr/(?<!\|)(\|\|)(?![|=])/, sub {'&&'}],
+  [qr/\b(and)\b/, sub {'or'}], [qr/\b(or)\b/, sub {'and'}],
   [qr/\b(true|false|True|False|TRUE|FALSE)\b/, sub { { true => 'false', false => 'true', True => 'False',
     False => 'True', TRUE => 'FALSE', FALSE => 'TRUE' }->{ $_[0] } }],
-  [qr/(?<![\w.\$\\])(0|[1-9][0-9]*)(?![\w.])/, \&next_int],
+  [qr/(?<![\w.\$\\\x80-\xFF])(?<!\$\{)(0|[1-9][0-9]*)(?![\w.\x80-\xFF])/, \&next_int, 'number'],
 );
 
-# mutants_on LINE SHELL: [column, from, to] for every position, by column
+# mutants_on LINE: [column, from, to, kind] for every position, by column. A
+# shell test word (-lt and the others) counts only after a [ or test on the
+# line, so a flag such as ls -lt is left alone.
 sub mutants_on {
-  my ($l, $shell) = @_;
-  my $guard = $shell && destructive($l);
+  my ($l) = @_;
   my @m;
   for my $op (@OPS) {
     my ($re, $to, $kind) = @$op;
-    next if $guard && $kind && ($kind eq 'logic' || $kind eq 'test');
     while ($l =~ /$re/g) {
-      push @m, [$-[1] + 1, $1, $to->($1)];
+      my ($at, $tok) = ($-[1], $1);
+      next if defined $kind && $kind eq 'test' && substr($l, 0, $at) !~ /(?:\[|\btest\b)/;
+      push @m, [$at + 1, $tok, $to->($tok), $kind || ''];
     }
   }
   return sort { $a->[0] <=> $b->[0] } @m;
 }
 
+# shown MUTANT: what the screen says it does. A number of more than two
+# digits is shown by its length only, so a PIN, an account number or a
+# numeric key on a changed line never reaches the screen.
+sub shown {
+  my ($m) = @_;
+  return "'$m->{from}' becomes '$m->{to}'" unless $m->{kind} eq 'number' && length $m->{from} > 2;
+  return "a " . length($m->{from}) . '-digit number becomes that number + 1';
+}
+
 # --- the plan ---
 
-# plan CONF TOP: the changed files and lines, their mutants in run order, and
-# the counts for the last line
+# plan CONF TOP MAX: the changed files and lines, their mutants in run order
+# (at most MAX), and the counts for the last line
 sub plan {
   my ($conf, $top, $max) = @_;
   my $fp = Checks::fingerprint();
@@ -150,40 +176,53 @@ sub plan {
   my $method = method_folder($top);
   stop('mutate-changed.sh runs from the top folder, so every file would be its own; run the copy in scripts/method')
     if defined $method && $method eq '.';
-  my %c = (lines => 0, with => 0, comment => 0, nothing => 0, files => 0);
+  my %c = (lines => 0, with => 0, comment => 0, nothing => 0, guarded => 0, files => 0);
   my %skip;
-  my @files;
   Tree::check_trees($base, $fp->{head});
+  my @cand;
   for my $f (Tree::changed($base, $fp->{head})) {
     next if $f->{st} eq 'D';
-    my $p = $f->{path};
-    next unless under($p, $conf->{MUTATE_PATHS});
-    if (excluded($p, $method)) { $skip{"left out (the method's or git's own files)"}++; next }
+    next unless under($f->{path}, $conf->{MUTATE_PATHS});
+    if (excluded($f->{path}, $method)) { $skip{"left out (the method's or git's own files)"}++; next }
     if ($f->{m2} !~ /\A100(?:644|755)\z/) { $skip{'not a regular file'}++; next }
-    if ($converted{$p}) { $skip{'converted by .gitattributes or in Git LFS'}++; next }
+    push @cand, $f;
+  }
+  # Git LFS by the commit's own attributes too: a pointer left on disk (no
+  # git-lfs, or GIT_LFS_SKIP_SMUDGE) is the stored blob, but not the file
+  my %lfs = Tree::lfs_paths($fp->{head}, map { $_->{path} } @cand);
+  my (@files, $possible);
+  for my $f (@cand) {
+    my $p = $f->{path};
+    if ($converted{$p} || $lfs{$p}) { $skip{'converted by .gitattributes or in Git LFS'}++; next }
     my $text = Git::cat('blob', $f->{o2}, 1, $MAX_SIZE);
     if (!defined $text) { $skip{'larger than 1 MB'}++; next }
-    my $copy = $text;
-    if ($text =~ /\0/ || !utf8::decode($copy)) { $skip{'not UTF-8 text'}++; next }
+    if ($text =~ m{\Aversion https://git-lfs\.github\.com/spec/}) { $skip{'converted by .gitattributes or in Git LFS'}++; next }
+    if ($text =~ /\0/ || !Esc::utf8_ok($text)) { $skip{'not UTF-8 text'}++; next }
+    if (shell_like($p, $text) && destructive($text)) { $skip{'a shell script or make file that deletes or moves files'}++; next }
     my @lines = split /\n/, $text, -1;
     pop @lines if @lines && $lines[-1] eq '';
     my $old_text = $f->{m1} =~ /\A100(?:644|755)\z/ && $f->{st} ne 'A';
+    # the old file is read through Git::cat first: git diff does not check a
+    # stored file against its id, so one changed by hand could hide lines
+    Git::cat('blob', $f->{o1}, 1, $MAX_SIZE) if $old_text;
     my @changed = $old_text ? Tree::added_lines($f->{o1}, $f->{o2}) : (1 .. scalar @lines);
     next unless @changed;
     $c{files}++;
-    my $sh = shell($p, $text);
     my (@first, @rest);
     for my $n (@changed) {
       my $l = $lines[$n - 1];
       next unless defined $l;
       $c{lines}++;
       if (comment_like($l)) { $c{comment}++; next }
-      my @m = mutants_on($l, $sh);
+      if (destructive($l)) { $c{guarded}++; next }
+      my @m = mutants_on($l);
       if (!@m) { $c{nothing}++; next }
       $c{with}++;
-      my @at = map { { path => $p, line => $n, col => $_->[0], from => $_->[1], to => $_->[2] } } @m;
-      push @first, shift @at;
-      push @rest, @at;
+      $possible += @m;
+      # (no more than MAX from one file in either pass: a cap never needs more)
+      my @at = map { { path => $p, line => $n, col => $_->[0], from => $_->[1], to => $_->[2], kind => $_->[3] } } @m;
+      push @first, shift @at if @first < $max;
+      push @rest, shift @at while @at && @rest < $max;
     }
     push @files, [\@first, \@rest];
   }
@@ -197,9 +236,12 @@ sub plan {
       for my $q (@q) { push @order, shift @$q if @$q }
     }
   }
-  my $all = @order;
   splice @order, $max if @order > $max;
-  return { mutants => \@order, possible => $all, counts => \%c, skipped => \%skip, ref => $ref, base => $base };
+  # a MUTATE_PATHS entry that names no tracked file is likely a typo
+  my %all = %{ Tree::all_files($fp->{head}) };
+  my @none = grep { my $e = $_; !grep { under($_, [$e]) } keys %all } @{ $conf->{MUTATE_PATHS} };
+  return { mutants => \@order, possible => $possible || 0, counts => \%c, skipped => \%skip, ref => $ref,
+    base => $base, none => \@none };
 }
 
 # counts PLAN: the counts for the last line
@@ -208,9 +250,10 @@ sub counts {
   my $c = $pl->{counts};
   my $s = $pl->{skipped};
   my $line = "$c->{lines} changed lines in $c->{files} files: $c->{with} with a mutant, $c->{comment} comment-like,"
-    . " $c->{nothing} with nothing to mutate";
+    . " $c->{guarded} that delete or move files, $c->{nothing} with nothing to mutate";
   my @sk = map {"$s->{$_} $_"} sort keys %$s;
   $line .= '; files skipped: ' . join(', ', @sk) if @sk;
+  $line .= '; MUTATE_PATHS entries that name no tracked file: ' . join(', ', @{ $pl->{none} }) if @{ $pl->{none} };
   return $line;
 }
 
@@ -227,6 +270,14 @@ sub main {
     else { usage() }
   }
   stop('running mutants comes in step 4b.3; for now mutate-changed.sh plans them with --list') unless $list;
+  # an error past this point (git failing, a damaged object) still ends with
+  # a FAIL line and exit 2
+  my $ok = eval { work($max); 1 };
+  stop($@) unless $ok;
+}
+
+sub work {
+  my ($max) = @_;
   my ($top, $elsewhere) = Git::top();
   stop('not inside a git working tree (or git refuses this one: owned by another user, or a damaged .git)')
     unless defined $top;
@@ -238,8 +289,7 @@ sub main {
     say_line($_) for @$cp;
     stop('.claude/method.conf has problems (above); fix them first');
   }
-  my @ign = eval { Conf::ignored_inputs('.') };
-  stop($@) if $@;
+  my @ign = Conf::ignored_inputs('.');
   if (@ign) {
     say_line("$_ is ignored by git, so a clone would not have it; track it with git add -f") for @ign;
     stop('a config file is ignored by git');
@@ -254,19 +304,21 @@ sub main {
     stop('checks/*.tsv has problems (above)');
   }
   my %by_id = map { ($_->{id} => $_) } @$checks;
-  my @unknown = grep { !$by_id{$_} } @{ $conf->{MUTATION_CHECKS} };
+  my %seen;
+  my @ids = grep { !$seen{$_}++ } @{ $conf->{MUTATION_CHECKS} };
+  my @unknown = grep { !$by_id{$_} } @ids;
   stop('MUTATION_CHECKS names checks that checks/*.tsv does not have: ' . join(', ', @unknown)) if @unknown;
   my ($here) = Checks::place();
   my $env = Checks::check_env();
   my (@use, @not);
-  for my $id (@{ $conf->{MUTATION_CHECKS} }) {
+  for my $id (@ids) {
     my $r = Checks::applies($by_id{$id}, $here, $env);
     if ($r) { push @not, "$id ($r->{detail})" } else { push @use, $id }
   }
   skipped('not-here', 'none of MUTATION_CHECKS runs here: ' . join('; ', @not)) unless @use;
   my $pl = plan($conf, $top, $max);
   skipped('nothing-to-mutate', counts($pl)) unless @{ $pl->{mutants} };
-  say_line("planned: $_->{path}:$_->{line}:$_->{col}: '$_->{from}' becomes '$_->{to}'") for @{ $pl->{mutants} };
+  say_line("planned: $_->{path}:$_->{line}:$_->{col}: " . shown($_)) for @{ $pl->{mutants} };
   say_line('checks: ' . join(' ', @use) . (@not ? '; not run here: ' . join('; ', @not) : ''));
   my $n = @{ $pl->{mutants} };
   say_line("PLAN - $n mutants" . ($pl->{possible} > $n ? " of $pl->{possible} (--max $max)" : '') . '; '
