@@ -73,19 +73,20 @@ while (@ARGV && $ARGV[0] =~ /^--/) {
   else { die "secrets: unknown option " . esc($opt) . "\n" }
 }
 
-# Keys and tokens with a recognisable shape.
+# Keys and tokens with a recognisable shape. A shape marked 1 counts only
+# where no letter or digit comes right before it.
 my @token_rules = (
-  [qr/sk-ant-[A-Za-z0-9_-]{20,}/, 'Anthropic API key'],
-  [qr/(?<![A-Za-z0-9])sk-(?:proj-)?[A-Za-z0-9]{32,}/, 'OpenAI-style API key'],
-  [qr/(?<![A-Za-z0-9])gh[pousr]_[A-Za-z0-9]{36,}/, 'GitHub token'],
-  [qr/(?<![A-Za-z0-9])github_pat_[A-Za-z0-9_]{40,}/, 'GitHub fine-grained token'],
-  [qr/(?<![A-Za-z0-9])AKIA[0-9A-Z]{16}(?![0-9A-Z])/, 'AWS access key'],
-  [qr/(?<![A-Za-z0-9])AIza[0-9A-Za-z_-]{35}(?![0-9A-Za-z_-])/, 'Google API key'],
-  [qr/(?<![A-Za-z0-9])xox[abprs]-[A-Za-z0-9-]{10,}/, 'Slack token'],
-  [qr/-----BEGIN (?:[A-Z]+ )*PRIVATE KEY(?: BLOCK)?-----/, 'private key'],
+  [qr/sk-ant-[A-Za-z0-9_-]{20,}/, 'Anthropic API key', 0],
+  [qr/sk-(?:proj-)?[A-Za-z0-9]{32,}/, 'OpenAI-style API key', 1],
+  [qr/gh[pousr]_[A-Za-z0-9]{36,}/, 'GitHub token', 1],
+  [qr/github_pat_[A-Za-z0-9_]{40,}/, 'GitHub fine-grained token', 1],
+  [qr/AKIA[0-9A-Z]{16}(?![0-9A-Z])/, 'AWS access key', 1],
+  [qr/AIza[0-9A-Za-z_-]{35}(?![0-9A-Za-z_-])/, 'Google API key', 1],
+  [qr/xox[abprs]-[A-Za-z0-9-]{10,}/, 'Slack token', 1],
+  [qr/-----BEGIN (?:[A-Z]+ )*PRIVATE KEY(?: BLOCK)?-----/, 'private key', 0],
 );
 # the same rules with a capture group, compiled once
-my @token_cap = map { qr/($_->[0])/ } @token_rules;
+my @token_cap = map { $_->[2] ? qr/(?<![A-Za-z0-9])($_->[0])/ : qr/($_->[0])/ } @token_rules;
 
 # Credentials assigned to a name that contains a credential word, also as
 # part of a longer name (DB_PASSWORD, client_secret). Names are capped at 64
