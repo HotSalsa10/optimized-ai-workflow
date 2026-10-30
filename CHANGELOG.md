@@ -41,7 +41,9 @@ Nothing yet. Release 1 is being built.
 ### Changed (step 4)
 
 - run-checks compares the bytes of every tracked file with the commit at its start and in tree-unchanged, so a CR that core.autocrlf hides from git status is a change; a CRLF or $Id$ that the commit's own .gitattributes asks for is not, on Linux too (DECISIONS A36).
-- Main is no longer taken from an origin/HEAD that names the task branch itself (a single-branch clone), and git never fetches a missing object while the method reads.
+- Main is no longer taken from an origin/HEAD that names the task branch itself, and git never fetches a missing object while the method reads (git 2.44 and later).
+- The review packet now accepts a CRLF or $Id$ that the commit's own .gitattributes asks for (on Linux too), and refuses three cases it accepted before: Git LFS content whose path the commit does not mark for LFS, a committed symlink written as a plain file (core.symlinks=false), and a file over 64 MB that differs only by CRs.
+- status turns off a filter set only inside a submodule, as run-checks and done-check do.
 - The mutation wrapper is split out of step 4 into step 4b, and rule M044's second half becomes M122 (DECISIONS A39).
 
 ### Changed (step 3)
