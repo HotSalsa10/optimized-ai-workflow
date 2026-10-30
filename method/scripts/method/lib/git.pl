@@ -120,26 +120,39 @@ sub ok {
   return $out;
 }
 
-# flagged DIR: [path, tag] for every index entry marked so git does not
-# compare it with the file on disk (assume-unchanged: a lower-case tag;
-# skip-worktree: S), in the repository whose working tree has its top at
-# DIR and in every submodule checked out in it, nested ones too: git's own
-# status of a submodule obeys the submodule's flags. Paths are relative to
-# DIR. No program from the repository runs.
-sub flagged {
+# submodules DIR: [path relative to DIR, folder] for every submodule
+# checked out in the repository whose working tree has its top at DIR,
+# nested ones too (up to 8 deep)
+sub submodules {
   my ($dir, $prefix, $depth) = @_;
   ($prefix, $depth) = ('', 0) unless defined $prefix;
-  my @f;
-  for my $rec (split /\0/, ok('-C', $dir, 'ls-files', '-v', '-z')) {
-    my ($tag, $path) = split / /, $rec, 2;
-    push @f, ["$prefix$path", $tag] if defined $path && ($tag =~ /\A[a-z]\z/ || $tag eq 'S');
-  }
-  return @f if $depth >= 8;
+  my @s;
   for my $rec (split /\0/, ok('-C', $dir, 'ls-files', '-s', '-z')) {
     my ($meta, $path) = split /\t/, $rec, 2;
     next unless defined $path && $meta =~ /\A160000 /;
     my $sub = "$dir/$path";
-    push @f, flagged($sub, "$prefix$path/", $depth + 1) if -e "$sub/.git";
+    next unless -e "$sub/.git";
+    push @s, ["$prefix$path", $sub];
+    push @s, submodules($sub, "$prefix$path/", $depth + 1) if $depth < 7;
+  }
+  return @s;
+}
+
+# flagged DIR: [path, tag] for every index entry marked so git does not
+# compare it with the file on disk (assume-unchanged: a lower-case tag;
+# skip-worktree: S), in the repository whose working tree has its top at
+# DIR and in every submodule checked out in it: git's own status of a
+# submodule obeys the submodule's flags. Paths are relative to DIR. No
+# program from the repository runs.
+sub flagged {
+  my ($dir) = @_;
+  my @f;
+  for my $r (['', $dir], map { ["$_->[0]/", $_->[1]] } submodules($dir)) {
+    my ($prefix, $d) = @$r;
+    for my $rec (split /\0/, ok('-C', $d, 'ls-files', '-v', '-z')) {
+      my ($tag, $path) = split / /, $rec, 2;
+      push @f, ["$prefix$path", $tag] if defined $path && ($tag =~ /\A[a-z]\z/ || $tag eq 'S');
+    }
   }
   return @f;
 }
