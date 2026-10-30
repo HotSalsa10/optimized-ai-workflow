@@ -23,6 +23,10 @@
 # - <text>" where the text is UTF-8 and holds a letter or digit and no
 # control, format or invisible character (trailing spaces and tabs are
 # dropped); and no other line starts with "<trailer-key>:".
+#
+# Verdicts::judged(TIP, FROM) is the one rule for which commits on main's
+# first-parent history carry a verdict that counts (DECISIONS A30); status
+# and done-check use it. Callers load lib/git.pl first.
 package Verdicts;
 use strict;
 use warnings;
@@ -141,4 +145,30 @@ sub main {
 }
 
 main() unless caller;
+
+# judged TIP FROM: the commits status judges, newest first: those on TIP's
+# first-parent history after FROM, or, when FROM is undef, from the oldest
+# one whose message has a line starting with the trailer key (none such: an
+# empty list). Returns {ids => [...], start => FROM or the oldest judged,
+# shallow => 1 when the history here is cut and older commits were not
+# read}, or {problem => 'not here', shallow => ...} when FROM is not on that
+# history (in a shallow one it may lie beyond the cut). Needs lib/git.pl.
+sub judged {
+  my ($tip, $from) = @_;
+  my ($key) = words('trailer-key', rows());
+  my @ids = split /\n/, Git::ok('rev-list', '--first-parent', $tip);
+  my ($sh) = Git::ok('rev-parse', '--is-shallow-repository') =~ /\A(\w+)/;
+  my $shallow = defined $sh && $sh eq 'true' ? 1 : 0;
+  if (defined $from) {
+    my ($at) = grep { $ids[$_] eq $from } 0 .. $#ids;
+    return { problem => 'not here', shallow => $shallow } unless defined $at;
+    return { ids => [@ids[0 .. $at - 1]], start => $from, shallow => 0 };    # all of it is here
+  }
+  for my $i (reverse 0 .. $#ids) {
+    return { ids => [@ids[0 .. $i]], start => $ids[$i], shallow => $shallow }
+      if grep { index($_, "$key:") == 0 } split /\r?\n/, Git::message($ids[$i]);
+  }
+  return { ids => [], shallow => $shallow };
+}
+
 1;

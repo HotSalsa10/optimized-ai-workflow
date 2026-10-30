@@ -41,6 +41,11 @@
 #                       program that could hide an edit, like a file-system
 #                       monitor), and core.trustctime and core.checkStat are
 #                       set to git's defaults
+#   Git::exact(REF)     the commit id of a full ref name, or undef
+#   Git::main_ref()     (main's full ref name, its commit id), or () when
+#                       there is none: origin/HEAD, then @Git::MAIN_REFS
+#   Git::merge_base(A, B)  ('ok', ids), ('none', what to do) or ('error')
+#   Git::message(ID)    a commit's message, checked against its id
 package Git;
 use strict;
 use warnings;
@@ -219,6 +224,53 @@ sub cat {
     unless object_id($type, $c, $id) eq $id;
   return $c if $once;
   return $cache{$id} = $c;
+}
+
+
+# exact REF: the commit id of the full ref name REF (a branch or tag with the
+# same short name cannot stand in for it), or undef
+sub exact {
+  my ($ref) = @_;
+  my ($st, $id) = run('show-ref', '--verify', '--hash', $ref);
+  return undef if $st || $id !~ /\A([0-9a-f]+)\n\z/;
+  my ($cst, $c) = run('rev-parse', '-q', '--verify', "$1^{commit}");
+  return $cst || $c !~ /\A([0-9a-f]+)\n\z/ ? undef : $1;
+}
+
+# the refs main_ref tries after origin/HEAD, in order
+our @MAIN_REFS = qw(refs/remotes/origin/main refs/heads/main refs/remotes/origin/master refs/heads/master);
+
+# main_ref: (the full name of main, its commit), or () when there is none
+sub main_ref {
+  my ($st, $t) = run('symbolic-ref', '-q', 'refs/remotes/origin/HEAD');
+  $t =~ s/\n\z//;
+  if (!$st && $t =~ m{\Arefs/remotes/origin/\S+\z}) {
+    my $id = exact($t);
+    return ($t, $id) if defined $id;
+  }
+  for my $ref (@MAIN_REFS) {
+    my $id = exact($ref);
+    return ($ref, $id) if defined $id;
+  }
+  return;
+}
+
+# merge_base A B: ('ok', every merge base, the one git picks first);
+# ('none', WHAT TO DO) when A and B share no history here (in a shallow
+# clone, more history may be needed); ('error') when git failed
+my $NO_HISTORY_HINT = 'in a shallow clone, fetch more history (git fetch --deepen=N or git fetch --unshallow)';
+sub merge_base {
+  my ($st, $out) = run('merge-base', '--all', @_);
+  return ('none', $NO_HISTORY_HINT) if $st == 1 << 8;
+  return ('error') if $st || $out !~ /\A(?:[0-9a-f]+\n)+\z/;
+  return ('ok', split /\n/, $out);
+}
+
+# message ID: a commit's message, read raw and checked against its id
+sub message {
+  my $c = cat('commit', $_[0]);
+  my $i = index $c, "\n\n";
+  return $i < 0 ? '' : substr($c, $i + 2);
 }
 
 1;

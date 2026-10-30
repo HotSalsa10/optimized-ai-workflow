@@ -174,11 +174,10 @@ chdir $top or fail(2, 'cannot change to the repository root');
 
 my $head = commit_id('HEAD') or fail(2, 'HEAD is not a commit');
 my $base = commit_id($opt{base}) or fail(2, "the base '$opt{base}' is not a commit here");
-my ($st, $mbs) = run_git('merge-base', '--all', $base, $head);
-fail(2, "the base '$opt{base}' and HEAD share no history here; in a shallow clone, fetch more history (git fetch --deepen=N or git fetch --unshallow)")
-  if $st == 1 << 8;
-fail(2, 'git merge-base failed') if $st || $mbs !~ /\A(?:[0-9a-f]+\n)+\z/;
-my @mbs = split /\n/, $mbs;
+my ($mst, @mbs) = eval { Git::merge_base($base, $head) };
+git_die($@) unless defined $mst;
+fail(2, "the base '$opt{base}' and HEAD share no history here; $mbs[0]") if $mst eq 'none';
+fail(2, 'git merge-base failed') if $mst ne 'ok';
 my $mb = $mbs[0];
 
 # git finds the merge base by following parent links without checking the

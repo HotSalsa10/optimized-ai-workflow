@@ -225,29 +225,6 @@ sub work_lines {
 # undef. git's usual lookup would also take refs/tags/REF or refs/heads/REF
 # when REF itself does not exist, so a branch or tag named
 # refs/remotes/origin/main could stand in for main.
-sub exact {
-  my ($ref) = @_;
-  my ($st, $id) = Git::run('show-ref', '--verify', '--hash', $ref);
-  return undef if $st || $id !~ /\A([0-9a-f]+)\n\z/;
-  my ($cst, $c) = Git::run('rev-parse', '-q', '--verify', "$1^{commit}");
-  return $cst || $c !~ /\A([0-9a-f]+)\n\z/ ? undef : $1;
-}
-
-# main_ref: (the full name of main, its commit), or () when there is none
-sub main_ref {
-  my ($st, $t) = Git::run('symbolic-ref', '-q', 'refs/remotes/origin/HEAD');
-  $t =~ s/\n\z//;
-  if (!$st && $t =~ m{\Arefs/remotes/origin/\S+\z}) {
-    my $id = exact($t);
-    return ($t, $id) if defined $id;
-  }
-  for my $ref (qw(refs/remotes/origin/main refs/heads/main refs/remotes/origin/master refs/heads/master)) {
-    my $id = exact($ref);
-    return ($ref, $id) if defined $id;
-  }
-  return;
-}
-
 # masked TEXT: TEXT with keys, credentials and personal data masked, by
 # secrets.pl --mask (control characters come back escaped)
 sub masked {
@@ -264,13 +241,6 @@ sub masked {
   waitpid $pid, 0;
   die "the masking step failed\n" if $? || !defined $line || $line !~ /\A  (.*)\n\z/s;
   return $1;
-}
-
-# message ID: a commit's message, read raw and checked against its id
-sub message {
-  my $c = Git::cat('commit', $_[0]);
-  my $i = index $c, "\n\n";
-  return $i < 0 ? '' : substr($c, $i + 2);
 }
 
 # subject MESSAGE: its first non-blank line, at most 60 characters
@@ -293,40 +263,33 @@ sub subject {
 sub verdicts_lines {
   my ($conf) = @_;
   my $note = 'task-branch commits are not read; done-check checks the change at merge';
-  my ($ref, $tip) = main_ref();
+  my ($ref, $tip) = Git::main_ref();
   return ['verdicts', 'SKIPPED', 'no main branch (looked for origin/HEAD, refs/remotes/origin/main, refs/heads/main,'
     . " refs/remotes/origin/master, refs/heads/master); $note"] unless defined $ref;
   my ($key) = Verdicts::words('trailer-key', Verdicts::rows());
-  my @ids = split /\n/, Git::ok('rev-list', '--first-parent', $tip);
-  my ($sh) = Git::ok('rev-parse', '--is-shallow-repository') =~ /\A(\w+)/;
-  my $shallow = defined $sh && $sh eq 'true' ? '; shallow history: older commits not read' : '';
+  my $j = Verdicts::judged($tip, $conf->{VERDICTS_FROM});
+  my $shallow = $j->{shallow} ? '; shallow history: older commits not read' : '';
   my (@range, $since);
   if (defined $conf->{VERDICTS_FROM}) {
-    my ($at) = grep { $ids[$_] eq $conf->{VERDICTS_FROM} } 0 .. $#ids;
     return ['verdicts', 'SKIPPED', "VERDICTS_FROM in .claude/method.conf is not in this shallow history of $ref;"
-      . ' fetch more history (git fetch --unshallow)'] if !defined $at && $shallow;
+      . ' fetch more history (git fetch --unshallow)'] if $j->{problem} && $shallow;
     return ['verdicts', 'LOOK', "VERDICTS_FROM in .claude/method.conf is not on ${ref}'s first-parent history"]
-      unless defined $at;
-    $shallow = '';    # the whole range after VERDICTS_FROM is here
-    @range = @ids[0 .. $at - 1];
+      if $j->{problem};
+    @range = @{ $j->{ids} };
     $since = 'after ' . short($conf->{VERDICTS_FROM});
     return ['verdicts', 'SKIPPED', "no commit on $ref $since yet, so there was nothing to check"] unless @range;
   } else {
-    my $oldest;
-    for my $i (reverse 0 .. $#ids) {
-      if (grep { index($_, "$key:") == 0 } split /\r?\n/, message($ids[$i])) { $oldest = $i; last }
-    }
-    return ['verdicts', 'SKIPPED', "no commit on $ref carries a $key line yet; $note$shallow"] unless defined $oldest;
-    @range = @ids[0 .. $oldest];
-    $since = 'since ' . short($ids[$oldest]);
+    return ['verdicts', 'SKIPPED', "no commit on $ref carries a $key line yet; $note$shallow"] unless @{ $j->{ids} };
+    @range = @{ $j->{ids} };
+    $since = 'since ' . short($j->{start});
   }
-  my @bad = grep { defined Verdicts::trailer_problem(message($_)) } @range;
+  my @bad = grep { defined Verdicts::trailer_problem(Git::message($_)) } @range;
   if (@bad) {
     my $old = $bad[-1];
     my @show = map { short($_) } @bad[0 .. ($#bad < 4 ? $#bad : 4)];
     return ['verdicts', 'LOOK', scalar(@bad) . " commits on $ref $since lack a valid $key line: @show"
-      . (@bad > 5 ? ' ...' : '') . '; the oldest, "' . subject(message($old)) . '": '
-      . Verdicts::trailer_problem(message($old))
+      . (@bad > 5 ? ' ...' : '') . '; the oldest, "' . subject(Git::message($old)) . '": '
+      . Verdicts::trailer_problem(Git::message($old))
       . '; accept them by moving VERDICTS_FROM in .claude/method.conf through a reviewed change; never rewrite main'
       . $shallow];
   }
@@ -457,7 +420,7 @@ sub ci_lines {
   my ($hst, $head) = Git::run('rev-parse', '-q', '--verify', 'HEAD^{commit}');
   return ['ci', 'SKIPPED', 'no commit yet'] if $hst;
   push @want, ['', (split /\n/, $head)[0]];
-  my ($ref, $tip) = main_ref();
+  my ($ref, $tip) = Git::main_ref();
   push @want, ['main: ', $tip] if defined $tip && $tip ne $want[0][1];
   my (@details, %words);
   for my $w (@want) {
