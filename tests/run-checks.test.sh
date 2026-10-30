@@ -819,7 +819,8 @@ r3=$(new_repo) || abort_sandbox
 printf '%s\n' "'\\x1b[1m$ak\\x1b[0m'" "'\\x1B[33m$tok\\x1B[39m'" "\"\\u001b[31m$ph\"" "line\\n$ib" \
   "'\\x1b[01;31m\\x1b[K$ak1\\x1b[m\\x1b[K$ak2'" "x\\ny $ak" "x\\nbo.smith@""gmail.com" \
   "\"\\033[31m$ak\"" "'\\e[1m$tok'" "^[[K$ak" "\"\\u{1b}[1m$tok\"" "a\\t$ak" "\$'\\E[1m$tok'" "\"\\ESC[1m$ak\"" \
-  "$tok x\\n$ak" 're.sub(r"\bpass''word=[^&\s]+&yz", "", s)' '"+12\t3456\t7890"' "\"\\x1b(B$ak\"" >"$r3/out.txt"
+  "$tok x\\n$ak" 're.sub(r"\bpass''word=[^&\s]+&yz", "", s)' '"+12\t3456\t7890"' "\"\\x1b(B$ak\"" "'$ak1\\u{1b}[1m$ak2'" \
+  "$(perl -e 'print join(" ", map { "u$_\@gm" . "ail.com" } 1..101), " x\\nbo.x\@gm", "ail.com bo.x\@gm", "ail.com"')" >"$r3/out.txt"
 pgb="-----BEGIN PGP PRIV""ATE KEY BLOCK-----"
 pge="-----END PGP PRIV""ATE KEY BLOCK-----"
 # the key's last body line is short, as a real key's often is
@@ -853,6 +854,12 @@ if grep -q 'out.txt:16:' "$logf"; then
   fail "a credential name after an escape written as text is not read as the start of a line" "$(grep 'out.txt:16:' "$logf")"
 else
   pass "a credential name after an escape written as text is not read as the start of a line"
+fi
+n=$(grep -c 'out.txt:20: email address' "$logf")
+if [ "$n" -eq 103 ]; then
+  pass "past 100 finds on one line, a piece's find equal to one the whole line shows is still left out"
+else
+  fail "past 100 finds on one line, equal finds are reported once: $n lines for 103 finds" ""
 fi
 n=$(grep -c -e 'out.txt:6: AWS access key' -e 'out.txt:7: email address' "$logf")
 if [ "$n" -eq 2 ]; then
