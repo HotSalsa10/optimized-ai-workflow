@@ -151,6 +151,12 @@ Notes for later steps, from the step 4 design critique:
 
 Rules: M044 (the mutation half), M122 (new, the parameter half, step 6). Designed and critiqued with step 4; built after step 4 closes.
 
+- [x] Design rechecked against the code step 4 built (v3): three independent readers (integration, likely review failures, split). Changes from v2: only files whose disk bytes are the stored blob are mutated (a converted or LFS file would be damaged); one way to run a check, shared with run-checks; each check in its own process group under a watchdog that stops it if mutate dies; the lock shared with run-checks (a run-checks run between two mutants could log a pass over a restored mutant); a journal that lists every file written; lock before recovery; file times set forward with utime instead of waiting; --list and --recover; the log, the mutant id, a lone < or >, binary + and -, the in-string tag and MUTATE_SKIP cut or moved to step 6; no mutant of an integer with a leading zero, nor of && or || on a shell line that deletes or moves.
+- [ ] 4b.1 Restructure: checks.pl's check_project split into applies, run and judge; helpers die instead of stopping run-checks. Output byte for byte the same.
+- [ ] 4b.2 The plan, read only (--list): mutate-changed.sh, lib/mutate.pl's planning half, Tree::added_lines, MUTATE_PATHS and MUTATION_CHECKS; diff.renameLimit pinned in Tree::changed (own commit).
+- [ ] 4b.3 Run mutants safely: lock, journal, recovery, --recover, the runner's time limit and process group, signals, status LOOKs, run-checks' shared lock. No PASS yet (all killed is SKIPPED kills-unchecked).
+- [ ] 4b.4 Trust the kills: run B, the control run, run C; PASS; M044 done.
+
 ## Next
 
-Step 4b: mutate-changed.sh, built from the step 4 design (section 5) and its critique, then reviewed like every step.
+Step 4b.1: the check-runner restructure in checks.pl, then 4b.2 to 4b.4, each reviewed on its own.
