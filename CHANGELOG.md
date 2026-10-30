@@ -40,6 +40,7 @@ Nothing yet. Release 1 is being built.
 
 ### Changed (step 4b)
 
+- The review packet finds moved files up to git's default limit whatever a local diff.renameLimit says (a low one turned moves into deletes and adds).
 - run-checks' way of running one project check is split into parts (whether it applies here, and how its end is judged) that mutate-changed.sh will share; internal, with run-checks' output byte for byte the same.
 
 ### Changed (step 4)

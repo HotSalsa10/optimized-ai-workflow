@@ -343,6 +343,20 @@ else
   fail "hostile git settings and an external diff do not change the packet" "$(diff "$work/clean.packet" "$work/hostile.packet" | head -20)"
 fi
 
+# a local diff.renameLimit cannot turn moves into deletes and adds (the names
+# change too, so git cannot match them by name first)
+rl=$(new_repo) || abort_sandbox
+seq 1 40 >"$rl/a.txt"
+seq 101 140 >"$rl/b.txt"
+commit "$rl" base
+(cd "$rl" && git checkout -q -b feature && mkdir src && git mv a.txt src/alpha.txt && git mv b.txt src/beta.txt &&
+  echo 41 >>src/alpha.txt && echo 141 >>src/beta.txt)
+commit "$rl" moves
+(cd "$rl" && git config diff.renameLimit 1)
+if (cd "$rl" && git diff --name-status main feature 2>/dev/null | grep -q '^D'); then pass "setup: git itself lists the moves as deletes"; else fail "setup: git itself lists the moves as deletes"; fi
+build "$rl" --base main
+expect "a local diff.renameLimit does not turn moves into deletes and adds" 0 "FILE R a.txt -> src/alpha.txt" "FILE R b.txt -> src/beta.txt"
+
 # only bash, git and perl are needed
 mkdir -p "$work/bin"
 for tool in bash git perl; do ln -s "$(command -v "$tool")" "$work/bin/$tool"; done

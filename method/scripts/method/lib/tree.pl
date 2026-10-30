@@ -134,11 +134,13 @@ sub check_trees {
 }
 
 # changed FROM TO: sorted by name. Submodules are listed whatever .gitmodules
-# or the settings say, and the order is the same whatever a diff.orderFile
-# setting says.
+# or the settings say, the order is the same whatever a diff.orderFile
+# setting says, and moves are found up to git's default limit whatever a
+# diff.renameLimit setting says (-l1000).
 sub changed {
   my ($from_rev, $to_rev) = @_;
-  my $raw = git_ok('diff', '--raw', '-z', '--no-abbrev', '-M', '--ignore-submodules=none', $from_rev, $to_rev);
+  my $raw = git_ok('diff', '--raw', '-z', '--no-abbrev', '-M', '-l1000', '--ignore-submodules=none', $from_rev,
+    $to_rev);
   my @f = split /\0/, $raw, -1;
   pop @f if @f && $f[-1] eq '';
   my @files;
