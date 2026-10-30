@@ -85,8 +85,11 @@ my @token_rules = (
   [qr/xox[abprs]-[A-Za-z0-9-]{10,}/, 'Slack token', 1],
   [qr/-----BEGIN (?:[A-Z]+ )*PRIVATE KEY(?: BLOCK)?-----/, 'private key', 0],
 );
-# the same rules with a capture group, compiled once
+# the same rules with a capture group, compiled once; the output mask also
+# takes a shape glued to a word (an escape in a spelling it does not know,
+# such as %1B or &#27;, leaves the key right after a letter)
 my @token_cap = map { $_->[2] ? qr/(?<![A-Za-z0-9])($_->[0])/ : qr/($_->[0])/ } @token_rules;
+my @token_mask = map { qr/($_->[0])/ } @token_rules;
 
 # Credentials assigned to a name that contains a credential word, also as
 # part of a longer name (DB_PASSWORD, client_secret). Names are capped at 64
@@ -191,40 +194,51 @@ sub iban_hits {
 # A finding is shown by its kind and length only. A key or token of 20 or
 # more characters also keeps its first 4, which name the kind (sk-a, ghp_,
 # AKIA) without giving the key away.
+our $MASKED;    # set (with local) to an array that collects [text, is_token] for every text masked
 sub mask {
   my ($s, $is_token) = @_;
+  push @$MASKED, [$s, $is_token] if $MASKED;
   my $len = length $s;
   return substr($s, 0, 4) . "...($len chars)" if $is_token && $len >= 20;
   return "***($len chars)";
 }
 
-# mask_all TEXT HIT...: every HIT in TEXT masked, in one pass (longest first)
+# mask_found TEXT [HIT, IS_TOKEN]...: every HIT in TEXT masked as mask shows
+# it, in one pass (longest first)
+sub mask_found {
+  my ($s, @found) = @_;
+  return $s unless @found;
+  my %tok = map { ($_->[0] => $_->[1]) } @found;
+  my $alt = join '|', map { quotemeta } sort { length $b <=> length $a } keys %tok;
+  $s =~ s/($alt)/mask($1, $tok{$1})/ge;
+  return $s;
+}
+# mask_all TEXT HIT...: every HIT in TEXT masked
 sub mask_all {
   my ($s, @hits) = @_;
-  return $s unless @hits;
-  my $alt = join '|', map { quotemeta } sort { length $b <=> length $a } @hits;
-  $s =~ s/($alt)/mask($1, 0)/ge;
-  return $s;
+  return mask_found($s, map { [$_, 0] } @hits);
 }
 # (BLOCK: an armored PGP private key)
 my $pem_begin = qr/-----BEGIN (?:[A-Z]+ )*PRIVATE KEY(?: BLOCK)?-----/;
 my $pem_end = qr/-----END (?:[A-Z]+ )*PRIVATE KEY(?: BLOCK)?-----/;
-# An escape written as text, as a test runner prints a string (Python's
-# '\x1b[1m', Node's '\x1B[33m', JSON's "\u001b[31m", '\033[0m', '\n',
-# cat -v's ^[[K), with the rest of a colour code after it. A word right
-# after one has a letter before it, which hides a key from every rule.
-my $text_code = qr/(?:\\(?:x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|u\{[0-9A-Fa-f]{1,6}\}|[0-7]{1,3}|[abefnrtv])|\^\[)(?:\[[0-?]*[ -\/]*[@-~])?/;
-# plain TEXT: TEXT with every terminal code and every escape written as
-# text taken out
+# ESC written as text, as a test runner prints a string (Python's '\x1b',
+# Node's '\x1B', JSON's "\u001b", '\033', bash's \E, Haskell's \ESC, cat
+# -v's ^[), with the rest of its sequence ([31m, (B). Then any escape
+# written as text (\n, \t, \x09). A word right after one has a letter
+# before it, which hides a key from every rule.
+my $esc_text = qr/(?:\\(?:x0*1[bB]|x\{0*1[bB]\}|u001[bB]|u\{0*1[bB]\}|0?33|27|ESC|[eE]|c\[)|\^\[)(?:\[[0-?]*[ -\/]*[@-~]|[ -\/]+[0-~])?/;
+my $text_code = qr/$esc_text|\\(?:x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|u\{[0-9A-Fa-f]{1,6}\}|[0-7]{1,3}|[abefnrtv])(?:\[[0-?]*[ -\/]*[@-~])?/;
+# plain TEXT: TEXT with every terminal code and every ESC written as text
+# taken out (\n and \t stay: they part words, they do not colour them)
 sub plain {
-  (my $s = Esc::plain($_[0])) =~ s/$text_code//g;
+  (my $s = Esc::plain($_[0])) =~ s/$esc_text//g;
   return $s;
 }
 sub mask_pass {
   my ($s) = @_;
   # a whole private key on one line (as JSON writes it) is masked to its end
   $s =~ s/($pem_begin.*?(?:$pem_end|\z))/mask($1, 1)/ge;
-  $s =~ s/$_/mask($1, 1)/ge for @token_cap;
+  $s =~ s/$_/mask($1, 1)/ge for @token_mask;
   $s =~ s/$quoted_cred/$1 . mask($3, 0)/ge;
   $s =~ s/$env_cred/$1 . mask($3, 0)/e;
   $s =~ s/($email_re)/email_ok($1) ? $1 : mask($1, 0)/ge;
@@ -243,14 +257,18 @@ sub mask_pass {
 # key inside one (a link's address) is not let through. Last, a key with a
 # code inside it (grep's highlighting, a coloured diff) is whole only with
 # the codes taken out: when that copy still holds something to mask, the
-# text is shown without its codes, masked.
+# text is shown without its codes, masked, and with every text the pieces
+# gave masked in it first (without the code, a key that followed one would
+# be glued to the word before it).
 sub mask_text {
   my ($t) = @_;
+  local $MASKED = [];
   my $s = mask_pass($t);
   $s = join '', map { /\A$text_code\z/ ? $_ : mask_pass($_) } split /($text_code|$term_code)/, $s;
+  my @found = @$MASKED;
   my $plain = plain($s);
   return $s if $plain eq $s || mask_pass($plain) eq $plain;
-  return mask_text(plain($t));
+  return mask_text(mask_found(plain($t), @found));
 }
 
 # --mask: a filter for other tools' output. A private key's body lines hold
@@ -260,8 +278,9 @@ sub mask_text {
 # they were the end of a key whose BEGIN line came before this input (a
 # window of a longer output), and they are masked too.
 if ($mask_mode) {
-  # (=XXXX: the checksum line before a PGP key's END line)
-  my $body = qr/\A[ \t]*(?:[A-Za-z0-9+\/=]{16,}|=[A-Za-z0-9+\/]{4})[ \t]*\z/;
+  # (any length: a key's last body line, and a PGP key's =XXXX checksum
+  # line, are short; + and = also cover a diff of a key file)
+  my $body = qr/\A[ \t]*[A-Za-z0-9+\/=]+[ \t]*\z/;
   my ($in_key, @held) = (0);
   my $out = sub { say_line('  ' . $_[0]) };
   while (my $line = <STDIN>) {
@@ -361,12 +380,16 @@ sub allow_id {
 
 my ($examined, $bad, $allowed_hits, $skipped, $staged_examined) = (0, 0, 0, 0, 0);
 my @skipped_names;
+my (%disk_found, $in_staged);
 
 # report PATH WHERE KIND TEXT IS_TOKEN SEEN SKIP_SEEN
 sub report {
   my ($path, $where, $kind, $text, $is_token, $seen, $skip_seen) = @_;
   return if $skip_seen && $seen->{$text};
   $seen->{$text} = 1;
+  # a find in a staged copy that the copy on disk holds too is reported once
+  my $key = "$path\0$kind\0$text";
+  if ($in_staged) { return if $disk_found{$key} } else { $disk_found{$key} = 1 }
   if ($allow{$path}) {
     my $id = allow_id($path, $text);
     if (exists $allow{$path}{$id}) {
@@ -380,10 +403,11 @@ sub report {
   $bad++;
 }
 
-# rules_on TEXT HIT: every rule on TEXT; HIT is called with the kind, the
-# text found and whether it is a key or token
+# rules_on TEXT HIT [PIECE]: every rule on TEXT; HIT is called with the
+# kind, the text found and whether it is a key or token. A PIECE of a line
+# does not start a line, so the env-style rule is not used on it.
 sub rules_on {
-  my ($line, $hit) = @_;
+  my ($line, $hit, $piece) = @_;
   for my $i (0 .. $#token_rules) {
     while ($line =~ /$token_cap[$i]/g) { $hit->($token_rules[$i][1], $1, 1) }
   }
@@ -391,7 +415,7 @@ sub rules_on {
     my ($name, $value) = ($2, $3);
     $hit->('hard-coded credential', $value, 0) if cred_is_real($name, $value);
   }
-  if ($line =~ /$env_cred/) {
+  if (!$piece && $line =~ /$env_cred/) {
     my ($name, $value) = ($2, $3);
     $hit->('credential in an env-style assignment', $value, 0) if cred_is_real($name, $value);
   }
@@ -407,17 +431,19 @@ sub rules_on {
 # text (print("\x1b[1mAKIA...")) has a letter before it, so the pieces
 # between such escapes are searched too, for what the whole line did not
 # show: a piece's find that is part of a find on the whole line (an email
-# address that took in the n of \n) is reported already.
+# address that took in the n of \n) is reported already. (Past 100 finds
+# on one line, only equal ones are left out, so a long line stays fast.)
 sub scan_line {
   my ($path, $where, $line, $seen, $skip_seen) = @_;
   my %here;
   rules_on($line, sub { $here{ $_[1] } = 1; report($path, $where, @_, $seen, $skip_seen) });
   return unless $line =~ $text_code;
+  my @whole = keys %here;
   for my $piece (split /$text_code/, $line) {
     rules_on($piece, sub {
       my $t = $_[1];
-      report($path, $where, @_, $seen, $skip_seen) unless grep { index($_, $t) >= 0 } keys %here;
-    });
+      report($path, $where, @_, $seen, $skip_seen) unless $here{$t} || (@whole <= 100 && grep { index($_, $t) >= 0 } @whole);
+    }, 1);
   }
 }
 
@@ -505,59 +531,48 @@ sub scan_name {
   scan_line($path, 'a tracked file name (' . mask_text($path) . ')', $path, {}, 0);
 }
 
+# With --staged, a staged copy is scanned whenever the bytes on disk are not
+# that stored file, or the file is not on disk. git's own comparison is not
+# used: it trusts its stat cache, so a staged secret could hide behind a
+# restored time stamp, and git diff writes the index and runs its hook.
+my (@index, %like, %disk_id);    # index entries [path, mode, id]; path => an id; path => its bytes' id
+if ($staged) {
+  local $/ = "\0";
+  my $l = git_pipe('ls-files', '-s', '-z');
+  while (my $e = <$l>) {
+    chomp $e;
+    my ($meta, $path) = split /\t/, $e, 2;
+    my ($mode, $oid) = split / /, $meta;
+    push @index, [$path, $mode, $oid];
+    $like{$path} = $oid;
+  }
+  close $l or die "secrets: git ls-files failed\n";
+}
+
 for my $file (@ARGV) {
   my $bytes = read_raw($file);
   if (!defined $bytes) { say_line('secrets: cannot read ' . mask_text($file)); $bad++; next; }
+  $disk_id{$file} = Git::object_id('blob', $bytes, $like{$file}) if defined $like{$file};
   scan_content($file, mask_text($file), $bytes);
 }
 
-# Staged copies that differ from the working tree.
 if ($staged) {
-  my %differs;
-  {
-    local $/ = "\0";
-    # no filter program runs and no stat shortcut hides an edit (lib/git.pl);
-    # diff-files never refreshes or writes the index, so no hook runs (a
-    # file whose stat data is out of date is listed too, and only adds its
-    # staged copy to the scan)
-    my $d = git_pipe(Git::status_options(), 'diff-files', '--name-only', '-z');
-    while (my $p = <$d>) { chomp $p; $differs{$p} = 1 }
-    close $d or die "secrets: git diff-files failed\n";
-    # files marked assume-unchanged (lower-case tag) or skip-worktree (S), which
-    # git diff does not compare
-    my $v = git_pipe('ls-files', '-v', '-z');
-    while (my $e = <$v>) {
-      chomp $e;
-      my ($tag, $p) = split / /, $e, 2;
-      $differs{$p} = 1 if defined $p && ($tag =~ /^[a-z]$/ || $tag eq 'S');
-    }
-    close $v or die "secrets: git ls-files -v failed\n";
+  my @blobs;
+  for my $x (@index) {
+    my ($path, $mode, $oid) = @$x;
+    scan_name($path);
+    # a symlink's stored target is text too, whatever it points at
+    push @blobs, [$path, $oid, ' (link target)'] if $mode eq '120000';
+    next if $mode eq '160000' || $mode eq '120000';
+    push @blobs, [$path, $oid, ' (staged)'] unless defined $disk_id{$path} && $disk_id{$path} eq $oid;
   }
-  {
-    local $/ = "\0";
-    my $l = git_pipe('ls-files', '-s', '-z');
-    my @blobs;
-    while (my $e = <$l>) {
-      chomp $e;
-      my ($meta, $path) = split /\t/, $e, 2;
-      my ($mode, $oid) = split / /, $meta;
-      scan_name($path);
-      # a symlink's stored target is text too, whatever it points at
-      push @blobs, [$path, $oid, ' (link target)'] if $mode eq '120000';
-      push @blobs, [$path, $oid, ' (staged)'] if $differs{$path} && $mode ne '160000' && $mode ne '120000';
-    }
-    close $l or die "secrets: git ls-files failed\n";
-    for my $b (@blobs) {
-      my ($path, $oid, $kind) = @$b;
-      local $/;
-      my $c = git_pipe('cat-file', 'blob', $oid);
-      binmode $c;
-      my $bytes = <$c>;
-      close $c or die "secrets: git cat-file failed\n";
-      my $before = $examined;
-      scan_content($path, mask_text($path) . $kind, defined $bytes ? $bytes : '');
-      $staged_examined += $examined - $before;
-    }
+  $in_staged = 1;
+  for my $b (@blobs) {
+    my ($path, $oid, $kind) = @$b;
+    my $before = $examined;
+    # one git process for every stored file, each checked against its id
+    scan_content($path, mask_text($path) . $kind, Git::cat('blob', $oid));
+    $staged_examined += $examined - $before;
   }
 }
 

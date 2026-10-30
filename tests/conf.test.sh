@@ -101,6 +101,8 @@ conf_bad "a key in lower case" 'product_paths=zq\n' 1 "unknown key product_paths
 conf_bad "a PROFILE key (not in this version)" 'PROFILE=zq\n' 1 "unknown key PROFILE"
 conf_bad "an unknown key name with digits (a pasted value ending in =?) is not shown" 'Ab3dEf9hKk2=zq\n' 1 "an unknown key, not shown"
 case "$got" in *Ab3dEf9hKk2*) fail "an unknown key name with digits is not quoted" "$got" ;; *) pass "an unknown key name with digits is not quoted" ;; esac
+conf_bad "an unknown key name in mixed case (a pasted value ending in =?) is not shown" 'AbcdEfghIjkl=zq\n' 1 "an unknown key, not shown"
+conf_bad "an unknown key name of 31 letters is not shown" 'ABCDEFGHIJKLMNOPQRSTUVWXYZABCDE=zq\n' 1 "an unknown key, not shown"
 printf 'VERDICTS_FROM=0123456789abcdef0123456789abcdef01234567\nVERDICTS_FROM=1123456789abcdef0123456789abcdef01234567\n' >"$cfile"
 read_conf
 case "$got" in

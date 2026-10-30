@@ -168,15 +168,13 @@ sub work_lines {
     my $n = () = $st =~ /\0/g;
     push @parts, "$where$n uncommitted entries (a new folder counts once)" if $n;
     my ($marked, $missing) = (0, 0);
-    for my $e (split /\0/, Git::ok(@wg, 'ls-files', '-v', '-z')) {
-      my ($tag, $path) = split / /, $e, 2;
-      next unless defined $path;
+    for my $e (Git::flagged($wt->{worktree})) {
+      my ($path, $tag) = @$e;
       if ($tag =~ /\A[a-z]\z/) { $marked++; next }
-      next unless $tag eq 'S';
       if (-e "$wt->{worktree}/$path" || -l "$wt->{worktree}/$path") { $marked++ } else { $missing++ }
     }
-    push @parts, "$where$marked files are marked so git does not compare them (assume-unchanged or skip-worktree)"
-      if $marked;
+    push @parts, "$where$marked files are marked so git does not compare them (assume-unchanged or skip-worktree, also"
+      . ' inside submodules)' if $marked;
     # a deletion hidden this way would drop a test from every local run
     push @parts, "$where$missing tracked files are not on disk and are marked skip-worktree, so git does not show them"
       . ' as deleted (a sparse checkout does this too)' if $missing;

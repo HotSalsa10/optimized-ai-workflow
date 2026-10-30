@@ -231,6 +231,7 @@ sub cut {
 # (matched, capture)
 sub count_in {
   my ($file, $re) = @_;
+  local $SIG{__WARN__} = sub { };    # a warning could quote the pattern raw
   open my $fh, '<:raw', $file or return (0, undef);
   my ($matched, $value) = (0, undef);
   while (my $chunk = <$fh>) {
@@ -259,10 +260,10 @@ sub check_env {
 # branch it is on, the commit of every branch and tag, and every path git
 # does not ignore that is changed, untracked, or marked so git does not
 # compare it (assume-unchanged, or skip-worktree, also with the file gone
-# from disk: a sparse checkout, or a deletion hidden that way), each with
-# its mode and the SHA-256 of what is on disk (.method/local left out). git
-# status runs with no filter program and no stat shortcut
-# (Git::status_options).
+# from disk: a sparse checkout, or a deletion hidden that way; also inside
+# submodules, Git::flagged), each with its mode and the SHA-256 of what is
+# on disk (.method/local left out). git status runs with no filter program
+# and no stat shortcut (Git::status_options).
 sub fingerprint {
   require Digest::SHA;    # loaded here, so status.pl can load this file without it
   my ($st, $head) = Git::run('rev-parse', '-q', '--verify', 'HEAD^{commit}');
@@ -276,11 +277,7 @@ sub fingerprint {
   for my $rec (split /\0/, $out) {
     push @paths, [substr($rec, 3), substr($rec, 0, 2)] if length $rec >= 4;
   }
-  for my $rec (split /\0/, Git::ok('ls-files', '-v', '-z')) {
-    my ($tag, $path) = split / /, $rec, 2;
-    next unless defined $path;
-    push @paths, [$path, "flag $tag"] if $tag =~ /\A[a-z]\z/ || $tag eq 'S';
-  }
+  push @paths, [$_->[0], "flag $_->[1]"] for Git::flagged('.');
   my %e;
   for my $p (@paths) {
     my ($path, $why) = @$p;
@@ -429,7 +426,11 @@ sub check_project {
   return { status => 'FAIL', kind => 'exit', examined => '-', detail => 'killed by signal ' . ($st & 127) . " ($at)" }
     if $st & 127;
   return { status => 'FAIL', kind => 'exit', examined => '-', detail => 'exit ' . ($st >> 8) . " ($at)" } if $st;
-  my ($matched, $v) = count_in($out, $c->{count});
+  # a pattern that is fine on an empty line can still fail on an output line
+  my ($matched, $v) = eval { count_in($out, $c->{count}) };
+  return { status => 'SKIPPED', kind => 'no-count', examined => '-',
+    detail => "it passed, but its count pattern failed when it was matched on its output ($at)" }
+    unless defined $matched;
   return { status => 'SKIPPED', kind => 'no-count', examined => '-',
     detail => "it passed, but no output line matched its count pattern, so nothing shows it examined anything ($at)" }
     unless $matched;

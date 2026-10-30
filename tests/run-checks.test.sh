@@ -817,18 +817,24 @@ r3=$(new_repo) || abort_sandbox
 # a test runner's string forms: Python's repr, Node's inspect, JSON, an escaped newline, grep's
 # highlighting inside a key; and a key found on the whole line and again after an escaped newline
 printf '%s\n' "'\\x1b[1m$ak\\x1b[0m'" "'\\x1B[33m$tok\\x1B[39m'" "\"\\u001b[31m$ph\"" "line\\n$ib" \
-  "'\\x1b[01;31m\\x1b[K$ak1\\x1b[m\\x1b[K$ak2'" "x\\ny $ak" "x\\nbo.smith@""gmail.com" >"$r3/out.txt"
+  "'\\x1b[01;31m\\x1b[K$ak1\\x1b[m\\x1b[K$ak2'" "x\\ny $ak" "x\\nbo.smith@""gmail.com" \
+  "\"\\033[31m$ak\"" "'\\e[1m$tok'" "^[[K$ak" "\"\\u{1b}[1m$tok\"" "a\\t$ak" "\$'\\E[1m$tok'" "\"\\ESC[1m$ak\"" \
+  "$tok x\\n$ak" 're.sub(r"\bpass''word=[^&\s]+&yz", "", s)' '"+12\t3456\t7890"' "\"\\x1b(B$ak\"" >"$r3/out.txt"
 pgb="-----BEGIN PGP PRIV""ATE KEY BLOCK-----"
 pge="-----END PGP PRIV""ATE KEY BLOCK-----"
-printf '%s\n\nlQOYBF%s\n%s\n=Wx7z\n%s\nafter the key\n{"key":"%s\\n\\nlQOYBF%s\\n%s"}\n' "$pgb" "$(perl -e 'print "Ab12" x 15')" \
+# the key's last body line is short, as a real key's often is
+printf '%s\n\nlQOYBF%s\n%s\nGh78\n=Wx7z\n%s\nafter the key\n{"key":"%s\\n\\nlQOYBF%s\\n%s"}\n' "$pgb" "$(perl -e 'print "Ab12" x 15')" \
   "$(perl -e 'print "Cd34" x 15')" "$pge" "$pgb" "$(perl -e 'print "Ef56" x 15')" "$pge" >"$r3/pgp.txt"
 (cd "$r3" && git add -A && git commit -q -m fixtures)
+# glued: a key after a letter and a colour code, also on a line whose other value only the copy without codes shows;
+# odd: escapes in spellings the mask does not split at (URL and HTML forms)
 # shellcheck disable=SC2016 # the checks' own shell expands these
-tsv "$r3" "$(ck glued "printf 'x\\033[31m%s\\033[0m\\nx\\033[31m%s\\nx\\033[1m%s\\n' $ak $ph $ib; exit 1")" \
+tsv "$r3" "$(ck glued "printf 'x\\033[31m%s\\033[0m\\nx\\033[31m%s\\nx\\033[1m%s\\nx\\033[31m%s\\033[0m and +1415\\033[1m5550132\\nx\\033[31m%s\\033[0m and %s\\033[1m%s\\n' $ak $ph $ib $ak $ph $ak1 $ak2; exit 1")" \
+  "$(ck odd "printf '%%1B[1m%s\\n&#27;[1m%s\\n' $tok $ak; exit 1")" \
   "$(ck repr 'cat out.txt; exit 1')" "$(ck pgp 'cat pgp.txt; exit 1')" "$(ck pgpend 'sed -n "4,\$p" pgp.txt; exit 1')"
 run "$r3"
 leaked=""
-for v in "$ak" "$tok" "$ph" "$ib" "$ak2" Ab12Ab12 Cd34Cd34 Ef56Ef56; do
+for v in "$ak" "$tok" "$ph" "$ib" "$ak2" 5550132 Ab12Ab12 Cd34Cd34 Ef56Ef56; do
   if printf '%s\n' "$out" | grep -F -q -- "$v" || grep -F -q -- "$v" "$logf"; then leaked="$leaked [$v]"; fi
 done
 if [ "$code" -eq 1 ] && [ -z "$leaked" ]; then
@@ -836,9 +842,18 @@ if [ "$code" -eq 1 ] && [ -z "$leaked" ]; then
 else
   fail "values after a letter and a colour code, after escapes written as text, or in a PGP key block are masked: shown in full:$leaked" "$out"
 fi
-expect "the shown lines keep what is not secret" 1 'x\x1B[31mAKIA...(20 chars)' "'\\x1B[33mghp_...(40 chars)\\x1B[39m'" 'line\n***(22 chars)' "  after the key"
-expect "the secrets check finds a key after an escape written as text, and a PGP private key, in a tracked file" 1 \
-  "out.txt:1: AWS access key" "out.txt:2: GitHub token" "out.txt:3: phone number" "out.txt:4: bank account number" "pgp.txt:1: private key"
+in_log "the shown lines keep what is not secret" '  x\x1B[31mAKIA...(20 chars)' "  '\\x1B[33mghp_...(40 chars)\\x1B[39m'" '  line\n***(22 chars)' \
+  "  after the key" '  xAKIA...(20 chars) and ***(12 chars)' '  "+12\t3456\t7890"' '  x***(12 chars) and AKIA...(20 chars)'
+in_log "the secrets check finds a key after an escape written as text (each spelling), and a PGP private key, in a tracked file" \
+  "out.txt:1: AWS access key" "out.txt:2: GitHub token" "out.txt:3: phone number" "out.txt:4: bank account number" \
+  "out.txt:8: AWS access key" "out.txt:9: GitHub token" "out.txt:10: AWS access key" "out.txt:11: GitHub token" \
+  "out.txt:12: AWS access key" "out.txt:13: GitHub token" "out.txt:14: AWS access key" "out.txt:15: AWS access key" \
+  "out.txt:18: AWS access key" "pgp.txt:1: private key"
+if grep -q 'out.txt:16:' "$logf"; then
+  fail "a credential name after an escape written as text is not read as the start of a line" "$(grep 'out.txt:16:' "$logf")"
+else
+  pass "a credential name after an escape written as text is not read as the start of a line"
+fi
 n=$(grep -c -e 'out.txt:6: AWS access key' -e 'out.txt:7: email address' "$logf")
 if [ "$n" -eq 2 ]; then
   pass "a find on the whole line is not reported again from a piece of it, also when the piece holds less of it"
@@ -846,6 +861,20 @@ else
   fail "a find on the whole line is reported once: $n lines for 2 finds" "$(cat "$logf")"
 fi
 (cd "$r3" && git rm -q out.txt pgp.txt && git commit -q -m "no fixtures")
+# a staged copy is scanned only when its content differs from the disk, and a find in both is reported once
+printf 'k=%s\n' "$ak" >"$r3/src/dirty.txt"
+printf 'k=%s\n' "$ak" >"$r3/src/two.txt"
+(cd "$r3" && git add src && git commit -q -m keys)
+touch -t 202001010000 "$r3/src/dirty.txt"
+echo more >>"$r3/src/two.txt"
+run "$r3"
+n=$(grep -c -e 'src/dirty.txt.*AWS access key' -e 'src/two.txt.*AWS access key' "$logf")
+if [ "$code" -eq 1 ] && [ "$n" -eq 2 ]; then
+  pass "a key in a file whose stat data is out of date, or in both copies of an edited file, is reported once"
+else
+  fail "a key in a stat-dirty file or in both copies of an edited file is reported once: $n lines for 2 keys" "$(cat "$logf")"
+fi
+(cd "$r3" && git rm -q -f src/dirty.txt src/two.txt && git commit -q -m "no keys")
 tsv "$r3" "$(ck unit 'echo "1 passed"')"
 (cd "$r3" && git update-index --skip-worktree src/a.txt)
 rm "$r3/src/a.txt"
@@ -862,6 +891,28 @@ tsv "$r3" "rec<T>any<T>-<T>(?R)([0-9]+)<T>echo 1"
 run "$r3"
 expect "a count pattern that fails when it is matched stops the run and names the line" 2 \
   "checks/main.tsv line 1: the count pattern fails when it is matched"
+tsv "$r3" "prop<T>any<T>-<T>\\p{IsNoSuchThing}([0-9]+) passed<T>echo 'x1 passed'"
+run "$r3"
+expect "a count pattern that fails only on an output line is SKIPPED, naming the line, and the run goes on" 3 \
+  "prop: SKIPPED - it passed, but its count pattern failed when it was matched on its output (checks/main.tsv line 1)" "tree-unchanged"
+tsv "$r3" "$(ck hide 'git update-index --skip-worktree src/a.txt && rm src/a.txt && echo "1 passed"')"
+run "$r3"
+expect "a check that deletes a file and hides it with skip-worktree fails tree-unchanged" 1 "changed during the run: src/a.txt"
+(cd "$r3" && git update-index --no-skip-worktree src/a.txt && git checkout -q src/a.txt)
+subr=$(new_repo) || abort_sandbox
+(cd "$r3" && git -c protocol.file.allow=always submodule -q add "$subr" lib 2>/dev/null && git commit -q -m sub) ||
+  fail "could not add a submodule"
+tsv "$r3" "$(ck unit 'echo "1 passed"')"
+(cd "$r3/lib" && git update-index --skip-worktree src/a.txt && rm src/a.txt)
+run "$r3"
+expect "a file deleted and hidden by skip-worktree inside a submodule counts as uncommitted" 0 "on uncommitted changes"
+(cd "$r3/lib" && git update-index --no-skip-worktree src/a.txt && git checkout -q src/a.txt)
+tsv "$r3" "$(ck subhide '(cd lib && git update-index --skip-worktree src/a.txt && rm src/a.txt) && echo "1 passed"')"
+run "$r3"
+expect "a check that deletes a file inside a submodule and hides it with skip-worktree fails tree-unchanged" 1 \
+  "changed during the run: lib/src/a.txt"
+(cd "$r3/lib" && git update-index --no-skip-worktree src/a.txt && git checkout -q src/a.txt)
+(cd "$r3" && git rm -q -f lib && rm -rf .git/modules/lib && git commit -q -m "no sub")
 printf '# nothing accepted\n' >"$work/allow.txt"
 ln -s "$work/allow.txt" "$r3/checks/scan-allow.txt"
 tsv "$r3" "$(ck unit 'echo "1 passed"')"

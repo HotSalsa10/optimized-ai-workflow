@@ -905,7 +905,15 @@ case "$(od -An -c "$eol/plain.txt" | tr -d ' \n')" in
 esac
 build "$eol" --base main
 expect "a clean CRLF working copy under core.autocrlf=true is not refused" 0 "FILE M plain.txt"
-(cd "$eol" && git config core.autocrlf false && git checkout -q -- plain.txt)
+printf 'plain\r\nmore\n' >"$eol/plain.txt"
+(cd "$eol" && git add plain.txt)
+if [ -z "$(cd "$eol" && git status --porcelain --untracked-files=no)" ]; then
+  build "$eol" --base main
+  expect "a CR added to one line, which core.autocrlf makes look committed, is refused" 1 "the working copy of plain.txt is not what was committed"
+else
+  skip "a CR added to one line under core.autocrlf: git status sees the edit here"
+fi
+(cd "$eol" && git config core.autocrlf false && rm -f plain.txt && git checkout -q -- plain.txt)
 # shellcheck disable=SC2016 # $1 is for the script being written
 printf '#!/bin/sh\ncat >/dev/null\ngit cat-file blob "HEAD:$1"\n' >"$eol/.git/clean-hide.sh"
 # shellcheck disable=SC2016 # $Id$ is meant literally

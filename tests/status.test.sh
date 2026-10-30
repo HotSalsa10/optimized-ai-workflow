@@ -711,6 +711,15 @@ expect "a change inside a submodule is seen there" 1 "work: LOOK - 1 uncommitted
 st "$sm/linked"
 expect "status run in a linked worktree reads the main working tree from its own folder" 1 \
   "work: LOOK - 1 uncommitted entries (a new folder counts once); linked worktrees: $sm/linked"
+(cd "$smw/lib" && git checkout -q a.txt && git update-index --skip-worktree a.txt && rm a.txt)
+st "$smw"
+expect "a file deleted and hidden by skip-worktree inside a submodule is a LOOK" 1 \
+  "work: LOOK - 1 tracked files are not on disk and are marked skip-worktree"
+(cd "$smw/lib" && git update-index --no-skip-worktree a.txt && git checkout -q a.txt && echo hidden >>a.txt && git update-index --assume-unchanged a.txt)
+st "$smw"
+expect "an edit hidden by assume-unchanged inside a submodule is a LOOK" 1 \
+  "work: LOOK - 1 files are marked so git does not compare them (assume-unchanged or skip-worktree, also inside submodules)"
+(cd "$smw/lib" && git update-index --no-assume-unchanged a.txt && git checkout -q a.txt)
 (cd "$lib" && git clone -q --separate-git-dir "$lib/sep.git" remote.git sep 2>/dev/null) || fail "could not clone with --separate-git-dir"
 st "$lib/sep"
 expect "a clone made with --separate-git-dir is read" 0 "work: PASS - nothing uncommitted, nothing unpushed"

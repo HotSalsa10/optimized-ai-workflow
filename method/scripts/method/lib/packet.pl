@@ -342,8 +342,9 @@ fail(1, 'tracked files have uncommitted or staged changes; commit first, because
 
 
 # check_disk: every file of HEAD holds its committed content on disk, as a
-# regular file: the same bytes, or the same bytes once CRLF line ends are
-# turned into LF (git's line-ending conversion), or, for Git LFS, content
+# regular file: the same bytes, or the bytes git's line-ending conversion
+# writes on checkout (every LF with no CR before it written as CRLF; a CR
+# added to some lines only is an edit), or, for Git LFS, content
 # whose SHA-256 is the one the stored pointer names. Any other
 # difference is refused, also one that git status misses (a flag such as
 # skip-worktree, a file-system monitor, a stat cache told to ignore change
@@ -371,8 +372,8 @@ for my $p (sort keys %head_files) {
   close $fh;
   fail(2, "cannot read $p") unless defined $disk;
   next if object_id('blob', $disk, $id) eq $id;
-  (my $lf = $disk) =~ s/\r\n/\n/g;
-  next if object_id('blob', $lf, $id) eq $id;    # only line endings differ
+  (my $crlf = blob($id)) =~ s/(?<!\r)\n/\r\n/g;
+  next if $disk eq $crlf;    # only line endings differ, as a checkout writes them
   my ($oid) = blob($id) =~ m{\Aversion https://git-lfs\.github\.com/spec/v1\noid sha256:([0-9a-f]{64})\nsize [0-9]+\n\z};
   if (defined $oid && Digest::SHA::sha256_hex($disk) eq $oid) {
     $lfs{$p} = 1;
