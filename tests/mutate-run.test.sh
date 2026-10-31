@@ -329,6 +329,11 @@ check "$pw" 'if grep -q -- -gt src/a.sh; then rm -f .git/check-ended; perl -MPOS
 perl -e 'my $t = time + 10; utime $t, $t, $ARGV[0]' "$pw/src/a.sh"
 mr "$pw" --max 1
 expect "an edit made while the put-back waits for the clock stops the run (exit 2)" 2 "mutate-changed: FAIL - "
+case "$out" in
+  *"src/a.sh was changed "*", so it may still hold the mutant (line 2, column 18: '-ge' becomes '-gt')"*) pass "and the line says where the mutant may still be" ;;
+  *"the checks changed 1 files (src/a.sh)"*) pass "and the line says where the mutant may still be (the edit came after the put-back)" ;;
+  *) fail "and the line says where the mutant may still be" "$out" ;;
+esac
 if grep -q '^# edit$' "$pw/src/a.sh"; then pass "and the edit is still there"; else fail "and the edit is still there" "$(cat "$pw/src/a.sh")"; fi
 
 # --- a signal while the next mutant's write waits for the clock: the file
@@ -605,6 +610,15 @@ expect "a removed journal that cannot be written again: the file is put back all
 lacks "and it does not say the journal stays" "the journal stays"
 rmdir "$w/.git/method-mutate-journal.tmp"
 clean "and the files are the commit" "$w"
+act "$w" 'rm -f .git/method-mutate-journal; mkdir -p .git/method-mutate-journal.tmp; printf "# edit\n" >>src/a.sh'
+mr "$w" --max 1
+expect "the same, and the file edited: the put-back is refused, and the line says no journal names it (exit 2)" 2 \
+  "src/a.sh was changed after its mutant was written, so it may still hold the mutant (line 2, column 18:" \
+  "; no journal names it: the journal was removed during the round and could not be written again"
+lacks "and it does not say the journal stays" "the journal stays"
+rmdir "$w/.git/method-mutate-journal.tmp"
+(cd "$w" && git checkout -q -- src/a.sh)
+clean "and once the file is put back by hand, the files are the commit" "$w"
 check "$w" 'if grep -q -- -gt src/a.sh; then rm -f .git/method-mutate-journal; mkdir -p .git/method-mutate-journal.tmp; fi; '"$slow; $weak"
 run_and "$w" TERM plain
 expect "the same, then TERM: the file is put back all the same (exit 2)" 2 \
@@ -735,6 +749,22 @@ expect "an autostash a merge left (MERGE_AUTOSTASH) that holds the mutant keeps 
 rm -f "$w/.git/MERGE_AUTOSTASH"
 mr "$w" --recover
 expect "and once it is gone, --recover removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
+clean "and the files are the commit" "$w"
+act "$w" 'echo not-an-id >.git/MERGE_AUTOSTASH'
+mr "$w" --max 1
+expect "a MERGE_AUTOSTASH that names no commit: the journal stays, saying it cannot tell (exit 2)" 2 \
+  "cannot tell whether git holds the mutant of src/a.sh (reading MERGE_AUTOSTASH failed)"
+rm -f "$w/.git/MERGE_AUTOSTASH"
+mr "$w" --recover
+expect "and once it is gone, --recover removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
+clean "and the files are the commit" "$w"
+# shellcheck disable=SC2016 # the check is written, not run
+act "$w" 'touch "$FAKE_ARM"'
+odd_git "--git-path MERGE_AUTOSTASH" fail 1
+expect "release's look for MERGE_AUTOSTASH fails: the journal stays (exit 2)" 2 \
+  "cannot tell whether git holds the mutant of src/a.sh (git rev-parse --git-path failed)"
+mr "$w" --recover
+expect "and --recover then removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
 clean "and the files are the commit" "$w"
 check "$w" "$slow; $weak"
 

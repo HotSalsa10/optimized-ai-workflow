@@ -27,28 +27,36 @@
 # write function (a temp file next to the file, synced, given the file's
 # mode, and renamed over it, only while the file still holds what this run
 # last left there: an edit made during the run stops it, exit 2, and is
-# kept; its time is the next whole second, or one past the file's own,
+# kept; when that stops a mutant's write, nothing was written, and no
+# journal is left; its time is the next whole second, or one past the file's own,
 # so it is later than anything written before, also at the sub-second
 # times make compares, and a cache keyed on the time in seconds and the
 # size never takes one version for another; a file can be up to about 3 s
 # ahead of the clock, which make may warn about), with a journal in git's
-# own folder that names it until it is put back. Do not edit files while a
+# own folder that names it, and where it is (line, column and change),
+# until it is put back. Do not edit files while a
 # run is going. Each check runs in its own process group under a watchdog
 # that stops the group when the run ends in any way, kill -9 included, and
 # within a time limit of 3 times its run A time plus 30 s; a check that
 # runs out of time has killed the mutant. After each mutant: the check's
 # group is stopped, the file put back, and the journal removed once the
 # mutant is nowhere git keeps it (HEAD, the index, a stash made during the
-# run) and no merge, rebase or other git operation is in progress (its
-# autostash can hold it, also when a check started it); a git command that
-# fails there keeps the journal too. Then the files, HEAD, the branches and
+# run and its index part, an autostash a merge left) and no merge, rebase
+# or other git operation is in progress (its autostash can hold it, also
+# when a check started it); a git command that fails there, or ends on a
+# signal, keeps the journal too. A journal a check removed is written
+# again first; when it cannot be, the file is put back all the same, and
+# the line says no journal names it. Then the files, HEAD, the branches and
 # tags, and the stash must be as at the start (else exit 2, naming what
 # changed). On INT, TERM, HUP (unless it came ignored, as under nohup) or
 # QUIT, the check's group is killed and the file put back at once (exit 2,
 # naming the signal). After kill -9, the next run or --recover puts the
 # file back (it never reads the settings first), and refuses, keeping the
-# journal, by the same rules; a file changed after its mutant was written
-# may still hold it, and the refusal says how to see it and get out. Files
+# journal, by the same rules; a file changed after its mutant was written,
+# or missing, may still hold it (or a copy may), and the refusal says where
+# it is and how to keep the change without it: undo it, check with git
+# diff that it is gone, keep a copy, put the file back as it was at the
+# start (git restore --source=START --worktree), --recover, copy it back. Files
 # put back are newer than any build, so a build is redone, and a "build is
 # current" check fails until a rebuild.
 #
