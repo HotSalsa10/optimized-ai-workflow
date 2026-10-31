@@ -40,9 +40,9 @@ Nothing yet. Release 1 is being built.
 
 ### Added (step 4b)
 
-- `mutate-changed.sh --list`: plans the mutants for the lines this branch adds (step 4b.2; running them comes in 4b.3): which changed lines get which small text change, in an order that reaches every changed file first, with the reasons files are skipped. It writes nothing and runs no check, and nothing that deletes or moves files gets a mutant. New settings MUTATE_PATHS and MUTATION_CHECKS (DECISIONS A40).
+- `mutate-changed.sh --list`: plans the mutants for the lines this branch adds (step 4b.2; running them comes in 4b.3): which changed lines get which small text change, in an order that reaches every changed file first, with the reasons files are skipped. It writes nothing and runs no check, and a file or line that names one of a fixed list of delete and move commands gets no mutant (a delete written any other way is not recognised; RISKS #13). New settings MUTATE_PATHS and MUTATION_CHECKS (DECISIONS A40).
 - `Tree::added_lines`: the lines a file adds, from the same fixed diff the review packet uses; `Esc::utf8_ok`: the escaper's UTF-8 rule, shared.
-- Tests: 1 new test file (mutate plan), 3 config cases and 1 packet case; 982 test cases in all.
+- Tests: 1 new test file (mutate plan), 3 config cases and 1 packet case; 1001 test cases in all.
 
 ### Changed (step 4b)
 

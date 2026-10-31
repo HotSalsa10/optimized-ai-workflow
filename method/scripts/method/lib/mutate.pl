@@ -97,18 +97,39 @@ sub shell_like {
 # language (#, //, --, /*, *, ;, %, <!--)
 sub comment_like { return $_[0] =~ m{\A[ \t]*(?:#|//|--|/\*|\*|;|%|<!--)} ? 1 : 0 }
 
-# destructive TEXT: TEXT runs a command that deletes, moves or rewrites
-# files or history. A mutant runs with the session's rights, so a changed
-# condition would run it when it was meant not to.
-my $DESTRUCTIVE = qr/\b(?:rm|rmdir|unlink|mv|dd|chmod|chown|shred|truncate|rimraf)\b
-  |\$[({]?(?:rm|RM)\b
-  |\bfind\b[^\n]*\s-delete\b|\brsync\b[^\n]*\s--delete
-  |\bgit\b[^\n]*?\s(?:clean|reset|push|checkout|restore|rm|branch|stash|worktree)\b
-  |\b(?:os\.(?:remove|unlink|rmdir|removedirs|RemoveAll|Remove)|shutil\.(?:rmtree|move)
-    |fs\.(?:rm|rmSync|unlink|unlinkSync|rmdir|rmdirSync)|FileUtils\.(?:rm\w*|remove\w*|mv)|File\.delete
-    |Files\.delete\w*|fs::remove\w*|Remove-Item|Move-Item)\b
-  |\b(?:del|erase|rd)\s/x;
-sub destructive { return $_[0] =~ $DESTRUCTIVE ? 1 : 0 }
+# destructive TEXT BATCH: a line of TEXT names a command that deletes, moves
+# or rewrites files or history. A mutant runs with the session's rights, so
+# a changed condition would run it when it was meant not to. Words, not a
+# parser (RISKS #13): one occurrence is enough, and over-matching only drops
+# mutants. BATCH (a .bat, .cmd or .ps1 file) adds cmd's and PowerShell's
+# words in any letter case. Each line is read once from its first git, find,
+# rsync or make, so a long line costs time in proportion to its length.
+my $WORDS = qr/\b(?:rm|rmdir|unlink|mv|dd|chmod|chown|shred|truncate|rimraf)\b|\$[({]?(?:rm|RM)\b
+  |\b(?:os\.(?:remove|unlink|rmdir|removedirs|rename|replace|RemoveAll|Remove|Rename)|shutil\.(?:rmtree|move)
+    |fs\.(?:rm|rmSync|unlink|unlinkSync|rmdir|rmdirSync|rename|renameSync)|FileUtils\.(?:rm\w*|remove\w*|mv)
+    |File\.(?:[Dd]elete|[Mm]ove)|Directory\.(?:Delete|Move)|Files\.(?:delete\w*|move)|fs::(?:remove\w*|rename)
+    |Remove-Item|Move-Item)\b
+  |\b(?:del|erase|rd)[ \t]/x;
+my $BATCH_WORDS = qr/\b(?i:del|erase|rd|rmdir|move|ren|rename|remove-item|move-item)\b|\b(?i:robocopy)\b[^\n]*?[ \t]\/(?i:mir|purge|move)\b/;
+my $GIT_SUB = qr/[ \t](?:clean|reset|push|checkout|restore|rm|branch|stash|worktree)\b/;
+# after LINE FIRST THEN: THEN comes after the first FIRST on LINE (one pass)
+sub after {
+  my ($l, $first, $then) = @_;
+  return 0 unless $l =~ /$first/g;
+  return $l =~ /\G[^\n]*?$then/ ? 1 : 0;
+}
+
+sub destructive {
+  my ($text, $batch) = @_;
+  for my $l (split /\n/, $text) {
+    return 1 if $l =~ $WORDS || ($batch && $l =~ $BATCH_WORDS);
+    # git (also run as $(GIT), ${GIT} or $GIT), find, rsync and make: the
+    # command word after the first of them, whatever options come between
+    return 1 if after($l, qr/\bgit\b|\$[({]?(?i:git)\b/, $GIT_SUB) || after($l, qr/\bfind\b/, qr/[ \t]-delete\b/)
+      || after($l, qr/\brsync\b/, qr/[ \t]--delete/) || after($l, qr/\bmake\b/, qr/[ \t](?:clean|distclean)\b/);
+  }
+  return 0;
+}
 
 # next_int N: N + 1 as decimal text (any length); 1 becomes 0, as 0 becomes 1
 sub next_int {
@@ -146,12 +167,15 @@ my @OPS = (
 sub mutants_on {
   my ($l, $max) = @_;
   my (@m, $count);
+  # where a [ or test first appears (found once, so a long line costs time in
+  # proportion to its length)
+  my $test_at = $l =~ /\[|\btest\b/ ? $-[0] : -1;
   for my $op (@OPS) {
     my ($re, $to, $kind) = @$op;
     my $kept = 0;
     while ($l =~ /$re/g) {
       my ($at, $tok) = ($-[1], $1);
-      next if defined $kind && $kind eq 'test' && substr($l, 0, $at) !~ /(?:\[|\btest\b)/;
+      next if defined $kind && $kind eq 'test' && !($test_at >= 0 && $test_at < $at);
       $count++;
       push @m, [$at + 1, $tok, $to->($tok), $kind || ''] if $kept++ < $max;
     }
@@ -213,7 +237,8 @@ sub plan {
     if (!defined $text) { $skip{'larger than 1 MB'}++; next }
     if ($text =~ m{\Aversion https://git-lfs\.github\.com/spec/}) { $skip{'converted by .gitattributes or in Git LFS'}++; next }
     if ($text =~ /\0/ || !Esc::utf8_ok($text)) { $skip{'not UTF-8 text'}++; next }
-    if (shell_like($p, $text) && destructive($text)) { $skip{'a shell script, make or batch file that deletes or moves files'}++; next }
+    my $batch = $p =~ /\.(?:bat|cmd|ps1)\z/i;
+    if (shell_like($p, $text) && destructive($text, $batch)) { $skip{'a shell script, make or batch file that deletes or moves files'}++; next }
     my @lines = split /\n/, $text, -1;
     pop @lines if @lines && $lines[-1] eq '';
     my $old_text = $f->{m1} =~ /\A100(?:644|755)\z/ && $f->{st} ne 'A';
@@ -230,7 +255,7 @@ sub plan {
       next unless defined $l;
       $c{lines}++;
       if (comment_like($l)) { $c{comment}++; next }
-      if (destructive($l)) { $c{guarded}++; next }
+      if (destructive($l, $batch)) { $c{guarded}++; next }
       my ($ms, $count) = mutants_on($l, $max);
       my @m = @$ms;
       if (!@m) { $c{nothing}++; next }

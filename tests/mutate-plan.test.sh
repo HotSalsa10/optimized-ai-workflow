@@ -363,10 +363,15 @@ mkdir -p "$w5/.Claude" "$w5/Checks"
 printf 'x == 1\n' >"$w5/.Claude/x.py"
 printf 'x == 1\n' >"$w5/Checks/x.py"
 printf 'x == 1\n' >"$w5/src/.GitAttributes"
+mkdir -p "$w5/.method"
+printf 'x == 1\n' >"$w5/.method/x.py"
+printf '[submodule "x"]\n\tpath = x == 1\n' >"$w5/.gitmodules"
 feat "$w5" "Method files and a top file"
 MP="$w5/scripts/method/mutate-changed.sh" mp "$w5" --list
 expect "with MUTATE_PATHS=. the method's files, checks/, .claude/ and .gitignore are left out, and the rest is mutated" 0 \
-  "mutate-changed: planned: top.py:1:7: '1' becomes '0'" "7 left out (the method's or git's own files)"
+  "mutate-changed: planned: top.py:1:7: '1' becomes '0'" "9 left out (the method's or git's own files)"
+lacks "nor in .method/" ".method/x.py"
+lacks "nor in .gitmodules" ".gitmodules:"
 lacks "nothing in the method's folder" "scripts/method/"
 lacks "nothing in checks/" "checks/project.tsv:"
 lacks "nor in .Claude/ (any case: a file system that folds case opens .claude/)" ".Claude/"
@@ -431,9 +436,13 @@ for h in post-checkout post-index-change reference-transaction pre-commit fsmoni
   git config filter.y.process "$work/mark.sh" && git config core.fsmonitor "$work/mark.sh" && git config core.hooksPath "$work/hooks")
 before=$(cd "$p8" && find w -type f | LC_ALL=C sort | while read -r f; do cksum "$f"; done)
 rm -f "$work/ran" "$work/check-ran"
-git config --global trace2.eventTarget "$w8/trace2-setting.log"
+GIT_TRACE2=0 GIT_TRACE2_EVENT=0 GIT_TRACE2_PERF=0 git config --global trace2.eventTarget "$w8/trace2-setting.log"
+GIT_TRACE2=0 GIT_TRACE2_EVENT=0 GIT_TRACE2_PERF=0 git config --global trace2.normalTarget "$w8/trace2-normal.log"
+GIT_TRACE2=0 GIT_TRACE2_EVENT=0 GIT_TRACE2_PERF=0 git config --global trace2.perfTarget "$w8/trace2-perf.log"
 GIT_TRACE="$w8/trace.log" GIT_TRACE2_EVENT="$w8/trace2.log" GIT_TRACE_PACKET="$w8/packet.log" mp "$w8" --list
-GIT_TRACE2_EVENT=0 git config --global --unset trace2.eventTarget
+GIT_TRACE2=0 GIT_TRACE2_EVENT=0 GIT_TRACE2_PERF=0 git config --global --unset trace2.eventTarget
+GIT_TRACE2=0 GIT_TRACE2_EVENT=0 GIT_TRACE2_PERF=0 git config --global --unset trace2.normalTarget
+GIT_TRACE2=0 GIT_TRACE2_EVENT=0 GIT_TRACE2_PERF=0 git config --global --unset trace2.perfTarget
 expect "setup: a plan under hostile settings" 0 "mutate-changed: planned: src/a.py:1:3: '==' becomes '!='"
 after=$(cd "$p8" && find w -type f | LC_ALL=C sort | while read -r f; do cksum "$f"; done)
 if [ "$before" = "$after" ]; then pass "no file in the project, .git included, is written or changed"; else fail "no file in the project, .git included, is written or changed" "$(printf '%s\n' "$before" >"$work/b"; printf '%s\n' "$after" | diff "$work/b" - | head -10)"; fi
@@ -513,7 +522,9 @@ mkdir -p "$w12/src/kinds"
 for word in rm rmdir unlink mv dd chmod chown shred truncate rimraf '$(RM)' '${RM}' 'find . -delete' 'rsync -a --delete' \
   'git clean' 'git reset' 'git push' 'git checkout' 'git restore' 'git rm' 'git branch' 'git stash' 'git worktree' \
   os.remove os.unlink os.rmdir os.removedirs os.RemoveAll shutil.rmtree shutil.move fs.rm fs.rmSync fs.unlinkSync \
-  FileUtils.rm_rf FileUtils.mv File.delete Files.delete fs::remove_file Remove-Item Move-Item 'del ' 'erase ' 'rd '; do
+  FileUtils.rm_rf FileUtils.mv File.delete Files.delete fs::remove_file Remove-Item Move-Item 'del ' 'erase ' 'rd ' \
+  os.rename os.replace fs.renameSync File.Delete File.Move Directory.Delete Directory.Move Files.move fs::rename \
+  'make clean' 'make -C build distclean' '$(GIT) clean' '"$GIT" reset' '${GIT} push'; do
   printf 'if a == 1: %s x\n' "$word" >>"$w12/src/words.py"
 done
 printf 'if a == 1: keep x\n' >>"$w12/src/words.py"
@@ -529,9 +540,9 @@ for bang in '/bin/bash' '/usr/bin/env zsh' '/usr/bin/make -f' '/usr/bin/env pwsh
 done
 feat "$w12" "Every delete word and file kind"
 mp "$w12" --list --max 1000
-expect "each delete word keeps its line from being mutated, and a line without one is" 0 "src/words.py:44:6: '==' becomes '!='" \
-  "43 that delete or move files"
-lacks "no line before the last is mutated" "src/words.py:43:"
+expect "each delete word keeps its line from being mutated, and a line without one is" 0 "src/words.py:58:6: '==' becomes '!='" \
+  "57 that delete or move files"
+lacks "no line before the last is mutated" "src/words.py:57:"
 expect "each kind of shell, make or batch file that deletes is skipped whole" 0 \
   "files skipped: 26 a shell script, make or batch file that deletes or moves files"
 lacks "and none of them is planned" "src/kinds/"
@@ -559,6 +570,67 @@ expect "two merge bases stop it, with what to do (exit 2)" 2 "merge bases (" "me
 (cd "$w13" && git merge -q --no-edit origin/main 2>/dev/null)
 mp "$w13" --list
 expect "after merging main, one base: no line main added is planned" 3 "SKIPPED - nothing-to-mutate"
+
+# batch and PowerShell files delete in any letter case, also of the file
+# name; git run as $(GIT) or $GIT is still git, and a git clean after a
+# harmless git is still seen; a make file whose git and clean sit on
+# different lines deletes nothing; batch words keep no line out of a file
+# of another kind
+p14=$(new_project) || abort_sandbox
+w14="$p14/w"
+mkdir -p "$w14/src/b"
+printf 'IF "%%CLEAN%%"=="1" RMDIR /S /Q build\r\n' >"$w14/src/b/up1.bat"
+printf 'cd /d "%%BUILD%%" || exit /b 1\r\nDEL /S /Q *\r\n' >"$w14/src/b/up2.cmd"
+# shellcheck disable=SC2016 # the scripts are written, not run
+printf '$keep = $false\nif (-not $keep) { remove-item -recurse -force $out }\n' >"$w14/src/b/up3.ps1"
+printf 'IF %%ERRORLEVEL%% NEQ 0 EXIT /B 1\r\nERASE /Q x\r\n' >"$w14/src/b/up4.bat"
+printf 'IF "%%A%%"=="1" robocopy src dst /MIR\r\n' >"$w14/src/b/up5.bat"
+printf 'IF "%%A%%"=="1" MOVE a b\r\n' >"$w14/src/b/up6.bat"
+printf 'IF "%%A%%"=="1" DEL x\r\n' >"$w14/src/b/UP7.BAT"
+# shellcheck disable=SC2016 # the scripts are written, not run
+printf 'clean:\n\ttest -n "$(KEEP)" || $(GIT) clean -fdx\n' >"$w14/src/b/git.mk"
+# shellcheck disable=SC2016 # the scripts are written, not run
+printf '#!/bin/sh\n[ -n "$D" ] || exit 1\n"$GIT" reset --hard\n' >"$w14/src/b/g.sh"
+# shellcheck disable=SC2016 # the scripts are written, not run
+printf '#!/bin/sh\ngit status\n[ -n "$D" ] || exit 1\ngit clean -fdx\n' >"$w14/src/b/g2.sh"
+printf 'GIT ?= git\nclean:\n\techo X = 1\n' >"$w14/src/b/safe.mk"
+printf 'if mode == 1: rename = move\n' >"$w14/src/b/names.py"
+feat "$w14" "Batch, PowerShell and git through a variable"
+mp "$w14" --list --max 1000
+expect "upper-case batch deletes, lower-case remove-item, robocopy /MIR, MOVE, a .BAT file, \$(GIT) clean, \$GIT reset and a git clean after a harmless git skip their files" 0 \
+  "files skipped: 10 a shell script, make or batch file that deletes or moves files"
+for f in up1.bat up2.cmd up3.ps1 up4.bat up5.bat up6.bat UP7.BAT git.mk g.sh g2.sh; do lacks "nothing planned in $f" "src/b/$f:"; done
+expect "a make file whose git and clean sit on different lines is planned" 0 "src/b/safe.mk:3:11: '1' becomes '0'"
+expect "batch words such as rename and move keep no line out of other files" 0 "src/b/names.py:1:9: '==' becomes '!='"
+
+# a line of thousands of git, find, rsync, make or shell test words costs
+# time in proportion to its length
+perl -e 'print "git " x 65536, "\n"' >"$w14/src/b/gits.txt"
+perl -e 'print "find " x 52428, "\n"' >"$w14/src/b/finds.txt"
+perl -e 'print "rsync " x 43690, "\n"' >"$w14/src/b/rsyncs.txt"
+perl -e 'print "make " x 52428, "\n"' >"$w14/src/b/makes.txt"
+perl -e 'print " -lt" x 65536, "\n"' >"$w14/src/b/tests.txt"
+feat "$w14" "Long lines"
+t0=$(perl -e 'print time')
+mp "$w14" --list
+t1=$(perl -e 'print time')
+expect "setup: the long lines are planned" 0 "mutate-changed: PLAN - "
+if [ $((t1 - t0)) -lt 30 ]; then pass "five lines of 256 KB of such words plan in under 30 s ($((t1 - t0)) s)"; else fail "five lines of 256 KB of such words plan in under 30 s ($((t1 - t0)) s)"; fi
+
+# a branch that only deletes lines adds none to mutate; one that deletes
+# and adds plans only the added line
+p15=$(new_project) || abort_sandbox
+w15="$p15/w"
+(cd "$w15" && git checkout -q main && printf 'a = 1\nb = 2\nc = 3\n' >src/d.py && git add -A && git commit -q -m d &&
+  git push -q origin main 2>/dev/null && git checkout -q feat && git merge -q main 2>/dev/null)
+printf 'a = 1\nc = 3\n' >"$w15/src/d.py"
+feat "$w15" "Only a deletion"
+mp "$w15" --list
+expect "a branch that only deletes a line has nothing to mutate" 3 "SKIPPED - nothing-to-mutate: 0 changed lines"
+printf 'a = 1\nz = 0\n' >"$w15/src/d.py"
+feat "$w15" "A deletion and an addition"
+mp "$w15" --list
+expect "one that deletes and adds plans only the added line" 0 "src/d.py:2:5: '0' becomes '1'" "1 changed lines in 1 files"
 
 # no main
 p7=$(new_project) || abort_sandbox
