@@ -686,6 +686,18 @@ expect "and --recover trusts it, naming the stash again (exit 2)" 2 "a stash mad
 mr "$w" --recover
 expect "once the stash is dropped, --recover removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
 clean "and the files are the commit" "$w"
+# a blob release must read (HEAD holds the mutant's change with an edit)
+# that git cannot read: "cannot tell"
+# shellcheck disable=SC2016 # the check is written, not run
+act "$w" 'printf "# e\n" >>src/a.sh && git commit -q -am Edit && b=$(git rev-parse HEAD:src/a.sh) && git show HEAD^:src/a.sh >src/a.sh && git add src/a.sh && rm -f ".git/objects/$(printf %s "$b" | cut -c1-2)/$(printf %s "$b" | cut -c3-)"'
+before=$(cd "$w" && git rev-parse HEAD)
+mr "$w" --max 1
+expect "a blob release must read cannot be read: the journal stays, saying it cannot tell (exit 2)" 2 \
+  "cannot tell whether git holds the mutant of src/a.sh (git cat-file failed)"
+(cd "$w" && git reset -q --hard "$before")
+mr "$w" --recover
+expect "and once HEAD is back, --recover removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
+clean "and the files are the commit" "$w"
 # a lost journal, and a put-back that cannot be written (its temp name
 # taken by a folder): the line says where the mutant is
 # shellcheck disable=SC2016 # the check is written, not run
@@ -898,7 +910,7 @@ journal() {
   # shellcheck disable=SC2086 # the ids are three words on purpose
   printf 'mutate-changed journal 1\nstart %s\nstash -\ntemp %s\npgid %s\nfile %s %s %s %s %s %s %s\n%s' "$start" \
     "$(hex "${4:-.mutate-1.tmp}")" "$1" "$(hex "${3:-src/a.sh}")" "$sb" ${5:-$ids} \
-    "$(hex "line 2, column 18: '-ge' becomes '-gt'")" "$ml" "$2" >"${JF:-$jf}"
+    "$(hex "line 2, column 18: '-ge' becomes '-gt'")" "${ML:-$ml}" "$2" >"${JF:-$jf}"
 }
 journal - ''
 mr "$jw" --recover
@@ -961,6 +973,23 @@ journal - 'end
 ' src/a.sh .mutate-1.tmp "$mut_ids"
 mr "$jw" --recover
 expect "a journal whose original does not match the stored one is refused (exit 2)" 2 "the stored original of src/a.sh does not match the journal"
+# the mutant's line is counted against the original (here a journal whose
+# mutant's line is one the original has, min=18): a changed file with that
+# line once is not taken for the mutant; with it once more, it is, also
+# with CRLF line ends
+min18=$(perl -MDigest::SHA=sha256_hex -e 'print sha256_hex("min=18")')
+printf '# edited\n' >>"$jw/src/a.sh"
+ML=$min18 journal - 'end
+'
+mr "$jw" --recover
+expect "a changed file whose mutant's line is no more often in it than in the original is not refused" 0 "RECOVERED - 0 files put back; the journal is removed"
+perl -pi -e 's/\n/\r\n/; $_ .= "min=18\r\n" if $. == 1' "$jw/src/a.sh"
+ML=$min18 journal - 'end
+'
+mr "$jw" --recover
+expect "with that line once more, CRLF line ends and all, it is refused (exit 2)" 2 "src/a.sh was changed after its mutant was written, and it still holds the mutant's change"
+(cd "$jw" && git checkout -q -- src/a.sh)
+rm -f "$jf"
 cp -R "$work/next" "$work/link"
 (cd "$work/link/w" && mv src real && ln -s real src && perl -pi -e 's/-ge/-gt/' real/a.sh)
 : >"$work/link/w/real/.mutate-1.tmp"

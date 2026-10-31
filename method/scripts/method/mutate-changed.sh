@@ -41,22 +41,26 @@
 # runs out of time has killed the mutant. After each mutant: the check's
 # group is stopped, the file put back, and the journal removed once the
 # mutant is nowhere git keeps it (HEAD, the index, a stash made during the
-# run and its index part, an autostash a merge left) and no merge, rebase
+# run and its index part, an autostash a merge left: each is looked at for
+# the mutant's line, so an edit made on top of it does not hide it; the
+# journal keeps that line's SHA-256, never its text) and no merge, rebase
 # or other git operation is in progress (its autostash can hold it, also
 # when a check started it); a git command that fails there, or ends on a
-# signal, keeps the journal too. A journal a check removed is written
-# again first; when it cannot be, the file is put back all the same, and
-# the line says no journal names it. Then the files, HEAD, the branches and
+# signal, keeps the journal too. A journal a check removed or changed is
+# written again first; when it cannot be, the file is put back all the
+# same, and the line says no journal names it and where the mutant may be.
+# Then the files, HEAD, the branches and
 # tags, and the stash must be as at the start (else exit 2, naming what
 # changed). On INT, TERM, HUP (unless it came ignored, as under nohup) or
 # QUIT, the check's group is killed and the file put back at once (exit 2,
 # naming the signal). After kill -9, the next run or --recover puts the
 # file back (it never reads the settings first), and refuses, keeping the
-# journal, by the same rules; a file changed after its mutant was written,
-# or missing, may still hold it (or a copy may), and the refusal says where
-# it is and how to keep the change without it: undo it, check with git
-# diff that it is gone, keep a copy, put the file back as it was at the
-# start (git restore --source=START --worktree), --recover, copy it back. Files
+# journal, by the same rules. A file changed on top of its mutant is left
+# as it is once the mutant's line is gone from it; while it is there, the
+# refusal says where (line, column and change; lines added above move it):
+# undo that one change, then --recover. A missing file, or a copy of it,
+# may hold it: the refusal says to undo it there and put the file back as
+# it was at the start (git restore --source=START --staged --worktree). Files
 # put back are newer than any build, so a build is redone, and a "build is
 # current" check fails until a rebuild.
 #
