@@ -303,11 +303,13 @@ expect "a mutant written in the same second as a build is still rebuilt and kill
 if (cd "$bw" && bash t.sh) | grep -q '^1 ok$'; then pass "and afterwards the build is current again"; else fail "and afterwards the build is current again"; fi
 
 # --- an edit made while a run is going is never overwritten: the next
-# round's file is edited while its write waits for the clock ---
+# round's file is edited while its write waits for the clock (the editor,
+# started by the first round's check, waits for the journal that names
+# src/b.sh, so it does not have to catch the short time between rounds) ---
 ep2=$(new_project "$weak") || abort_sandbox
 ew2="$ep2/w"
 # shellcheck disable=SC2016 # the check is written, not run
-check "$ew2" 'if grep -q -- -gt src/a.sh; then perl -MPOSIX -e '\''POSIX::setsid(); alarm 30; my ($j, $f) = @ARGV; select undef, undef, undef, 0.05 while -e $j; select undef, undef, undef, 0.01 until -e $j; open my $o, ">>", $f; print $o "# edit\n"; close $o'\'' .git/method-mutate-journal src/b.sh </dev/null >/dev/null 2>&1 & fi; '"$weak"
+check "$ew2" 'if grep -q -- -gt src/a.sh; then perl -MPOSIX -e '\''POSIX::setsid(); alarm 30; my ($j, $f) = @ARGV; my $want = " " . unpack("H*", $f) . " "; for (;;) { my $t; if (open my $h, "<", $j) { local $/; $t = <$h> } last if defined $t && index($t, $want) >= 0; select undef, undef, undef, 0.01 } open my $o, ">>", $f; print $o "# edit\n"; close $o'\'' .git/method-mutate-journal src/b.sh </dev/null >/dev/null 2>&1 & fi; '"$weak"
 perl -e 'my $t = time + 10; utime $t, $t, $ARGV[0]' "$ew2/src/b.sh"
 mr "$ew2" --max 2
 expect "an edit made while the run waits to write a file stops the run, and is kept (exit 2)" 2 "src/b.sh was changed during the run, so it was not overwritten"
