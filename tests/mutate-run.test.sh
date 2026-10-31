@@ -319,13 +319,13 @@ if [ -e "$ew2/.git/method-mutate-journal" ]; then fail "and no journal is left (
 
 # --- an edit made while the round's put-back waits for the clock is kept:
 # the put-back's own check sees it. The editor, started by the check on the
-# mutant, edits 0.3 s after the check has ended, inside the 1 s the
-# put-back waits; were it early or late, another guard would keep the edit,
+# mutant, edits 0.7 s after the check has ended, inside the 1 s the
+# put-back waits (it starts about 0.25 s after the check ends); were it early or late, another guard would keep the edit,
 # so only exit 2 and the edit are asked ---
 pb=$(new_project "$weak") || abort_sandbox
 pw="$pb/w"
 # shellcheck disable=SC2016 # the check is written, not run
-check "$pw" 'if grep -q -- -gt src/a.sh; then rm -f .git/check-ended; perl -MPOSIX -e '\''POSIX::setsid(); alarm 30; my ($m, $f) = @ARGV; select undef, undef, undef, 0.01 until -e $m; select undef, undef, undef, 0.3; open my $o, ">>", $f; print $o "# edit\n"; close $o'\'' .git/check-ended src/a.sh </dev/null >/dev/null 2>&1 & fi; '"$weak"'; touch .git/check-ended'
+check "$pw" 'if grep -q -- -gt src/a.sh; then rm -f .git/check-ended; perl -MPOSIX -e '\''POSIX::setsid(); alarm 30; my ($m, $f) = @ARGV; select undef, undef, undef, 0.01 until -e $m; select undef, undef, undef, 0.7; open my $o, ">>", $f; print $o "# edit\n"; close $o'\'' .git/check-ended src/a.sh </dev/null >/dev/null 2>&1 & fi; '"$weak"'; touch .git/check-ended'
 perl -e 'my $t = time + 10; utime $t, $t, $ARGV[0]' "$pw/src/a.sh"
 mr "$pw" --max 1
 expect "an edit made while the put-back waits for the clock stops the run (exit 2)" 2 "mutate-changed: FAIL - "
