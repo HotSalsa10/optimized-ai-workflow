@@ -35,6 +35,7 @@ Rules every check follows:
 ## Planted breaks
 
 To check the checks, each guard was removed once in a throwaway copy, and the full test suite was run against it (in step 2's last two runs and in step 3, the tests of the file it changed).
+- Step 4b.2, repair loop 2: 20 removals of the guards it added (lib/mutate.pl, and the trace settings in lib/git.pl), each run against the tests that guard the file. All 20 turned them red (one was planted again, as its first form also removed the check of the old file and so went red for another reason).
 - Step 4b.2, repair loop 1: 18 removals of the guards it added, each run against the tests that guard the file. All 18 turned them red (one was planted again, as its first form did not compile and so proved nothing).
 - Step 4b.2: 25 removals of the guards it added (lib/mutate.pl, Tree::added_lines and the rename pin in Tree::changed, conf.pl's two keys), each run against the tests that guard the file. 24 turned them red on the first run; the 25th, MUTATE_PATHS not applied, did once a test had a changed file outside it.
 - Step 4b.1 (restructure): 9 removals of the guards in the moved check runner (applies, judge, and the helpers that now die), each run against the tests of run-checks, done-check and status. 8 turned them red. The 9th, a failed fork, cannot be caused here, as before the move.
