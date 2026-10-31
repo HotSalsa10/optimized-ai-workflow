@@ -534,28 +534,77 @@ mr "$w" --recover
 expect "once the file is put back as committed, --recover removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
 clean "and the files are the commit" "$w"
 
-# Ctrl-C while mutate runs git (here release's git ls-files, through a git
-# that sends INT to the run's group once the check has seen the mutant):
-# the signal is the reason, with what failed after it
+# --- odd git: a git on PATH that, once the check has seen the mutant and
+# made FAKE_ARM (holding how many matching commands to let pass first),
+# acts at the next git command holding FAKE_ON: MODE cut sends INT to the
+# run's group, as a Ctrl-C would, and the command dies of it; keep sends
+# INT, and the command still ends well; fail makes the command fail ---
 mkdir -p "$work/fakegit"
 cat >"$work/fakegit/git" <<'EOF'
 #!/bin/sh
 case "$*" in
-  *"ls-files -s -z"*) if [ -e "$FAKE_ARM" ]; then rm -f "$FAKE_ARM"; kill -s INT 0; fi ;;
+  *"$FAKE_ON"*)
+    if [ -e "$FAKE_ARM" ]; then
+      n=$(cat "$FAKE_ARM")
+      if [ "${n:-0}" -gt 0 ]; then
+        echo $((n - 1)) >"$FAKE_ARM"
+      else
+        rm -f "$FAKE_ARM"
+        case $FAKE_MODE in
+          fail) exit 128 ;;
+          keep) trap '' INT ;;
+        esac
+        kill -s INT 0
+      fi
+    fi ;;
 esac
 exec "$REAL_GIT" "$@"
 EOF
 chmod +x "$work/fakegit/git"
+# odd_git ON MODE MAX: a run through that git, with --max MAX; sets out and code
+odd_git() {
+  rm -f "$work/arm"
+  (cd "$w" && exec env CI= PATH="$work/fakegit:$PATH" REAL_GIT="$(command -v git)" FAKE_ARM="$work/arm" FAKE_ON="$1" FAKE_MODE="$2" \
+    perl -e 'alarm 300; setpgrp(0, 0); exec @ARGV' bash "$mutate" --max "$3") >"$work/g.out" 2>&1
+  code=$?
+  out=$(cat "$work/g.out")
+}
 # shellcheck disable=SC2016 # the check is written, not run
 act "$w" 'touch "$FAKE_ARM"'
-rm -f "$work/arm"
-(cd "$w" && exec env CI= PATH="$work/fakegit:$PATH" REAL_GIT="$(command -v git)" FAKE_ARM="$work/arm" perl -e 'alarm 300; setpgrp(0, 0); exec @ARGV' bash "$mutate" --max 1) >"$work/g.out" 2>&1
-code=$?
-out=$(cat "$work/g.out")
+# release's git ls-files is cut off by Ctrl-C: the signal is the reason,
+# with what failed after it
+odd_git "ls-files -s -z" cut 1
 expect "Ctrl-C while mutate runs git: the signal is named first, then what failed (exit 2)" 2 \
   "mutate-changed: FAIL - stopped by SIGINT (then: cannot tell whether git holds the mutant of src/a.sh (git ls-files failed)"
 mr "$w" --recover
 expect "and --recover then removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
+clean "and the files are the commit" "$w"
+# a signal while a round's compare runs (its git for-each-ref ends well):
+# no next mutant is written, and after the last round the signal is said,
+# not lost
+odd_git "for-each-ref" keep 2
+expect "a signal while the round's compare runs: no next mutant is written (exit 2)" 2 "mutate-changed: FAIL - stopped by SIGINT; the run stopped"
+clean "and the files are the commit" "$w"
+odd_git "for-each-ref" keep 1
+expect "a signal while the last round's compare runs: said, not lost (exit 2)" 2 "mutate-changed: FAIL - stopped by SIGINT; the run stopped"
+clean "and the files are the commit" "$w"
+# a git command release asks that fails means "cannot tell", never "not
+# there": HEAD's git ls-tree, then (with a stash made during the run) the
+# stash's, after HEAD's is let pass
+odd_git "ls-tree" fail 1
+expect "release's git ls-tree of HEAD fails: the journal stays, saying it cannot tell (exit 2)" 2 \
+  "cannot tell whether git holds the mutant of src/a.sh (git ls-tree failed); run mutate-changed.sh --recover"
+mr "$w" --recover
+expect "and --recover then removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
+clean "and the files are the commit" "$w"
+# shellcheck disable=SC2016 # the check is written, not run
+act "$w" 'echo 1 >"$FAKE_ARM"; printf "x\n" >>src/b.sh; git stash push -q -- src/b.sh'
+odd_git "ls-tree" fail 1
+expect "release's git ls-tree of a stash fails: the journal stays, saying it cannot tell (exit 2)" 2 \
+  "cannot tell whether git holds the mutant of src/a.sh (git ls-tree failed); run mutate-changed.sh --recover"
+(cd "$w" && git stash clear)
+mr "$w" --recover
+expect "and once the stash is dropped, --recover removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
 clean "and the files are the commit" "$w"
 check "$w" "$slow; $weak"
 
