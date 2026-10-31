@@ -27,6 +27,23 @@ sub paths {
   return map { File::Spec->rel2abs($_, $dir) } @p;
 }
 
+# operations DIR: the git operations in progress in the working tree at DIR,
+# as words ("a merge", "a rebase", ...). status reports them; mutate-changed
+# does not recover or run during one, as a rebase's or a merge's autostash
+# can hold a mutant that comes back when the operation ends.
+sub operations {
+  my ($dir) = @_;
+  my @what = (['MERGE_HEAD', 'a merge'], ['rebase-merge', 'a rebase'], ['rebase-apply', 'a rebase or am'],
+    ['CHERRY_PICK_HEAD', 'a cherry-pick'], ['REVERT_HEAD', 'a revert'], ['BISECT_LOG', 'a bisect']);
+  my @paths = split /\n/, Git::ok('-C', $dir, 'rev-parse', map { ('--git-path', $_->[0]) } @what);
+  my @on;
+  for my $k (0 .. $#what) {
+    next unless defined $paths[$k];
+    push @on, $what[$k][1] if -e File::Spec->rel2abs($paths[$k], $dir);
+  }
+  return @on;
+}
+
 # probe [DIR]: what a report may say without writing anything: {journal (1
 # when a journal exists), mutate (1 when someone holds the lock
 # exclusively: a mutate run, or the watchdog of a cut-off run while it stops

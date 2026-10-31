@@ -181,14 +181,7 @@ sub work_lines {
     # a deletion hidden this way would drop a test from every local run
     push @parts, "$where$missing tracked files are not on disk and are marked skip-worktree, so git does not show them"
       . ' as deleted (a sparse checkout does this too)' if $missing;
-    my @what = (['MERGE_HEAD', 'a merge'], ['rebase-merge', 'a rebase'], ['rebase-apply', 'a rebase or am'],
-      ['CHERRY_PICK_HEAD', 'a cherry-pick'], ['REVERT_HEAD', 'a revert'], ['BISECT_LOG', 'a bisect']);
-    my @paths = split /\n/, Git::ok(@wg, 'rev-parse', map { ('--git-path', $_->[0]) } @what);
-    for my $k (0 .. $#what) {
-      next unless defined $paths[$k];
-      my $p = File::Spec->rel2abs($paths[$k], $wt->{worktree});
-      push @parts, "$where$what[$k][1] is in progress" if -e $p;
-    }
+    push @parts, "$where$_ is in progress" for RunState::operations($wt->{worktree});
   }
   my ($sst, $stashes) = Git::run(@g, 'rev-list', '--walk-reflogs', 'refs/stash');
   my $ns = 0;

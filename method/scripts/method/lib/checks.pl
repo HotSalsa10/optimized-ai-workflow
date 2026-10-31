@@ -586,12 +586,13 @@ sub check_fresh_clone {
     detail => "examined $examined tracked files under PRODUCT_PATHS; $aside ignored files set aside by LOCAL_ONLY" };
 }
 
-sub check_tree_unchanged {
-  my ($before, $out) = @_;
-  my $after = fingerprint();
+# tree_changes BEFORE AFTER: what changed between two fingerprints, as (the
+# reasons, the paths that changed, the refs that moved); tree-unchanged and
+# mutate-changed's rounds share it
+sub tree_changes {
+  my ($before, $after) = @_;
   my %all = (%{ $before->{e} }, %{ $after->{e} });
   my @changed = sort grep { ($before->{e}{$_} || '') ne ($after->{e}{$_} || '') } keys %all;
-  write_lines($out, map { 'changed during the run: ' . Esc::line($_) } @changed);
   my %refs_before = map { split / /, $_, 2 } split /\n/, $before->{refs};
   my %refs_after = map { split / /, $_, 2 } split /\n/, $after->{refs};
   # a branch that moved, appeared or went, or a tag that moved or went (a
@@ -599,12 +600,20 @@ sub check_tree_unchanged {
   my %all_refs = (%refs_before, %refs_after);
   my @moved = sort grep { ($refs_before{$_} || '') ne ($refs_after{$_} || '') && (exists $refs_before{$_} || m{\Arefs/heads/}) }
     keys %all_refs;
-  write_lines($out, map {"moved during the run: $_"} @moved);
   my @why;
   push @why, 'HEAD moved during the run' if $before->{head} ne $after->{head};
   push @why, 'HEAD is on another branch than before the run' if $before->{branch} ne $after->{branch};
   push @why, scalar(@moved) . ' branches or tags moved during the run' if @moved;
   push @why, 'the checks changed ' . scalar(@changed) . ' files' if @changed;
+  return (\@why, \@changed, \@moved);
+}
+
+sub check_tree_unchanged {
+  my ($before, $out) = @_;
+  my ($why, $changed, $moved) = tree_changes($before, fingerprint());
+  write_lines($out, map { 'changed during the run: ' . Esc::line($_) } @$changed);
+  write_lines($out, map {"moved during the run: $_"} @$moved);
+  my @why = @$why;
   my $examined = tracked_count();
   return { status => 'FAIL', kind => 'finding', examined => $examined, detail => join('; ', @why) } if @why;
   return { status => 'SKIPPED', kind => 'examined-nothing', examined => 0,
