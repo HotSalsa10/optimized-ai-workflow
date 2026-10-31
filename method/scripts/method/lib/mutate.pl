@@ -483,19 +483,78 @@ sub sha_file {
   return eval { Digest::SHA->new(256)->addfile($p, 'b')->hexdigest };
 }
 
+# read_file PATH: a regular file's bytes, or undef (missing, a link, not a
+# regular file, or unreadable)
+sub read_file {
+  my ($p) = @_;
+  my @s = lstat $p;
+  return undef unless @s && -f _;
+  open my $fh, '<:raw', $p or return undef;
+  local $/;
+  my $b = <$fh>;
+  close $fh;
+  return defined $b ? $b : '';
+}
+
+# lines_with SHA BYTES: how many lines of BYTES (without their line end, a
+# CR before it included) have the SHA-256 SHA
+sub lines_with {
+  my ($sha, $bytes) = @_;
+  my $n = 0;
+  for my $l (split /\n/, $bytes, -1) {
+    $l =~ s/\r\z//;
+    $n++ if Digest::SHA::sha256_hex($l) eq $sha;
+  }
+  return $n;
+}
+
+# the mutant's change is found by its line, not by the file's bytes: an
+# edit made on top of the mutant (and then staged, committed or stashed)
+# keeps that line. original F: the file's bytes at the start (checked
+# against the journal); holds F BYTES: BYTES hold more lines that are the
+# mutant's line than the original does
+sub original {
+  my ($f) = @_;
+  $f->{text} = Git::cat('blob', $f->{sb}, 1) unless defined $f->{text};
+  die 'the stored original of ' . Esc::line($f->{path}) . " does not match the journal\n"
+    unless Digest::SHA::sha256_hex($f->{text}) eq $f->{ss};
+  return $f->{text};
+}
+sub holds {
+  my ($f, $bytes) = @_;
+  $f->{base} = lines_with($f->{ml}, original($f)) unless defined $f->{base};
+  return lines_with($f->{ml}, $bytes) > $f->{base};
+}
+
 # journal_write J: the journal, written whole (a temp file, synced, renamed
 # over it) before a mutant is written, and again once a check's process
 # group is known. One file line per file that may hold a mutant: its path,
 # its stored blob at the start and the mutant's, and both their SHA-256.
+sub journal_text {
+  my ($j) = @_;
+  my $text = "mutate-changed journal 1\nstart $j->{start}\nstash $j->{stash}\ntemp " . unpack('H*', $j->{temp})
+    . "\npgid " . (defined $j->{pgid} ? $j->{pgid} : '-') . "\n";
+  $text .= join(' ', 'file', unpack('H*', $_->{path}), @$_{qw(sb mb ss ms)}, unpack('H*', $_->{place}), $_->{ml}) . "\n"
+    for @{ $j->{files} };
+  return "${text}end\n";
+}
+
+# journal_ok J: the journal on disk is J's, byte for byte
+sub journal_ok {
+  my ($j) = @_;
+  return 0 if -l $JOURNAL || !-f $JOURNAL;
+  open my $fh, '<:raw', $JOURNAL or return 0;
+  local $/;
+  my $t = <$fh>;
+  close $fh;
+  return defined $t && $t eq journal_text($j);
+}
+
 sub journal_write {
   my ($j) = @_;
   my $tmp = "$JOURNAL.tmp";
   unlink $tmp if -f $tmp && !-l $tmp;    # a cut-off write's
-  my $text = "mutate-changed journal 1\nstart $j->{start}\nstash $j->{stash}\ntemp " . unpack('H*', $j->{temp})
-    . "\npgid " . (defined $j->{pgid} ? $j->{pgid} : '-') . "\n";
-  $text .= join(' ', 'file', unpack('H*', $_->{path}), @$_{qw(sb mb ss ms)}, unpack('H*', $_->{place})) . "\n"
-    for @{ $j->{files} };
-  $text .= "end\n";
+  my $text = journal_text($j);
   my $fh;
   sysopen $fh, $tmp, O_WRONLY | O_CREAT | O_EXCL, 0600 or die "cannot write the journal $JOURNAL ($!)\n";
   binmode $fh;
@@ -522,8 +581,9 @@ sub journal_read {
     elsif ($l =~ /\Astash ($id|-)\z/) { $j{stash} = $1 }
     elsif ($l =~ /\Atemp ((?:[0-9a-f]{2})+)\z/) { $j{temp} = pack 'H*', $1 }
     elsif ($l =~ /\Apgid (-|[0-9]{1,10})\z/) { $j{pgid} = $1 eq '-' ? undef : $1; $j{has_pgid} = 1 }
-    elsif ($l =~ /\Afile ((?:[0-9a-f]{2})+) ($id) ($id) ([0-9a-f]{64}) ([0-9a-f]{64}) ((?:[0-9a-f]{2})+)\z/) {
-      push @{ $j{files} }, { path => pack('H*', $1), sb => $2, mb => $3, ss => $4, ms => $5, place => pack('H*', $6) };
+    elsif ($l =~ /\Afile ((?:[0-9a-f]{2})+) ($id) ($id) ([0-9a-f]{64}) ([0-9a-f]{64}) ((?:[0-9a-f]{2})+) ([0-9a-f]{64})\z/) {
+      push @{ $j{files} }, { path => pack('H*', $1), sb => $2, mb => $3, ss => $4, ms => $5, place => pack('H*', $6),
+        ml => $7 };
     } else {
       return (undef, 'a line does not parse');
     }
@@ -620,31 +680,39 @@ sub mutated {
 # and recovery all use it.
 sub restore {
   my ($f, $fast, $start) = @_;
-  # an edit starts from the mutant, so a file that holds neither may still
-  # hold it: the reason says where, and how to keep the edit without it (a
-  # copy of the file, or a diff of it, would bring the mutant back)
-  my $held = sub {
+  my $p = Esc::line($f->{path});
+  my $where = "$f->{place}; lines added above it move it";
+  my $back = "put the file back as it was when the run started (git restore --source=$start --staged --worktree --"
+    . ' and its name)';
+  # a file changed on top of its mutant: when the mutant's line is gone
+  # from it, the change stays as it is; else it is refused, and the way
+  # out is to undo that one change (a copy of the file, or a diff of it,
+  # would bring the mutant back)
+  my $changed = sub {
     my ($what) = @_;
-    my $back = "put the file back as it was when the run started (git restore --source=$start --worktree -- and its name)";
-    die Esc::line($f->{path}) . ($what eq 'is missing'
-      ? " is missing; a copy made from it, or the file moved, may still hold the mutant ($f->{place}): undo that"
-        . " change there. Then $back, run mutate-changed.sh --recover, and remove the file again if you meant to\n"
-      : " $what, so it may still hold the mutant ($f->{place}). To keep your change without it: undo that change"
-        . " in the file and check with git diff that it is gone; keep a copy of the file; $back; run"
-        . " mutate-changed.sh --recover; then copy your file back\n");
+    my $now = read_file($f->{path});
+    die "$p $what, so it may hold the mutant ($where): $back, then run mutate-changed.sh --recover\n"
+      unless defined $now;
+    die "$p $what, and it still holds the mutant's change ($where): undo that change in the file (git diff shows it),"
+      . " then run mutate-changed.sh --recover\n" if holds($f, $now);
+    return 0;
   };
   my $h = sha_file($f->{path});
   return 0 if defined $h && $h eq $f->{ss};
   if (!defined $h || $h ne $f->{ms}) {
-    $held->(!(-e $f->{path} || -l $f->{path}) ? 'is missing'
-      : (-l $f->{path} || !-f _) ? 'is not a readable regular file' : 'was changed after its mutant was written');
+    die "$p is missing; a copy made from it, or the file moved, may hold the mutant's change ($where): undo that"
+      . " change there. Then $back, run mutate-changed.sh --recover, and remove the file again if you meant to\n"
+      if !(-e $f->{path} || -l $f->{path});
+    return $changed->((-l $f->{path} || !-f _) ? 'is not a regular file' : 'was changed after its mutant was written');
   }
   # (a round keeps the start bytes, so the signal path needs no git)
-  my $bytes = defined $f->{text} ? $f->{text} : Git::cat('blob', $f->{sb}, 1);
-  die 'the stored original of ' . Esc::line($f->{path}) . " does not match the journal\n"
-    unless Digest::SHA::sha256_hex($bytes) eq $f->{ss};
-  put($f->{path}, $bytes, !$fast, $f->{ms}) or $held->('was changed while it was being put back');
-  return 1;
+  my $bytes = original($f);
+  if (!eval { folder_of($f->{path}); 1 }) {
+    (my $e = $@) =~ s/\n\z//;
+    die "$e, and what it leads to holds the mutant ($where): make it the real folder again (as it was when the run"
+      . " started), then run mutate-changed.sh --recover\n";
+  }
+  return put($f->{path}, $bytes, !$fast, $f->{ms}) ? 1 : $changed->('was changed while it was being put back');
 }
 
 # stash_id: refs/stash's commit, or -
@@ -705,18 +773,29 @@ sub release {
       'git merge --quit moves it to the stash list; drop it there (or take that change out of it)'];
   }
   my $head = $verify->('HEAD');    # (none before the first commit)
+  # has ID: the blob ID holds the mutant, or its change with others
+  my $has = sub {
+    my ($f, $id) = @_;
+    return 1 if $id eq $f->{mb};
+    return 0 if $id eq $f->{sb};
+    my $bytes = eval { Git::cat('blob', $id, 1) };
+    $fail->('git cat-file') unless defined $bytes;
+    return holds($f, $bytes);
+  };
   for my $f (@{ $j->{files} }) {
     my $p = $f->{path};
     if (defined $head) {
       my ($tst, $tree) = Git::run('ls-tree', '-z', $head, '--', $p);
       $fail->('git ls-tree') if $tst;
       die 'HEAD (' . substr($head, 0, 7) . ') holds the mutant of ' . Esc::line($p) . ': undo that change in a new'
-        . " commit, then run mutate-changed.sh --recover\n" if $tree =~ /\A[0-7]+ blob \Q$f->{mb}\E\t/;
+        . " commit, then run mutate-changed.sh --recover\n" if $tree =~ /\A[0-7]+ blob ([0-9a-f]+)\t/ && $has->($f, $1);
     }
     my ($ist, $idx) = Git::run('ls-files', '-s', '-z', '--', $p);
     $fail->('git ls-files') if $ist;
-    die 'the index holds the mutant of ' . Esc::line($p) . ' (it was staged): unstage that change, then run'
-      . " mutate-changed.sh --recover\n" if $idx =~ /\A[0-7]+ \Q$f->{mb}\E /;
+    for my $e (split /\0/, $idx) {
+      die 'the index holds the mutant of ' . Esc::line($p) . ' (it was staged): unstage that change, then run'
+        . " mutate-changed.sh --recover\n" if $e =~ /\A[0-7]+ ([0-9a-f]+) [0-3]\t/ && $has->($f, $1);
+    }
     for my $k (@kept) {
       my ($s, $what, $out) = @$k;
       # the stash, then its index part when it has one
@@ -725,7 +804,7 @@ sub release {
         my ($tst, $tree) = Git::run('ls-tree', '-z', $rev, '--', $p);
         $fail->('git ls-tree') if $tst;
         die "$what holds the mutant of " . Esc::line($p) . ": $out, then run mutate-changed.sh --recover\n"
-          if $tree =~ /\A[0-7]+ blob \Q$f->{mb}\E\t/;
+          if $tree =~ /\A[0-7]+ blob ([0-9a-f]+)\t/ && $has->($f, $1);
       }
     }
   }
@@ -744,19 +823,23 @@ sub end_round {
   }
   return () unless $OPEN;
   $OPEN->{tried} = 1;
-  # a check may have removed the journal: it is written again before the
-  # files are put back; when that fails, they are put back all the same,
-  # and the reason says no journal names them
+  # a check may have removed or changed the journal: it is written again
+  # before the files are put back; when that fails, they are put back all
+  # the same, and the reason says no journal names them, and where the
+  # mutant may be
   my $lost;
-  ($lost = $@) =~ s/\n\z// if !(-e $JOURNAL || -l $JOURNAL) && !eval { journal_write($OPEN); 1 };
+  ($lost = $@) =~ s/\n\z// if !journal_ok($OPEN) && !eval { journal_write($OPEN); 1 };
   my @back;
   if (!eval { @back = map { $_->{path} } grep { restore($_, $fast, $OPEN->{start}) } @{ $OPEN->{files} }; release($OPEN); 1 }) {
     die $@ unless defined $lost;
     (my $e = $@) =~ s/\n\z//;
-    die "$e; no journal names it: the journal was removed during the round and could not be written again ($lost)\n";
+    die "$e; and no journal names it, so --recover cannot find it (the journal was removed or changed during the round"
+      . " and could not be written again: $lost): once that is done, make sure "
+      . join(', ', map { Esc::line($_->{path}) . " no longer holds the mutant's change ($_->{place})" } @{ $OPEN->{files} })
+      . "\n";
   }
   undef $OPEN;
-  die "the journal was removed during the round and could not be written again ($lost); "
+  die "the journal was removed or changed during the round and could not be written again ($lost); "
     . (@back ? join(', ', map { Esc::line($_) } @back) . ' put back' : 'the files are as at the start') . "\n" if defined $lost;
   return @back;
 }
@@ -886,7 +969,8 @@ sub run_mutants {
     my $mut = mutated($text, $m);
     my $j = { start => $start->{head}, stash => $stash, temp => $TEMP, pgid => undef, files => [{ path => $m->{path},
       sb => $m->{blob}, mb => Git::object_id('blob', $mut, $m->{blob}), ss => Digest::SHA::sha256_hex($text),
-      ms => Digest::SHA::sha256_hex($mut), text => $text, place => "line $m->{line}, column $m->{col}: " . shown($m) }] };
+      ms => Digest::SHA::sha256_hex($mut), text => $text, place => "line $m->{line}, column $m->{col}: " . shown($m),
+      ml => Digest::SHA::sha256_hex((split /\n/, $mut, -1)[$m->{line} - 1] =~ s/\r\z//r) }] };
     journal_write($j);
     $OPEN = $j;
     if (!put($m->{path}, $mut, 1, $j->{files}[0]{ss})) {

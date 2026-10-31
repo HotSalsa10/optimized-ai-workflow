@@ -144,6 +144,18 @@ strong='adult 18 && ! adult 17 && big 100 && ! big 99 && small 3 && ! small 4 ||
 # shellcheck disable=SC2016 # the check is written, not run
 slow='if [ -n "${SLOW:-}" ] && grep -q -- -gt src/a.sh; then touch "$MARK"; perl "$BEAT_PL" "$BEAT" "$SLOW"; fi'
 
+# the checks that remove or change the journal first wait until the round
+# has written the check's process group into it, so that write is done
+cat >"$work/pgid.pl" <<'EOF'
+alarm 10;
+for (;;) {
+  my $t;
+  if (open my $h, '<', '.git/method-mutate-journal') { local $/; $t = <$h> }
+  last if defined $t && $t =~ /^pgid [0-9]+$/m;
+  select undef, undef, undef, 0.01;
+}
+EOF
+
 # --- usage ---
 p=$(new_project "$weak") || abort_sandbox
 w="$p/w"
@@ -330,7 +342,7 @@ perl -e 'my $t = time + 10; utime $t, $t, $ARGV[0]' "$pw/src/a.sh"
 mr "$pw" --max 1
 expect "an edit made while the put-back waits for the clock stops the run (exit 2)" 2 "mutate-changed: FAIL - "
 case "$out" in
-  *"src/a.sh was changed "*", so it may still hold the mutant (line 2, column 18: '-ge' becomes '-gt')"*) pass "and the line says where the mutant may still be" ;;
+  *"src/a.sh was changed "*", and it still holds the mutant's change (line 2, column 18: '-ge' becomes '-gt'"*) pass "and the line says where the mutant may still be" ;;
   *"the checks changed 1 files (src/a.sh)"*) pass "and the line says where the mutant may still be (the edit came after the put-back)" ;;
   *) fail "and the line says where the mutant may still be" "$out" ;;
 esac
@@ -485,7 +497,7 @@ case "$out" in
   *) fail "run-checks refuses" "$out" ;;
 esac
 # the ways out, each in a copy of the project as the kill left it
-for k in committed staged edited gone stashed conf next rebase; do cp -R "$p" "$work/$k"; done
+for k in committed staged edited gone stashed stagededit committededit stashededit movededit conf next rebase; do cp -R "$p" "$work/$k"; done
 (cd "$work/committed/w" && git commit -q -am "Oops")
 mr "$work/committed/w" --recover
 expect "the mutant committed after the kill: refused, naming HEAD (exit 2)" 2 "holds the mutant of src/a.sh: undo that change in a new commit"
@@ -494,41 +506,78 @@ mr "$work/staged/w" --recover
 expect "the mutant staged after the kill: refused (exit 2)" 2 "the index holds the mutant of src/a.sh (it was staged)"
 printf '# edited\n' >>"$work/edited/w/src/a.sh"
 mr "$work/edited/w" --recover
-expect "an edit after the kill: refused, not overwritten, saying where the mutant may still be (exit 2)" 2 \
-  "src/a.sh was changed after its mutant was written, so it may still hold the mutant (line 2, column 18: '-ge' becomes '-gt')" \
-  "undo that change in the file and check with git diff that it is gone; keep a copy of the file; put the file back as it was when the run started (git restore --source="
+expect "an edit after the kill: refused, not overwritten, saying where the mutant is (exit 2)" 2 \
+  "src/a.sh was changed after its mutant was written, and it still holds the mutant's change (line 2, column 18: '-ge' becomes '-gt'; lines added above it move it): undo that change in the file (git diff shows it), then run mutate-changed.sh --recover"
 case "$out" in
   *"remove "*"by hand"*) fail "and it never says to remove the journal by hand" "$out" ;;
   *) pass "and it never says to remove the journal by hand" ;;
 esac
 if grep -q '^# edited$' "$work/edited/w/src/a.sh"; then pass "and the edit stays"; else fail "and the edit stays"; fi
-# the way out it gives, step by step: the edit is kept, the mutant is not
-from=$(printf '%s\n' "$out" | perl -ne 'print $1 if /--source=([0-9a-f]+)/')
+# the way out it gives: undo that one change; the edit is kept, the mutant
+# is not
 (cd "$work/edited/w" && perl -pi -e 's/-gt/-ge/ if $. == 2' src/a.sh)
-if (cd "$work/edited/w" && git diff -- src/a.sh | grep -q -- -gt); then fail "the advice: git diff shows the mutant's change is gone"; else pass "the advice: git diff shows the mutant's change is gone"; fi
-cp "$work/edited/w/src/a.sh" "$work/edited-copy"
-(cd "$work/edited/w" && git restore --source="$from" --worktree -- src/a.sh)
 mr "$work/edited/w" --recover
-expect "the advice: then --recover removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
-cp "$work/edited-copy" "$work/edited/w/src/a.sh"
+expect "the advice: once that change is undone, --recover removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
 if grep -q '^# edited$' "$work/edited/w/src/a.sh" && ! grep -q -- -gt "$work/edited/w/src/a.sh"; then
-  pass "the advice: the edit is back, without the mutant"
+  pass "the advice: the edit stays, without the mutant"
 else
-  fail "the advice: the edit is back, without the mutant" "$(cat "$work/edited/w/src/a.sh")"
+  fail "the advice: the edit stays, without the mutant" "$(cat "$work/edited/w/src/a.sh")"
 fi
 # a folder on the way removed after the kill: the file is missing, and the
 # advice says where else the mutant may be and how to get out
 rm -rf "$work/gone/w/src"
 mr "$work/gone/w" --recover
 expect "a folder removed after the kill: refused as missing, saying a copy may hold the mutant (exit 2)" 2 \
-  "src/a.sh is missing; a copy made from it, or the file moved, may still hold the mutant (line 2, column 18: '-ge' becomes '-gt')"
-from=$(printf '%s\n' "$out" | perl -ne 'print $1 if /--source=([0-9a-f]+)/')
-(cd "$work/gone/w" && git restore --source="$from" --worktree -- src/a.sh)
+  "src/a.sh is missing; a copy made from it, or the file moved, may hold the mutant's change (line 2, column 18: '-ge' becomes '-gt'; lines added above it move it)"
+from=$(printf '%s\n' "$out" | perl -ne 'print $1 if /--source=([0-9a-f]+) --staged --worktree/')
+(cd "$work/gone/w" && git restore --source="$from" --staged --worktree -- src/a.sh)
 mr "$work/gone/w" --recover
 expect "the advice: once the file is back, --recover removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
 (cd "$work/stashed/w" && git stash -q)
 mr "$work/stashed/w" --recover
 expect "the mutant stashed after the kill: refused (exit 2)" 2 "a stash made during the run holds the mutant of src/a.sh"
+# an edit on top of the mutant, then staged: the file is refused first;
+# once the change is undone in it, the index is
+sd="$work/stagededit/w"
+(cd "$sd" && printf '# edited\n' >>src/a.sh && git add src/a.sh)
+mr "$sd" --recover
+expect "an edit staged after the kill: the file is refused (exit 2)" 2 "src/a.sh was changed after its mutant was written, and it still holds the mutant's change"
+(cd "$sd" && perl -pi -e 's/-gt/-ge/ if $. == 2' src/a.sh)
+mr "$sd" --recover
+expect "then the index is refused, as it holds the mutant's change with the edit (exit 2)" 2 "the index holds the mutant of src/a.sh (it was staged): unstage that change"
+(cd "$sd" && git restore --staged -- src/a.sh)
+mr "$sd" --recover
+expect "once it is unstaged, --recover removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
+if grep -q '^# edited$' "$sd/src/a.sh" && ! grep -q -- -gt "$sd/src/a.sh"; then pass "and the edit stays, without the mutant"; else fail "and the edit stays, without the mutant" "$(cat "$sd/src/a.sh")"; fi
+# an edit on top of the mutant, then committed: HEAD is refused once the
+# file is fixed, until the change is undone in a new commit
+cd2="$work/committededit/w"
+(cd "$cd2" && printf '# edited\n' >>src/a.sh && git commit -q -am "Edit")
+(cd "$cd2" && perl -pi -e 's/-gt/-ge/ if $. == 2' src/a.sh)
+mr "$cd2" --recover
+expect "an edit committed after the kill: HEAD is refused, as it holds the mutant's change with the edit (exit 2)" 2 \
+  "holds the mutant of src/a.sh: undo that change in a new commit"
+(cd "$cd2" && git commit -q -am "Undo the mutant's change")
+mr "$cd2" --recover
+expect "once that is committed, --recover removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
+# an edit on top of the mutant, then stashed: the stash is refused
+se="$work/stashededit/w"
+(cd "$se" && printf '# edited\n' >>src/a.sh && git stash -q)
+mr "$se" --recover
+expect "an edit stashed after the kill: the stash is refused, as it holds the mutant's change with the edit (exit 2)" 2 \
+  "a stash made during the run holds the mutant of src/a.sh"
+(cd "$se" && git stash pop -q && perl -pi -e 's/-gt/-ge/ if $. == 2' src/a.sh)
+mr "$se" --recover
+expect "once it is taken back and the change undone, --recover removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
+if grep -q '^# edited$' "$se/src/a.sh" && ! grep -q -- -gt "$se/src/a.sh"; then pass "and the edit stays, without the mutant"; else fail "and the edit stays, without the mutant" "$(cat "$se/src/a.sh")"; fi
+# lines added above the mutant's line: it is still found
+mv2="$work/movededit/w"
+(cd "$mv2" && perl -pi -e 'print "# added\n# added\n" if $. == 1' src/a.sh)
+mr "$mv2" --recover
+expect "lines added above the mutant's line after the kill: still found (exit 2)" 2 "and it still holds the mutant's change (line 2, column 18:"
+(cd "$mv2" && perl -pi -e 's/-gt/-ge/' src/a.sh)
+mr "$mv2" --recover
+expect "once that change is undone where it now is, --recover removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
 printf 'PRODUCT_PATHS=src\nMUTATE_PATHS=src\nMUTATION_CHECKS=nope\n' >"$work/conf/w/.claude/method.conf"
 mr "$work/conf/w" --recover
 expect "--recover does not read the settings, so broken ones do not keep the mutant on disk" 0 \
@@ -590,7 +639,7 @@ done
 # and the reason says why (once, with one --recover advice)
 run_and "$w" TERM plain 'printf "# edit\n" >>src/a.sh'
 expect "TERM after the file was edited during the check: not overwritten, and the reason says why (exit 2)" 2 \
-  "mutate-changed: FAIL - stopped by SIGTERM; src/a.sh was changed after its mutant was written" "then copy your file back; the journal stays; the run stopped"
+  "mutate-changed: FAIL - stopped by SIGTERM; src/a.sh was changed after its mutant was written" "then run mutate-changed.sh --recover; the journal stays; the run stopped"
 case "$out" in
   *--recover*--recover*) fail "and --recover is advised once" "$out" ;;
   *) pass "and --recover is advised once" ;;
@@ -603,28 +652,51 @@ clean "and the files are the commit" "$w"
 
 # a check removes the journal, and it cannot be written again: the file is
 # put back all the same, and the line does not say a journal stays
-act "$w" 'rm -f .git/method-mutate-journal; mkdir -p .git/method-mutate-journal.tmp'
+act "$w" 'perl "'"$work/pgid.pl"'"; rm -f .git/method-mutate-journal; mkdir -p .git/method-mutate-journal.tmp'
 mr "$w" --max 1
 expect "a removed journal that cannot be written again: the file is put back all the same (exit 2)" 2 \
-  "mutate-changed: FAIL - the journal was removed during the round and could not be written again (cannot write the journal" "src/a.sh put back; the run stopped"
+  "mutate-changed: FAIL - the journal was removed or changed during the round and could not be written again (cannot write the journal" "src/a.sh put back; the run stopped"
 lacks "and it does not say the journal stays" "the journal stays"
 rmdir "$w/.git/method-mutate-journal.tmp"
 clean "and the files are the commit" "$w"
-act "$w" 'rm -f .git/method-mutate-journal; mkdir -p .git/method-mutate-journal.tmp; printf "# edit\n" >>src/a.sh'
+act "$w" 'perl "'"$work/pgid.pl"'"; rm -f .git/method-mutate-journal; mkdir -p .git/method-mutate-journal.tmp; printf "# edit\n" >>src/a.sh'
 mr "$w" --max 1
 expect "the same, and the file edited: the put-back is refused, and the line says no journal names it (exit 2)" 2 \
-  "src/a.sh was changed after its mutant was written, so it may still hold the mutant (line 2, column 18:" \
-  "; no journal names it: the journal was removed during the round and could not be written again"
+  "src/a.sh was changed after its mutant was written, and it still holds the mutant's change (line 2, column 18:" \
+  "; and no journal names it, so --recover cannot find it (the journal was removed or changed during the round and could not be written again" \
+  "once that is done, make sure src/a.sh no longer holds the mutant's change (line 2, column 18: '-ge' becomes '-gt')"
 lacks "and it does not say the journal stays" "the journal stays"
 rmdir "$w/.git/method-mutate-journal.tmp"
 (cd "$w" && git checkout -q -- src/a.sh)
 clean "and once the file is put back by hand, the files are the commit" "$w"
-check "$w" 'if grep -q -- -gt src/a.sh; then rm -f .git/method-mutate-journal; mkdir -p .git/method-mutate-journal.tmp; fi; '"$slow; $weak"
+check "$w" 'if grep -q -- -gt src/a.sh; then perl "'"$work/pgid.pl"'"; rm -f .git/method-mutate-journal; mkdir -p .git/method-mutate-journal.tmp; fi; '"$slow; $weak"
 run_and "$w" TERM plain
 expect "the same, then TERM: the file is put back all the same (exit 2)" 2 \
-  "mutate-changed: FAIL - stopped by SIGTERM; the journal was removed during the round and could not be written again" "src/a.sh put back; the run stopped"
+  "mutate-changed: FAIL - stopped by SIGTERM; the journal was removed or changed during the round and could not be written again" "src/a.sh put back; the run stopped"
 rmdir "$w/.git/method-mutate-journal.tmp"
 clean "and the files are the commit" "$w"
+
+act "$w" 'perl "'"$work/pgid.pl"'"; printf "mutate-changed journal 1\n" >.git/method-mutate-journal; git stash -q'
+mr "$w" --max 1
+expect "a check that cuts the journal short and stashes the mutant: the journal is written again, naming the stash (exit 2)" 2 \
+  "a stash made during the run holds the mutant of src/a.sh"
+mr "$w" --recover
+expect "and --recover trusts it, naming the stash again (exit 2)" 2 "a stash made during the run holds the mutant of src/a.sh"
+(cd "$w" && git stash clear)
+mr "$w" --recover
+expect "once the stash is dropped, --recover removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
+clean "and the files are the commit" "$w"
+# a lost journal, and a put-back that cannot be written (its temp name
+# taken by a folder): the line says where the mutant is
+# shellcheck disable=SC2016 # the check is written, not run
+act "$w" 'perl "'"$work/pgid.pl"'"; tmp=$(perl -ne '\''print pack "H*", $1 if /^temp ([0-9a-f]+)$/'\'' .git/method-mutate-journal); mkdir "src/$tmp"; rm -f .git/method-mutate-journal; mkdir -p .git/method-mutate-journal.tmp'
+mr "$w" --max 1
+expect "a lost journal and a put-back that cannot be written: the line says where the mutant is (exit 2)" 2 \
+  "cannot write next to src/a.sh" "and no journal names it, so --recover cannot find it" \
+  "make sure src/a.sh no longer holds the mutant's change (line 2, column 18: '-ge' becomes '-gt')"
+rmdir "$w/.git/method-mutate-journal.tmp" "$w"/src/.mutate-*.tmp
+(cd "$w" && git checkout -q -- src/a.sh)
+clean "and once the file is put back by hand, the files are the commit" "$w"
 
 # --- odd git: a git on PATH that, once the check has seen the mutant and
 # made FAKE_ARM (holding how many matching commands to let pass first),
@@ -816,15 +888,17 @@ my $t = <$f>;
 print join(' ', sha1_hex('blob ' . length($m) . "\0$m"), sha256_hex($t), sha256_hex($m));
 EOF
 ids=$(perl "$work/ids.pl" "$jw/src/a.sh")
+# the SHA-256 of the mutant's line (line 2, -gt)
+ml=$(perl -MDigest::SHA=sha256_hex -e 'local $/; open my $f, "<", $ARGV[0] or die; my $t = <$f>; $t =~ s/-ge/-gt/; print sha256_hex((split /\n/, $t)[1])' "$jw/src/a.sh")
 # hex TEXT: TEXT as hex digits
 hex() { printf '%s' "$1" | perl -ne 'print unpack "H*", $_'; }
 # journal PGID END [PATH [TEMP [IDS]]]: a journal for src/a.sh (or PATH),
 # which holds the original on disk, to JF (or the file JF names)
 journal() {
   # shellcheck disable=SC2086 # the ids are three words on purpose
-  printf 'mutate-changed journal 1\nstart %s\nstash -\ntemp %s\npgid %s\nfile %s %s %s %s %s %s\n%s' "$start" \
+  printf 'mutate-changed journal 1\nstart %s\nstash -\ntemp %s\npgid %s\nfile %s %s %s %s %s %s %s\n%s' "$start" \
     "$(hex "${4:-.mutate-1.tmp}")" "$1" "$(hex "${3:-src/a.sh}")" "$sb" ${5:-$ids} \
-    "$(hex "line 2, column 18: '-ge' becomes '-gt'")" "$2" >"${JF:-$jf}"
+    "$(hex "line 2, column 18: '-ge' becomes '-gt'")" "$ml" "$2" >"${JF:-$jf}"
 }
 journal - ''
 mr "$jw" --recover
@@ -893,7 +967,8 @@ cp -R "$work/next" "$work/link"
 JF="$work/link/w/.git/method-mutate-journal" journal - 'end
 '
 mr "$work/link/w" --recover
-expect "a folder on the way that is a link is never written through (exit 2)" 2 "a folder on the way to src/a.sh is a link or not a folder"
+expect "a folder on the way that is a link is never written through (exit 2)" 2 "a folder on the way to src/a.sh is a link or not a folder" \
+  "and what it leads to holds the mutant (line 2, column 18: '-ge' becomes '-gt'; lines added above it move it): make it the real folder again"
 if [ -e "$work/link/w/real/.mutate-1.tmp" ]; then pass "and nothing behind the link is removed"; else fail "and nothing behind the link is removed"; fi
 perl -e 'setpgrp(0, 0); open my $f, ">", $ARGV[0]; print $f getpgrp(), "\n"; close $f; alarm 20; sleep 20' "$work/group" &
 gpid=$!
