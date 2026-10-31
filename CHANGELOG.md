@@ -42,9 +42,12 @@ Nothing yet. Release 1 is being built.
 
 - `mutate-changed.sh --list`: plans the mutants for the lines this branch adds (step 4b.2; running them comes in 4b.3): which changed lines get which small text change, in an order that reaches every changed file first, with the reasons files are skipped. It writes nothing and runs no check, and a file or line that names one of a fixed list of delete and move commands gets no mutant (a delete written any other way is not recognised; RISKS #13). New settings MUTATE_PATHS and MUTATION_CHECKS (DECISIONS A40).
 - `Tree::added_lines`: the lines a file adds, from the same fixed diff the review packet uses; `Esc::utf8_ok`: the escaper's UTF-8 rule, shared.
-- Tests: 1 new test file (mutate plan), 3 config cases and 1 packet case; in 4b.3a 1 new test file (runner) and new run-checks and status cases; 1090 test cases in all.
+- Tests: 1 new test file (mutate plan), 3 config cases and 1 packet case; in 4b.3a 1 new test file (runner) and new run-checks and status cases; in 4b.3b 1 new test file (mutate run) and new runner cases; 1188 test cases in all.
 
 ### Changed (step 4b)
+
+- `mutate-changed.sh` runs mutants (step 4b.3b): run A, then one mutant at a time in the working tree, each written through one write function with a journal in git's own folder, each check under the limited runner with a time limit; survivors are named (exit 1); all killed is SKIPPED kills-unchecked until step 4b.4. `--recover` puts back what a cut-off run left; the next run does it first. `--minutes` (default 8) bounds a run.
+- The CI jobs get 25 minutes (Linux) and 30 (Windows, macOS): the suite takes about 11 minutes.
 
 - run-checks holds a lock it shares with mutate-changed (in git's own folder) for its whole run: while mutate-changed runs, it waits up to 5 s, then stops with `FAIL - busy` (exit 2, no log); a journal left by a cut-off mutate-changed run stops it too (run `mutate-changed.sh --recover`). status's work area says when mutate-changed is running, or was cut off.
 - `lib/checks.pl` gains a limited runner for mutate-changed's checks (used in step 4b.3b): each check leads its own process group under a watchdog that stops the group when its caller ends, kill -9 included, and has a time limit. run-checks' own runner is unchanged.

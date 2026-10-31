@@ -176,15 +176,15 @@ wait_for() {
 # beat_script FILE: writes a perl program to FILE. "perl FILE BEAT [MODE]"
 # appends a byte to BEAT every 0.1 s, for 60 s at most; MODE "ignore"
 # ignores TERM, INT and HUP; MODE "note" writes TERM to BEAT.term when TERM
-# comes, then ends. A process counts as stopped when its BEAT stops growing
-# (stopped), which works the same on Linux, macOS and Git Bash and is not
-# fooled by a zombie.
+# comes, then ends; MODE "short" ends after 2 s. A process counts as
+# stopped when its BEAT stops growing (stopped), which works the same on
+# Linux, macOS and Git Bash and is not fooled by a zombie.
 beat_script() {
   cat >"$1" <<'BEAT'
 my $m = $ARGV[1] || '';
 $SIG{$_} = 'IGNORE' for $m eq 'ignore' ? qw(TERM INT HUP) : ();
 $SIG{TERM} = sub { open my $t, '>>', "$ARGV[0].term"; print $t "TERM\n"; close $t; exit 0 } if $m eq 'note';
-alarm 60;
+alarm($m eq 'short' ? 2 : 60);
 while (1) { open my $f, '>>', $ARGV[0] or exit 1; print $f '.'; close $f; select undef, undef, undef, 0.1 }
 BEAT
 }
@@ -200,9 +200,10 @@ stopped() {
 
 # hold_lock FILE SECS MARK: holds FILE locked exclusively for SECS seconds,
 # in the background ($holder is its process id); returns once it holds it
-# (MARK then exists)
+# (MARK then exists), and fails when it cannot get it within 10 s
 hold_lock() {
-  perl -MFcntl=:flock -e 'open my $f, ">>", $ARGV[0] or exit 1; flock $f, LOCK_EX or exit 1; open my $m, ">", $ARGV[2]; close $m; sleep $ARGV[1]' "$1" "$2" "$3" &
+  perl -MFcntl=:flock -MTime::HiRes=sleep,time -e 'open my $f, ">>", $ARGV[0] or exit 1; my $u = time + 10;
+    until (flock $f, LOCK_EX | LOCK_NB) { exit 1 if time > $u; sleep 0.1 } open my $m, ">", $ARGV[2]; close $m; sleep $ARGV[1]' "$1" "$2" "$3" &
   # shellcheck disable=SC2034 # read by the test files that call it
   holder=$!
   wait_for "$3" 10

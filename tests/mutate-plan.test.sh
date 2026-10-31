@@ -100,10 +100,10 @@ feat() { (cd "$1" && git add -A 2>/dev/null && git commit -q -m "$2"); }
 p=$(new_project) || abort_sandbox
 w="$p/w"
 mp "$w"
-expect "without --list it stops: running mutants comes later (exit 2)" 2 \
-  "mutate-changed: FAIL - running mutants comes in step 4b.3; for now mutate-changed.sh plans them with --list"
+expect "without --list a run starts; at main's tip there is nothing to mutate (exit 3)" 3 \
+  "mutate-changed: SKIPPED - nothing-to-mutate: 0 changed lines in 0 files"
 mp "$w" --list --max 0
-expect "--max 0 is bad usage (exit 2)" 2 "mutate-changed: usage: mutate-changed.sh --list [--max N]"
+expect "--max 0 is bad usage (exit 2)" 2 "mutate-changed: usage: mutate-changed.sh [--list | --recover] [--max N] [--minutes N]"
 mp "$w" --list --bogus
 expect "an unknown argument is bad usage (exit 2)" 2 "mutate-changed: usage:"
 mp "$w" --list

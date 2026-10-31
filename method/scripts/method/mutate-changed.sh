@@ -3,13 +3,47 @@
 # small text change (a mutant), the project's fast checks run against it,
 # and the line is put back. A mutant the checks do not notice survives: the
 # tests would not notice that mistake either. The work is done by
-# lib/mutate.pl. Step 4b.2 builds the plan only; running mutants comes in
-# step 4b.3.
+# lib/mutate.pl. No run gives PASS yet: all killed is SKIPPED
+# kills-unchecked, until a repeat and a control run check the kills (step
+# 4b.4).
 #
-# Usage: bash scripts/method/mutate-changed.sh --list [--max N]
-#   --list   print the plan: one line per mutant, nothing written, no check
-#            run
-#   --max N  at most N mutants (default 100)
+# Usage: bash scripts/method/mutate-changed.sh [--list | --recover] [--max N] [--minutes N]
+#   (none)       run: run A (each check once, with no mutant), then one
+#                mutant at a time
+#   --list       print the plan: one line per mutant, nothing written, no
+#                check run
+#   --recover    put back what a run that was cut off left on disk, and
+#                nothing else
+#   --max N      at most N mutants (default 100)
+#   --minutes N  stop starting mutants once one more might not end within N
+#                minutes of the start (default 8; 1 to 600). A foreground
+#                tool call allows 10 minutes: for longer runs, raise its
+#                limit or run in the background.
+#
+# A run writes into the working tree with your rights. It holds the lock
+# it shares with run-checks.sh (lib/runstate.pl, in git's own folder), so
+# the two never run at once: while another holds it, it waits 5 s, then
+# stops with "FAIL - busy: ..." (exit 2). Each mutant goes in through one
+# write function (a temp file next to the file, synced, given the file's
+# mode, and renamed over it; its time one second past the file's, so a
+# cache keyed on the time in seconds and the size never takes one version
+# for another), with a journal in git's own folder that names it until it
+# is put back. Each check runs in its own process group under a watchdog
+# that stops the group when the run ends in any way, kill -9 included, and
+# within a time limit of 3 times its run A time plus 30 s; a check that
+# runs out of time has killed the mutant. After each mutant: the check's
+# group is stopped, the file put back, and the journal removed once the
+# mutant is nowhere git keeps it (the index, HEAD, a stash made during the
+# run); then the files, HEAD, the branches and tags, and the stash must be
+# as at the start (else exit 2, naming what changed). On INT, TERM, HUP
+# (unless it came ignored, as under nohup) or QUIT, the check's group is
+# killed and the file put back at once (exit 2). After kill -9, the next
+# run or --recover puts the file back (it never reads the settings first),
+# and refuses, keeping the journal, when the file holds neither the mutant
+# nor the original, when HEAD, the index or a new stash holds the mutant,
+# or during a merge, rebase or other git operation (whose autostash can
+# hold it). Files put back are newer than any build, so a "build is
+# current" check fails until a rebuild.
 #
 # What changed: the lines this branch adds since its merge base with main
 # (lib/git.pl's Git::main_ref; there is no --base). Two merge bases (after
@@ -78,18 +112,26 @@
 # Order: the files in path order, one mutant per changed line from each
 # file in turn, then the rest the same way, so a cap reaches every file.
 #
-# Screen: one line per planned mutant,
+# Screen: --list prints one line per planned mutant,
 #   mutate-changed: planned: FILE:LINE:COLUMN: 'OP' becomes 'OP'
 # (the column in bytes; never the line's text, which can hold a key: a
 # number other than 0 and 1 is shown as "a N-digit number becomes that
 # number + 1"), the checks it would run, then one line that starts with
-# mutate-changed: PLAN, SKIPPED or FAIL. File names are escaped.
+# mutate-changed: PLAN, SKIPPED or FAIL. A run prints what it put back
+# from a cut-off run, the checks, run A's times and the limits, one line
+# per mutant that survived ("survived: FILE:LINE:COLUMN: ...", naming a
+# check that passed but examined nothing), then the last line: the counts,
+# then "N mutants: K killed (T by time limit), S survived, R not run". File
+# names are escaped.
 #
-# Exit codes: 0 a plan with mutants; 2 bad usage (the usage line), bad
-# settings, files on disk that are not the commit, no main, two merge
-# bases, no shared history, or a git error
-# or a damaged stored file (the last line says FAIL and why); 3 SKIPPED
-# (not-configured, not-here, nothing-to-mutate), never a pass.
+# Exit codes: 0 a plan with mutants (--list), or --recover done; 1 a
+# mutant survived (FAIL); 2 bad usage (the usage line), bad settings, files
+# on disk that are not the commit, no main, two merge bases, no shared
+# history, a git error or a damaged stored file, busy, run A failing, a
+# check that changed something, a signal, or a refusal to put a file back
+# (the last line says FAIL and why); 3 SKIPPED (not-configured, not-here,
+# nothing-to-mutate, time-reached: --minutes ran out; max-reached: the
+# plan had more than --max; kills-unchecked), never a pass.
 set -u
 unset METHOD_CALLER_PERL_UNICODE METHOD_CALLER_PERL5OPT METHOD_CALLER_PERL5LIB METHOD_CALLER_PERLLIB
 unset METHOD_CALLER_PERL_USE_UNSAFE_INC METHOD_CALLER_PERLIO

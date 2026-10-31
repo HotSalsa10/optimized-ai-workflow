@@ -58,6 +58,8 @@ sub probe {
     $r{unknown} = 'the lock is not a regular file';
   } elsif (!sysopen $fh, $lock, O_RDONLY | O_NONBLOCK | $NOFOLLOW) {
     $r{unknown} = "cannot open the lock ($!)";
+  } elsif (!-f $fh) {
+    $r{unknown} = 'the lock is not a regular file';
   } elsif (flock $fh, LOCK_SH | LOCK_NB) {
     flock $fh, LOCK_UN;
   } elsif ($!{EWOULDBLOCK} || $!{EAGAIN}) {
@@ -78,6 +80,8 @@ sub probe {
 sub take {
   my ($mode) = @_;
   my ($lock) = paths();
+  # (without O_NOFOLLOW, O_CREAT would follow a link and make its target)
+  return (undef, 'error', "the lock $lock is a link") if !$NOFOLLOW && -l $lock;
   my $fh;
   sysopen $fh, $lock, O_RDWR | O_CREAT | O_NONBLOCK | $NOFOLLOW, 0600
     or return (undef, 'error', "cannot open the lock $lock ($!)");

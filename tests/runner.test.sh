@@ -159,6 +159,35 @@ if ($mode eq 'exit') {
   $t0 = time;
   Checks::finish_limited($r, 0, sub { 1 });
   print "finish=", took(), "\n";
+} elsif ($mode eq 'closed') {
+  # a caller with its own stdin and stdout closed
+  close STDIN;
+  close STDOUT;
+  my $r = Checks::start_limited(undef, ['bash', '-c', 'echo 3 ok'], $out);
+  my $how = Checks::wait_limited($r, 10);
+  $t0 = time;
+  Checks::finish_limited($r);
+  print STDERR "how=$how finish=", took(), "\n";
+} elsif ($mode eq 'stclosed') {
+  # the caller closes its end of the status pipe before the check ends, so
+  # the watchdog's status write meets a closed pipe
+  my $r = Checks::start_limited(undef, ['bash', '-c', 'perl "$1" "$2" ignore & sleep 0.5; echo 1 ok', 'bash', $ENV{BEAT_PL}, $beat], $out);
+  close $r->{st};
+  sleep 1;
+  POSIX::_exit(0);
+} elsif ($mode eq 'warn') {
+  # the caller's own warn handler must not run in the check
+  $SIG{__WARN__} = sub { open my $m, '>', $ENV{MARK}; close $m; POSIX::_exit(0) };
+  my $r = Checks::start_limited(undef, ['no-such-command-here'], $out);
+  my $how = Checks::wait_limited($r, 10);
+  Checks::finish_limited($r);
+  print "how=$how code=", $r->{status} >> 8, "\n";
+} elsif ($mode eq 'twice') {
+  my $r = Checks::start_limited(undef, ['bash', '-c', 'echo 1 ok'], $out);
+  Checks::wait_limited($r, 10);
+  Checks::finish_limited($r);
+  Checks::finish_limited($r, 1);
+  print "alive\n";
 } elsif ($mode eq 'groups') {
   print join(' ', map { Checks::group_ok($_) ? 'yes' : 'no' } undef, 0, 1, getpgrp(), 'x', 4294967295), "\n";
   my $dummy = fork;
@@ -168,10 +197,11 @@ if ($mode eq 'exit') {
 }
 EOF
 
-# drive MODE: runs the driver in the work repo; sets out (its screen)
+# drive MODE: runs the driver in the work repo, for 60 s at most; sets out
+# (its screen)
 drive() {
   rm -f "$work/beat" "$work/check.out"
-  out=$(cd "$work" && BEAT_PL="$work/beat.pl" SIG_PL="$work/sig.pl" perl "$work/drv.pl" "$lib" "$1" "$work/beat" "$work/check.out" 2>&1)
+  out=$(cd "$work" && BEAT_PL="$work/beat.pl" SIG_PL="$work/sig.pl" perl -e 'alarm 60; exec @ARGV' perl "$work/drv.pl" "$lib" "$1" "$work/beat" "$work/check.out" 2>&1)
 }
 
 # has NAME STRING: the last driver screen holds STRING
@@ -283,6 +313,30 @@ if stopped "$work/beat" 10; then pass "a watchdog killed on its own: finishing s
 # reaps every child still gets the check's result
 drive chld
 has "a caller's SIGCHLD handler does not take the check's result from the watchdog" "how=exit"
+
+# a caller with its own stdin and stdout closed: the check still reads the
+# null device and writes into its file, and the watchdog sees its pipe end
+drive closed
+has "a caller with stdin and stdout closed still gets the check's result" "how=exit"
+under "and finishes at once" "$(printf '%s\n' "$out" | sed -n 's/.*finish=//p')" 1
+if grep -q '^3 ok$' "$work/check.out"; then pass "and the check's output is in its file"; else fail "and the check's output is in its file"; fi
+
+# the watchdog ignores PIPE: its status write into a pipe the caller closed
+# does not end it, so it still stops the check once the caller is gone
+drive stclosed
+if stopped "$work/beat" 10; then pass "a status write into a closed pipe does not end the watchdog"; else fail "a status write into a closed pipe does not end the watchdog"; fi
+
+# a check that cannot be started comes back as exit 127, and the caller's
+# own warn handler does not run in its place
+rm -f "$work/mark"
+out=$(cd "$work" && MARK="$work/mark" perl -e 'alarm 60; exec @ARGV' perl "$work/drv.pl" "$lib" warn "$work/beat" "$work/check.out" 2>&1)
+has "a check that cannot be started is exit 127" "how=exit code=127"
+if [ -e "$work/mark" ]; then fail "and the caller's warn handler does not run in the check"; else pass "and the caller's warn handler does not run in the check"; fi
+
+# a finished run is inert: a second (fast) finish sends nothing (the driver
+# runs in a group of its own, as a stray KILL would go to its group)
+out=$(cd "$work" && perl -e 'alarm 60; setpgrp(0, 0); exec @ARGV' perl "$work/drv.pl" "$lib" twice "$work/beat" "$work/check.out" 2>&1)
+has "a second finish of one run sends no signal" "alive"
 
 # a fast finish does not wait for a killed check's children to be reaped
 drive fastchild

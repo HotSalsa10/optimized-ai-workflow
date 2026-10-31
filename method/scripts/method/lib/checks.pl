@@ -171,12 +171,13 @@ sub group_ok {
   return defined $g && $g =~ /\A[0-9]{1,10}\z/ && $g >= 2 && $g < 2147483648 && $g != getpgrp();
 }
 
-# default_signals: every signal back to its default, none blocked (a
-# handler, an ignored signal or a mask a process inherited from its caller)
+# default_signals: every signal back to its default, none blocked, and no
+# __WARN__ or __DIE__ handler (a handler, an ignored signal or a mask a
+# process inherited from its caller, whose code must not run here)
 sub default_signals {
   for my $s (keys %SIG) {
-    next if $s =~ /\A__/ || !defined $SIG{$s};
-    $SIG{$s} = 'DEFAULT';
+    next unless defined $SIG{$s};
+    $SIG{$s} = $s =~ /\A__/ ? undef : 'DEFAULT';
   }
   POSIX::sigprocmask(POSIX::SIG_SETMASK(), POSIX::SigSet->new);
 }
@@ -209,6 +210,15 @@ sub close_others {
 # gets every signal back at its default, none blocked.
 sub start_limited {
   my ($env, $argv, $out, @keep) = @_;
+  # descriptors 0 to 2 must be open, or the pipes below would take one of
+  # them, and the check would read or write the watchdog's pipe
+  for my $fd (0 .. 2) {
+    my $d = POSIX::dup($fd);
+    if (defined $d) { POSIX::close($d); next }
+    my $null = POSIX::open(File::Spec->devnull, POSIX::O_RDWR());
+    next unless defined $null;
+    if ($null != $fd) { POSIX::dup2($null, $fd); POSIX::close($null) }
+  }
   pipe(my $keep_r, my $keep_w) or die "cannot make a pipe\n";
   pipe(my $st_r, my $st_w) or die "cannot make a pipe\n";
   my $caller = $$;
@@ -222,9 +232,12 @@ sub start_limited {
       default_signals();
       $SIG{$_} = 'IGNORE' for qw(INT TERM HUP QUIT PIPE);
       close_others(fileno($keep_r), fileno($st_w), map { fileno($_) } grep {defined} @keep);
-      open STDIN, '<', File::Spec->devnull;
-      open STDOUT, '>', File::Spec->devnull;
-      open STDERR, '>', File::Spec->devnull;
+      # descriptors 0 to 2 by number: perl's own handles may be closed
+      my $null = POSIX::open(File::Spec->devnull, POSIX::O_RDWR());
+      if (defined $null) {
+        POSIX::dup2($null, $_) for 0 .. 2;
+        POSIX::close($null) if $null > 2;
+      }
       my $c = fork;
       if (!defined $c) { syswrite $st_w, "error cannot start a process\n"; POSIX::_exit(1) }
       if (!$c) {
@@ -232,9 +245,15 @@ sub start_limited {
           POSIX::setpgid(0, 0);
           default_signals();
           %ENV = %$env if $env;
-          open STDIN, '<', File::Spec->devnull or POSIX::_exit(127);
-          open STDOUT, '>>', $out or POSIX::_exit(127);
-          open STDERR, '>&', \*STDOUT or POSIX::_exit(127);
+          # descriptors 0 to 2 by number, as exec hands them on
+          my $in = POSIX::open(File::Spec->devnull, POSIX::O_RDONLY());
+          my $o = POSIX::open($out, POSIX::O_WRONLY() | POSIX::O_CREAT() | POSIX::O_APPEND(), 0666);
+          POSIX::_exit(127) unless defined $in && defined $o;
+          POSIX::dup2($in, 0) // POSIX::_exit(127);
+          POSIX::dup2($o, 1) // POSIX::_exit(127);
+          POSIX::dup2($o, 2) // POSIX::_exit(127);
+          POSIX::close($_) for grep { $_ > 2 } $in, $o;
+          no warnings 'exec';
           exec { $argv->[0] } @$argv;
         };
         POSIX::_exit(127);
@@ -255,7 +274,7 @@ sub start_limited {
       # the caller is done or gone: stop the check's group (KILL only to a
       # group that is still there: its number could be taken again once it
       # is gone)
-      kill 'TERM', -$c;
+      kill 'TERM', -$c if kill 0, -$c;
       my ($until, $gone) = (now() + 2, 0);
       while (now() < $until) {
         waitpid($c, POSIX::WNOHANG()) unless defined $status;
@@ -320,9 +339,11 @@ sub wait_limited {
 # the group to be gone (a killed check's children can stay zombies until the
 # system reaps them); so does INTERRUPTED->() becoming true while it waits.
 # After 3 s, KILL goes to the watchdog and the group. A group still there
-# once the watchdog is gone (killed on its own) gets KILL.
+# once the watchdog is gone (killed on its own) gets KILL. A finished run
+# is inert: a second call does nothing, as its numbers may be taken again.
 sub finish_limited {
   my ($r, $fast, $interrupted) = @_;
+  return unless $r->{w};    # finished already: its numbers may be taken again
   my $g = group_ok($r->{pgid}) ? $r->{pgid} : undef;
   close $r->{keep} if $r->{keep};
   undef $r->{keep};
@@ -330,7 +351,7 @@ sub finish_limited {
   while (1) {
     $fast = 1 if !$fast && $interrupted && $interrupted->();
     if ($fast && !$sent) {
-      kill 'KILL', -$g if $g;
+      kill 'KILL', -$g if $g && kill 0, -$g;
       kill 'KILL', $r->{w};
       $sent = 1;
     }
@@ -345,7 +366,7 @@ sub finish_limited {
   }
   kill 'KILL', -$g if $g && kill 0, -$g;
   close $r->{st} if $r->{st};
-  undef $r->{st};
+  delete @$r{qw(st w pgid)};
 }
 
 sub write_lines {
