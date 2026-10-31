@@ -12,13 +12,13 @@
 #   --max N  at most N mutants (default 100)
 #
 # What changed: the lines this branch adds since its merge base with main
-# (lib/git.pl's Git::main_ref; there is no --base). Only files that are
-# exactly their stored bytes on disk are mutated: a file git's checkout
-# converts (eol, ident, working-tree-encoding), one the commit's own
-# .gitattributes puts in Git LFS (or that holds an LFS pointer), a file
-# that is not UTF-8 text as RFC 3629 defines it (or holds a NUL byte), one
-# larger than 1 MB and one that is not a regular file are skipped and
-# counted. The files on disk must be the commit (run-checks' fingerprint is
+# (lib/git.pl's Git::main_ref; there is no --base). Two merge bases (after
+# criss-cross merges) stop it: merge main into the branch first. Only files
+# that are exactly their stored bytes on disk are mutated: a file git's
+# checkout converts (eol, ident, working-tree-encoding), Git LFS content
+# and an LFS pointer, a file that is not UTF-8 text as RFC 3629 defines it
+# (or holds a NUL byte), one larger than 1 MB (or whose old version is) and
+# one that is not a regular file are skipped and counted. The files on disk must be the commit (run-checks' fingerprint is
 # empty).
 #
 # Settings, in .claude/method.conf (lib/conf.pl):
@@ -33,14 +33,21 @@
 # .method/, and .gitattributes, .gitignore and .gitmodules anywhere, in any
 # case of letters.
 #
-# A mutant runs with your rights, so nothing that deletes or moves files is
-# mutated: a shell script or make file (.sh, .bash, .zsh, .ksh, .bats,
-# .fish, .command, .mk, Makefile, or a first line naming sh, bash, dash,
-# ksh, zsh, fish or make) that runs rm, rmdir, unlink, mv, dd, chmod,
-# chown, shred, truncate, find -delete, or git clean, reset, push,
-# checkout, restore, rm or branch anywhere is skipped whole, since its
-# guard can sit on another line; in any other file, a line that names one
-# of them gets no mutant.
+# A mutant runs with your rights, so a file or line that names a command
+# that deletes or moves files gets none. The words: rm, rmdir, unlink, mv,
+# dd, chmod, chown, shred, truncate, rimraf, $(RM) and ${RM}, find with
+# -delete, rsync with --delete, git with clean, reset, push, checkout,
+# restore, rm, branch, stash or worktree later on the line (whatever options
+# come first), os.remove and the like, shutil.rmtree and .move, fs.rm and
+# the like, FileUtils.rm and .mv, File.delete, Files.delete, fs::remove,
+# Remove-Item, Move-Item, and del, erase or rd followed by a space. A shell
+# script, make file or batch file (.sh, .bash, .zsh, .ksh, .bats, .fish,
+# .command, .mk, .mak, .make, .bat, .cmd, .ps1, Makefile and its kin,
+# .envrc, .bashrc, .bash_profile, .profile, .zshrc, or a first line naming
+# sh, bash, dash, ksh, zsh, fish, make or pwsh) that names one anywhere is
+# skipped whole, since its guard can sit on another line; in any other
+# file, the line that names one gets no mutant. The list is words, not a
+# parser (RISKS #13).
 #
 # Mutants, one position each: === and !== swapped, == and != swapped; <= to
 # <, >= to >; after a [ or test on the line, the shell tests -lt -le -gt
@@ -48,8 +55,10 @@
 # and -lt, -eq and -ne swapped); && and || swapped, and the words and and
 # or; true and false (also True, TRUE) swapped; a whole decimal integer N
 # to N+1 (1 to 0), not one with a leading zero, a fraction or a letter
-# (also a non-ASCII one) next to it, nor one after $, ${ or \ (a variable
-# or a back-reference). A run of = is not an operator. A line whose first
+# (also a non-ASCII one) next to it, nor one after $, ${, ${#, %, \ (a
+# variable or a back-reference) or >& and <&, nor one before > or < (a
+# file descriptor). A run of =, and ==>, <=<, >=> and the like, are not
+# operators. A line whose first
 # text opens a comment (#, //, --, /*, *, ;, %, <!--) is skipped and
 # counted.
 # Order: the files in path order, one mutant per changed line from each
@@ -58,12 +67,13 @@
 # Screen: one line per planned mutant,
 #   mutate-changed: planned: FILE:LINE:COLUMN: 'OP' becomes 'OP'
 # (the column in bytes; never the line's text, which can hold a key: a
-# number of more than two digits is shown as "a N-digit number becomes
-# that number + 1"), the checks it would run, then one line that starts
-# with mutate-changed: PLAN, SKIPPED or FAIL. File names are escaped.
+# number other than 0 and 1 is shown as "a N-digit number becomes that
+# number + 1"), the checks it would run, then one line that starts with
+# mutate-changed: PLAN, SKIPPED or FAIL. File names are escaped.
 #
 # Exit codes: 0 a plan with mutants; 2 bad usage (the usage line), bad
-# settings, files on disk that are not the commit, no main, or a git error
+# settings, files on disk that are not the commit, no main, two merge
+# bases, no shared history, or a git error
 # or a damaged stored file (the last line says FAIL and why); 3 SKIPPED
 # (not-configured, not-here, nothing-to-mutate), never a pass.
 set -u

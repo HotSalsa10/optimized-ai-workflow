@@ -88,8 +88,9 @@ sub method_folder {
 # first line: its lines run commands
 sub shell_like {
   my ($p, $text) = @_;
-  return 1 if $p =~ /\.(?:sh|bash|zsh|ksh|bats|fish|command|mk)\z/i || $p =~ m{(?:\A|/)(?:GNU)?[Mm]akefile\z};
-  return $text =~ m{\A#![^\n]*\b(?:sh|bash|dash|ksh|zsh|fish|make)\b} ? 1 : 0;
+  return 1 if $p =~ /\.(?:sh|bash|zsh|ksh|bats|fish|command|mk|mak|make|bat|cmd|ps1)\z/i
+    || $p =~ m{(?:\A|/)(?:(?:GNU|BSD)?makefile(?:\.[^/]*)?|\.envrc|\.bashrc|\.bash_profile|\.profile|\.zshrc)\z}i;
+  return $text =~ m{\A#![^\n]*\b(?:sh|bash|dash|ksh|zsh|fish|make|pwsh)\b} ? 1 : 0;
 }
 
 # comment-like LINE: its first non-blank text opens a comment in a common
@@ -99,8 +100,14 @@ sub comment_like { return $_[0] =~ m{\A[ \t]*(?:#|//|--|/\*|\*|;|%|<!--)} ? 1 : 
 # destructive TEXT: TEXT runs a command that deletes, moves or rewrites
 # files or history. A mutant runs with the session's rights, so a changed
 # condition would run it when it was meant not to.
-my $DESTRUCTIVE = qr/\b(?:rm|rmdir|unlink|mv|dd|chmod|chown|shred|truncate)\b|\bfind\b[^\n]*\s-delete\b
-  |\bgit\b(?:\s+(?:-[cC]\s+\S+|--?\S+))*\s+(?:clean|reset|push|checkout|restore|rm|branch)\b/x;
+my $DESTRUCTIVE = qr/\b(?:rm|rmdir|unlink|mv|dd|chmod|chown|shred|truncate|rimraf)\b
+  |\$[({]?(?:rm|RM)\b
+  |\bfind\b[^\n]*\s-delete\b|\brsync\b[^\n]*\s--delete
+  |\bgit\b[^\n]*?\s(?:clean|reset|push|checkout|restore|rm|branch|stash|worktree)\b
+  |\b(?:os\.(?:remove|unlink|rmdir|removedirs|RemoveAll|Remove)|shutil\.(?:rmtree|move)
+    |fs\.(?:rm|rmSync|unlink|unlinkSync|rmdir|rmdirSync)|FileUtils\.(?:rm\w*|remove\w*|mv)|File\.delete
+    |Files\.delete\w*|fs::remove\w*|Remove-Item|Move-Item)\b
+  |\b(?:del|erase|rd)\s/x;
 sub destructive { return $_[0] =~ $DESTRUCTIVE ? 1 : 0 }
 
 # next_int N: N + 1 as decimal text (any length); 1 becomes 0, as 0 becomes 1
@@ -120,40 +127,47 @@ sub next_int {
 # non-ASCII letter).
 my @OPS = (
   [qr/(?<![=!])(===)(?!=)/, sub {'!=='}], [qr/(?<![=!])(!==)(?!=)/, sub {'==='}],
-  [qr/(?<![=!<>])(==)(?!=)/, sub {'!='}], [qr/(!=)(?!=)/, sub {'=='}],
-  [qr/(?<![<=])(<=)(?![>=])/, sub {'<'}], [qr/(?<![>=])(>=)(?!=)/, sub {'>'}],
+  [qr/(?<![=!<>])(==)(?![=>])/, sub {'!='}], [qr/(!=)(?!=)/, sub {'=='}],
+  [qr/(?<![<=])(<=)(?![<>=])/, sub {'<'}], [qr/(?<![>=])(>=)(?![=>])/, sub {'>'}],
   [qr/(?<=\s)(-(?:lt|le|gt|ge|eq|ne))(?=\s)/, sub { { '-lt' => '-le', '-le' => '-lt', '-gt' => '-ge', '-ge' => '-gt',
     '-eq' => '-ne', '-ne' => '-eq' }->{ $_[0] } }, 'test'],
   [qr/(?<!&)(&&)(?![&=])/, sub {'||'}], [qr/(?<!\|)(\|\|)(?![|=])/, sub {'&&'}],
   [qr/\b(and)\b/, sub {'or'}], [qr/\b(or)\b/, sub {'and'}],
   [qr/\b(true|false|True|False|TRUE|FALSE)\b/, sub { { true => 'false', false => 'true', True => 'False',
     False => 'True', TRUE => 'FALSE', FALSE => 'TRUE' }->{ $_[0] } }],
-  [qr/(?<![\w.\$\\\x80-\xFF])(?<!\$\{)(0|[1-9][0-9]*)(?![\w.\x80-\xFF])/, \&next_int, 'number'],
+  [qr/(?<![\w.\$\\%\x80-\xFF])(?<!\$\{)(?<!\$\{\#)(?<![<>]&)(0|[1-9][0-9]*)(?![\w.<>\x80-\xFF])/, \&next_int, 'number'],
 );
 
-# mutants_on LINE: [column, from, to, kind] for every position, by column. A
-# shell test word (-lt and the others) counts only after a [ or test on the
-# line, so a flag such as ls -lt is left alone.
+# mutants_on LINE MAX: ([column, from, to, kind] for the first MAX positions
+# by column, the number of positions). A shell test word (-lt and the
+# others) counts only after a [ or test on the line, so a flag such as ls -lt
+# is left alone. No more than MAX are kept from each operator, so one long
+# line costs no more memory than the cap needs.
 sub mutants_on {
-  my ($l) = @_;
-  my @m;
+  my ($l, $max) = @_;
+  my (@m, $count);
   for my $op (@OPS) {
     my ($re, $to, $kind) = @$op;
+    my $kept = 0;
     while ($l =~ /$re/g) {
       my ($at, $tok) = ($-[1], $1);
       next if defined $kind && $kind eq 'test' && substr($l, 0, $at) !~ /(?:\[|\btest\b)/;
-      push @m, [$at + 1, $tok, $to->($tok), $kind || ''];
+      $count++;
+      push @m, [$at + 1, $tok, $to->($tok), $kind || ''] if $kept++ < $max;
     }
   }
-  return sort { $a->[0] <=> $b->[0] } @m;
+  @m = sort { $a->[0] <=> $b->[0] } @m;
+  splice @m, $max if @m > $max;
+  return (\@m, $count || 0);
 }
 
-# shown MUTANT: what the screen says it does. A number of more than two
-# digits is shown by its length only, so a PIN, an account number or a
-# numeric key on a changed line never reaches the screen.
+# shown MUTANT: what the screen says it does. A number other than 0 and 1 is
+# shown by its length only, so no PIN, account number, phone number (also
+# one written in groups of one or two digits) or numeric key on a changed
+# line reaches the screen.
 sub shown {
   my ($m) = @_;
-  return "'$m->{from}' becomes '$m->{to}'" unless $m->{kind} eq 'number' && length $m->{from} > 2;
+  return "'$m->{from}' becomes '$m->{to}'" unless $m->{kind} eq 'number' && $m->{from} ne '0' && $m->{from} ne '1';
   return "a " . length($m->{from}) . '-digit number becomes that number + 1';
 }
 
@@ -172,6 +186,10 @@ sub plan {
   my ($mst, @mb) = Git::merge_base($tip, $fp->{head});
   stop('git merge-base failed') if $mst eq 'error';
   stop("$ref and this branch share no history here ($mb[0])") if $mst eq 'none';
+  # two merge bases (criss-cross merges): which lines the branch adds cannot
+  # be told from either alone
+  stop("$ref and this branch have " . scalar(@mb) . ' merge bases (' . join(', ', map { substr($_, 0, 7) } @mb)
+    . '), so which lines this branch adds cannot be told; merge main into this branch first') if @mb > 1;
   my $base = $mb[0];
   my $method = method_folder($top);
   stop('mutate-changed.sh runs from the top folder, so every file would be its own; run the copy in scripts/method')
@@ -187,24 +205,22 @@ sub plan {
     if ($f->{m2} !~ /\A100(?:644|755)\z/) { $skip{'not a regular file'}++; next }
     push @cand, $f;
   }
-  # Git LFS by the commit's own attributes too: a pointer left on disk (no
-  # git-lfs, or GIT_LFS_SKIP_SMUDGE) is the stored blob, but not the file
-  my %lfs = Tree::lfs_paths($fp->{head}, map { $_->{path} } @cand);
   my (@files, $possible);
   for my $f (@cand) {
     my $p = $f->{path};
-    if ($converted{$p} || $lfs{$p}) { $skip{'converted by .gitattributes or in Git LFS'}++; next }
+    if ($converted{$p}) { $skip{'converted by .gitattributes or in Git LFS'}++; next }
     my $text = Git::cat('blob', $f->{o2}, 1, $MAX_SIZE);
     if (!defined $text) { $skip{'larger than 1 MB'}++; next }
     if ($text =~ m{\Aversion https://git-lfs\.github\.com/spec/}) { $skip{'converted by .gitattributes or in Git LFS'}++; next }
     if ($text =~ /\0/ || !Esc::utf8_ok($text)) { $skip{'not UTF-8 text'}++; next }
-    if (shell_like($p, $text) && destructive($text)) { $skip{'a shell script or make file that deletes or moves files'}++; next }
+    if (shell_like($p, $text) && destructive($text)) { $skip{'a shell script, make or batch file that deletes or moves files'}++; next }
     my @lines = split /\n/, $text, -1;
     pop @lines if @lines && $lines[-1] eq '';
     my $old_text = $f->{m1} =~ /\A100(?:644|755)\z/ && $f->{st} ne 'A';
     # the old file is read through Git::cat first: git diff does not check a
-    # stored file against its id, so one changed by hand could hide lines
-    Git::cat('blob', $f->{o1}, 1, $MAX_SIZE) if $old_text;
+    # stored file against its id, so one changed by hand could hide lines (an
+    # old file over 1 MB is not read, so its file is skipped)
+    if ($old_text && !defined Git::cat('blob', $f->{o1}, 1, $MAX_SIZE)) { $skip{'larger than 1 MB'}++; next }
     my @changed = $old_text ? Tree::added_lines($f->{o1}, $f->{o2}) : (1 .. scalar @lines);
     next unless @changed;
     $c{files}++;
@@ -215,10 +231,11 @@ sub plan {
       $c{lines}++;
       if (comment_like($l)) { $c{comment}++; next }
       if (destructive($l)) { $c{guarded}++; next }
-      my @m = mutants_on($l);
+      my ($ms, $count) = mutants_on($l, $max);
+      my @m = @$ms;
       if (!@m) { $c{nothing}++; next }
       $c{with}++;
-      $possible += @m;
+      $possible += $count;
       # (no more than MAX from one file in either pass: a cap never needs more)
       my @at = map { { path => $p, line => $n, col => $_->[0], from => $_->[1], to => $_->[2], kind => $_->[3] } } @m;
       push @first, shift @at if @first < $max;

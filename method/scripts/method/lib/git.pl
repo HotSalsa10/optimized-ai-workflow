@@ -82,6 +82,9 @@ delete @ENV{qw(GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_CONFIG GI
   GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_SHALLOW_FILE GIT_IMPLICIT_WORK_TREE GIT_PREFIX GIT_INTERNAL_SUPER_PREFIX
   GIT_NAMESPACE GIT_DIFF_OPTS GIT_EXTERNAL_DIFF GIT_REPLACE_REF_BASE
   GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS)};
+# git's trace settings would make it write files where the session says
+delete @ENV{ grep {/\AGIT_TRACE/} keys %ENV };
+@ENV{qw(GIT_TRACE2 GIT_TRACE2_EVENT GIT_TRACE2_PERF)} = (0, 0, 0);    # (also over trace2.* settings)
 $ENV{GIT_NO_REPLACE_OBJECTS} = 1;
 $ENV{GIT_NO_LAZY_FETCH} = 1;    # a partial clone never fetches a missing object (git 2.44 and later)
 $ENV{GIT_GRAFT_FILE} = File::Spec->catfile(File::Spec->devnull, 'none');    # a grafts file that cannot exist, so none is read and nothing is written

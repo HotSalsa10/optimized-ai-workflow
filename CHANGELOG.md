@@ -46,6 +46,7 @@ Nothing yet. Release 1 is being built.
 
 ### Changed (step 4b)
 
+- git's trace variables (GIT_TRACE and the like, GIT_TRACE2) are cleared for every git call the method makes, so a session setting cannot make status, run-checks, done-check, the packet or mutate-changed write a trace file.
 - The review packet finds moved files up to git's default limit whatever a local diff.renameLimit says (a low one turned moves into deletes and adds).
 - run-checks' way of running one project check is split into parts (whether it applies here, and how its end is judged) that mutate-changed.sh will share; internal, with run-checks' output byte for byte the same.
 
