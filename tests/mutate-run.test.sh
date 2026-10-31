@@ -485,8 +485,8 @@ mr "$w" --recover
 expect "a second --recover has nothing to do" 0 "mutate-changed: RECOVERED - nothing to recover (no journal)"
 
 # --- signals: the mutant is put back and the check stopped at once ---
-# run_and DIR SIGNAL MODE: starts a run whose slow check runs heartbeat MODE
-# on the mutant, sends SIGNAL once it does, and KILL 1.5 s later as a
+# run_and DIR SIGNAL MODE [COMMAND]: starts a run whose slow check runs
+# heartbeat MODE on the mutant, runs COMMAND in DIR once it does, sends SIGNAL, and KILL 1.5 s later as a
 # harness would; sets out and code
 run_and() {
   rm -f "$work/mark" "$work/beat" "$work/s.out"
@@ -494,6 +494,8 @@ run_and() {
   spid=$!
   wait_for "$work/mark" 20
   wait_for "$work/beat" 10
+  # (an optional command, run in the project before the signal)
+  if [ -n "${4:-}" ]; then (cd "$1" && eval "$4"); fi
   # (INT to the whole group, as a terminal's Ctrl-C sends it: mutate's git
   # processes get it too)
   if [ "$2" = INT ]; then kill -INT -- "-$spid"; else kill "-$2" "$spid"; fi
@@ -514,6 +516,46 @@ for sig in INT HUP QUIT; do
   expect "$sig: put back and stopped (exit 2)" 2 "mutate-changed: FAIL - stopped by SIG$sig; src/a.sh put back"
   clean "after $sig the files are the commit" "$w"
 done
+
+# an edit made while the check runs, then TERM: the put-back is refused,
+# and the reason says why (once, with one --recover advice)
+run_and "$w" TERM plain 'printf "# edit\n" >>src/a.sh'
+expect "TERM after the file was edited during the check: not overwritten, and the reason says why (exit 2)" 2 \
+  "mutate-changed: FAIL - stopped by SIGTERM; src/a.sh was changed after its mutant was written" "then make your change again; the journal stays; the run stopped"
+case "$out" in
+  *--recover*--recover*) fail "and --recover is advised once" "$out" ;;
+  *) pass "and --recover is advised once" ;;
+esac
+if grep -q '^# edit$' "$w/src/a.sh"; then pass "and the edit is still there"; else fail "and the edit is still there"; fi
+(cd "$w" && git checkout -q -- src/a.sh)
+mr "$w" --recover
+expect "once the file is put back as committed, --recover removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
+clean "and the files are the commit" "$w"
+
+# Ctrl-C while mutate runs git (here release's git ls-files, through a git
+# that sends INT to the run's group once the check has seen the mutant):
+# the signal is the reason, with what failed after it
+mkdir -p "$work/fakegit"
+cat >"$work/fakegit/git" <<'EOF'
+#!/bin/sh
+case "$*" in
+  *"ls-files -s -z"*) if [ -e "$FAKE_ARM" ]; then rm -f "$FAKE_ARM"; kill -s INT 0; fi ;;
+esac
+exec "$REAL_GIT" "$@"
+EOF
+chmod +x "$work/fakegit/git"
+# shellcheck disable=SC2016 # the check is written, not run
+act "$w" 'touch "$FAKE_ARM"'
+rm -f "$work/arm"
+(cd "$w" && exec env CI= PATH="$work/fakegit:$PATH" REAL_GIT="$(command -v git)" FAKE_ARM="$work/arm" perl -e 'alarm 300; setpgrp(0, 0); exec @ARGV' bash "$mutate" --max 1) >"$work/g.out" 2>&1
+code=$?
+out=$(cat "$work/g.out")
+expect "Ctrl-C while mutate runs git: the signal is named first, then what failed (exit 2)" 2 \
+  "mutate-changed: FAIL - stopped by SIGINT (then: cannot tell whether git holds the mutant of src/a.sh (git ls-files failed)"
+mr "$w" --recover
+expect "and --recover then removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
+clean "and the files are the commit" "$w"
+check "$w" "$slow; $weak"
 
 # HUP that came ignored (nohup) stays ignored: the run goes on
 rm -f "$work/mark" "$work/beat"
