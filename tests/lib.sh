@@ -165,3 +165,53 @@ expect_landed() {
   fail "$name: the plant did not apply, so the check result would mean nothing"
   return 1
 }
+
+# --- processes and locks (the limited runner, run-checks' lock, status) ---
+
+# wait_for FILE SECS: waits until FILE exists, at most SECS seconds
+wait_for() {
+  perl -MTime::HiRes=sleep,time -e 'my $u = time + $ARGV[1]; until (-e $ARGV[0]) { exit 1 if time > $u; sleep 0.1 }' "$1" "$2"
+}
+
+# beat_script FILE: writes a perl program to FILE. "perl FILE BEAT [MODE]"
+# appends a byte to BEAT every 0.1 s, for 60 s at most; MODE "ignore"
+# ignores TERM, INT and HUP; MODE "note" writes TERM to BEAT.term when TERM
+# comes, then ends. A process counts as stopped when its BEAT stops growing
+# (stopped), which works the same on Linux, macOS and Git Bash and is not
+# fooled by a zombie.
+beat_script() {
+  cat >"$1" <<'BEAT'
+my $m = $ARGV[1] || '';
+$SIG{$_} = 'IGNORE' for $m eq 'ignore' ? qw(TERM INT HUP) : ();
+$SIG{TERM} = sub { open my $t, '>>', "$ARGV[0].term"; print $t "TERM\n"; close $t; exit 0 } if $m eq 'note';
+alarm 60;
+while (1) { open my $f, '>>', $ARGV[0] or exit 1; print $f '.'; close $f; select undef, undef, undef, 0.1 }
+BEAT
+}
+
+# stopped BEAT SECS: BEAT exists (the process ran) and has not grown for 1
+# s, waiting at most SECS seconds
+stopped() {
+  [ -e "$1" ] || return 1
+  perl -MTime::HiRes=sleep,time -e 'my ($f, $s) = @ARGV; my $u = time + $s; my $last = -s $f || 0; my $since = time;
+    while (time < $u) { sleep 0.2; my $n = -s $f || 0; if ($n != $last) { ($last, $since) = ($n, time) } elsif (time - $since >= 1) { exit 0 } }
+    exit 1' "$1" "$2"
+}
+
+# hold_lock FILE SECS MARK: holds FILE locked exclusively for SECS seconds,
+# in the background ($holder is its process id); returns once it holds it
+# (MARK then exists)
+hold_lock() {
+  perl -MFcntl=:flock -e 'open my $f, ">>", $ARGV[0] or exit 1; flock $f, LOCK_EX or exit 1; open my $m, ">", $ARGV[2]; close $m; sleep $ARGV[1]' "$1" "$2" "$3" &
+  # shellcheck disable=SC2034 # read by the test files that call it
+  holder=$!
+  wait_for "$3" 10
+}
+
+# lock_state FILE: prints "ex=free|busy sh=free|busy": whether FILE could be
+# locked exclusively, and shared, right now
+lock_state() {
+  perl -MFcntl=:flock -e 'open my $f, "<", $ARGV[0] or do { print "no lock\n"; exit };
+    my $ex = flock($f, LOCK_EX | LOCK_NB) ? "free" : "busy"; flock $f, LOCK_UN;
+    my $sh = flock($f, LOCK_SH | LOCK_NB) ? "free" : "busy"; print "ex=$ex sh=$sh\n"' "$1"
+}

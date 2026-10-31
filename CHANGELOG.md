@@ -42,9 +42,12 @@ Nothing yet. Release 1 is being built.
 
 - `mutate-changed.sh --list`: plans the mutants for the lines this branch adds (step 4b.2; running them comes in 4b.3): which changed lines get which small text change, in an order that reaches every changed file first, with the reasons files are skipped. It writes nothing and runs no check, and a file or line that names one of a fixed list of delete and move commands gets no mutant (a delete written any other way is not recognised; RISKS #13). New settings MUTATE_PATHS and MUTATION_CHECKS (DECISIONS A40).
 - `Tree::added_lines`: the lines a file adds, from the same fixed diff the review packet uses; `Esc::utf8_ok`: the escaper's UTF-8 rule, shared.
-- Tests: 1 new test file (mutate plan), 3 config cases and 1 packet case; 1019 test cases in all.
+- Tests: 1 new test file (mutate plan), 3 config cases and 1 packet case; in 4b.3a 1 new test file (runner) and new run-checks and status cases; 1072 test cases in all.
 
 ### Changed (step 4b)
+
+- run-checks holds a lock it shares with mutate-changed (in git's own folder) for its whole run: while mutate-changed runs, it waits up to 5 s, then stops with `FAIL - busy` (exit 2, no log); a journal left by a cut-off mutate-changed run stops it too (run `mutate-changed.sh --recover`). status's work area says when mutate-changed is running, or was cut off.
+- `lib/checks.pl` gains a limited runner for mutate-changed's checks (used in step 4b.3b): each check leads its own process group under a watchdog that stops the group when its caller ends, kill -9 included, and has a time limit. run-checks' own runner is unchanged.
 
 - git's trace variables (GIT_TRACE and the like, GIT_TRACE2) are cleared for every git call the method makes, so a session setting cannot make status, run-checks, done-check, the packet or mutate-changed write a trace file.
 - The review packet finds moved files up to git's default limit whatever a local diff.renameLimit says (a low one turned moves into deletes and adds).

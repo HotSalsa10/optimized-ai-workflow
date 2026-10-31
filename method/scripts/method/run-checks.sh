@@ -59,6 +59,13 @@
 # but a check that applies here was SKIPPED, or no project check runs here.
 # A SKIPPED is never a pass.
 #
+# It holds the lock it shares with mutate-changed.sh (lib/runstate.pl, in
+# git's own folder) shared for its whole run, so mutate-changed cannot put a
+# mutant on disk while checks run. While mutate-changed holds it, run-checks
+# waits up to 5 s, then stops with "FAIL - busy: ..." (exit 2, no log). A
+# journal left by a cut-off mutate-changed run also stops it (exit 2): a
+# file may hold a mutant until mutate-changed.sh --recover puts it back.
+#
 # Rules it serves:
 # - M002: a check that examined nothing is SKIPPED, never a pass; a check
 #   must print how many things it examined.

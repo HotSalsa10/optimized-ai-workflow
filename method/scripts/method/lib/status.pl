@@ -13,7 +13,7 @@ use POSIX ();
 use Time::HiRes ();
 
 my $lib = dirname(File::Spec->rel2abs(__FILE__));
-require File::Spec->catfile($lib, $_) for qw(git.pl esc.pl conf.pl verdicts.pl checks.pl);
+require File::Spec->catfile($lib, $_) for qw(git.pl esc.pl conf.pl verdicts.pl checks.pl runstate.pl);
 
 # the records every project keeps (step 7's templates must match this list)
 my @RECORDS = qw(CLAUDE.md AGENTS.md SPEC.md TASKS.md DECISIONS.md ROADMAP.md RISKS.md CHANGELOG.md TESTS.md);
@@ -215,6 +215,16 @@ sub work_lines {
     }
     push @parts, "$unpushed commits not pushed" . (@where ? ' (on ' . names(@where) . ')' : '') . ', as of the last fetch';
   }
+  # a mutate-changed run in DIR's own working tree (lib/runstate.pl): one that
+  # runs has files that hold mutants; one cut off left its journal
+  my $ms = RunState::probe($dir);
+  if ($ms->{mutate}) {
+    push @parts, 'mutate-changed is running: files hold mutants until it ends';
+  } elsif ($ms->{journal}) {
+    push @parts, 'a mutate-changed run was cut off and left its journal: a file may hold a mutant; run'
+      . ' mutate-changed.sh --recover';
+  }
+  push @parts, "cannot tell whether mutate-changed is running: $ms->{unknown}" if $ms->{unknown};
   my $wtlist = @linked ? '; linked worktrees: ' . names(@linked) : '';
   return [$area, 'LOOK', join('; ', @parts) . $wtlist] if @parts;
   return [$area, 'PASS', 'nothing uncommitted, nothing unpushed (as of the last fetch)' . $wtlist];

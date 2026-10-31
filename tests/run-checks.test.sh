@@ -1019,6 +1019,58 @@ run "$lr"
 expect "a check that adds CRs and hides them with git add fails tree-unchanged" 1 "tree-unchanged: FAIL - the checks changed 1 files"
 in_log "and the log names the file" "changed during the run: src/t.sh"
 
+# the lock it shares with mutate-changed (lib/runstate.pl), in git's own
+# folder: held shared for the whole run, so mutate-changed cannot start
+# while a run is going; an exclusive hold (a mutate run) makes it wait, and
+# after 5 s stop with "busy"; a journal left by a cut-off mutate run stops it
+kr=$(new_repo) || abort_sandbox
+tsv "$kr" "$(ck unit 'echo 1 passed')"
+klock="$kr/.git/method-run.lock"
+run "$kr"
+expect "setup: a plain run passes" 0 "run-checks: PASS"
+if [ -f "$klock" ] && [ -z "$(cd "$kr" && git status --porcelain --untracked-files=all)" ]; then
+  pass "the lock lives in git's own folder: nothing new in the working tree"
+else
+  fail "the lock lives in git's own folder" "$(ls -la "$kr/.git"; cd "$kr" && git status --porcelain --untracked-files=all)"
+fi
+hold_lock "$klock" 1 "$work/held1"
+run "$kr"
+expect "an exclusive hold that ends within 5 s is waited out" 0 "run-checks: PASS"
+wait "$holder" 2>/dev/null
+hold_lock "$klock" 30 "$work/held2"
+run "$kr"
+expect "an exclusive hold for longer stops it: busy (exit 2)" 2 "run-checks: FAIL - busy: mutate-changed is running here; wait for it to end"
+kill "$holder" 2>/dev/null
+wait "$holder" 2>/dev/null
+case "$out" in
+  *"run-checks: log"*) fail "and no log is opened" "$out" ;;
+  *) pass "and no log is opened" ;;
+esac
+: >"$kr/.git/method-mutate-journal"
+run "$kr"
+expect "a journal left by a cut-off mutate run stops it (exit 2)" 2 \
+  "run-checks: FAIL - a mutate-changed run was cut off and left its journal, so a file may hold a mutant; run mutate-changed.sh --recover"
+rm -f "$kr/.git/method-mutate-journal"
+rm -f "$klock"
+mkfifo "$klock"
+run "$kr"
+expect "a FIFO where the lock should be stops it (exit 2)" 2 "method-run.lock is not a regular file"
+rm -f "$klock"
+: >"$work/lock-target"
+ln -s "$work/lock-target" "$klock"
+run "$kr"
+expect "a link where the lock should be is not followed (exit 2)" 2 "run-checks: FAIL - cannot open the lock"
+rm -f "$klock"
+kr2=$(new_repo) || abort_sandbox
+# shellcheck disable=SC2016 # $MARK is for the check's own shell
+tsv "$kr2" "$(ck unit 'touch "$MARK"; sleep 2; echo 1 passed')"
+(cd "$kr2" && unset CI && exec env MARK="$work/mark" bash "$rc") >"$work/bg.out" 2>&1 &
+bg=$!
+wait_for "$work/mark" 10
+state=$(lock_state "$kr2/.git/method-run.lock")
+wait "$bg"
+if [ "$state" = "ex=busy sh=free" ]; then pass "during a run the lock is held shared"; else fail "during a run the lock is held shared: $state" "$(cat "$work/bg.out")"; fi
+
 for d in $repos; do drop_sandbox "$d"; done
 drop_sandbox "$work"
 echo "tests: run-checks: $tests_pass passed, $tests_fail failed, $tests_skip skipped"

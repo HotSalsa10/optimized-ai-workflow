@@ -675,6 +675,11 @@ st "$ow"
 expect "work in progress in another repository is found there" 1 "repo ../site: LOOK - a bisect is in progress"
 case "$out" in *"work: LOOK"*) fail "the other repository's bisect was reported for this one" "$out" ;; esac
 (cd "$o/site" && git bisect reset -q >/dev/null 2>&1)
+: >"$o/site/.git/method-mutate-journal"
+st "$ow"
+expect "a cut-off mutate run in another repository is found there" 1 "repo ../site: LOOK - " "a mutate-changed run was cut off and left its journal"
+case "$out" in *"work: LOOK"*) fail "the other repository's mutate run was reported for this one" "$out" ;; esac
+rm -f "$o/site/.git/method-mutate-journal"
 echo dirty >>"$o/site/a.txt"
 mkdir -p "$ow/evil/objects" "$ow/evil/refs/heads"
 printf 'ref: refs/heads/main\n' >"$ow/evil/HEAD"
@@ -712,6 +717,12 @@ st "$smw/lib"
 expect "status inside a submodule reads its work area" 0 "work: PASS - nothing uncommitted, nothing unpushed"
 st "$smw"
 expect "a REPOS entry that is a submodule is read" 0 "repo lib: PASS - nothing uncommitted, nothing unpushed"
+smj=$(cd "$smw/lib" && git rev-parse --git-path method-mutate-journal)
+case "$smj" in /*) ;; *) smj="$smw/lib/$smj" ;; esac
+: >"$smj"
+st "$smw"
+expect "a cut-off mutate run in a submodule is found in its own git folder" 1 "repo lib: LOOK - a mutate-changed run was cut off"
+rm -f "$smj"
 echo dirty >>"$smw/lib/a.txt"
 st "$smw/lib"
 expect "a change inside a submodule is seen there" 1 "work: LOOK - 1 uncommitted entries"
@@ -802,6 +813,33 @@ if [ -e "$work/st-subfilter" ]; then fail "and the submodule's filter never runs
 out=$(cd "$om/w" && PERL5LIB="$work/plib" perl "$root/method/scripts/method/lib/status.pl" 2>&1)
 code=$?
 expect "status names a Digest::SHA that cannot load, and still reports the rest" 1 "perl: LOOK - cannot load Digest::SHA" "work: PASS"
+
+# a mutate-changed run (lib/runstate.pl): one that runs (the lock held
+# exclusively) and one that was cut off (its journal left behind); the lock
+# is only looked at, never created
+mp=$(new_project) || abort_sandbox
+mw="$mp/w"
+st "$mw"
+if [ -e "$mw/.git/method-run.lock" ]; then fail "status creates no lock file"; else pass "status creates no lock file"; fi
+: >"$mw/.git/method-mutate-journal"
+st "$mw"
+expect "a journal left by a cut-off run is a LOOK, with what to do" 1 \
+  "work: LOOK - a mutate-changed run was cut off and left its journal: a file may hold a mutant; run mutate-changed.sh --recover"
+hold_lock "$mw/.git/method-run.lock" 30 "$work/held"
+st "$mw"
+expect "a held lock is a running mutate-changed, even with a journal" 1 "work: LOOK - mutate-changed is running: files hold mutants until it ends"
+case "$out" in
+  *"was cut off"*) fail "and it does not say the run was cut off" "$out" ;;
+  *) pass "and it does not say the run was cut off" ;;
+esac
+kill "$holder" 2>/dev/null
+wait "$holder" 2>/dev/null
+rm -f "$mw/.git/method-mutate-journal" "$mw/.git/method-run.lock"
+mkfifo "$mw/.git/method-run.lock"
+st "$mw"
+expect "a FIFO where the lock should be is named, and status still ends" 1 \
+  "work: LOOK - cannot tell whether mutate-changed is running: the lock is not a regular file"
+rm -f "$mw/.git/method-run.lock"
 
 for d in $repos; do drop_sandbox "$d"; done
 export HOME="$saved_home"

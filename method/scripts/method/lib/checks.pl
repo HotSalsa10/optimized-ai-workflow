@@ -12,6 +12,7 @@ use Fcntl qw(O_WRONLY O_CREAT O_EXCL);
 use File::Basename qw(dirname);
 use File::Spec;
 use POSIX ();
+use Time::HiRes ();
 
 # The caller's environment, taken before git.pl cleans it: the project's
 # checks run in it, with the caller's perl settings put back (run-checks.sh
@@ -20,7 +21,7 @@ our %CALLER_ENV;
 BEGIN { %CALLER_ENV = %ENV }
 
 my $lib = dirname(File::Spec->rel2abs(__FILE__));
-require File::Spec->catfile($lib, $_) for qw(git.pl esc.pl conf.pl tree.pl);
+require File::Spec->catfile($lib, $_) for qw(git.pl esc.pl conf.pl tree.pl runstate.pl);
 
 our @RESERVED = qw(secrets fresh-clone tree-unchanged project-checks);
 my $LOCAL = '.method/local';
@@ -108,7 +109,7 @@ sub read_tsv {
 
 # --- running ---
 
-my ($LOG, $log_path, @temps, $parent_pid);
+my ($LOG, $log_path, @temps, $parent_pid, $RUN_LOCK);
 
 # stop REASON [LINES]: end the run with exit 2
 sub stop {
@@ -153,6 +154,159 @@ sub run_to_file {
   }
   waitpid $pid, 0;
   return $?;
+}
+
+# --- the limited runner: a check in its own process group, under a
+# watchdog and a time limit (mutate-changed's checks; run-checks uses
+# run_to_file) ---
+
+my $MONO = eval { Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC()); 1 };
+sub now { return $MONO ? Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC()) : Time::HiRes::time() }
+
+# a group a signal may go to: a number of 2 or more that is not this
+# process's own group (kill with 0 or 1 would reach this group, or every
+# process)
+sub group_ok { my ($g) = @_; return defined $g && $g =~ /\A[0-9]+\z/ && $g >= 2 && $g != getpgrp() }
+
+# start_limited ENV ARGV OUT: starts ARGV as run_to_file does, but as the
+# leader of a process group of its own, under a watchdog: a fork of this
+# process, named "method check watchdog", that ignores INT, TERM, HUP, QUIT
+# and PIPE and keeps the lock this process holds. When this process closes
+# its pipe, or ends in any way (kill -9 included), the watchdog sends TERM to
+# the check's group, KILL 2 s later when any of it is left, and exits; so a
+# cut-off run's lock stays held until its checks are stopped. Returns a run
+# {pgid, ...} once the group exists. The check gets the five signals back
+# at their defaults.
+sub start_limited {
+  my ($env, $argv, $out) = @_;
+  pipe(my $keep_r, my $keep_w) or die "cannot make a pipe\n";
+  pipe(my $st_r, my $st_w) or die "cannot make a pipe\n";
+  my $w = fork;
+  die "cannot start a process\n" unless defined $w;
+  if (!$w) {
+    # the watchdog: it never returns into the caller's code
+    eval {
+      $0 = 'method check watchdog';
+      $SIG{$_} = 'IGNORE' for qw(INT TERM HUP QUIT PIPE);
+      close $keep_w;
+      close $st_r;
+      open STDIN, '<', File::Spec->devnull;
+      open STDOUT, '>', File::Spec->devnull;
+      open STDERR, '>', File::Spec->devnull;
+      my $c = fork;
+      if (!defined $c) { syswrite $st_w, "error cannot start a process\n"; POSIX::_exit(1) }
+      if (!$c) {
+        eval {
+          POSIX::setpgid(0, 0);
+          $SIG{$_} = 'DEFAULT' for qw(INT TERM HUP QUIT PIPE);
+          %ENV = %$env if $env;
+          open STDIN, '<', File::Spec->devnull or POSIX::_exit(127);
+          open STDOUT, '>>', $out or POSIX::_exit(127);
+          open STDERR, '>&', \*STDOUT or POSIX::_exit(127);
+          exec { $argv->[0] } @$argv;
+        };
+        POSIX::_exit(127);
+      }
+      # both set the group, so it exists whichever runs first
+      POSIX::setpgid($c, $c);
+      syswrite $st_w, "pgid $c\n";
+      my ($status, $sel) = (undef, '');
+      vec($sel, fileno($keep_r), 1) = 1;
+      while (1) {
+        if (!defined $status && waitpid($c, POSIX::WNOHANG()) == $c) {
+          $status = $?;
+          syswrite $st_w, "status $status\n";
+        }
+        last if select(my $rout = $sel, undef, undef, 0.2) > 0 && !sysread $keep_r, my $buf, 64;
+      }
+      # the caller is done or gone: stop the check's group
+      kill 'TERM', -$c;
+      my $until = now() + 2;
+      while (now() < $until) {
+        waitpid($c, POSIX::WNOHANG()) unless defined $status;
+        last unless kill 0, -$c;
+        Time::HiRes::sleep(0.1);
+      }
+      kill 'KILL', -$c;
+    };
+    POSIX::_exit(0);
+  }
+  close $keep_r;
+  close $st_w;
+  my $r = { w => $w, keep => $keep_w, st => $st_r, buf => '', started => now() };
+  my $until = now() + 10;
+  while (!defined $r->{pgid}) {
+    read_status($r, 0.1);
+    if (defined $r->{error} || $r->{eof} || now() > $until) {
+      finish_limited($r, 1);
+      die 'cannot start a check: ' . ($r->{error} || 'its watchdog did not answer') . "\n";
+    }
+  }
+  return $r;
+}
+
+# read_status RUN WAIT: reads what the watchdog has written, waiting at most
+# WAIT seconds for something: "pgid N", "status N" or "error ..."
+sub read_status {
+  my ($r, $wait) = @_;
+  my $sel = '';
+  vec($sel, fileno($r->{st}), 1) = 1;
+  if (select(my $rout = $sel, undef, undef, $wait) > 0) {
+    my $got = sysread $r->{st}, my $buf, 4096;
+    if ($got) { $r->{buf} .= $buf } elsif (defined $got) { $r->{eof} = 1 }
+  }
+  while ($r->{buf} =~ s/\A([^\n]*)\n//) {
+    my $l = $1;
+    if ($l =~ /\Apgid ([0-9]+)\z/) { $r->{pgid} = $1 if group_ok($1) }
+    elsif ($l =~ /\Astatus ([0-9]+)\z/) { $r->{status} = $1 }
+    elsif ($l =~ /\Aerror (.*)\z/) { $r->{error} = $1 }
+  }
+}
+
+# wait_limited RUN SECONDS INTERRUPTED: waits until the check ends (how
+# 'exit', status its wait status), until SECONDS have passed since it started
+# (how 'time'), or until INTERRUPTED->() is true (how 'interrupted'). The
+# check's group is left as it is: finish_limited stops it.
+sub wait_limited {
+  my ($r, $seconds, $interrupted) = @_;
+  while (1) {
+    read_status($r, 0.1);
+    return $r->{how} = 'exit' if defined $r->{status};
+    die "the check's watchdog ended without its result\n" if $r->{eof};
+    return $r->{how} = 'interrupted' if $interrupted && $interrupted->();
+    return $r->{how} = 'time' if now() - $r->{started} >= $seconds;
+  }
+}
+
+# finish_limited RUN FAST INTERRUPTED: stops what is left of the check's
+# group and reaps the watchdog: closing the pipe makes the watchdog stop
+# the group (TERM, then KILL 2 s later) and exit. FAST sends KILL to the
+# group first; so does INTERRUPTED->() becoming true while it waits. After
+# 3 s, KILL goes to the watchdog and the group.
+sub finish_limited {
+  my ($r, $fast, $interrupted) = @_;
+  my $g = group_ok($r->{pgid}) ? $r->{pgid} : undef;
+  kill 'KILL', -$g if $fast && $g;
+  close $r->{keep} if $r->{keep};
+  undef $r->{keep};
+  my $until = now() + 3;
+  while (1) {
+    my $p = waitpid($r->{w}, POSIX::WNOHANG());
+    last if $p == $r->{w} || $p < 0;
+    if (!$fast && $interrupted && $interrupted->()) {
+      $fast = 1;
+      kill 'KILL', -$g if $g;
+    }
+    if (now() > $until) {
+      kill 'KILL', -$g if $g;
+      kill 'KILL', $r->{w};
+      waitpid $r->{w}, 0;
+      last;
+    }
+    Time::HiRes::sleep(0.05);
+  }
+  close $r->{st} if $r->{st};
+  undef $r->{st};
 }
 
 sub write_lines {
@@ -667,6 +821,17 @@ sub main {
     stop('checks/*.tsv has problems (above); no check was run');
   }
   my ($here, $where) = place();
+  # held shared until the run ends (lib/runstate.pl): mutate-changed holds
+  # it exclusively, so neither runs while the other does
+  my ($kind, $why, $journal);
+  if (!eval { ($RUN_LOCK, $kind, $why) = RunState::take('shared'); $journal = (RunState::paths())[1]; 1 }) {
+    (my $err = $@) =~ s/\n\z//;
+    stop(Esc::line($err));
+  }
+  stop('busy: mutate-changed is running here; wait for it to end') if !$RUN_LOCK && $kind eq 'busy';
+  stop(Esc::line($why)) unless $RUN_LOCK;
+  stop('a mutate-changed run was cut off and left its journal, so a file may hold a mutant; run'
+    . ' mutate-changed.sh --recover') if -e $journal || -l $journal;
 
   my $started = open_log();
   print "run-checks: log $log_path\n";

@@ -12,7 +12,10 @@
 #                folders whose changes git cannot see, a merge, rebase,
 #                cherry-pick, revert or bisect in progress, stashes and
 #                commits not pushed (as of the last fetch), in this
-#                repository and each of its linked worktrees
+#                repository and each of its linked worktrees; and in this
+#                working tree, a mutate-changed run that is running (files
+#                hold mutants until it ends) or was cut off (run
+#                mutate-changed.sh --recover)
 #   verdicts     every commit on main's first-parent history since the first
 #                one with a Review-Verdict line (or after VERDICTS_FROM)
 #                ends with a valid trailer (lib/verdicts.pl check-trailer)
