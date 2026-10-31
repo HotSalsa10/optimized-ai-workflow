@@ -25,24 +25,31 @@
 # the two never run at once: while another holds it, it waits 5 s, then
 # stops with "FAIL - busy: ..." (exit 2). Each mutant goes in through one
 # write function (a temp file next to the file, synced, given the file's
-# mode, and renamed over it; its time one second past the file's, so a
-# cache keyed on the time in seconds and the size never takes one version
-# for another), with a journal in git's own folder that names it until it
-# is put back. Each check runs in its own process group under a watchdog
+# mode, and renamed over it, only while the file still holds what this run
+# last left there: an edit made during the run stops it, exit 2, and is
+# kept; its time is the next whole second, or one past the file's own,
+# so it is later than anything written before, also at the sub-second
+# times make compares, and a cache keyed on the time in seconds and the
+# size never takes one version for another; a file can be up to about 3 s
+# ahead of the clock, which make may warn about), with a journal in git's
+# own folder that names it until it is put back. Do not edit files while a
+# run is going. Each check runs in its own process group under a watchdog
 # that stops the group when the run ends in any way, kill -9 included, and
 # within a time limit of 3 times its run A time plus 30 s; a check that
 # runs out of time has killed the mutant. After each mutant: the check's
 # group is stopped, the file put back, and the journal removed once the
-# mutant is nowhere git keeps it (the index, HEAD, a stash made during the
-# run); then the files, HEAD, the branches and tags, and the stash must be
-# as at the start (else exit 2, naming what changed). On INT, TERM, HUP
-# (unless it came ignored, as under nohup) or QUIT, the check's group is
-# killed and the file put back at once (exit 2). After kill -9, the next
-# run or --recover puts the file back (it never reads the settings first),
-# and refuses, keeping the journal, when the file holds neither the mutant
-# nor the original, when HEAD, the index or a new stash holds the mutant,
-# or during a merge, rebase or other git operation (whose autostash can
-# hold it). Files put back are newer than any build, so a "build is
+# mutant is nowhere git keeps it (HEAD, the index, a stash made during the
+# run) and no merge, rebase or other git operation is in progress (its
+# autostash can hold it, also when a check started it); a git command that
+# fails there keeps the journal too. Then the files, HEAD, the branches and
+# tags, and the stash must be as at the start (else exit 2, naming what
+# changed). On INT, TERM, HUP (unless it came ignored, as under nohup) or
+# QUIT, the check's group is killed and the file put back at once (exit 2,
+# naming the signal). After kill -9, the next run or --recover puts the
+# file back (it never reads the settings first), and refuses, keeping the
+# journal, by the same rules; a file changed after its mutant was written
+# may still hold it, and the refusal says how to see it and get out. Files
+# put back are newer than any build, so a build is redone, and a "build is
 # current" check fails until a rebuild.
 #
 # What changed: the lines this branch adds since its merge base with main

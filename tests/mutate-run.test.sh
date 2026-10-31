@@ -33,11 +33,12 @@ git config --global protocol.file.allow always
 beat_script "$work/beat.pl"
 export BEAT_PL="$work/beat.pl"
 
-# mr DIR ARGS...: runs mutate-changed.sh in DIR. Sets out and code.
+# mr DIR ARGS...: runs mutate-changed.sh in DIR, for 300 s at most. Sets out
+# and code.
 mr() {
   d=$1
   shift
-  out=$(cd "$d" && env CI= bash "$mutate" "$@" 2>&1)
+  out=$(cd "$d" && env CI= perl -e 'alarm 300; exec @ARGV' bash "$mutate" "$@" 2>&1)
   code=$?
 }
 
@@ -190,7 +191,7 @@ expect "run A: a check that fails without any mutant stops the run (exit 2)" 2 \
   "mutate-changed: FAIL - run A: unit did not pass without any mutant (FAIL: exit 4"
 check "$w" "touch src/new.txt; $weak"
 mr "$w"
-expect "run A: a check that changes files stops the run (exit 2)" 2 "mutate-changed: FAIL - run A: the checks changed 1 files without any mutant"
+expect "run A: a check that changes files stops the run, naming them (exit 2)" 2 "mutate-changed: FAIL - run A: the checks changed 1 files (src/new.txt) without any mutant"
 rm -f "$w/src/new.txt"
 
 # --- what a check does during a round ---
@@ -202,8 +203,8 @@ feat_head=$(cd "$w" && git rev-parse HEAD)
 act() { check "$1" 'if grep -q -- -gt src/a.sh; then '"$2"'; fi; '"$weak"; }
 act "$w" 'touch src/new.txt'
 mr "$w" --max 1
-expect "a check that writes a file during a round stops the run (exit 2)" 2 \
-  "mutate-changed: FAIL - after the mutant at src/a.sh:2:18: the checks changed 1 files"
+expect "a check that writes a file during a round stops the run, naming it (exit 2)" 2 \
+  "mutate-changed: FAIL - after the mutant at src/a.sh:2:18: the checks changed 1 files (src/new.txt)"
 rm -f "$w/src/new.txt"
 act "$w" 'git add src/a.sh'
 mr "$w" --max 1
@@ -218,6 +219,20 @@ act "$w" 'git stash -q'
 mr "$w" --max 1
 expect "a check that stashes the mutant: the journal stays, naming the stash (exit 2)" 2 "a stash made during the run holds the mutant of src/a.sh"
 (cd "$w" && git stash clear && git reset -q --hard "$feat_head" && rm -f .git/method-mutate-journal)
+act "$w" 'git add src/a.sh && git show HEAD:src/a.sh >src/a.sh && git stash -q'
+mr "$w" --max 1
+expect "a check that stashes only the staged mutant: the stash's index part is seen (exit 2)" 2 "a stash made during the run holds the mutant of src/a.sh"
+(cd "$w" && git stash clear && git reset -q --hard "$feat_head" && rm -f .git/method-mutate-journal)
+# shellcheck disable=SC2016 # the command is run by the check, not here
+act "$w" 'c=$(git stash create) && git update-ref refs/stash "$c" && rm -f .git/logs/refs/stash'
+mr "$w" --max 1
+expect "a stash without a reflog that holds the mutant is seen (exit 2)" 2 "a stash made during the run holds the mutant of src/a.sh"
+(cd "$w" && git update-ref -d refs/stash && git reset -q --hard "$feat_head" && rm -f .git/method-mutate-journal)
+act "$w" 'rm -f .git/method-mutate-journal; git add src/a.sh'
+mr "$w" --max 1
+expect "a check that removes the journal and stages the mutant: the index is named (exit 2)" 2 "the index holds the mutant of src/a.sh"
+if [ -f "$w/.git/method-mutate-journal" ]; then pass "and the journal is written again"; else fail "and the journal is written again"; fi
+(cd "$w" && git reset -q --hard "$feat_head" && rm -f .git/method-mutate-journal)
 act "$w" 'git commit -q --allow-empty -m Empty'
 mr "$w" --max 1
 expect "a check that commits (not the mutant): the run stops, naming it (exit 2)" 2 "after the mutant at src/a.sh:2:18: HEAD moved during the run"
@@ -251,6 +266,52 @@ mr "$w" --max 1
 expect "a check that runs git clean -fdx cannot remove the journal: the round ends normally" 1 "survived: src/a.sh:2:18"
 clean "and the files are the commit" "$w"
 check "$w" "$weak"
+
+# --- a check that starts a merge with autostash, which stops on a conflict:
+# the autostash holds the mutant, so the journal stays ---
+ap=$(new_project "$weak") || abort_sandbox
+aw="$ap/w"
+(cd "$aw" && git checkout -q -b side main && printf 'x\n' >other.txt && git add other.txt && git commit -q -m "Side" &&
+  git checkout -q feat && printf 'y\n' >other.txt && git add other.txt && git commit -q -m "Mine")
+check "$aw" 'if grep -q -- -gt src/a.sh; then git merge -q --autostash side >/dev/null 2>&1; fi; '"$weak"
+mr "$aw" --max 1
+expect "a merge whose autostash holds the mutant keeps the journal, naming it (exit 2)" 2 \
+  "a merge is in progress, and its autostash can hold the mutant of src/a.sh; finish or abort it"
+(cd "$aw" && git merge --abort >/dev/null 2>&1)
+if grep -q -- -gt "$aw/src/a.sh"; then pass "setup: after the abort the mutant is back on disk"; else fail "setup: after the abort the mutant is back on disk"; fi
+mr "$aw" --recover
+expect "then --recover puts it back" 0 "RECOVERED - 1 files put back"
+clean "and the files are the commit" "$aw"
+
+# --- a build tool that compares file times below the second (make, ninja):
+# every write is later than a build made before it, also in the same
+# second, so each mutant is rebuilt and the build is current afterwards ---
+bp=$(new_project "$weak") || abort_sandbox
+bw="$bp/w"
+printf 'build/\n' >"$bw/.gitignore"
+cat >"$bw/t.sh" <<'EOF'
+perl -MTime::HiRes=time,sleep -e 'my $t = time; sleep(1.05 - ($t - int $t))'
+mkdir -p build
+if perl -MTime::HiRes=stat -e 'my @s = stat "src/a.sh"; my @o = stat "build/a.sh"; exit(!(!@o || $s[9] > $o[9]))'; then cp src/a.sh build/a.sh; fi
+. build/a.sh
+adult 18 && ! adult 17 || exit 1
+echo 1 ok
+EOF
+(cd "$bw" && git add -A && git commit -q -m "Build")
+mr "$bw" --max 1
+expect "a mutant written in the same second as a build is still rebuilt and killed" 3 "1 mutants: 1 killed"
+if (cd "$bw" && bash t.sh) | grep -q '^1 ok$'; then pass "and afterwards the build is current again"; else fail "and afterwards the build is current again"; fi
+
+# --- an edit made while a run is going is never overwritten: the next
+# round's file is edited while its write waits for the clock ---
+ep2=$(new_project "$weak") || abort_sandbox
+ew2="$ep2/w"
+# shellcheck disable=SC2016 # the check is written, not run
+check "$ew2" 'if grep -q -- -gt src/a.sh; then perl -MPOSIX -e '\''POSIX::setsid(); alarm 30; my ($j, $f) = @ARGV; select undef, undef, undef, 0.05 while -e $j; select undef, undef, undef, 0.01 until -e $j; open my $o, ">>", $f; print $o "# edit\n"; close $o'\'' .git/method-mutate-journal src/b.sh </dev/null >/dev/null 2>&1 & fi; '"$weak"
+perl -e 'my $t = time + 10; utime $t, $t, $ARGV[0]' "$ew2/src/b.sh"
+mr "$ew2" --max 2
+expect "an edit made while the run waits to write a file stops the run, and is kept (exit 2)" 2 "src/b.sh was changed during the run, so it was not overwritten"
+if grep -q '^# edit$' "$ew2/src/b.sh"; then pass "and the edit is still there"; else fail "and the edit is still there" "$(cat "$ew2/src/b.sh")"; fi
 
 # --- the whole-second cache: a check that reuses its result while the file's
 # time in seconds and its size are the same must still run on each mutant ---
@@ -321,9 +382,10 @@ mr "$w" --max 1
 expect "a run does not start during a merge, rebase or bisect (exit 2)" 2 "mutate-changed: FAIL - a bisect is in progress; finish or abort it first"
 (cd "$w" && git bisect reset >/dev/null 2>&1)
 : >"$w/.git/method-mutate-1-1.out"
+: >"$w/.git/method-mutate-journal.tmp"
 mr "$w" --recover
-expect "a cut-off run's check output is removed" 0 "RECOVERED - nothing to recover"
-if [ -e "$w/.git/method-mutate-1-1.out" ]; then fail "and the file is gone"; else pass "and the file is gone"; fi
+expect "a cut-off run's check output and journal temp file are removed" 0 "RECOVERED - nothing to recover"
+if [ -e "$w/.git/method-mutate-1-1.out" ] || [ -e "$w/.git/method-mutate-journal.tmp" ]; then fail "and the files are gone"; else pass "and the files are gone"; fi
 
 # a leftover of a cut-off journal write does not stop the next run
 : >"$w/.git/method-mutate-journal.tmp"
@@ -388,7 +450,12 @@ mr "$work/staged/w" --recover
 expect "the mutant staged after the kill: refused (exit 2)" 2 "the index holds the mutant of src/a.sh (it was staged)"
 printf '# edited\n' >>"$work/edited/w/src/a.sh"
 mr "$work/edited/w" --recover
-expect "an edit after the kill: refused, not overwritten (exit 2)" 2 "src/a.sh holds neither the mutant nor the original"
+expect "an edit after the kill: refused, not overwritten, saying the mutant may still be there and how to see it (exit 2)" 2 \
+  "src/a.sh was changed after its mutant was written, so it may still hold the mutant (git diff " "Keep a copy of your change, put the file back as committed"
+case "$out" in
+  *"remove "*"by hand"*) fail "and it never says to remove the journal by hand" "$out" ;;
+  *) pass "and it never says to remove the journal by hand" ;;
+esac
 if grep -q '^# edited$' "$work/edited/w/src/a.sh"; then pass "and the edit stays"; else fail "and the edit stays"; fi
 (cd "$work/stashed/w" && git stash -q)
 mr "$work/stashed/w" --recover
@@ -423,11 +490,13 @@ expect "a second --recover has nothing to do" 0 "mutate-changed: RECOVERED - not
 # harness would; sets out and code
 run_and() {
   rm -f "$work/mark" "$work/beat" "$work/s.out"
-  (cd "$1" && exec env CI= SLOW="$3" MARK="$work/mark" BEAT="$work/beat" bash "$mutate" --max 1) >"$work/s.out" 2>&1 &
+  (cd "$1" && exec env CI= SLOW="$3" MARK="$work/mark" BEAT="$work/beat" perl -e 'setpgrp(0, 0); exec @ARGV' bash "$mutate" --max 1) >"$work/s.out" 2>&1 &
   spid=$!
   wait_for "$work/mark" 20
   wait_for "$work/beat" 10
-  kill "-$2" "$spid"
+  # (INT to the whole group, as a terminal's Ctrl-C sends it: mutate's git
+  # processes get it too)
+  if [ "$2" = INT ]; then kill -INT -- "-$spid"; else kill "-$2" "$spid"; fi
   perl -e 'select undef, undef, undef, 1.5'
   kill -9 "$spid" 2>/dev/null
   wait "$spid"
@@ -439,10 +508,11 @@ expect "TERM, while the check ignores TERM: put back and stopped before the KILL
   "mutate-changed: FAIL - stopped by SIGTERM; src/a.sh put back; the run stopped"
 if stopped "$work/beat" 10; then pass "and the check is stopped"; else fail "and the check is stopped"; fi
 clean "and the files are the commit, with no journal and the lock free" "$w"
-for s in INT HUP QUIT; do
-  run_and "$w" "$s" plain
-  expect "$s: put back and stopped (exit 2)" 2 "mutate-changed: FAIL - stopped by SIG$s; src/a.sh put back"
-  clean "after $s the files are the commit" "$w"
+if ls "$w/.git"/method-mutate-*.out >/dev/null 2>&1; then fail "and no check output is left in git's folder"; else pass "and no check output is left in git's folder"; fi
+for sig in INT HUP QUIT; do
+  run_and "$w" "$sig" plain
+  expect "$sig: put back and stopped (exit 2)" 2 "mutate-changed: FAIL - stopped by SIG$sig; src/a.sh put back"
+  clean "after $sig the files are the commit" "$w"
 done
 
 # HUP that came ignored (nohup) stays ignored: the run goes on
@@ -522,6 +592,23 @@ expect "a journal with a line missing is refused (exit 2)" 2 "cannot be trusted:
 printf 'mutate-changed journal 1\nstart %s\nstash -\ntemp %s\npgid -\nwhat now\nend\n' "$start" "$(hex .mutate-1.tmp)" >"$jf"
 mr "$jw" --recover
 expect "a journal with a line that does not parse is refused (exit 2)" 2 "cannot be trusted: a line does not parse"
+rm -f "$jf"
+mkfifo "$jf" 2>/dev/null
+if [ -p "$jf" ]; then
+  mr "$jw" --recover
+  expect "a FIFO where the journal should be is refused, not read (exit 2)" 2 "cannot be trusted: it is not a regular file"
+  rm -f "$jf"
+else
+  skip "a FIFO where the journal should be: mkfifo is not available here"
+fi
+journal - 'end
+' .git/config
+mr "$jw" --recover
+expect "a journal naming a file in git's own folder is refused (exit 2)" 2 "a path names the method's or git's own files"
+journal - 'end
+' .claude/method.conf
+mr "$jw" --recover
+expect "a journal naming one of the method's own files is refused (exit 2)" 2 "a path names the method's or git's own files"
 printf 'not a journal\nend\n' >"$jf"
 mr "$jw" --recover
 expect "a file that is not a journal is refused (exit 2)" 2 "its first line is not a mutate-changed journal"
@@ -540,10 +627,12 @@ mr "$jw" --recover
 expect "a journal whose original does not match the stored one is refused (exit 2)" 2 "the stored original of src/a.sh does not match the journal"
 cp -R "$work/next" "$work/link"
 (cd "$work/link/w" && mv src real && ln -s real src && perl -pi -e 's/-ge/-gt/' real/a.sh)
+: >"$work/link/w/real/.mutate-1.tmp"
 JF="$work/link/w/.git/method-mutate-journal" journal - 'end
 '
 mr "$work/link/w" --recover
 expect "a folder on the way that is a link is never written through (exit 2)" 2 "a folder on the way to src/a.sh is a link or not a folder"
+if [ -e "$work/link/w/real/.mutate-1.tmp" ]; then pass "and nothing behind the link is removed"; else fail "and nothing behind the link is removed"; fi
 perl -e 'setpgrp(0, 0); open my $f, ">", $ARGV[0]; print $f getpgrp(), "\n"; close $f; alarm 20; sleep 20' "$work/group" &
 gpid=$!
 wait_for "$work/group" 10
