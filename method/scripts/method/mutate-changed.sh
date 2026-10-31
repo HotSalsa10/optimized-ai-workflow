@@ -36,30 +36,32 @@
 # A mutant runs with your rights, so a file or line that names one of these
 # words gets none: rm, rmdir, unlink, mv, dd, chmod, chown, shred, truncate,
 # rimraf, $(RM), ${RM} and $RM; find with -delete, rsync with --delete, make
-# (also as $(MAKE), ${MAKE} or $MAKE) with clean or distclean, and git (also
-# as $(GIT), ${GIT} or $GIT) with clean, reset, push, checkout, restore, rm,
-# branch, stash or worktree later on the line, whatever options come first,
-# each as a word of its own: the character before it is not a letter, digit,
-# _ or -, so ["git", "clean"] and repo.git.clean count too; os.remove,
-# .unlink, .rmdir, .removedirs, .rename, .replace, .RemoveAll, .Remove and
-# .Rename; shutil.rmtree and .move; fs.rm, .rmSync, .unlink, .unlinkSync,
-# .rmdir, .rmdirSync, .rename and .renameSync; FileUtils.rm*, .remove* and
-# .mv; File.Delete and .Move (also delete and move, and PowerShell's
-# [IO.File]::Delete and ::Move); Directory.Delete and .Move (also with ::);
-# Files.delete* and .move; fs::remove* and fs::rename; Remove-Item and
-# Move-Item; and del, erase or rd followed by a space or tab. In a .bat, .cmd
-# or .ps1 file, or a script whose first line names pwsh, del, erase, rd,
-# rmdir, move, ren, rename, remove-item and move-item in any letter case,
-# and robocopy with /mir, /purge, /move or /mov, count too. A line that ends
-# in a backslash (in those files also ^ or `) is read with the next. A
-# shell script, make file or batch file (.sh, .bash, .zsh, .ksh, .bats,
-# .fish, .command, .mk, .mak, .make, .bat, .cmd, .ps1, Makefile and its kin,
-# .envrc, .bashrc, .bash_profile, .profile, .zshrc, or a first line naming
-# sh, bash, dash, ksh, zsh, fish, make or pwsh) with such a line anywhere is
-# skipped whole, since its guard can sit on another line; in any other file,
-# only that line gets no mutant, so a guard on another line gets mutants.
-# The list is words, not a parser (RISKS #13): a delete, move or overwrite
-# written any other way gets mutants, even on its own line.
+# (also as $(MAKE), ${MAKE} or $MAKE) with clean, distclean, mostlyclean or
+# maintainer-clean, and git (also as $(GIT), ${GIT} or $GIT) with clean,
+# reset, push, checkout, restore, rm, branch, stash or worktree later on the
+# line, whatever options come first, each as a word of its own: the
+# character before it is not a letter, digit, _ or -, so ["git", "clean"]
+# and repo.git.clean count too; os.remove, .unlink, .rmdir, .removedirs,
+# .rename, .replace, .RemoveAll, .Remove and .Rename; shutil.rmtree and
+# .move; fs.rm, .rmSync, .unlink, .unlinkSync, .rmdir, .rmdirSync, .rename
+# and .renameSync; FileUtils.rm*, .remove* and .mv; File.Delete and .Move
+# (also delete and move, and PowerShell's [IO.File]::Delete and ::Move);
+# Directory.Delete and .Move (also with ::); Files.delete* and .move;
+# fs::remove* and fs::rename; Remove-Item and Move-Item; and del, erase or
+# rd followed by a space or tab. In a .bat, .cmd or .ps1 file, or a script
+# whose first line names pwsh, del, erase, rd, rmdir, move, ren, rename,
+# remove-item and move-item in any letter case, and robocopy with /mir,
+# /purge, /move or /mov later on the line, count too. In every file, a line
+# that ends in a backslash (in those files also ^ or `) is read with the
+# next. A shell script, make file or batch file (.sh, .bash, .zsh, .ksh,
+# .bats, .fish, .command, .mk, .mak, .make, .bat, .cmd, .ps1, Makefile and
+# its kin, .envrc, .bashrc, .bash_profile, .profile, .zshrc, or a first
+# line naming sh, bash, dash, ksh, zsh, fish, make or pwsh) with such a line
+# anywhere is skipped whole, since its guard can sit on another line; in
+# any other file, only that line, with the lines a backslash joins it to,
+# gets no mutant, so a guard on another line gets mutants. The list is
+# words, not a parser (RISKS #13): a delete, move or overwrite written any
+# other way gets mutants, even on its own line.
 #
 # Mutants, one position each: === and !== swapped, == and != swapped; <= to
 # <, >= to >; after a [ or test on the line, the shell tests -lt -le -gt

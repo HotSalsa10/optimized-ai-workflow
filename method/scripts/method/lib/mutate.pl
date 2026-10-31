@@ -125,17 +125,21 @@ sub after {
   return $l =~ /\G[^\n]*?$then/ ? 1 : 0;
 }
 
+# cont BATCH: the end of a line that goes on in the next: a backslash (in
+# BATCH also ^ or `), with the CR of a CRLF line
+sub cont { return $_[0] ? qr/[\\^`]\r?/ : qr/\\\r?/ }
+
 sub destructive {
   my ($text, $batch) = @_;
-  (my $joined = $text) =~ s/\\\r?\n/ /g;
-  $joined =~ s/[\^`]\r?\n/ /g if $batch;
+  my $joins = cont($batch);
+  (my $joined = $text) =~ s/$joins\n/ /g;
   for my $l (split /\n/, $joined) {
     return 1 if $l =~ $WORDS || ($batch && $l =~ $BATCH_WORDS);
     # git (also run as $(GIT), ${GIT} or $GIT), find, rsync, make (also as
     # $(MAKE)) and robocopy: the command word after the first of them,
     # whatever options come between
     return 1 if after($l, qr/\bgit\b|\$[({]?(?i:git)\b/, $GIT_SUB) || after($l, qr/\bfind\b/, qr/(?<![\w-])-delete\b/)
-      || after($l, qr/\brsync\b/, qr/(?<![\w-])--delete/) || after($l, qr/\bmake\b|\$[({]?MAKE\b/, qr/(?<![\w-])(?:clean|distclean)\b/)
+      || after($l, qr/\brsync\b/, qr/(?<![\w-])--delete/) || after($l, qr/\bmake\b|\$[({]?MAKE\b/, qr/(?<![\w-])(?:clean|distclean|mostlyclean|maintainer-clean)\b/)
       || ($batch && after($l, qr/\b(?i:robocopy)\b/, qr/(?<![\w-])\/(?i:mir|purge|move?)\b/));
   }
   return 0;
@@ -251,6 +255,16 @@ sub plan {
     if (shell_like($p, $text) && destructive($text, $batch)) { $skip{'a shell script, make or batch file that deletes or moves files'}++; next }
     my @lines = split /\n/, $text, -1;
     pop @lines if @lines && $lines[-1] eq '';
+    # a line is read with the lines a backslash joins it to (cont), in every
+    # file: @start holds where each line's run of joined lines starts, and
+    # each run is judged once
+    my $joins = cont($batch);
+    my (@start, %kept);
+    for my $i (0 .. $#lines) { $start[$i] = $i && $lines[$i - 1] =~ /$joins\z/ ? $start[$i - 1] : $i }
+    my $kept_out = sub {
+      my $s = $start[$_[0]];
+      return $kept{$s} //= do { my $e = $s; $e++ while $e < $#lines && $lines[$e] =~ /$joins\z/; destructive(join("\n", @lines[$s .. $e]), $batch) };
+    };
     my $old_text = $f->{m1} =~ /\A100(?:644|755)\z/ && $f->{st} ne 'A';
     # the old file is read through Git::cat first: git diff does not check a
     # stored file against its id, so one changed by hand could hide lines (an
@@ -265,7 +279,7 @@ sub plan {
       next unless defined $l;
       $c{lines}++;
       if (comment_like($l)) { $c{comment}++; next }
-      if (destructive($l, $batch)) { $c{guarded}++; next }
+      if ($kept_out->($n - 1)) { $c{guarded}++; next }
       my ($ms, $count) = mutants_on($l, $max);
       my @m = @$ms;
       if (!@m) { $c{nothing}++; next }
