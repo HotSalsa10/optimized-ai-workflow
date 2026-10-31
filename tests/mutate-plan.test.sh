@@ -524,7 +524,11 @@ for word in rm rmdir unlink mv dd chmod chown shred truncate rimraf '$(RM)' '${R
   os.remove os.unlink os.rmdir os.removedirs os.RemoveAll shutil.rmtree shutil.move fs.rm fs.rmSync fs.unlinkSync \
   FileUtils.rm_rf FileUtils.mv File.delete Files.delete fs::remove_file Remove-Item Move-Item 'del ' 'erase ' 'rd ' \
   os.rename os.replace fs.renameSync File.Delete File.Move Directory.Delete Directory.Move Files.move fs::rename \
-  'make clean' 'make -C build distclean' '$(GIT) clean' '"$GIT" reset' '${GIT} push'; do
+  'make clean' 'make -C build distclean' '$(GIT) clean' '"$GIT" reset' '${GIT} push' \
+  os.Remove os.Rename fs.unlink fs.rmdir fs.rmdirSync fs.rename FileUtils.remove_dir File.move \
+  'subprocess.run(["git", "clean", "-fdx"])' 'exec.Command("git", "reset", "--hard")' 'Process.Start("git", "clean -fdx")' \
+  'run(["find", out, "-delete"])' 'run(["rsync", "-a", "--delete", a, b])' 'run(["make", "clean"])' 'repo.git.clean("-fdx")' \
+  "$(printf 'rd\t')" '$RM -f x' '$MAKE clean' '$(MAKE) clean' '${MAKE} -C sub distclean' '[System.IO.File]::Delete($p)' '[IO.Directory]::Move($a, $b)'; do
   printf 'if a == 1: %s x\n' "$word" >>"$w12/src/words.py"
 done
 printf 'if a == 1: keep x\n' >>"$w12/src/words.py"
@@ -540,9 +544,9 @@ for bang in '/bin/bash' '/usr/bin/env zsh' '/usr/bin/make -f' '/usr/bin/env pwsh
 done
 feat "$w12" "Every delete word and file kind"
 mp "$w12" --list --max 1000
-expect "each delete word keeps its line from being mutated, and a line without one is" 0 "src/words.py:58:6: '==' becomes '!='" \
-  "57 that delete or move files"
-lacks "no line before the last is mutated" "src/words.py:57:"
+expect "each delete word keeps its line from being mutated, and a line without one is" 0 "src/words.py:80:6: '==' becomes '!='" \
+  "79 that delete or move files"
+lacks "no line before the last is mutated" "src/words.py:79:"
 expect "each kind of shell, make or batch file that deletes is skipped whole" 0 \
   "files skipped: 26 a shell script, make or batch file that deletes or moves files"
 lacks "and none of them is planned" "src/kinds/"
@@ -572,10 +576,11 @@ mp "$w13" --list
 expect "after merging main, one base: no line main added is planned" 3 "SKIPPED - nothing-to-mutate"
 
 # batch and PowerShell files delete in any letter case, also of the file
-# name; git run as $(GIT) or $GIT is still git, and a git clean after a
-# harmless git is still seen; a make file whose git and clean sit on
-# different lines deletes nothing; batch words keep no line out of a file
-# of another kind
+# name, and so does a pwsh script; git run as $(GIT) or $GIT is still git,
+# and a git clean after a harmless git is still seen; a line that ends in a
+# backslash (in a batch file also ^ or `) is read with the next; a make
+# file whose git and clean sit on different lines deletes nothing; batch
+# words keep no line out of a file of another kind
 p14=$(new_project) || abort_sandbox
 w14="$p14/w"
 mkdir -p "$w14/src/b"
@@ -587,6 +592,24 @@ printf 'IF %%ERRORLEVEL%% NEQ 0 EXIT /B 1\r\nERASE /Q x\r\n' >"$w14/src/b/up4.ba
 printf 'IF "%%A%%"=="1" robocopy src dst /MIR\r\n' >"$w14/src/b/up5.bat"
 printf 'IF "%%A%%"=="1" MOVE a b\r\n' >"$w14/src/b/up6.bat"
 printf 'IF "%%A%%"=="1" DEL x\r\n' >"$w14/src/b/UP7.BAT"
+printf 'IF "%%A%%"=="1" RD /S /Q x\r\n' >"$w14/src/b/up8.bat"
+printf 'IF "%%A%%"=="1" REN a b\r\n' >"$w14/src/b/up9.bat"
+printf 'IF "%%A%%"=="1" RENAME a b\r\n' >"$w14/src/b/up10.cmd"
+# shellcheck disable=SC2016 # the scripts are written, not run
+printf 'if ($a -eq 1) { move-item a b }\n' >"$w14/src/b/up11.ps1"
+printf 'IF "%%A%%"=="1" robocopy a b /PURGE\r\n' >"$w14/src/b/up12.bat"
+printf 'IF "%%A%%"=="1" ROBOCOPY a b /mir\r\n' >"$w14/src/b/up13.bat"
+printf 'IF "%%A%%"=="1" robocopy a b /MOV\r\n' >"$w14/src/b/up14.bat"
+printf 'IF "%%A%%"=="1" robocopy "a" "b" "/MIR"\r\n' >"$w14/src/b/up15.bat"
+# shellcheck disable=SC2016 # the scripts are written, not run
+printf '#!/usr/bin/env pwsh\nif ($a -eq 1) { remove-item -recurse $d }\n' >"$w14/src/b/tidy"
+# shellcheck disable=SC2016 # the scripts are written, not run
+printf '#!/bin/sh\ncd "$B" || exit 1\nfind . -name "*.tmp" \\\n-delete\n' >"$w14/src/b/c1.sh"
+# shellcheck disable=SC2016 # the scripts are written, not run
+printf '#!/bin/sh\n[ -n "$D" ] || exit 1\nrsync -a \\\n  --delete a/ "$D"/\n' >"$w14/src/b/c2.sh"
+printf 'IF "%%A%%"=="1" robocopy a b ^\r\n  /MIR\r\n' >"$w14/src/b/c3.bat"
+# shellcheck disable=SC2016 # the scripts are written, not run
+printf 'if ($a -eq 1) { robocopy a b `\n  /MIR }\n' >"$w14/src/b/c4.ps1"
 # shellcheck disable=SC2016 # the scripts are written, not run
 printf 'clean:\n\ttest -n "$(KEEP)" || $(GIT) clean -fdx\n' >"$w14/src/b/git.mk"
 # shellcheck disable=SC2016 # the scripts are written, not run
@@ -597,25 +620,27 @@ printf 'GIT ?= git\nclean:\n\techo X = 1\n' >"$w14/src/b/safe.mk"
 printf 'if mode == 1: rename = move\n' >"$w14/src/b/names.py"
 feat "$w14" "Batch, PowerShell and git through a variable"
 mp "$w14" --list --max 1000
-expect "upper-case batch deletes, lower-case remove-item, robocopy /MIR, MOVE, a .BAT file, \$(GIT) clean, \$GIT reset and a git clean after a harmless git skip their files" 0 \
-  "files skipped: 10 a shell script, make or batch file that deletes or moves files"
-for f in up1.bat up2.cmd up3.ps1 up4.bat up5.bat up6.bat UP7.BAT git.mk g.sh g2.sh; do lacks "nothing planned in $f" "src/b/$f:"; done
+expect "upper-case batch deletes, lower-case remove-item and move-item, robocopy /MIR, /PURGE, /MOV and \"/MIR\", an upper-case ROBOCOPY, MOVE, REN, RENAME, RD, a .BAT file, a pwsh script, \$(GIT) clean, \$GIT reset, a git clean after a harmless git and deletes continued on the next line skip their files" 0 \
+  "files skipped: 23 a shell script, make or batch file that deletes or moves files"
+for f in up1.bat up2.cmd up3.ps1 up4.bat up5.bat up6.bat UP7.BAT up8.bat up9.bat up10.cmd up11.ps1 up12.bat up13.bat up14.bat \
+  up15.bat tidy c1.sh c2.sh c3.bat c4.ps1 git.mk g.sh g2.sh; do lacks "nothing planned in $f" "src/b/$f:"; done
 expect "a make file whose git and clean sit on different lines is planned" 0 "src/b/safe.mk:3:11: '1' becomes '0'"
 expect "batch words such as rename and move keep no line out of other files" 0 "src/b/names.py:1:9: '==' becomes '!='"
 
-# a line of thousands of git, find, rsync, make or shell test words costs
-# time in proportion to its length
+# a line of thousands of git, find, rsync, make, robocopy or shell test
+# words costs time in proportion to its length
 perl -e 'print "git " x 65536, "\n"' >"$w14/src/b/gits.txt"
 perl -e 'print "find " x 52428, "\n"' >"$w14/src/b/finds.txt"
 perl -e 'print "rsync " x 43690, "\n"' >"$w14/src/b/rsyncs.txt"
 perl -e 'print "make " x 52428, "\n"' >"$w14/src/b/makes.txt"
 perl -e 'print " -lt" x 65536, "\n"' >"$w14/src/b/tests.txt"
+perl -e 'print "robocopy " x 29127, "\n"' >"$w14/src/b/robos.bat"
 feat "$w14" "Long lines"
 t0=$(perl -e 'print time')
 mp "$w14" --list
 t1=$(perl -e 'print time')
 expect "setup: the long lines are planned" 0 "mutate-changed: PLAN - "
-if [ $((t1 - t0)) -lt 30 ]; then pass "five lines of 256 KB of such words plan in under 30 s ($((t1 - t0)) s)"; else fail "five lines of 256 KB of such words plan in under 30 s ($((t1 - t0)) s)"; fi
+if [ $((t1 - t0)) -lt 30 ]; then pass "six lines of 256 KB of such words plan in under 30 s ($((t1 - t0)) s)"; else fail "six lines of 256 KB of such words plan in under 30 s ($((t1 - t0)) s)"; fi
 
 # a branch that only deletes lines adds none to mutate; one that deletes
 # and adds plans only the added line

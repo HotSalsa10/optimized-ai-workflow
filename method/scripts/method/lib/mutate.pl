@@ -101,17 +101,23 @@ sub comment_like { return $_[0] =~ m{\A[ \t]*(?:#|//|--|/\*|\*|;|%|<!--)} ? 1 : 
 # or rewrites files or history. A mutant runs with the session's rights, so
 # a changed condition would run it when it was meant not to. Words, not a
 # parser (RISKS #13): one occurrence is enough, and over-matching only drops
-# mutants. BATCH (a .bat, .cmd or .ps1 file) adds cmd's and PowerShell's
-# words in any letter case. Each line is read once from its first git, find,
-# rsync or make, so a long line costs time in proportion to its length.
+# mutants. BATCH (a .bat, .cmd or .ps1 file, or a pwsh script) adds cmd's
+# and PowerShell's words in any letter case. A line that ends in a
+# backslash (in BATCH also ^ or `) is read with the next. The command word
+# after git, find, rsync, make or robocopy counts as a word of its own, so
+# an argument list such as ["git", "clean"] counts too. Each line is read
+# once from its first git, find, rsync, make or robocopy, so a long line
+# costs time in proportion to its length.
 my $WORDS = qr/\b(?:rm|rmdir|unlink|mv|dd|chmod|chown|shred|truncate|rimraf)\b|\$[({]?(?:rm|RM)\b
   |\b(?:os\.(?:remove|unlink|rmdir|removedirs|rename|replace|RemoveAll|Remove|Rename)|shutil\.(?:rmtree|move)
     |fs\.(?:rm|rmSync|unlink|unlinkSync|rmdir|rmdirSync|rename|renameSync)|FileUtils\.(?:rm\w*|remove\w*|mv)
-    |File\.(?:[Dd]elete|[Mm]ove)|Directory\.(?:Delete|Move)|Files\.(?:delete\w*|move)|fs::(?:remove\w*|rename)
+    |File(?:\.|\]::)(?:[Dd]elete|[Mm]ove)|Directory(?:\.|\]::)(?:Delete|Move)|Files\.(?:delete\w*|move)|fs::(?:remove\w*|rename)
     |Remove-Item|Move-Item)\b
   |\b(?:del|erase|rd)[ \t]/x;
-my $BATCH_WORDS = qr/\b(?i:del|erase|rd|rmdir|move|ren|rename|remove-item|move-item)\b|\b(?i:robocopy)\b[^\n]*?[ \t]\/(?i:mir|purge|move)\b/;
-my $GIT_SUB = qr/[ \t](?:clean|reset|push|checkout|restore|rm|branch|stash|worktree)\b/;
+my $BATCH_WORDS = qr/\b(?i:del|erase|rd|rmdir|move|ren|rename|remove-item|move-item)\b/;
+# a command word that follows git, find, rsync, make or robocopy: any text
+# but a letter, digit, _ or - before it (a space, a quote, a comma, a dot)
+my $GIT_SUB = qr/(?<![\w-])(?:clean|reset|push|checkout|restore|rm|branch|stash|worktree)\b/;
 # after LINE FIRST THEN: THEN comes after the first FIRST on LINE (one pass)
 sub after {
   my ($l, $first, $then) = @_;
@@ -121,12 +127,16 @@ sub after {
 
 sub destructive {
   my ($text, $batch) = @_;
-  for my $l (split /\n/, $text) {
+  (my $joined = $text) =~ s/\\\r?\n/ /g;
+  $joined =~ s/[\^`]\r?\n/ /g if $batch;
+  for my $l (split /\n/, $joined) {
     return 1 if $l =~ $WORDS || ($batch && $l =~ $BATCH_WORDS);
-    # git (also run as $(GIT), ${GIT} or $GIT), find, rsync and make: the
-    # command word after the first of them, whatever options come between
-    return 1 if after($l, qr/\bgit\b|\$[({]?(?i:git)\b/, $GIT_SUB) || after($l, qr/\bfind\b/, qr/[ \t]-delete\b/)
-      || after($l, qr/\brsync\b/, qr/[ \t]--delete/) || after($l, qr/\bmake\b/, qr/[ \t](?:clean|distclean)\b/);
+    # git (also run as $(GIT), ${GIT} or $GIT), find, rsync, make (also as
+    # $(MAKE)) and robocopy: the command word after the first of them,
+    # whatever options come between
+    return 1 if after($l, qr/\bgit\b|\$[({]?(?i:git)\b/, $GIT_SUB) || after($l, qr/\bfind\b/, qr/(?<![\w-])-delete\b/)
+      || after($l, qr/\brsync\b/, qr/(?<![\w-])--delete/) || after($l, qr/\bmake\b|\$[({]?MAKE\b/, qr/(?<![\w-])(?:clean|distclean)\b/)
+      || ($batch && after($l, qr/\b(?i:robocopy)\b/, qr/(?<![\w-])\/(?i:mir|purge|move?)\b/));
   }
   return 0;
 }
@@ -237,7 +247,7 @@ sub plan {
     if (!defined $text) { $skip{'larger than 1 MB'}++; next }
     if ($text =~ m{\Aversion https://git-lfs\.github\.com/spec/}) { $skip{'converted by .gitattributes or in Git LFS'}++; next }
     if ($text =~ /\0/ || !Esc::utf8_ok($text)) { $skip{'not UTF-8 text'}++; next }
-    my $batch = $p =~ /\.(?:bat|cmd|ps1)\z/i;
+    my $batch = $p =~ /\.(?:bat|cmd|ps1)\z/i || $text =~ m{\A#![^\n]*\bpwsh\b} ? 1 : 0;
     if (shell_like($p, $text) && destructive($text, $batch)) { $skip{'a shell script, make or batch file that deletes or moves files'}++; next }
     my @lines = split /\n/, $text, -1;
     pop @lines if @lines && $lines[-1] eq '';
@@ -274,8 +284,9 @@ sub plan {
   my @order;
   for my $pass (0, 1) {
     my @q = map { [@{ $_->[$pass] }] } @files;
-    while (grep {@$_} @q) {
-      for my $q (@q) { push @order, shift @$q if @$q }
+    # an empty queue is dropped, so a round costs only the files left
+    while (@q = grep {@$_} @q) {
+      push @order, shift @$_ for @q;
     }
   }
   splice @order, $max if @order > $max;
