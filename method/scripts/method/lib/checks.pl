@@ -163,33 +163,65 @@ sub run_to_file {
 my $MONO = eval { Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC()); 1 };
 sub now { return $MONO ? Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC()) : Time::HiRes::time() }
 
-# a group a signal may go to: a number of 2 or more that is not this
-# process's own group (kill with 0 or 1 would reach this group, or every
-# process)
-sub group_ok { my ($g) = @_; return defined $g && $g =~ /\A[0-9]+\z/ && $g >= 2 && $g != getpgrp() }
+# a group a signal may go to: a process id of 2 or more, below 2^31 (a
+# larger one could wrap to -1, every process), that is not this process's
+# own group (kill with 0 or 1 would reach this group, or every process)
+sub group_ok {
+  my ($g) = @_;
+  return defined $g && $g =~ /\A[0-9]{1,10}\z/ && $g >= 2 && $g < 2147483648 && $g != getpgrp();
+}
 
-# start_limited ENV ARGV OUT: starts ARGV as run_to_file does, but as the
-# leader of a process group of its own, under a watchdog: a fork of this
-# process, named "method check watchdog", that ignores INT, TERM, HUP, QUIT
-# and PIPE and keeps the lock this process holds. When this process closes
-# its pipe, or ends in any way (kill -9 included), the watchdog sends TERM to
-# the check's group, KILL 2 s later when any of it is left, and exits; so a
-# cut-off run's lock stays held until its checks are stopped. Returns a run
-# {pgid, ...} once the group exists. The check gets the five signals back
-# at their defaults.
+# default_signals: every signal back to its default, none blocked (a
+# handler, an ignored signal or a mask a process inherited from its caller)
+sub default_signals {
+  for my $s (keys %SIG) {
+    next if $s =~ /\A__/ || !defined $SIG{$s};
+    $SIG{$s} = 'DEFAULT';
+  }
+  POSIX::sigprocmask(POSIX::SIG_SETMASK(), POSIX::SigSet->new);
+}
+
+# close_others KEEP...: closes every descriptor above 2 of this process but
+# the numbers KEEP, listed in /dev/fd (or 3 to 1023 where it cannot be read)
+sub close_others {
+  my %keep = map { ($_ => 1) } 0, 1, 2, @_;
+  my @fds;
+  if (opendir my $d, '/dev/fd') {
+    @fds = grep { /\A[0-9]+\z/ } readdir $d;
+    closedir $d;
+  } else {
+    @fds = 3 .. 1023;
+  }
+  POSIX::close($_) for grep { !$keep{$_} } @fds;
+}
+
+# start_limited ENV ARGV OUT KEEP: starts ARGV as run_to_file does, but as
+# the leader of a process group of its own, under a watchdog: a fork of
+# this process, in a process group of its own too (so a KILL to the
+# caller's group does not reach it), named "method check watchdog", that
+# ignores INT, TERM, HUP, QUIT and PIPE, sets every other signal back to its
+# default, and keeps no descriptor of the caller's but the handles KEEP
+# (the lock it holds). When the caller closes its pipe, or ends in any way
+# (kill -9 included: the pipe closes, or the watchdog's parent changes),
+# the watchdog sends TERM to the check's group, KILL 2 s later when any of
+# it is left, and exits; so a cut-off run's lock stays held until its checks
+# are stopped. Returns a run {pgid, ...} once the group exists. The check
+# gets every signal back at its default, none blocked.
 sub start_limited {
-  my ($env, $argv, $out) = @_;
+  my ($env, $argv, $out, @keep) = @_;
   pipe(my $keep_r, my $keep_w) or die "cannot make a pipe\n";
   pipe(my $st_r, my $st_w) or die "cannot make a pipe\n";
+  my $caller = $$;
   my $w = fork;
   die "cannot start a process\n" unless defined $w;
   if (!$w) {
     # the watchdog: it never returns into the caller's code
     eval {
+      POSIX::setpgid(0, 0);
       $0 = 'method check watchdog';
+      default_signals();
       $SIG{$_} = 'IGNORE' for qw(INT TERM HUP QUIT PIPE);
-      close $keep_w;
-      close $st_r;
+      close_others(fileno($keep_r), fileno($st_w), map { fileno($_) } grep {defined} @keep);
       open STDIN, '<', File::Spec->devnull;
       open STDOUT, '>', File::Spec->devnull;
       open STDERR, '>', File::Spec->devnull;
@@ -198,7 +230,7 @@ sub start_limited {
       if (!$c) {
         eval {
           POSIX::setpgid(0, 0);
-          $SIG{$_} = 'DEFAULT' for qw(INT TERM HUP QUIT PIPE);
+          default_signals();
           %ENV = %$env if $env;
           open STDIN, '<', File::Spec->devnull or POSIX::_exit(127);
           open STDOUT, '>>', $out or POSIX::_exit(127);
@@ -217,17 +249,20 @@ sub start_limited {
           $status = $?;
           syswrite $st_w, "status $status\n";
         }
+        last if getppid() != $caller;
         last if select(my $rout = $sel, undef, undef, 0.2) > 0 && !sysread $keep_r, my $buf, 64;
       }
-      # the caller is done or gone: stop the check's group
+      # the caller is done or gone: stop the check's group (KILL only to a
+      # group that is still there: its number could be taken again once it
+      # is gone)
       kill 'TERM', -$c;
-      my $until = now() + 2;
+      my ($until, $gone) = (now() + 2, 0);
       while (now() < $until) {
         waitpid($c, POSIX::WNOHANG()) unless defined $status;
-        last unless kill 0, -$c;
+        if (!kill 0, -$c) { $gone = 1; last }
         Time::HiRes::sleep(0.1);
       }
-      kill 'KILL', -$c;
+      kill 'KILL', -$c unless $gone;
     };
     POSIX::_exit(0);
   }
@@ -280,31 +315,35 @@ sub wait_limited {
 
 # finish_limited RUN FAST INTERRUPTED: stops what is left of the check's
 # group and reaps the watchdog: closing the pipe makes the watchdog stop
-# the group (TERM, then KILL 2 s later) and exit. FAST sends KILL to the
-# group first; so does INTERRUPTED->() becoming true while it waits. After
-# 3 s, KILL goes to the watchdog and the group.
+# the group (TERM, then KILL 2 s later) and exit. FAST (the signal path)
+# sends KILL to the group and to the watchdog at once, so it never waits for
+# the group to be gone (a killed check's children can stay zombies until the
+# system reaps them); so does INTERRUPTED->() becoming true while it waits.
+# After 3 s, KILL goes to the watchdog and the group. A group still there
+# once the watchdog is gone (killed on its own) gets KILL.
 sub finish_limited {
   my ($r, $fast, $interrupted) = @_;
   my $g = group_ok($r->{pgid}) ? $r->{pgid} : undef;
-  kill 'KILL', -$g if $fast && $g;
   close $r->{keep} if $r->{keep};
   undef $r->{keep};
-  my $until = now() + 3;
+  my ($until, $sent) = (now() + 3, 0);
   while (1) {
+    $fast = 1 if !$fast && $interrupted && $interrupted->();
+    if ($fast && !$sent) {
+      kill 'KILL', -$g if $g;
+      kill 'KILL', $r->{w};
+      $sent = 1;
+    }
     my $p = waitpid($r->{w}, POSIX::WNOHANG());
     last if $p == $r->{w} || $p < 0;
-    if (!$fast && $interrupted && $interrupted->()) {
-      $fast = 1;
-      kill 'KILL', -$g if $g;
-    }
     if (now() > $until) {
-      kill 'KILL', -$g if $g;
       kill 'KILL', $r->{w};
       waitpid $r->{w}, 0;
       last;
     }
     Time::HiRes::sleep(0.05);
   }
+  kill 'KILL', -$g if $g && kill 0, -$g;
   close $r->{st} if $r->{st};
   undef $r->{st};
 }

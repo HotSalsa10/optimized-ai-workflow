@@ -217,14 +217,17 @@ sub work_lines {
   }
   # a mutate-changed run in DIR's own working tree (lib/runstate.pl): one that
   # runs has files that hold mutants; one cut off left its journal
+  # (named like DIR's other lines: with its path when it is a linked worktree)
+  my ($me) = grep { $wts[$_]{worktree} eq $dir } 0 .. $#wts;
+  my $mw = $me ? "worktree $dir: " : '';
   my $ms = RunState::probe($dir);
   if ($ms->{mutate}) {
-    push @parts, 'mutate-changed is running: files hold mutants until it ends';
+    push @parts, "${mw}mutate-changed is running: files hold mutants until it ends";
   } elsif ($ms->{journal}) {
-    push @parts, 'a mutate-changed run was cut off and left its journal: a file may hold a mutant; run'
+    push @parts, "${mw}a mutate-changed run was cut off and left its journal: a file may hold a mutant; run"
       . ' mutate-changed.sh --recover';
   }
-  push @parts, "cannot tell whether mutate-changed is running: $ms->{unknown}" if $ms->{unknown};
+  push @parts, "${mw}cannot tell whether mutate-changed is running: $ms->{unknown}" if $ms->{unknown};
   my $wtlist = @linked ? '; linked worktrees: ' . names(@linked) : '';
   return [$area, 'LOOK', join('; ', @parts) . $wtlist] if @parts;
   return [$area, 'PASS', 'nothing uncommitted, nothing unpushed (as of the last fetch)' . $wtlist];

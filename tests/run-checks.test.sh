@@ -1033,11 +1033,11 @@ if [ -f "$klock" ] && [ -z "$(cd "$kr" && git status --porcelain --untracked-fil
 else
   fail "the lock lives in git's own folder" "$(ls -la "$kr/.git"; cd "$kr" && git status --porcelain --untracked-files=all)"
 fi
-hold_lock "$klock" 1 "$work/held1"
+hold_lock "$klock" 1 "$work/held1" || fail "setup: a helper holds the lock"
 run "$kr"
 expect "an exclusive hold that ends within 5 s is waited out" 0 "run-checks: PASS"
 wait "$holder" 2>/dev/null
-hold_lock "$klock" 30 "$work/held2"
+hold_lock "$klock" 30 "$work/held2" || fail "setup: a helper holds the lock"
 run "$kr"
 expect "an exclusive hold for longer stops it: busy (exit 2)" 2 "run-checks: FAIL - busy: mutate-changed is running here; wait for it to end"
 kill "$holder" 2>/dev/null
@@ -1052,9 +1052,13 @@ expect "a journal left by a cut-off mutate run stops it (exit 2)" 2 \
   "run-checks: FAIL - a mutate-changed run was cut off and left its journal, so a file may hold a mutant; run mutate-changed.sh --recover"
 rm -f "$kr/.git/method-mutate-journal"
 rm -f "$klock"
-mkfifo "$klock"
-run "$kr"
-expect "a FIFO where the lock should be stops it (exit 2)" 2 "method-run.lock is not a regular file"
+mkfifo "$klock" 2>/dev/null
+if [ -p "$klock" ]; then
+  run "$kr"
+  expect "a FIFO where the lock should be stops it (exit 2)" 2 "method-run.lock is not a regular file"
+else
+  skip "a FIFO where the lock should be: mkfifo is not available here"
+fi
 rm -f "$klock"
 : >"$work/lock-target"
 ln -s "$work/lock-target" "$klock"

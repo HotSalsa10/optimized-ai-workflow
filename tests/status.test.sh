@@ -261,6 +261,17 @@ expect "a change in a linked worktree is a LOOK naming it" 1 "worktree $p/linked
 (cd "$p/linked" && git checkout -q a.txt)
 st "$w"
 expect "a clean linked worktree is named in a PASS" 0 "work: PASS - nothing uncommitted, nothing unpushed (as of the last fetch); linked worktrees: $p/linked"
+lj=$(cd "$p/linked" && git rev-parse --git-path method-mutate-journal)
+case "$lj" in /*) ;; *) lj="$p/linked/$lj" ;; esac
+: >"$lj"
+st "$p/linked"
+expect "in a linked worktree, its own cut-off mutate run is named with its path" 1 "worktree $p/linked: a mutate-changed run was cut off"
+st "$w"
+case "$out" in
+  *"mutate-changed"*) fail "and the main worktree's status does not report it" "$out" ;;
+  *) pass "and the main worktree's status does not report it" ;;
+esac
+rm -f "$lj"
 (cd "$w" && git worktree remove --force "$p/linked" && git branch -q -D linked)
 (cd "$w" && git worktree add -q "$p/gone" -b gone origin/main 2>/dev/null)
 rm -rf "$p/gone"
@@ -825,7 +836,7 @@ if [ -e "$mw/.git/method-run.lock" ]; then fail "status creates no lock file"; e
 st "$mw"
 expect "a journal left by a cut-off run is a LOOK, with what to do" 1 \
   "work: LOOK - a mutate-changed run was cut off and left its journal: a file may hold a mutant; run mutate-changed.sh --recover"
-hold_lock "$mw/.git/method-run.lock" 30 "$work/held"
+hold_lock "$mw/.git/method-run.lock" 30 "$work/held" || fail "setup: a helper holds the lock"
 st "$mw"
 expect "a held lock is a running mutate-changed, even with a journal" 1 "work: LOOK - mutate-changed is running: files hold mutants until it ends"
 case "$out" in
@@ -835,10 +846,14 @@ esac
 kill "$holder" 2>/dev/null
 wait "$holder" 2>/dev/null
 rm -f "$mw/.git/method-mutate-journal" "$mw/.git/method-run.lock"
-mkfifo "$mw/.git/method-run.lock"
-st "$mw"
-expect "a FIFO where the lock should be is named, and status still ends" 1 \
-  "work: LOOK - cannot tell whether mutate-changed is running: the lock is not a regular file"
+mkfifo "$mw/.git/method-run.lock" 2>/dev/null
+if [ -p "$mw/.git/method-run.lock" ]; then
+  st "$mw"
+  expect "a FIFO where the lock should be is named, and status still ends" 1 \
+    "work: LOOK - cannot tell whether mutate-changed is running: the lock is not a regular file"
+else
+  skip "a FIFO where the lock should be: mkfifo is not available here"
+fi
 rm -f "$mw/.git/method-run.lock"
 
 for d in $repos; do drop_sandbox "$d"; done
