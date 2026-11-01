@@ -836,11 +836,7 @@ sub release {
   # reason gives the way out there (OUT)
   my $has = sub {
     my ($f, $id, $where, $out) = @_;
-    return 1 if $id eq $f->{mb};
-    return 0 if $id eq $f->{sb};
-    my $bytes = eval { Git::cat('blob', $id, 1) };
-    $fail->('git cat-file') unless defined $bytes;
-    my $r = holds($f, $bytes);
+    my $r = blob_holds($f, $id);
     return $r if defined $r;
     die "cannot tell whether $where holds the mutant of " . Esc::line($f->{path}) . ', as the original has its line'
       . " elsewhere too ($f->{place}): $out, then run mutate-changed.sh --recover\n";
@@ -969,28 +965,62 @@ sub recover {
   return $n;
 }
 
+# blob_holds F ID: holds, for the blob ID in git (1, 0, or undef: cannot
+# tell); a blob git cannot read is "cannot tell" too, and stops here
+sub blob_holds {
+  my ($f, $id) = @_;
+  return 1 if $id eq $f->{mb};
+  return 0 if $id eq $f->{sb};
+  my $bytes = eval { Git::cat('blob', $id, 1) };
+  die 'cannot tell whether git holds the mutant of ' . Esc::line($f->{path}) . ' (git cat-file failed); run'
+    . " mutate-changed.sh --recover\n" unless defined $bytes;
+  return holds($f, $bytes);
+}
+
 # on_start J: recovery goes on only while HEAD is the commit the run started
 # on, or one made after it, or one whose version of each file the journal
-# names is the one the run started from (a rebase); elsewhere (another
-# branch checked out, or a reset, after a cut-off run) the files are not
-# what the journal speaks of
+# names is the one the run started from (a rebase that kept them).
+# Elsewhere the files are not what the journal speaks of: a HEAD older than
+# the run (the base branch, a reset) cannot hold its mutant, so it says to
+# check the start out; any other HEAD (an amend, a rebase, another branch)
+# is looked at for the mutant first, as a commit made since may hold it
 sub on_start {
   my ($j) = @_;
+  my $cannot = sub { die "cannot tell where HEAD is from the commit the run started on ($_[0] failed); run"
+    . " mutate-changed.sh --recover\n" };
   my ($st) = Git::run('merge-base', '--is-ancestor', $j->{start}, 'HEAD');
   return unless $st;
-  if ($st == 256) {
-    my $same = 1;
-    for my $f (@{ $j->{files} }) {
-      my ($tst, $tree) = Git::run('ls-tree', '-z', 'HEAD', '--', $f->{path});
-      $same = 0 unless !$tst && $tree =~ /\A[0-7]+ blob \Q$f->{sb}\E\t/;
+  $cannot->('git merge-base') unless $st == 256;
+  my @moved;
+  for my $f (@{ $j->{files} }) {
+    my ($tst, $tree) = Git::run('ls-tree', '-z', 'HEAD', '--', $f->{path});
+    $cannot->('git ls-tree') if $tst;
+    my ($id) = $tree =~ /\A[0-7]+ blob ([0-9a-f]+)\t/;
+    push @moved, [$f, $id] unless defined $id && $id eq $f->{sb};
+  }
+  return unless @moved;
+  my ($ost, $head) = Git::run('rev-parse', '-q', '--verify', 'HEAD^{commit}');
+  $cannot->('git rev-parse HEAD') if $ost;
+  $head = substr((split /\n/, $head)[0], 0, 7);
+  my ($older) = Git::run('merge-base', '--is-ancestor', 'HEAD', $j->{start});
+  if ($older) {
+    $cannot->('git merge-base') unless $older == 256;
+    for my $m (@moved) {
+      my ($f, $id) = @$m;
+      next unless defined $id;
+      my $r = blob_holds($f, $id);
+      die "HEAD ($head) holds the mutant of " . Esc::line($f->{path}) . " ($f->{place}): undo that change in a new"
+        . " commit, then run mutate-changed.sh --recover\n" if $r;
+      die "cannot tell whether HEAD ($head) holds the mutant of " . Esc::line($f->{path}) . ', as the original has its'
+        . " line elsewhere too ($f->{place}): commit the file as it was when the run started (git restore"
+        . " --source=$j->{start} --staged --worktree -- and its name, then git commit), then run mutate-changed.sh"
+        . " --recover\n" unless defined $r;
     }
-    return if $same;
   }
   die "HEAD is not the commit the run started on ($j->{start}), one made after it, or one with the files as they were"
-    . " then: check that commit out (git checkout $j->{start}), run mutate-changed.sh --recover, then switch back\n"
-    if $st == 256;
-  die "cannot tell whether HEAD is the commit the run started on or one made after it (git merge-base failed); run"
-    . " mutate-changed.sh --recover\n";
+    . " then: check that commit out (git checkout $j->{start}), run mutate-changed.sh --recover, then switch back; if"
+    . ' you committed on the branch the run was on since, make sure those commits do not hold the mutant\'s change ('
+    . join(', ', map { Esc::line($_->{path}) . ": $_->{place}" } @{ $j->{files} }) . ")\n";
 }
 
 # changes START STASH: what is not as at the start (Checks::tree_changes,

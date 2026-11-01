@@ -23,7 +23,7 @@ Blocker: none; Claude does the work.
 
 ## Track 2: Release 2, proof and hardening
 
-Reviewer test (planted bugs, clean changes, old bugs, business-rule questions); the merge check run from the main branch so a change cannot grade itself; mutation testing in CI; GitHub branch rules; Deep review checked against the incident set; an end-to-end smoke test.
+Reviewer test (planted bugs, clean changes, old bugs, business-rule questions); the merge check run from the main branch so a change cannot grade itself; mutation testing in CI; GitHub branch rules; Deep review checked against the incident set; an end-to-end smoke test; an exact way to find a mutant in a file edited after a cut-off run (RISKS #15).
 
 Exit: the reviewer test report exists and every Release 2 guard has its planted failure in CI.
 Blocker: an API key from the owner's Max plan credits, scoped to the test runs ([CREDENTIAL], owner).

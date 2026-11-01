@@ -496,7 +496,7 @@ case "$out" in
   *) fail "run-checks refuses" "$out" ;;
 esac
 # the ways out, each in a copy of the project as the kill left it
-for k in committed staged edited gone stashed stagededit committededit stashededit movededit mainco conf next rebase; do cp -R "$p" "$work/$k"; done
+for k in committed staged edited gone stashed stagededit committededit stashededit movededit mainco amended conf next rebase; do cp -R "$p" "$work/$k"; done
 (cd "$work/committed/w" && git commit -q -am "Oops")
 mr "$work/committed/w" --recover
 expect "the mutant committed after the kill: refused, naming HEAD (exit 2)" 2 "holds the mutant of src/a.sh: undo that change in a new commit"
@@ -583,6 +583,28 @@ mr "$mc" --recover
 expect "following that, --recover removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
 (cd "$mc" && git checkout -q main)
 clean "and back on main, the files are the commit" "$mc"
+# an edit amended into the commit the run started on: HEAD is made since the
+# run, so it is looked at first; once the mutant's change is undone in a new
+# commit, it says to check the start out, and to look at commits made since
+am="$work/amended/w"
+amstart=$(cd "$am" && git rev-parse HEAD)
+(cd "$am" && printf '# my fix\n' >>src/a.sh && git commit -q -a --amend --no-edit)
+mr "$am" --recover
+expect "an edit amended into the start commit after the kill: HEAD holds the mutant, so it says to undo it in a new commit (exit 2)" 2 \
+  "holds the mutant of src/a.sh (line 2, column 18: '-ge' becomes '-gt'): undo that change in a new commit"
+(cd "$am" && perl -pi -e 's/-gt/-ge/ if $. == 2' src/a.sh && git commit -q -am "Undo the mutant's change")
+mr "$am" --recover
+expect "then it says to check out the commit the run started on, and to look at commits made since (exit 2)" 2 \
+  "check that commit out (git checkout $amstart)" "make sure those commits do not hold the mutant's change"
+(cd "$am" && git checkout -q "$amstart")
+mr "$am" --recover
+expect "following that, --recover removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
+(cd "$am" && git checkout -q feat)
+if grep -q -- -gt "$am/src/a.sh" || ! grep -q '^# my fix$' "$am/src/a.sh"; then
+  fail "and back on the branch, the edit is kept and the mutant is gone" "$(cat "$am/src/a.sh")"
+else
+  pass "and back on the branch, the edit is kept and the mutant is gone"
+fi
 # lines added above the mutant's line: it is still found
 mv2="$work/movededit/w"
 (cd "$mv2" && perl -pi -e 'print "# added\n# added\n" if $. == 1' src/a.sh)
