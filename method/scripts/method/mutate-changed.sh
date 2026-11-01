@@ -42,8 +42,10 @@
 # group is stopped, the file put back, and the journal removed once the
 # mutant is nowhere git keeps it (HEAD, the index, a stash made during the
 # run and its index part, an autostash a merge left: each is looked at for
-# the mutant's line, so an edit made on top of it does not hide it; the
-# journal keeps that line's SHA-256, never its text) and no merge, rebase
+# the mutant's line, alone and with the lines around it, so an edit made on
+# top of it does not hide it, and where that cannot tell (the original has
+# the same lines elsewhere), the journal stays; the journal keeps their
+# SHA-256s, never their text) and no merge, rebase
 # or other git operation is in progress (its autostash can hold it, also
 # when a check started it); a git command that fails there, or ends on a
 # signal, keeps the journal too. A journal a check removed or changed is
@@ -58,7 +60,10 @@
 # journal, by the same rules. A file changed on top of its mutant is left
 # as it is once the mutant's line is gone from it; while it is there, the
 # refusal says where (line, column and change; lines added above move it):
-# undo that one change, then --recover. A missing file, or a copy of it,
+# undo that one change (after checking out the commit the run started on
+# again, if the session left it), then --recover; where it cannot tell, put
+# the file back as it was at the start, --recover, and make the change
+# again without the mutant's. A missing file, or a copy of it,
 # may hold it: the refusal says to undo it there and put the file back as
 # it was at the start (git restore --source=START --staged --worktree). Files
 # put back are newer than any build, so a build is redone, and a "build is

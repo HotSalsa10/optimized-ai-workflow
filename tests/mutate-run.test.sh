@@ -726,6 +726,16 @@ lacks "and it does not say the journal stays" "the journal stays"
 if [ -e "$w/.git/method-mutate-journal.tmp" ]; then fail "and no journal temp file is left"; else pass "and no journal temp file is left"; fi
 rmdir "$w/.git/method-mutate-journal"
 clean "and the files are the commit" "$w"
+# the same, with the file edited too: the put-back is refused, and still the
+# line does not say the journal stays
+act "$w" 'perl "'"$work/pgid.pl"'"; rm -f .git/method-mutate-journal; mkdir .git/method-mutate-journal; printf "# edit\n" >>src/a.sh'
+mr "$w" --max 1
+expect "the journal made a folder and the file edited: the put-back is refused, and no journal names it (exit 2)" 2 \
+  "and it still holds the mutant's change" "and no journal names it, so --recover cannot find it"
+lacks "and it does not say the journal stays" "the journal stays"
+rmdir "$w/.git/method-mutate-journal"
+(cd "$w" && git checkout -q -- src/a.sh)
+clean "and once the file is put back by hand, the files are the commit" "$w"
 # a check that changes only the journal's process group and blocks its
 # rewrite: the journal still names the files, so the round ends as usual
 act "$w" 'perl "'"$work/pgid.pl"'"; perl -pi -e "s/^pgid [0-9]+\$/pgid 99999/" .git/method-mutate-journal; mkdir -p .git/method-mutate-journal.tmp'
