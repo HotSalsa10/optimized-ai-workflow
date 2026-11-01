@@ -131,7 +131,7 @@ new_project() {
 # check DIR CHECK: t.sh in DIR runs CHECK (committed on feat)
 check() {
   printf '. src/a.sh; . src/b.sh; . src/c.sh\n%s\necho 1 ok\n' "$2" >"$1/t.sh"
-  (cd "$1" && git add -A && git commit -q -m "Check")
+  (cd "$1" && git add -A && git commit -q -m "Check" >/dev/null)    # (the same check twice: nothing to commit)
 }
 
 # the demo: only the plain cases are tested, so no boundary mutant is noticed
@@ -1109,6 +1109,19 @@ from=$(printf '%s\n' "$out" | perl -ne 'print $1 if /--source=([0-9a-f]+) --stag
 (cd "$tw2" && git restore --source="$from" --staged --worktree -- src/a.sh)
 mr "$tw2" --recover
 expect "following its way out, --recover removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
+clean "and the files are the commit" "$tw2"
+# the same edit committed, and the file put back as at the start: HEAD is
+# where it cannot tell
+# shellcheck disable=SC2016 # the check is written, not run
+killed "$tw2" '[ "$(grep -c "y=1" src/a.sh)" = 2 ]' 'true'
+before=$(cd "$tw2" && git rev-parse HEAD)
+(cd "$tw2" && perl -i -ne 'print unless $. >= 2 && $. <= 4' src/a.sh && git commit -q -am "Drop the first block" && git restore --source="$before" --worktree -- src/a.sh)
+mr "$tw2" --recover
+expect "the edit committed: HEAD is where it cannot tell, so the journal stays (exit 2)" 2 \
+  "cannot tell whether HEAD holds the mutant of src/a.sh, as the original has its line, with the same lines around it, elsewhere"
+(cd "$tw2" && git restore --source="$before" --staged --worktree -- src/a.sh && git commit -q -m "Back as at the start")
+mr "$tw2" --recover
+expect "once HEAD has the file as at the start, --recover removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
 clean "and the files are the commit" "$tw2"
 
 # --- a file removed while its mutant's write waits for the clock: no
