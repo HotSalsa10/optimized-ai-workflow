@@ -167,7 +167,7 @@ To check the checks, each guard was removed once in a throwaway copy, and the fu
 
 ## Where CI runs
 
-- Linux: every push and pull request (a 25-minute limit: the whole suite takes about 11 minutes, mutate-run's 30 s time-limit case and its signals among it). Windows and macOS jobs have 30 minutes.
+- Linux: every push and pull request (a 25-minute limit: the whole suite takes about 13 minutes, mutate-run's 30 s time-limit case and its signals among it). Windows and macOS jobs have 30 minutes.
 - Windows (Git Bash) and macOS: release tags and manual runs (decision A19).
 - Each run step first sends `::stop-commands::` with a random token, so the runner reads no workflow commands from the output that follows. A manual run and a push run on the same branch use different concurrency groups, so neither cancels the other.
 

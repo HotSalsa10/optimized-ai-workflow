@@ -47,7 +47,7 @@ Nothing yet. Release 1 is being built.
 ### Changed (step 4b)
 
 - `mutate-changed.sh` runs mutants (step 4b.3b): run A, then one mutant at a time in the working tree, each written through one write function with a journal in git's own folder, each check under the limited runner with a time limit; survivors are named (exit 1); all killed is SKIPPED kills-unchecked until step 4b.4. `--recover` puts back what a cut-off run left; the next run does it first. `--minutes` (default 8) bounds a run.
-- The CI jobs get 25 minutes (Linux) and 30 (Windows, macOS): the suite takes about 11 minutes.
+- The CI jobs get 25 minutes (Linux) and 30 (Windows, macOS): the suite takes about 13 minutes.
 
 - run-checks holds a lock it shares with mutate-changed (in git's own folder) for its whole run: while mutate-changed runs, it waits up to 5 s, then stops with `FAIL - busy` (exit 2, no log); a journal left by a cut-off mutate-changed run stops it too (run `mutate-changed.sh --recover`). status's work area says when mutate-changed is running, or was cut off.
 - `lib/checks.pl` gains a limited runner for mutate-changed's checks (used in step 4b.3b): each check leads its own process group under a watchdog that stops the group when its caller ends, kill -9 included, and has a time limit. run-checks' own runner is unchanged.
