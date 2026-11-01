@@ -509,18 +509,20 @@ sub window {
 }
 
 # line_counts F BYTES: how many of BYTES' lines are the mutant's line (whose
-# SHA-256 is F's ml), and how many of those have the mutant's lines around
-# them too (mw)
+# SHA-256 is F's ml), how many of those have the mutant's lines around them
+# too (mw), and how many have each set of lines around them
 sub line_counts {
   my ($f, $bytes) = @_;
   my @l = lines_of($bytes);
-  my ($nl, $nw) = (0, 0);
+  my ($nl, $nw, %win) = (0, 0);
   for my $i (0 .. $#l) {
     next unless Digest::SHA::sha256_hex($l[$i]) eq $f->{ml};
     $nl++;
-    $nw++ if Digest::SHA::sha256_hex(window(\@l, $i)) eq $f->{mw};
+    my $w = Digest::SHA::sha256_hex(window(\@l, $i));
+    $nw++ if $w eq $f->{mw};
+    $win{$w}++;
   }
-  return ($nl, $nw);
+  return ($nl, $nw, \%win);
 }
 
 # the mutant's change is found by its line, not by the file's bytes: an
@@ -528,9 +530,11 @@ sub line_counts {
 # keeps that line. original F: the file's bytes at the start (checked
 # against the journal). holds F BYTES: 1 when BYTES hold the mutant's line
 # more often than the original does, alone or with its lines around it; 0
-# when not; undef when it cannot tell: the original has the mutant's line,
-# with the same lines around it, so an edit that removed that one would
-# hide the mutant
+# when the line is not in BYTES, or each copy of it left is one of the
+# original's own with its lines around it unchanged; undef when it cannot
+# tell: a copy whose lines around it changed may be the mutant (an edit to
+# its neighbour, or one that removed a twin of it), and where the original
+# has the mutant's line with the same lines around it, any copy may be
 sub original {
   my ($f) = @_;
   $f->{text} = Git::cat('blob', $f->{sb}, 1) unless defined $f->{text};
@@ -540,10 +544,12 @@ sub original {
 }
 sub holds {
   my ($f, $bytes) = @_;
-  @$f{qw(bl bw)} = line_counts($f, original($f)) unless defined $f->{bl};
-  my ($nl, $nw) = line_counts($f, $bytes);
+  @$f{qw(bl bw bwin)} = line_counts($f, original($f)) unless defined $f->{bl};
+  my ($nl, $nw, $win) = line_counts($f, $bytes);
   return 1 if $nl > $f->{bl} || $nw > $f->{bw};
-  return undef if $f->{bw} > 0 && $nl > 0;
+  return 0 if $nl == 0;
+  return undef if $f->{bw} > 0;
+  for my $w (keys %$win) { return undef if $win->{$w} > ($f->{bwin}{$w} || 0) }
   return 0;
 }
 
@@ -634,6 +640,7 @@ sub folder_of {
   my $dir = '.';
   for my $part (@parts) {
     $dir .= "/$part";
+    die 'a folder on the way to ' . Esc::line($p) . " is missing\n" if !(-e $dir || -l $dir);
     die 'a folder on the way to ' . Esc::line($p) . " is a link or not a folder\n" if -l $dir || !-d _;
   }
   return $dir;
@@ -655,7 +662,11 @@ sub folder_of {
 # writes it anyway.
 sub put {
   my ($p, $bytes, $wait, $expect) = @_;
-  my $dir = folder_of($p);
+  my $dir = eval { folder_of($p) };
+  if (!defined $dir) {
+    return 0 if $@ =~ / is missing\n\z/;    # (gone: changed during the run)
+    die $@;
+  }
   my @st = lstat $p or return 0;    # (gone: changed during the run)
   my $t = int(Time::HiRes::time()) + 1;
   $t = $st[9] + 1 if $st[9] + 1 > $t;
@@ -665,7 +676,11 @@ sub put {
   }
   my $tmp = "$dir/$TEMP";
   my $fh;
-  sysopen $fh, $tmp, O_WRONLY | O_CREAT | O_EXCL, 0600 or die 'cannot write next to ' . Esc::line($p) . " ($!)\n";
+  if (!sysopen $fh, $tmp, O_WRONLY | O_CREAT | O_EXCL, 0600) {
+    my $e = "$!";
+    return 0 unless -d $dir;    # (its folder gone while it waited: changed during the run)
+    die 'cannot write next to ' . Esc::line($p) . " ($e)\n";
+  }
   binmode $fh;
   my $e;
   my $ok = (print {$fh} $bytes) && $fh->flush && $fh->sync;
@@ -720,8 +735,7 @@ sub restore {
       unless defined $now;
     my $r = holds($f, $now);
     die "$p $what, and it still holds the mutant's change ($where): undo that change in the file (git diff $start --"
-      . " and its name shows it; if you left the commit the run started on, check it out again first), then run"
-      . " mutate-changed.sh --recover\n" if $r;
+      . " and its name shows it), then run mutate-changed.sh --recover\n" if $r;
     die "$p $what, and it cannot tell whether the mutant's change is still in it, as the original has that line, with"
       . " the same lines around it, elsewhere ($where): $back, run mutate-changed.sh --recover, then make your change"
       . " again, leaving that change out\n" unless defined $r;
@@ -783,9 +797,15 @@ sub release {
     # (none: unless refs/stash names something that is not a commit, or its
     # reflog is left without it)
     my ($rst) = Git::run('rev-parse', '-q', '--verify', 'refs/stash');
-    $fail->('refs/stash names no commit', '') unless $rst == 256;
+    die "refs/stash names something that is not a stash, so it cannot tell whether a stash holds the mutant of"
+      . " $names: make it name a stash again, or remove it (git update-ref -d refs/stash) once you are sure none of"
+      . " your stashes holds the mutant, then run mutate-changed.sh --recover\n" if $rst == 0;
+    $fail->('git rev-parse refs/stash') unless $rst == 256;
     my ($est) = Git::run('reflog', 'exists', 'refs/stash');
-    $fail->('a stash reflog is left without refs/stash', '') unless $est == 256;
+    die "a stash reflog is left without refs/stash, so it cannot tell whether a stash holds the mutant of $names:"
+      . " remove that reflog (logs/refs/stash in git's folder) once you are sure none of its stashes holds the"
+      . " mutant, then run mutate-changed.sh --recover\n" if $est == 0;
+    $fail->('git reflog exists') unless $est == 256;
   }
   if (defined $top) {
     my ($sst, $ids) = Git::run('rev-list', '--walk-reflogs', 'refs/stash');
@@ -811,33 +831,36 @@ sub release {
       'git merge --quit moves it to the stash list; drop it there (or take that change out of it)'];
   }
   my $head = $verify->('HEAD');    # (none before the first commit)
-  # has F ID WHERE: the blob ID (in WHERE) holds the mutant, or its change
-  # with others; when that cannot be told, the journal stays
+  # has F ID WHERE OUT: the blob ID (in WHERE) holds the mutant, or its
+  # change with others; when that cannot be told, the journal stays, and the
+  # reason gives the way out there (OUT)
   my $has = sub {
-    my ($f, $id, $where) = @_;
+    my ($f, $id, $where, $out) = @_;
     return 1 if $id eq $f->{mb};
     return 0 if $id eq $f->{sb};
     my $bytes = eval { Git::cat('blob', $id, 1) };
     $fail->('git cat-file') unless defined $bytes;
     my $r = holds($f, $bytes);
     return $r if defined $r;
-    die "cannot tell whether $where holds the mutant of " . Esc::line($f->{path}) . ', as the original has its line,'
-      . " with the same lines around it, elsewhere ($f->{place}): make the file there as it was when the run started,"
-      . " then run mutate-changed.sh --recover\n";
+    die "cannot tell whether $where holds the mutant of " . Esc::line($f->{path}) . ', as the original has its line'
+      . " elsewhere too ($f->{place}): $out, then run mutate-changed.sh --recover\n";
   };
+  my $from = "git restore --source=$j->{start} --staged --worktree -- and its name";
   for my $f (@{ $j->{files} }) {
     my $p = $f->{path};
     if (defined $head) {
       my ($tst, $tree) = Git::run('ls-tree', '-z', $head, '--', $p);
       $fail->('git ls-tree') if $tst;
       die 'HEAD (' . substr($head, 0, 7) . ') holds the mutant of ' . Esc::line($p) . ': undo that change in a new'
-        . " commit, then run mutate-changed.sh --recover\n" if $tree =~ /\A[0-7]+ blob ([0-9a-f]+)\t/ && $has->($f, $1, 'HEAD');
+        . " commit, then run mutate-changed.sh --recover\n" if $tree =~ /\A[0-7]+ blob ([0-9a-f]+)\t/
+          && $has->($f, $1, 'HEAD', "commit the file as it was when the run started ($from, then git commit); make your"
+            . " change again afterwards, without the mutant's");
     }
     my ($ist, $idx) = Git::run('ls-files', '-s', '-z', '--', $p);
     $fail->('git ls-files') if $ist;
     for my $e (split /\0/, $idx) {
       die 'the index holds the mutant of ' . Esc::line($p) . ' (it was staged): unstage that change, then run'
-        . " mutate-changed.sh --recover\n" if $e =~ /\A[0-7]+ ([0-9a-f]+) [0-3]\t/ && $has->($f, $1, 'the index');
+        . " mutate-changed.sh --recover\n" if $e =~ /\A[0-7]+ ([0-9a-f]+) [0-3]\t/ && $has->($f, $1, 'the index', 'unstage it (git restore --staged -- and its name)');
     }
     for my $k (@kept) {
       my ($s, $what, $out) = @$k;
@@ -847,7 +870,7 @@ sub release {
         my ($tst, $tree) = Git::run('ls-tree', '-z', $rev, '--', $p);
         $fail->('git ls-tree') if $tst;
         die "$what holds the mutant of " . Esc::line($p) . ": $out, then run mutate-changed.sh --recover\n"
-          if $tree =~ /\A[0-7]+ blob ([0-9a-f]+)\t/ && $has->($f, $1, $what);
+          if $tree =~ /\A[0-7]+ blob ([0-9a-f]+)\t/ && $has->($f, $1, $what, $out);
       }
     }
   }
@@ -926,6 +949,7 @@ sub recover {
   my @ops = RunState::operations('.');
   die join(' and ', @ops) . ' is in progress, and its autostash can hold a mutant; finish or abort it, then run'
     . " mutate-changed.sh --recover\n" if @ops;
+  on_start($j);
   my ($own, $n) = ($TEMP, 0);
   $TEMP = $j->{temp};
   for my $f (@{ $j->{files} }) {
@@ -943,6 +967,30 @@ sub recover {
   release($j);
   $TEMP = $own;
   return $n;
+}
+
+# on_start J: recovery goes on only while HEAD is the commit the run started
+# on, or one made after it, or one whose version of each file the journal
+# names is the one the run started from (a rebase); elsewhere (another
+# branch checked out, or a reset, after a cut-off run) the files are not
+# what the journal speaks of
+sub on_start {
+  my ($j) = @_;
+  my ($st) = Git::run('merge-base', '--is-ancestor', $j->{start}, 'HEAD');
+  return unless $st;
+  if ($st == 256) {
+    my $same = 1;
+    for my $f (@{ $j->{files} }) {
+      my ($tst, $tree) = Git::run('ls-tree', '-z', 'HEAD', '--', $f->{path});
+      $same = 0 unless !$tst && $tree =~ /\A[0-7]+ blob \Q$f->{sb}\E\t/;
+    }
+    return if $same;
+  }
+  die "HEAD is not the commit the run started on ($j->{start}), one made after it, or one with the files as they were"
+    . " then: check that commit out (git checkout $j->{start}), run mutate-changed.sh --recover, then switch back\n"
+    if $st == 256;
+  die "cannot tell whether HEAD is the commit the run started on or one made after it (git merge-base failed); run"
+    . " mutate-changed.sh --recover\n";
 }
 
 # changes START STASH: what is not as at the start (Checks::tree_changes,

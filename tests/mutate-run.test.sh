@@ -496,7 +496,7 @@ case "$out" in
   *) fail "run-checks refuses" "$out" ;;
 esac
 # the ways out, each in a copy of the project as the kill left it
-for k in committed staged edited gone stashed stagededit committededit stashededit movededit conf next rebase; do cp -R "$p" "$work/$k"; done
+for k in committed staged edited gone stashed stagededit committededit stashededit movededit mainco conf next rebase; do cp -R "$p" "$work/$k"; done
 (cd "$work/committed/w" && git commit -q -am "Oops")
 mr "$work/committed/w" --recover
 expect "the mutant committed after the kill: refused, naming HEAD (exit 2)" 2 "holds the mutant of src/a.sh: undo that change in a new commit"
@@ -506,7 +506,7 @@ expect "the mutant staged after the kill: refused (exit 2)" 2 "the index holds t
 printf '# edited\n' >>"$work/edited/w/src/a.sh"
 mr "$work/edited/w" --recover
 expect "an edit after the kill: refused, not overwritten, saying where the mutant is (exit 2)" 2 \
-  "src/a.sh was changed after its mutant was written, and it still holds the mutant's change (line 2, column 18: '-ge' becomes '-gt'; lines added above it move it): undo that change in the file (git diff " "and its name shows it; if you left the commit the run started on, check it out again first), then run mutate-changed.sh --recover"
+  "src/a.sh was changed after its mutant was written, and it still holds the mutant's change (line 2, column 18: '-ge' becomes '-gt'; lines added above it move it): undo that change in the file (git diff " "and its name shows it), then run mutate-changed.sh --recover"
 case "$out" in
   *"remove "*"by hand"*) fail "and it never says to remove the journal by hand" "$out" ;;
   *) pass "and it never says to remove the journal by hand" ;;
@@ -569,6 +569,20 @@ expect "an edit stashed after the kill: the stash is refused, as it holds the mu
 mr "$se" --recover
 expect "once it is taken back and the change undone, --recover removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
 if grep -q '^# edited$' "$se/src/a.sh" && ! grep -q -- -gt "$se/src/a.sh"; then pass "and the edit stays, without the mutant"; else fail "and the edit stays, without the mutant" "$(cat "$se/src/a.sh")"; fi
+# the file put back by hand and main checked out (git status is clean): not
+# the commit the run started on, nor one after it, so it says to check that
+# commit out first; then --recover ends
+mc="$work/mainco/w"
+mcstart=$(cd "$mc" && git rev-parse HEAD)
+(cd "$mc" && git checkout -q -- src/a.sh && git checkout -q main)
+mr "$mc" --recover
+expect "main checked out after the kill: it says to check out the commit the run started on first (exit 2)" 2 \
+  "HEAD is not the commit the run started on ($mcstart), one made after it, or one with the files as they were then: check that commit out (git checkout $mcstart)"
+(cd "$mc" && git checkout -q "$mcstart")
+mr "$mc" --recover
+expect "following that, --recover removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
+(cd "$mc" && git checkout -q main)
+clean "and back on main, the files are the commit" "$mc"
 # lines added above the mutant's line: it is still found
 mv2="$work/movededit/w"
 (cd "$mv2" && perl -pi -e 'print "# added\n# added\n" if $. == 1' src/a.sh)
@@ -703,7 +717,7 @@ clean "and the files are the commit" "$w"
 act "$w" 'git update-ref refs/stash "$(git rev-parse "HEAD^{tree}")"'
 mr "$w" --max 1
 expect "a refs/stash that names no commit: the journal stays, saying it cannot tell (exit 2)" 2 \
-  "cannot tell whether git holds the mutant of src/a.sh (refs/stash names no commit)"
+  "refs/stash names something that is not a stash, so it cannot tell whether a stash holds the mutant of src/a.sh: make it name a stash again, or remove it (git update-ref -d refs/stash)"
 (cd "$w" && git update-ref -d refs/stash)
 mr "$w" --recover
 expect "and once it is gone, --recover removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
@@ -711,7 +725,7 @@ clean "and the files are the commit" "$w"
 act "$w" 'git stash -q && rm -f .git/refs/stash'
 mr "$w" --max 1
 expect "a stash reflog left without refs/stash: the journal stays, saying it cannot tell (exit 2)" 2 \
-  "cannot tell whether git holds the mutant of src/a.sh (a stash reflog is left without refs/stash)"
+  "a stash reflog is left without refs/stash, so it cannot tell whether a stash holds the mutant of src/a.sh: remove that reflog"
 rm -f "$w/.git/logs/refs/stash"
 mr "$w" --recover
 expect "and once it is gone, --recover removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
@@ -1110,6 +1124,15 @@ from=$(printf '%s\n' "$out" | perl -ne 'print $1 if /--source=([0-9a-f]+) --stag
 mr "$tw2" --recover
 expect "following its way out, --recover removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
 clean "and the files are the commit" "$tw2"
+# an edit that removes both blocks: no copy of the mutant's line is left, so
+# the file is left as it is
+# shellcheck disable=SC2016 # the check is written, not run
+killed "$tw2" '[ "$(grep -c "y=1" src/a.sh)" = 2 ]' 'true'
+perl -i -ne 'print unless $. >= 2 && $. <= 7' "$tw2/src/a.sh"
+mr "$tw2" --recover
+expect "an edit that removes every copy of the mutant's line is left as it is, twins or not" 0 "RECOVERED - 0 files put back; the journal is removed"
+(cd "$tw2" && git checkout -q -- src/a.sh)
+clean "and once the file is put back by hand, the files are the commit" "$tw2"
 # the same edit committed, and the file put back as at the start: HEAD is
 # where it cannot tell
 # shellcheck disable=SC2016 # the check is written, not run
@@ -1118,11 +1141,44 @@ before=$(cd "$tw2" && git rev-parse HEAD)
 (cd "$tw2" && perl -i -ne 'print unless $. >= 2 && $. <= 4' src/a.sh && git commit -q -am "Drop the first block" && git restore --source="$before" --worktree -- src/a.sh)
 mr "$tw2" --recover
 expect "the edit committed: HEAD is where it cannot tell, so the journal stays (exit 2)" 2 \
-  "cannot tell whether HEAD holds the mutant of src/a.sh, as the original has its line, with the same lines around it, elsewhere"
+  "cannot tell whether HEAD holds the mutant of src/a.sh, as the original has its line elsewhere too" \
+  "commit the file as it was when the run started (git restore --source="
 (cd "$tw2" && git restore --source="$before" --staged --worktree -- src/a.sh && git commit -q -m "Back as at the start")
 mr "$tw2" --recover
 expect "once HEAD has the file as at the start, --recover removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
 clean "and the files are the commit" "$tw2"
+
+# the mutant ('0' becomes '1') makes its line equal to the line just above
+# it: an edit to that neighbour changes the mutant's lines around it too, so
+# it cannot tell, and refuses
+t3=$(new_project "$weak") || abort_sandbox
+tw3="$t3/w"
+printf 'min=18\nsizes() {\n  echo 1\n  echo 0\n}\n' >"$tw3/src/a.sh"
+(cd "$tw3" && git add -A && git commit -q -m "A twin next to it")
+# shellcheck disable=SC2016 # the check is written, not run
+killed "$tw3" '[ "$(grep -c "echo 1" src/a.sh)" = 2 ]' 'sizes >/dev/null'
+perl -pi -e 's/echo 1/echo 5/ if $. == 3' "$tw3/src/a.sh"
+mr "$tw3" --recover
+expect "an edit to the mutant's twin just above it: it cannot tell, so it refuses (exit 2)" 2 \
+  "src/a.sh was changed after its mutant was written, and it cannot tell whether the mutant's change is still in it"
+from=$(printf '%s\n' "$out" | perl -ne 'print $1 if /--source=([0-9a-f]+) --staged --worktree/')
+(cd "$tw3" && git restore --source="$from" --staged --worktree -- src/a.sh)
+mr "$tw3" --recover
+expect "following its way out, --recover removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
+clean "and the files are the commit" "$tw3"
+
+# --- a folder removed while its file's mutant waits to be written: no
+# mutant was written, and no journal is left ---
+fp=$(new_project "$weak") || abort_sandbox
+fw2="$fp/w"
+(cd "$fw2" && mkdir sub && git mv src/b.sh sub/b.sh && perl -pi -e 's{src/b\.sh}{sub/b.sh}' t.sh && printf 'PRODUCT_PATHS=src sub\nMUTATE_PATHS=src\nMUTATE_PATHS=sub\nMUTATION_CHECKS=unit\n' >.claude/method.conf && git add -A && git commit -q -m "b.sh in sub")
+# shellcheck disable=SC2016 # the check is written, not run
+check "$fw2" 'if grep -q -- -gt src/a.sh; then perl -MPOSIX -MFile::Path=rmtree -e '\''POSIX::setsid(); alarm 30; my ($j, $f) = @ARGV; my $want = " " . unpack("H*", $f) . " "; for (;;) { my $t; if (open my $h, "<", $j) { local $/; $t = <$h> } last if defined $t && index($t, $want) >= 0; select undef, undef, undef, 0.01 } rmtree("sub")'\'' .git/method-mutate-journal sub/b.sh </dev/null >/dev/null 2>&1 & fi; . sub/b.sh; '"$weak"
+perl -e 'my $t = time + 10; utime $t, $t, $ARGV[0]' "$fw2/sub/b.sh"
+mr "$fw2" --max 3
+expect "a folder removed while its file's mutant waits: no mutant was written, and the run stops (exit 2)" 2 \
+  "sub/b.sh was changed during the run: no mutant was written to it, and the change is kept"
+if [ -e "$fw2/.git/method-mutate-journal" ]; then fail "and no journal is left"; else pass "and no journal is left"; fi
 
 # --- a file removed while its mutant's write waits for the clock: no
 # mutant was written, and no journal is left ---
