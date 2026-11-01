@@ -20,54 +20,55 @@
 #                tool call allows 10 minutes: for longer runs, raise its
 #                limit or run in the background.
 #
-# A run writes into the working tree with your rights. It holds the lock
-# it shares with run-checks.sh (lib/runstate.pl, in git's own folder), so
-# the two never run at once: while another holds it, it waits 5 s, then
-# stops with "FAIL - busy: ..." (exit 2). Each mutant goes in through one
-# write function (a temp file next to the file, synced, given the file's
-# mode, and renamed over it, only while the file still holds what this run
-# last left there: an edit made during the run stops it, exit 2, and is
-# kept; when that stops a mutant's write, nothing was written, and no
-# journal is left; its time is the next whole second, or one past the file's own,
-# so it is later than anything written before, also at the sub-second
-# times make compares, and a cache keyed on the time in seconds and the
-# size never takes one version for another; a file can be up to about 3 s
-# ahead of the clock, which make may warn about), with a journal in git's
-# own folder that names it, and where it is (line, column and change),
-# until it is put back. Do not edit files while a
-# run is going. Each check runs in its own process group under a watchdog
-# that stops the group when the run ends in any way, kill -9 included, and
-# within a time limit of 3 times its run A time plus 30 s; a check that
-# runs out of time has killed the mutant. After each mutant: the check's
-# group is stopped, the file put back, and the journal removed once the
-# mutant is nowhere git keeps it (HEAD, the index, a stash made during the
-# run and its index part, an autostash a merge left: each is looked at for
-# the mutant's line, alone and with the lines around it, so an edit made on
-# top of it does not hide it, and where that cannot tell (the original has
-# the same lines elsewhere), the journal stays; the journal keeps their
-# SHA-256s, never their text) and no merge, rebase
-# or other git operation is in progress (its autostash can hold it, also
-# when a check started it); a git command that fails there, or ends on a
-# signal, keeps the journal too. A journal a check removed or changed is
-# written again first; when it cannot be, the file is put back all the
-# same, and the line says no journal names it and where the mutant may be.
-# Then the files, HEAD, the branches and
-# tags, and the stash must be as at the start (else exit 2, naming what
-# changed). On INT, TERM, HUP (unless it came ignored, as under nohup) or
-# QUIT, the check's group is killed and the file put back at once (exit 2,
-# naming the signal). After kill -9, the next run or --recover puts the
-# file back (it never reads the settings first), and refuses, keeping the
-# journal, by the same rules. A file changed on top of its mutant is left
+# A run writes into the working tree with your rights. It holds the lock it
+# shares with run-checks.sh (lib/runstate.pl, in git's own folder), so the
+# two never run at once: while another holds it, it waits 5 s, then stops
+# with "FAIL - busy: ..." (exit 2). Each mutant goes in through one write
+# function (a temp file next to the file, synced, given the file's mode, and
+# renamed over it, only while the file still holds what this run last left
+# there: an edit made during the run stops it, exit 2, and is kept; when
+# that stops a mutant's write, nothing was written, and no journal is left;
+# its time is the next whole second, or one past the file's own, so it is
+# later than anything written before, also at the sub-second times make
+# compares, and a cache keyed on the time in seconds and the size never
+# takes one version for another; a file can be up to about 3 s ahead of the
+# clock, which make may warn about), with a journal in git's own folder that
+# names it, and where it is (line, column and change), until it is put back.
+# Do not edit files while a run is going. Each check runs in its own process
+# group under a watchdog that stops the group when the run ends in any way,
+# kill -9 included, and within a time limit of 3 times its run A time plus
+# 30 s; a check that runs out of time has killed the mutant. After each
+# mutant: the check's group is stopped, the file put back, and the journal
+# removed once the mutant is nowhere git keeps it (HEAD, the index, a stash
+# made during the run and its index part, an autostash a merge left: each is
+# looked at for the mutant's line, alone and with the lines around it, so an
+# edit made on top of it does not hide it, and where that cannot tell (a
+# copy of the line whose lines around it are not the original's), the
+# journal stays; the journal keeps their SHA-256s, never their text) and no
+# merge, rebase or other git operation is in progress (its autostash can
+# hold it, also when a check started it); a git command that fails there, or
+# ends on a signal, keeps the journal too. A journal a check removed or
+# changed is written again first; when it cannot be, the file is put back
+# all the same, and the line says no journal names it and where the mutant
+# may be. Then the files, HEAD, the branches and tags, and the stash must be
+# as at the start (else exit 2, naming what changed). On INT, TERM, HUP
+# (unless it came ignored, as under nohup) or QUIT, the check's group is
+# killed and the file put back at once (exit 2, naming the signal). After
+# kill -9, the next run or --recover puts the file back (it never reads the
+# settings first), and refuses, keeping the journal, by the same rules; it
+# goes on only while HEAD is the commit the run started on, one after it, or
+# one with those files as they were then (a rebase), and otherwise says to
+# check that commit out first. A file changed on top of its mutant is left
 # as it is once the mutant's line is gone from it; while it is there, the
 # refusal says where (line, column and change; lines added above move it):
-# undo that one change (after checking out the commit the run started on
-# again, if the session left it), then --recover; where it cannot tell, put
-# the file back as it was at the start, --recover, and make the change
-# again without the mutant's. A missing file, or a copy of it,
-# may hold it: the refusal says to undo it there and put the file back as
-# it was at the start (git restore --source=START --staged --worktree). Files
-# put back are newer than any build, so a build is redone, and a "build is
-# current" check fails until a rebuild.
+# undo that one change, then --recover; where it cannot tell (a copy of the
+# line whose lines around it are not the original's), put the file back as
+# it was at the start, --recover, and make the change again without the
+# mutant's. A missing file, or a copy of it, may hold it: the refusal says
+# to undo it there and put the file back as it was at the start (git restore
+# --source=START --staged --worktree). Files put back are newer than any
+# build, so a build is redone, and a "build is current" check fails until a
+# rebuild.
 #
 # What changed: the lines this branch adds since its merge base with main
 # (lib/git.pl's Git::main_ref; there is no --base). Two merge bases (after
