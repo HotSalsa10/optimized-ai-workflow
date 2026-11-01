@@ -56,7 +56,7 @@ sub stop {
     $reason .= '; ' . join(', ', @back) . ' put back' if @back;
     $reason .= "; $e" if $e;
   }
-  if ($OPEN && (-e $JOURNAL || -l $JOURNAL)) {
+  if ($OPEN && -f $JOURNAL && !-l $JOURNAL) {
     $reason .= '; the journal stays' . ($reason =~ /--recover/ ? '' : ': once that is fixed, run mutate-changed.sh --recover');
   }
   say_line("FAIL - $reason; the run stopped");
@@ -496,23 +496,41 @@ sub read_file {
   return defined $b ? $b : '';
 }
 
-# lines_with SHA BYTES: how many lines of BYTES (without their line end, a
-# CR before it included) have the SHA-256 SHA
-sub lines_with {
-  my ($sha, $bytes) = @_;
-  my $n = 0;
-  for my $l (split /\n/, $bytes, -1) {
-    $l =~ s/\r\z//;
-    $n++ if Digest::SHA::sha256_hex($l) eq $sha;
+# lines_of BYTES: its lines, without their line end (a CR before it
+# included); window LINES I: line I with the lines before and after it
+sub lines_of {
+  my @l = split /\n/, $_[0], -1;
+  s/\r\z// for @l;
+  return @l;
+}
+sub window {
+  my ($l, $i) = @_;
+  return join "\n", ($i > 0 ? $l->[$i - 1] : "\0"), $l->[$i], ($i < $#$l ? $l->[$i + 1] : "\0");
+}
+
+# line_counts F BYTES: how many of BYTES' lines are the mutant's line (whose
+# SHA-256 is F's ml), and how many of those have the mutant's lines around
+# them too (mw)
+sub line_counts {
+  my ($f, $bytes) = @_;
+  my @l = lines_of($bytes);
+  my ($nl, $nw) = (0, 0);
+  for my $i (0 .. $#l) {
+    next unless Digest::SHA::sha256_hex($l[$i]) eq $f->{ml};
+    $nl++;
+    $nw++ if Digest::SHA::sha256_hex(window(\@l, $i)) eq $f->{mw};
   }
-  return $n;
+  return ($nl, $nw);
 }
 
 # the mutant's change is found by its line, not by the file's bytes: an
 # edit made on top of the mutant (and then staged, committed or stashed)
 # keeps that line. original F: the file's bytes at the start (checked
-# against the journal); holds F BYTES: BYTES hold more lines that are the
-# mutant's line than the original does
+# against the journal). holds F BYTES: 1 when BYTES hold the mutant's line
+# more often than the original does, alone or with its lines around it; 0
+# when not; undef when it cannot tell: the original has the mutant's line,
+# with the same lines around it, so an edit that removed that one would
+# hide the mutant
 sub original {
   my ($f) = @_;
   $f->{text} = Git::cat('blob', $f->{sb}, 1) unless defined $f->{text};
@@ -522,8 +540,11 @@ sub original {
 }
 sub holds {
   my ($f, $bytes) = @_;
-  $f->{base} = lines_with($f->{ml}, original($f)) unless defined $f->{base};
-  return lines_with($f->{ml}, $bytes) > $f->{base};
+  @$f{qw(bl bw)} = line_counts($f, original($f)) unless defined $f->{bl};
+  my ($nl, $nw) = line_counts($f, $bytes);
+  return 1 if $nl > $f->{bl} || $nw > $f->{bw};
+  return undef if $f->{bw} > 0 && $nl > 0;
+  return 0;
 }
 
 # journal_write J: the journal, written whole (a temp file, synced, renamed
@@ -534,7 +555,7 @@ sub journal_text {
   my ($j) = @_;
   my $text = "mutate-changed journal 1\nstart $j->{start}\nstash $j->{stash}\ntemp " . unpack('H*', $j->{temp})
     . "\npgid " . (defined $j->{pgid} ? $j->{pgid} : '-') . "\n";
-  $text .= join(' ', 'file', unpack('H*', $_->{path}), @$_{qw(sb mb ss ms)}, unpack('H*', $_->{place}), $_->{ml}) . "\n"
+  $text .= join(' ', 'file', unpack('H*', $_->{path}), @$_{qw(sb mb ss ms)}, unpack('H*', $_->{place}), $_->{ml}, $_->{mw}) . "\n"
     for @{ $j->{files} };
   return "${text}end\n";
 }
@@ -561,7 +582,11 @@ sub journal_write {
   my $ok = (print {$fh} $text) && $fh->flush && $fh->sync;
   close $fh;
   $ok = $ok && rename $tmp, $JOURNAL;
-  die "cannot write the journal $JOURNAL ($!)\n" unless $ok;
+  if (!$ok) {
+    my $e = "$!";
+    unlink $tmp;
+    die "cannot write the journal $JOURNAL ($e)\n";
+  }
 }
 
 # journal_read: the journal as {start, stash, temp, pgid, files}, or (undef,
@@ -581,9 +606,9 @@ sub journal_read {
     elsif ($l =~ /\Astash ($id|-)\z/) { $j{stash} = $1 }
     elsif ($l =~ /\Atemp ((?:[0-9a-f]{2})+)\z/) { $j{temp} = pack 'H*', $1 }
     elsif ($l =~ /\Apgid (-|[0-9]{1,10})\z/) { $j{pgid} = $1 eq '-' ? undef : $1; $j{has_pgid} = 1 }
-    elsif ($l =~ /\Afile ((?:[0-9a-f]{2})+) ($id) ($id) ([0-9a-f]{64}) ([0-9a-f]{64}) ((?:[0-9a-f]{2})+) ([0-9a-f]{64})\z/) {
+    elsif ($l =~ /\Afile ((?:[0-9a-f]{2})+) ($id) ($id) ([0-9a-f]{64}) ([0-9a-f]{64}) ((?:[0-9a-f]{2})+) ([0-9a-f]{64}) ([0-9a-f]{64})\z/) {
       push @{ $j{files} }, { path => pack('H*', $1), sb => $2, mb => $3, ss => $4, ms => $5, place => pack('H*', $6),
-        ml => $7 };
+        ml => $7, mw => $8 };
     } else {
       return (undef, 'a line does not parse');
     }
@@ -631,7 +656,7 @@ sub folder_of {
 sub put {
   my ($p, $bytes, $wait, $expect) = @_;
   my $dir = folder_of($p);
-  my @st = lstat $p or die 'cannot read ' . Esc::line($p) . " ($!)\n";
+  my @st = lstat $p or return 0;    # (gone: changed during the run)
   my $t = int(Time::HiRes::time()) + 1;
   $t = $st[9] + 1 if $st[9] + 1 > $t;
   if ($wait && $t > Time::HiRes::time() + 2) {
@@ -693,8 +718,13 @@ sub restore {
     my $now = read_file($f->{path});
     die "$p $what, so it may hold the mutant ($where): $back, then run mutate-changed.sh --recover\n"
       unless defined $now;
-    die "$p $what, and it still holds the mutant's change ($where): undo that change in the file (git diff shows it),"
-      . " then run mutate-changed.sh --recover\n" if holds($f, $now);
+    my $r = holds($f, $now);
+    die "$p $what, and it still holds the mutant's change ($where): undo that change in the file (git diff $start --"
+      . " and its name shows it; if you left the commit the run started on, check it out again first), then run"
+      . " mutate-changed.sh --recover\n" if $r;
+    die "$p $what, and it cannot tell whether the mutant's change is still in it, as the original has that line, with"
+      . " the same lines around it, elsewhere ($where): $back, run mutate-changed.sh --recover, then make your change"
+      . " again, leaving that change out\n" unless defined $r;
     return 0;
   };
   my $h = sha_file($f->{path});
@@ -734,7 +764,7 @@ sub release {
   die join(' and ', @ops) . " is in progress, and its autostash can hold the mutant of $names; finish or abort it,"
     . " then run mutate-changed.sh --recover\n" if @ops;
   # a git command that fails means "cannot tell", never "not there"
-  my $fail = sub { die "cannot tell whether git holds the mutant of $names ($_[0] failed); run mutate-changed.sh --recover\n" };
+  my $fail = sub { die "cannot tell whether git holds the mutant of $names ($_[0]" . (defined $_[1] ? $_[1] : ' failed') . "); run mutate-changed.sh --recover\n" };
   # verify WHAT: the commit WHAT names, or undef when there is none (git
   # rev-parse -q --verify exits 1 then; any other end is a failure)
   my $verify = sub {
@@ -749,6 +779,14 @@ sub release {
   # first, down to the one at the start), and an autostash a merge left
   my @kept;
   my $top = $verify->('refs/stash');
+  if (!defined $top) {
+    # (none: unless refs/stash names something that is not a commit, or its
+    # reflog is left without it)
+    my ($rst) = Git::run('rev-parse', '-q', '--verify', 'refs/stash');
+    $fail->('refs/stash names no commit', '') unless $rst == 256;
+    my ($est) = Git::run('reflog', 'exists', 'refs/stash');
+    $fail->('a stash reflog is left without refs/stash', '') unless $est == 256;
+  }
   if (defined $top) {
     my ($sst, $ids) = Git::run('rev-list', '--walk-reflogs', 'refs/stash');
     if ($sst) {
@@ -773,14 +811,19 @@ sub release {
       'git merge --quit moves it to the stash list; drop it there (or take that change out of it)'];
   }
   my $head = $verify->('HEAD');    # (none before the first commit)
-  # has ID: the blob ID holds the mutant, or its change with others
+  # has F ID WHERE: the blob ID (in WHERE) holds the mutant, or its change
+  # with others; when that cannot be told, the journal stays
   my $has = sub {
-    my ($f, $id) = @_;
+    my ($f, $id, $where) = @_;
     return 1 if $id eq $f->{mb};
     return 0 if $id eq $f->{sb};
     my $bytes = eval { Git::cat('blob', $id, 1) };
     $fail->('git cat-file') unless defined $bytes;
-    return holds($f, $bytes);
+    my $r = holds($f, $bytes);
+    return $r if defined $r;
+    die "cannot tell whether $where holds the mutant of " . Esc::line($f->{path}) . ', as the original has its line,'
+      . " with the same lines around it, elsewhere ($f->{place}): make the file there as it was when the run started,"
+      . " then run mutate-changed.sh --recover\n";
   };
   for my $f (@{ $j->{files} }) {
     my $p = $f->{path};
@@ -788,13 +831,13 @@ sub release {
       my ($tst, $tree) = Git::run('ls-tree', '-z', $head, '--', $p);
       $fail->('git ls-tree') if $tst;
       die 'HEAD (' . substr($head, 0, 7) . ') holds the mutant of ' . Esc::line($p) . ': undo that change in a new'
-        . " commit, then run mutate-changed.sh --recover\n" if $tree =~ /\A[0-7]+ blob ([0-9a-f]+)\t/ && $has->($f, $1);
+        . " commit, then run mutate-changed.sh --recover\n" if $tree =~ /\A[0-7]+ blob ([0-9a-f]+)\t/ && $has->($f, $1, 'HEAD');
     }
     my ($ist, $idx) = Git::run('ls-files', '-s', '-z', '--', $p);
     $fail->('git ls-files') if $ist;
     for my $e (split /\0/, $idx) {
       die 'the index holds the mutant of ' . Esc::line($p) . ' (it was staged): unstage that change, then run'
-        . " mutate-changed.sh --recover\n" if $e =~ /\A[0-7]+ ([0-9a-f]+) [0-3]\t/ && $has->($f, $1);
+        . " mutate-changed.sh --recover\n" if $e =~ /\A[0-7]+ ([0-9a-f]+) [0-3]\t/ && $has->($f, $1, 'the index');
     }
     for my $k (@kept) {
       my ($s, $what, $out) = @$k;
@@ -804,12 +847,14 @@ sub release {
         my ($tst, $tree) = Git::run('ls-tree', '-z', $rev, '--', $p);
         $fail->('git ls-tree') if $tst;
         die "$what holds the mutant of " . Esc::line($p) . ": $out, then run mutate-changed.sh --recover\n"
-          if $tree =~ /\A[0-7]+ blob ([0-9a-f]+)\t/ && $has->($f, $1);
+          if $tree =~ /\A[0-7]+ blob ([0-9a-f]+)\t/ && $has->($f, $1, $what);
       }
     }
   }
   # (a journal removed during the round and not written again is gone already)
-  unlink $JOURNAL or die "cannot remove the journal $JOURNAL ($!)\n" if -e $JOURNAL || -l $JOURNAL;
+  # (and anything else there is not a journal: it stays, and the next run
+  # refuses it)
+  unlink $JOURNAL or die "cannot remove the journal $JOURNAL ($!)\n" if -l $JOURNAL || -f _;
 }
 
 # end_round FAST: the end of a round, in this order: the check's process
@@ -828,7 +873,14 @@ sub end_round {
   # the same, and the reason says no journal names them, and where the
   # mutant may be
   my $lost;
-  ($lost = $@) =~ s/\n\z// if !journal_ok($OPEN) && !eval { journal_write($OPEN); 1 };
+  if (!journal_ok($OPEN) && !eval { journal_write($OPEN); 1 }) {
+    ($lost = $@) =~ s/\n\z//;
+    # (one that still names this round's files is enough to recover from:
+    # only its check's process group may be out of date)
+    my ($cur) = journal_read();
+    undef $lost if $cur && join(' ', map {"$_->{path} $_->{mb}"} @{ $cur->{files} })
+      eq join(' ', map {"$_->{path} $_->{mb}"} @{ $OPEN->{files} });
+  }
   my @back;
   if (!eval { @back = map { $_->{path} } grep { restore($_, $fast, $OPEN->{start}) } @{ $OPEN->{files} }; release($OPEN); 1 }) {
     die $@ unless defined $lost;
@@ -970,7 +1022,8 @@ sub run_mutants {
     my $j = { start => $start->{head}, stash => $stash, temp => $TEMP, pgid => undef, files => [{ path => $m->{path},
       sb => $m->{blob}, mb => Git::object_id('blob', $mut, $m->{blob}), ss => Digest::SHA::sha256_hex($text),
       ms => Digest::SHA::sha256_hex($mut), text => $text, place => "line $m->{line}, column $m->{col}: " . shown($m),
-      ml => Digest::SHA::sha256_hex((split /\n/, $mut, -1)[$m->{line} - 1] =~ s/\r\z//r) }] };
+      ml => Digest::SHA::sha256_hex((lines_of($mut))[$m->{line} - 1]),
+      mw => Digest::SHA::sha256_hex(window([lines_of($mut)], $m->{line} - 1)) }] };
     journal_write($j);
     $OPEN = $j;
     if (!put($m->{path}, $mut, 1, $j->{files}[0]{ss})) {

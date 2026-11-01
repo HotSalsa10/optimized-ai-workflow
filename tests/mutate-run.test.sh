@@ -19,7 +19,6 @@ root=$(repo_root)
 mutate="$root/method/scripts/method/mutate-changed.sh"
 lib="$root/method/scripts/method/lib"
 work=$(new_sandbox_dir) || abort_sandbox
-repos=""
 saved_home=$HOME
 mkdir -p "$work/home"
 # a clean home and no system settings, so the owner's git settings play no part
@@ -97,7 +96,7 @@ clean() {
 # '-gt' at src/b.sh:2:16 and '-le' at src/c.sh:2:18.
 new_project() {
   b=$(new_sandbox_dir) || return 1
-  repos="$repos $b"
+  printf '%s\n' "$b" >>"$work/repos"    # (new_project runs in $( ): a variable would be lost)
   (
     cd "$b" || exit 1
     git init -q --bare remote.git
@@ -507,7 +506,7 @@ expect "the mutant staged after the kill: refused (exit 2)" 2 "the index holds t
 printf '# edited\n' >>"$work/edited/w/src/a.sh"
 mr "$work/edited/w" --recover
 expect "an edit after the kill: refused, not overwritten, saying where the mutant is (exit 2)" 2 \
-  "src/a.sh was changed after its mutant was written, and it still holds the mutant's change (line 2, column 18: '-ge' becomes '-gt'; lines added above it move it): undo that change in the file (git diff shows it), then run mutate-changed.sh --recover"
+  "src/a.sh was changed after its mutant was written, and it still holds the mutant's change (line 2, column 18: '-ge' becomes '-gt'; lines added above it move it): undo that change in the file (git diff " "and its name shows it; if you left the commit the run started on, check it out again first), then run mutate-changed.sh --recover"
 case "$out" in
   *"remove "*"by hand"*) fail "and it never says to remove the journal by hand" "$out" ;;
   *) pass "and it never says to remove the journal by hand" ;;
@@ -697,6 +696,42 @@ expect "a blob release must read cannot be read: the journal stays, saying it ca
 (cd "$w" && git reset -q --hard "$before")
 mr "$w" --recover
 expect "and once HEAD is back, --recover removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
+clean "and the files are the commit" "$w"
+# a refs/stash that names no commit, and a stash reflog left without
+# refs/stash: "cannot tell"
+# shellcheck disable=SC2016 # the check is written, not run
+act "$w" 'git update-ref refs/stash "$(git rev-parse "HEAD^{tree}")"'
+mr "$w" --max 1
+expect "a refs/stash that names no commit: the journal stays, saying it cannot tell (exit 2)" 2 \
+  "cannot tell whether git holds the mutant of src/a.sh (refs/stash names no commit)"
+(cd "$w" && git update-ref -d refs/stash)
+mr "$w" --recover
+expect "and once it is gone, --recover removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
+clean "and the files are the commit" "$w"
+act "$w" 'git stash -q && rm -f .git/refs/stash'
+mr "$w" --max 1
+expect "a stash reflog left without refs/stash: the journal stays, saying it cannot tell (exit 2)" 2 \
+  "cannot tell whether git holds the mutant of src/a.sh (a stash reflog is left without refs/stash)"
+rm -f "$w/.git/logs/refs/stash"
+mr "$w" --recover
+expect "and once it is gone, --recover removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
+clean "and the files are the commit" "$w"
+# a check that makes the journal a folder: the file is put back, the line
+# does not say the journal stays, and no journal temp file is left
+act "$w" 'perl "'"$work/pgid.pl"'"; rm -f .git/method-mutate-journal; mkdir .git/method-mutate-journal'
+mr "$w" --max 1
+expect "a check that makes the journal a folder: the file is put back all the same (exit 2)" 2 \
+  "the journal was removed or changed during the round and could not be written again" "src/a.sh put back; the run stopped"
+lacks "and it does not say the journal stays" "the journal stays"
+if [ -e "$w/.git/method-mutate-journal.tmp" ]; then fail "and no journal temp file is left"; else pass "and no journal temp file is left"; fi
+rmdir "$w/.git/method-mutate-journal"
+clean "and the files are the commit" "$w"
+# a check that changes only the journal's process group and blocks its
+# rewrite: the journal still names the files, so the round ends as usual
+act "$w" 'perl "'"$work/pgid.pl"'"; perl -pi -e "s/^pgid [0-9]+\$/pgid 99999/" .git/method-mutate-journal; mkdir -p .git/method-mutate-journal.tmp'
+mr "$w" --max 1
+expect "a rewrite that fails over a journal that still names the files: the round ends as usual" 1 "survived: src/a.sh:2:18"
+rmdir "$w/.git/method-mutate-journal.tmp"
 clean "and the files are the commit" "$w"
 # a lost journal, and a put-back that cannot be written (its temp name
 # taken by a folder): the line says where the mutant is
@@ -902,15 +937,17 @@ EOF
 ids=$(perl "$work/ids.pl" "$jw/src/a.sh")
 # the SHA-256 of the mutant's line (line 2, -gt)
 ml=$(perl -MDigest::SHA=sha256_hex -e 'local $/; open my $f, "<", $ARGV[0] or die; my $t = <$f>; $t =~ s/-ge/-gt/; print sha256_hex((split /\n/, $t)[1])' "$jw/src/a.sh")
+# and of it with the lines around it (none after it: the file ends there)
+mw=$(perl -MDigest::SHA=sha256_hex -e 'local $/; open my $f, "<", $ARGV[0] or die; my $t = <$f>; $t =~ s/-ge/-gt/; my @l = split /\n/, $t, -1; print sha256_hex(join "\n", $l[0], $l[1], $l[2])' "$jw/src/a.sh")
 # hex TEXT: TEXT as hex digits
 hex() { printf '%s' "$1" | perl -ne 'print unpack "H*", $_'; }
 # journal PGID END [PATH [TEMP [IDS]]]: a journal for src/a.sh (or PATH),
 # which holds the original on disk, to JF (or the file JF names)
 journal() {
   # shellcheck disable=SC2086 # the ids are three words on purpose
-  printf 'mutate-changed journal 1\nstart %s\nstash -\ntemp %s\npgid %s\nfile %s %s %s %s %s %s %s\n%s' "$start" \
+  printf 'mutate-changed journal 1\nstart %s\nstash -\ntemp %s\npgid %s\nfile %s %s %s %s %s %s %s %s\n%s' "$start" \
     "$(hex "${4:-.mutate-1.tmp}")" "$1" "$(hex "${3:-src/a.sh}")" "$sb" ${5:-$ids} \
-    "$(hex "line 2, column 18: '-ge' becomes '-gt'")" "${ML:-$ml}" "$2" >"${JF:-$jf}"
+    "$(hex "line 2, column 18: '-ge' becomes '-gt'")" "${ML:-$ml}" "$mw" "$2" >"${JF:-$jf}"
 }
 journal - ''
 mr "$jw" --recover
@@ -1011,13 +1048,78 @@ kill "$gpid" 2>/dev/null
 wait "$gpid" 2>/dev/null
 rm -f "$jf"
 
+# --- the mutant's line has a twin elsewhere in the original (round 3 of
+# 4b.3b). killed DIR WHEN BODY: a run of all mutants in DIR whose check
+# (BODY) runs a heartbeat that ignores TERM once WHEN holds on a mutant;
+# mutate is killed with -9 then, and its watchdog stops the check ---
+killed() {
+  rm -f "$work/mark" "$work/beat"
+  check "$1" "if $2; then touch \"\$MARK\"; perl \"\$BEAT_PL\" \"\$BEAT\" ignore; fi; $3"
+  (cd "$1" && exec env CI= MARK="$work/mark" BEAT="$work/beat" perl -e 'alarm 300; exec @ARGV' bash "$mutate") >"$work/x.out" 2>&1 &
+  xpid=$!
+  if wait_for "$work/mark" 60 && wait_for "$work/beat" 10; then pass "setup: the check runs on that mutant"; else fail "setup: the check runs on that mutant" "$(cat "$work/x.out")"; fi
+  kill -9 "$xpid" 2>/dev/null
+  wait "$xpid" 2>/dev/null
+  if stopped "$work/beat" 10; then pass "setup: the watchdog stops the check"; else fail "setup: the watchdog stops the check"; fi
+}
+# the mutant ('-ge' becomes '-gt' in nonneg) makes its line equal to one of
+# pos(); an edit that removes pos() does not hide it: its lines around it
+# differ
+t1=$(new_project "$weak") || abort_sandbox
+tw="$t1/w"
+# shellcheck disable=SC2016 # the code is written, not run
+printf 'min=18\npos() {\n  [ "$1" -gt 0 ] || return 1\n}\nnonneg() {\n  [ "$1" -ge 0 ] || return 1\n}\n' >"$tw/src/a.sh"
+(cd "$tw" && git add -A && git commit -q -m "Twin lines")
+# shellcheck disable=SC2016 # the check is written, not run
+killed "$tw" '[ "$(grep -c -- "-gt 0" src/a.sh)" = 2 ]' 'pos 1 && nonneg 1 || exit 1'
+perl -i -ne 'print unless $. >= 2 && $. <= 4' "$tw/src/a.sh"
+mr "$tw" --recover
+expect "an edit that removes the mutant's twin line: the mutant is still found, by its lines around it (exit 2)" 2 \
+  "src/a.sh was changed after its mutant was written, and it still holds the mutant's change (line 6, column"
+perl -pi -e 's/-gt 0/-ge 0/' "$tw/src/a.sh"
+mr "$tw" --recover
+expect "once that change is undone, --recover removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
+if ! grep -q 'pos()' "$tw/src/a.sh" && grep -q -- '-ge 0' "$tw/src/a.sh"; then pass "and the edit stays, without the mutant"; else fail "and the edit stays, without the mutant" "$(cat "$tw/src/a.sh")"; fi
+# the mutant ('0' becomes '1') makes its line, and the lines around it,
+# equal to an earlier block: an edit that removes that block leaves it
+# unable to tell, so it refuses, and the way out ends at the start
+t2=$(new_project "$weak") || abort_sandbox
+tw2="$t2/w"
+# shellcheck disable=SC2016 # the code is written, not run
+printf 'min=18\nif [ -n "${X:-}" ]; then\n  y=1\nfi\nif [ -n "${X:-}" ]; then\n  y=0\nfi\n' >"$tw2/src/a.sh"
+(cd "$tw2" && git add -A && git commit -q -m "Twin blocks")
+# shellcheck disable=SC2016 # the check is written, not run
+killed "$tw2" '[ "$(grep -c "y=1" src/a.sh)" = 2 ]' 'true'
+perl -i -ne 'print unless $. >= 2 && $. <= 4' "$tw2/src/a.sh"
+mr "$tw2" --recover
+expect "an edit that removes a twin of the mutant's lines: it cannot tell, so it refuses (exit 2)" 2 \
+  "src/a.sh was changed after its mutant was written, and it cannot tell whether the mutant's change is still in it" \
+  "then make your change again, leaving that change out"
+from=$(printf '%s\n' "$out" | perl -ne 'print $1 if /--source=([0-9a-f]+) --staged --worktree/')
+(cd "$tw2" && git restore --source="$from" --staged --worktree -- src/a.sh)
+mr "$tw2" --recover
+expect "following its way out, --recover removes the journal" 0 "RECOVERED - 0 files put back; the journal is removed"
+clean "and the files are the commit" "$tw2"
+
+# --- a file removed while its mutant's write waits for the clock: no
+# mutant was written, and no journal is left ---
+rp=$(new_project "$weak") || abort_sandbox
+rw="$rp/w"
+# shellcheck disable=SC2016 # the check is written, not run
+check "$rw" 'if grep -q -- -gt src/a.sh; then perl -MPOSIX -e '\''POSIX::setsid(); alarm 30; my ($j, $f) = @ARGV; my $want = " " . unpack("H*", $f) . " "; for (;;) { my $t; if (open my $h, "<", $j) { local $/; $t = <$h> } last if defined $t && index($t, $want) >= 0; select undef, undef, undef, 0.01 } unlink $f'\'' .git/method-mutate-journal src/b.sh </dev/null >/dev/null 2>&1 & fi; '"$weak"
+perl -e 'my $t = time + 10; utime $t, $t, $ARGV[0]' "$rw/src/b.sh"
+mr "$rw" --max 2
+expect "a file removed while its mutant's write waits: no mutant was written, and the run stops (exit 2)" 2 \
+  "src/b.sh was changed during the run: no mutant was written to it, and the change is kept"
+if [ -e "$rw/.git/method-mutate-journal" ]; then fail "and no journal is left"; else pass "and no journal is left"; fi
+
 # --- a native Windows perl is refused ---
 # shellcheck disable=SC2016 # perl code, not shell
 out=$(cd "$w" && env CI= perl -e 'my $f = shift; require $f; $^O = "MSWin32"; Mutate::main()' "$lib/mutate.pl" 2>&1)
 code=$?
 expect "a native Windows perl is refused (exit 2)" 2 "mutate-changed: FAIL - a native Windows perl cannot run mutants"
 
-for d in $repos; do drop_sandbox "$d"; done
+if [ -f "$work/repos" ]; then while IFS= read -r d; do drop_sandbox "$d"; done <"$work/repos"; fi
 export HOME="$saved_home"
 unset GIT_CONFIG_NOSYSTEM
 drop_sandbox "$work"
