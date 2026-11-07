@@ -87,16 +87,24 @@ sub kept_note {
 # own (each named, at most 10, then how many more)
 sub left_out {
   my ($pl) = @_;
-  my $names = sub {
-    my @n = @_;
-    return join(', ', @n[0 .. ($#n < 9 ? $#n : 9)]) . (@n > 10 ? ' and ' . (@n - 10) . ' more' : '');
-  };
   my @out;
-  push @out, 'changed lines not mutated, as they name a delete or move command: ' . $names->(@{ $pl->{guarded_at} })
+  push @out, 'changed lines not mutated, as they name a delete or move command: ' . capped(@{ $pl->{guarded_at} })
     if @{ $pl->{guarded_at} };
-  push @out, 'changed files not mutated: ' . $names->(map {"$_->[0] ($_->[1])"} sort { $a->[0] cmp $b->[0] } @{ $pl->{skipped_files} })
+  push @out, 'changed files not mutated: ' . capped(map {"$_->[0] ($_->[1])"} sort { $a->[0] cmp $b->[0] } @{ $pl->{skipped_files} })
     if @{ $pl->{skipped_files} };
   return @out;
+}
+
+# capped NAMES: at most 10 of them, then how many more. refused REASONS: the
+# reasons files could not be put back, at most 10, then how many more (so
+# a run over many files keeps its last line readable)
+sub capped {
+  my @n = @_;
+  return join(', ', @n[0 .. ($#n < 9 ? $#n : 9)]) . (@n > 10 ? ' and ' . (@n - 10) . ' more' : '');
+}
+sub refused {
+  my @e = @_;
+  return join('; ', @e[0 .. ($#e < 9 ? $#e : 9)]) . (@e > 10 ? '; and ' . (@e - 10) . ' more could not be put back' : '');
 }
 
 sub skipped {
@@ -970,12 +978,13 @@ sub end_round {
     @bad = @{ $OPEN->{files} };
   }
   if (@err) {
-    my $done = @back ? '; ' . join(', ', map { Esc::line($_) } @back) . ' put back' : '';
-    die join('; ', @err) . "$done\n" unless defined $lost;
-    die join('; ', @err) . '; and no journal names ' . (@bad > 1 ? 'them' : 'it') . ', so --recover cannot find '
+    my $done = @back ? '; ' . capped(map { Esc::line($_) } @back) . ' put back' : '';
+    die refused(@err) . "$done\n" unless defined $lost;
+    die refused(@err) . "$done; the journal could not be written again ($lost)\n" unless @bad;
+    die refused(@err) . '; and no journal names ' . (@bad > 1 ? 'them' : 'it') . ', so --recover cannot find '
       . (@bad > 1 ? 'them' : 'it') . ' (the journal was removed or changed during the round and could not be written'
       . " again: $lost): once that is done, make sure "
-      . join(', ', map { Esc::line($_->{path}) . " no longer holds the mutant's change ($_->{place})" } @bad)
+      . capped(map { Esc::line($_->{path}) . " no longer holds the mutant's change ($_->{place})" } @bad)
       . "$done\n";
   }
   undef $OPEN;
@@ -1039,7 +1048,7 @@ sub recover {
   say_line(substr $note, 2) if $note;
   # (every file is tried: one that cannot be put back does not keep the
   # others from it)
-  die join('; ', @err) . "\n" if @err;
+  die refused(@err) . "\n" if @err;
   release($j);
   $TEMP = $own;
   return $n;
@@ -1228,19 +1237,28 @@ sub run_mutants {
   for my $f (@cf) {
     # (a signal: no next file is written)
     die "stopped by SIG$SIGNAL\n" if defined $SIGNAL;
+    # (the journal names the file first, and only then does the run's own
+    # record: a journal write that fails leaves the two alike)
+    journal_write({ %$cj, files => [@{ $cj->{files} }, $f] });
     push @{ $cj->{files} }, $f;
-    journal_write($cj);
     $OPEN = $cj;
     next if put($f->{path}, "$f->{text}\n", 1, $f->{ss});
-    # (nothing was written to it, so it is not put back)
-    pop @{ $cj->{files} };
-    if (@{ $cj->{files} }) {
-      journal_write($cj);
+    # (nothing was written to it, so it is not put back, even when the
+    # journal cannot be written again; that reason comes after this one)
+    my $kept = Esc::line($f->{path}) . ' was changed during the run: the control run did not write to it, and the'
+      . ' change is kept';
+    my @rest = @{ $cj->{files} };
+    pop @rest;
+    $cj->{files} = \@rest;
+    if (@rest) {
+      if (!eval { journal_write($cj); 1 }) {
+        (my $e = $@) =~ s/\n\z//;
+        die "$kept; $e\n";
+      }
     } else {
       undef $OPEN if unlink($JOURNAL) || !(-e $JOURNAL || -l $JOURNAL);
     }
-    die Esc::line($f->{path}) . " was changed during the run: the control run did not write to it, and the change"
-      . " is kept\n";
+    die "$kept\n";
   }
   # (a signal while put waited for the clock: no check runs)
   die "stopped by SIG$SIGNAL\n" if defined $SIGNAL;

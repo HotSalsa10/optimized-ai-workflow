@@ -1380,6 +1380,15 @@ else
   expect "a product folder Checks/, where the file system keeps letter case: named, not a pass (exit 3)" 3 \
     "mutate-changed: SKIPPED - not-all-mutated: " "changed files not mutated: Checks/lim.sh (named like the method's or git's own files, in another case)"
   clean "and the files are the commit" "$c4"
+  # (the case is asked inside the project: a link with the flipped name next
+  # to its folder does not make it count as folding)
+  if [ "$can_link" -eq 1 ]; then
+    ln -s w "$cp4/W"
+    mr "$c4"
+    expect "and with a link W next to the project's folder w, still named (exit 3)" 3 \
+      "changed files not mutated: Checks/lim.sh (named like the method's or git's own files, in another case)"
+    rm -f "$cp4/W"
+  fi
   (cd "$c4" && git rm -q -r Checks && printf 'PRODUCT_PATHS=src\nMUTATE_PATHS=src\nMUTATION_CHECKS=unit\n' >.claude/method.conf &&
     git commit -q -am "No Checks folder")
 fi
@@ -1397,6 +1406,23 @@ if [ "$st" = " D src/a.sh" ]; then pass "and only that file differs from the com
 mr "$c4" --recover
 expect "once it is back, --recover removes the journal" 0 "mutate-changed: RECOVERED - 0 files put back; the journal is removed"
 clean "and the files are the commit" "$c4"
+# with many files that cannot be put back, the line names 10, then how
+# many more (in a run and in recovery)
+(cd "$c4" && for i in 1 2 3 4 5 6 7 8 9; do printf 'x=1\n' >"src/d0$i.sh"; done && git add -A && git commit -q -m "Nine more files")
+# shellcheck disable=SC2016 # the check is written, not run
+check "$c4" 'if [ "$(tail -c 2 src/b.sh | od -An -tx1 | tr -d " \n")" = 0a0a ]; then rm -f src/*.sh; fi; '"$strong"
+mr "$c4"
+expect "12 files a check removed in the control run: 10 refusals named, then how many more (exit 2)" 2 \
+  "mutate-changed: FAIL - src/a.sh is missing" "; and 2 more could not be put back; the journal stays"
+lacks "and the 11th is not named" "src/d08.sh is missing"
+mr "$c4" --recover
+expect "and --recover names 10, then how many more (exit 2)" 2 "mutate-changed: FAIL - src/a.sh is missing" "; and 2 more could not be put back"
+lacks "nor does it name the 11th" "src/d08.sh is missing"
+(cd "$c4" && git checkout -q -- src)
+mr "$c4" --recover
+expect "once they are back, --recover removes the journal" 0 "mutate-changed: RECOVERED - 0 files put back; the journal is removed"
+clean "and the files are the commit" "$c4"
+(cd "$c4" && git rm -q src/d0*.sh && git commit -q -m "Not nine more")
 # a check that edits a file on top of the control run's line end: the edit
 # is left as it is, and the line says that line end may still be there
 # shellcheck disable=SC2016 # the check is written, not run
@@ -1498,13 +1524,42 @@ expect "a signal while the control run's write waits: no next file written, thos
   "mutate-changed: FAIL - stopped by SIGTERM; src/a.sh, src/b.sh put back; the run stopped"
 clean "and the files are the commit" "$csw"
 
+# --- a journal write that fails while the control run grows it: the files
+# written so far are put back, and the line gives that write's reason (not
+# a journal removed or changed). src/a.sh's time is ahead, so its write
+# waits up to 1 s; once the journal names it, a folder is made where the
+# next journal write's temp file goes ---
+cj=$(new_project "$strong") || abort_sandbox
+cjw="$cj/w"
+perl -e 'my $t = time + 10; utime $t, $t, $ARGV[0]' "$cjw/src/a.sh"
+rm -f "$work/s.out"
+(cd "$cjw" && exec env CI= perl -e 'alarm 300; exec @ARGV' bash "$mutate") >"$work/s.out" 2>&1 &
+spid=$!
+# shellcheck disable=SC2016 # perl code, not shell
+perl -e 'alarm 60; my ($j, $f) = @ARGV; my $want = " " . unpack("H*", $f) . " "; for (;;) { my $t; if (open my $h, "<", $j) { local $/; $t = <$h> } if (defined $t && index($t, $want) >= 0) { mkdir "$j.tmp" or die "mkdir: $!\n"; exit 0 } select undef, undef, undef, 0.01 }' "$cjw/.git/method-mutate-journal" src/a.sh
+wait "$spid"
+code=$?
+out=$(cat "$work/s.out")
+rmdir "$cjw/.git/method-mutate-journal.tmp"
+expect "a journal write that fails while the control run grows it: those written put back, with that write's reason (exit 2)" 2 \
+  "mutate-changed: FAIL - cannot write the journal " "; src/a.sh put back; the run stopped"
+lacks "and the journal is not said to be removed or changed" "removed or changed during the round"
+clean "and the files are the commit" "$cjw"
+
 # --- the fit started at the top (a mutant starts only when it and run C
 # still fit --minutes), judged now ---
 wait "$fit_pid"
 code=$?
 out=$(cat "$work/fit.out")
-expect "a mutant starts only when it and run C still fit --minutes: 4 of the 6 ran (exit 3)" 3 \
-  "mutate-changed: SKIPPED - time-reached: " "6 mutants: 4 killed (unit 4; 0 by time limit), 0 survived, 2 not run (--minutes 3)"
+expect "a mutant starts only when it and run C still fit --minutes: not all 6 ran (exit 3)" 3 "mutate-changed: SKIPPED - time-reached: "
+# (4 run; 3 where each round takes 4 s or more longer; one round's room
+# alone would let 5 or 6 run)
+case "$out" in
+  *"6 mutants: 4 killed (unit 4; 0 by time limit), 0 survived, 2 not run (--minutes 3)"* | \
+    *"6 mutants: 3 killed (unit 3; 0 by time limit), 0 survived, 3 not run (--minutes 3)"*)
+    pass "and 4 of them ran (3 on a slow machine), not the 5 or 6 that room for one round would let run" ;;
+  *) fail "and 4 of them ran (3 on a slow machine), not the 5 or 6 that room for one round would let run" "$out" ;;
+esac
 clean "and the files are the commit" "$fw"
 
 # --- a native Windows perl is refused ---

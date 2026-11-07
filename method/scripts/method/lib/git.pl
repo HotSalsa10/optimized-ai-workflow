@@ -133,11 +133,14 @@ sub status_options {
 }
 
 # case_pin: (-c core.ignoreCase=false), or () where the working tree's file
-# system folds case: there the top folder and the same name with its case
-# flipped, in the folder above, are one folder. (The working tree decides: a
-# case twin can sit there only where it tells case apart, and where it folds,
-# git's own setting matches patterns as checkout does.) Found once, with the
-# first git call; when it cannot be told (a name with no letters), the pin
+# system folds case: there the top folder's .git and .GIT are one entry.
+# (The working tree decides: a case twin can sit there only where it tells
+# case apart, and where it folds, git's own setting matches patterns as
+# checkout does. It is asked inside the top folder, not by the top's name in
+# the folder above, and without following links: a link with the flipped
+# name next to the top, a parent that folds case over a top that keeps it,
+# or a mount point cannot make it say "folds".) Found once, with the first
+# git call; when it cannot be told (no .git in the top folder), the pin
 # stays.
 my $case_pin;
 sub case_pin {
@@ -146,13 +149,9 @@ sub case_pin {
   my ($st, $top) = run('rev-parse', '--show-toplevel');
   my $folds;
   if (!$st && $top =~ s/\n\z//) {
-    my ($vol, $dirs, $name) = File::Spec->splitpath($top);
-    (my $flipped = $name) =~ tr/a-zA-Z/A-Za-z/;
-    if ($flipped ne $name) {
-      my @a = stat $top;
-      my @b = stat File::Spec->catpath($vol, $dirs, $flipped);
-      $folds = @a && @b && $a[0] == $b[0] && $a[1] == $b[1];
-    }
+    my @a = lstat File::Spec->catfile($top, '.git');
+    my @b = lstat File::Spec->catfile($top, '.GIT');
+    $folds = @a && @b && $a[0] == $b[0] && $a[1] == $b[1];
   }
   $case_pin = $folds ? [] : ['-c', 'core.ignoreCase=false'];
   return @$case_pin;

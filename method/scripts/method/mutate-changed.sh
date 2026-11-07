@@ -60,8 +60,9 @@
 # changed is written again first; when it cannot be, the files are put back
 # all the same, and the line says no journal names them and where the
 # mutant may be. Every file a journal names is tried, here and in recovery:
-# one that cannot be put back does not keep the others from it. Then the
-# files, HEAD, the branches and tags, and the stash must be
+# one that cannot be put back does not keep the others from it (the line
+# names 10 refusals, then how many more). Then the files, HEAD, the
+# branches and tags, and the stash must be
 # as at the start (else exit 2, naming what changed). On INT, TERM, HUP
 # (unless it came ignored, as under nohup) or QUIT, the check's group is
 # killed and the file put back at once (exit 2, naming the signal). After
@@ -101,9 +102,10 @@
 #                    (runs_in, needs): SKIPPED not-here.
 # Never mutated: the folder this script runs from, .claude/, checks/,
 # .method/, and .gitattributes, .gitignore and .gitmodules anywhere, in any
-# case of letters where the file system folds case; where it keeps case, a
-# file named like them in another case is not theirs, and is named as not
-# mutated (so the run is not a pass).
+# case of letters where the file system folds case (asked inside the
+# working tree: its .git against .GIT); where it keeps case, a file named
+# like them in another case is not theirs, and is named as not mutated (so
+# the run is not a pass).
 #
 # A mutant runs with your rights, so a file or line that names one of these
 # words gets none: rm, rmdir, unlink, mv, dd, chmod, chown, shred, truncate,
