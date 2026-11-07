@@ -97,9 +97,11 @@
 #                    SKIPPED not-configured. An entry that names no tracked
 #                    file is named on the last line.
 #   MUTATION_CHECKS  the ids of the checks in checks/*.tsv run against each
-#                    mutant: the fast tests. Unset: SKIPPED not-configured;
-#                    never all checks. An unknown id: exit 2. None runs here
-#                    (runs_in, needs): SKIPPED not-here.
+#                    mutant: the fast tests (not a coverage threshold or a
+#                    lint, which fail on a mutant for other reasons). Unset:
+#                    SKIPPED not-configured; never all checks. An unknown
+#                    id: exit 2. None runs here (runs_in, needs): SKIPPED
+#                    not-here.
 # Never mutated: the folder this script runs from, .claude/, checks/,
 # .method/, and .gitattributes, .gitignore and .gitmodules anywhere, in any
 # case of letters where the file system folds case (lib/git.pl's
