@@ -1,6 +1,6 @@
 # TASKS
 
-Current phase: Release 1. Steps 1 to 4b are closed; they are being merged into main (one pull request), then step 5.
+Current phase: Release 1. Steps 1 to 4b are merged into main (dd860c3); step 5 next.
 
 ## Step 1: repo skeleton, records, rule map, CI with planted defects
 
@@ -197,8 +197,9 @@ Rules: M044 (the mutation half), M122 (new, the parameter half, step 6). Designe
 - Step 6: M123 to M127 added (the builder's decisions listed in reports, the owner predicts three cases before a FULL merge, four questions before planning, the report check also refuses an empty "what the checks would miss", pending approvals at session start). Overlapping rules are written as one sentence carrying every ID: scope (M016, M021, M033, M057, M082), independence (M020, M058, M107), visual checks (M028, M054, M055), report format (M012, M037, M097), plain language (M068, M071), round caps (M009, M056), full-file reads (M023, M115), verify (M026, M049, M059, M121), severity (M027, M117). Lines written for people (M088, M109, the first half of M119) go to docs/why.md. Tensions to settle: M005 and M034 against M119; M013 against M070.
 - Not acted on: a with-and-without trial of the 15 rules a current model may follow without being told (M021, M023, M026, M033, M042, M043, M045, M047, M048, M049, M059, M082, M115, M119, M121). The owner left the call to me: 150 to 300 full runs at xhigh, to save a few hundred tokens of text loaded each session, is not worth it now, and merging and shortening the rules gets most of the gain. Kept as an option for a model release (Track 4's rule pruning), on the one or two rules with a clear incident (M082 first).
 - [x] CI was red on every run that got a machine (1 to 7 November), unseen until the pull request was prepared: one test (review-packet's swap_tree) wrote over a read-only file, which root may do in the session and an ordinary user may not in CI. Fixed in the test; reproduced and shown passing as a non-root user (TESTS.md, Where CI runs). Green on GitHub from run 113 (75a2895).
-- [ ] Merge steps 1 to 4b into main: a pull request with a plain summary and cases for the owner to predict; the owner approves and merges.
+- [x] Merge steps 1 to 4b into main: pull request 1, with a plain summary, the decisions the owner had not settled, what the checks would miss, and six cases to predict, each answered from the test log. The owner merged it on 7 November (merge commit dd860c3). CI green on the pull request's head (Linux); the owner chose not to run Windows and macOS for this merge, as the owner works on Linux; they are still required before a release (R9).
+- [x] The merge commit has no verdict line: typing it was a step in the pull request, and it did not land. status says verdicts SKIPPED (no commit on main carries a line yet), not LOOK; judging starts at the first later commit that has one, so dd860c3 is never judged, and main is not rewritten (A30). The approval is the owner's merge on GitHub. Next time, the owner says "merge" and I merge through GitHub with the verdict line in the commit message, so nobody types it.
 
 ## Next
 
-Merge steps 1 to 4b (the pull request); then step 5: the three hooks, the settings fragment, a free test harness that proves the hooks fire.
+Step 5: the three hooks, the settings fragment, a free test harness that proves the hooks fire.
