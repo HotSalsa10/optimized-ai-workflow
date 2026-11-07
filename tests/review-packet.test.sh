@@ -678,8 +678,11 @@ first_src=$(cd "$treeswap" && git rev-parse HEAD~1:src)
 head_src=$(cd "$treeswap" && git rev-parse HEAD:src)
 obj_of() { printf '%s/.git/objects/%s/%s' "$treeswap" "$(printf '%s' "$1" | cut -c1-2)" "$(printf '%s' "$1" | cut -c3-)"; }
 # swap_tree FROM TO: the stored folder TO gets the content of FROM;
-# restore_tree puts it back
+# restore_tree puts it back. (The kept copy takes the stored file's
+# read-only mode, so the last one is removed first: a user who is not root
+# cannot copy over it, and the wrong folder would be put back.)
 swap_tree() {
+  rm -f "$work/tree.keep"
   cp "$(obj_of "$2")" "$work/tree.keep"
   chmod u+w "$(obj_of "$2")" 2>/dev/null
   cp "$(obj_of "$1")" "$(obj_of "$2")"

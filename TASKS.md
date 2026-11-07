@@ -1,6 +1,6 @@
 # TASKS
 
-Current phase: Release 1, step 4b (mutate-changed.sh). Steps 1, 1b, 2, 3 and 4 are closed except the owner's CI item.
+Current phase: Release 1. Steps 1 to 4b are closed; they are being merged into main (one pull request), then step 5.
 
 ## Step 1: repo skeleton, records, rule map, CI with planted defects
 
@@ -196,6 +196,7 @@ Rules: M044 (the mutation half), M122 (new, the parameter half, step 6). Designe
 - Step 5: the hooks stay shell scripts in the committed settings, not mods (A44). RISKS #16: repo hooks do not run in a cloud session with several repositories or in a Projects cloud thread, and onFailure "block" does nothing on Stop hooks; "auto" mode cannot be set from project settings.
 - Step 6: M123 to M127 added (the builder's decisions listed in reports, the owner predicts three cases before a FULL merge, four questions before planning, the report check also refuses an empty "what the checks would miss", pending approvals at session start). Overlapping rules are written as one sentence carrying every ID: scope (M016, M021, M033, M057, M082), independence (M020, M058, M107), visual checks (M028, M054, M055), report format (M012, M037, M097), plain language (M068, M071), round caps (M009, M056), full-file reads (M023, M115), verify (M026, M049, M059, M121), severity (M027, M117). Lines written for people (M088, M109, the first half of M119) go to docs/why.md. Tensions to settle: M005 and M034 against M119; M013 against M070.
 - Not acted on: a with-and-without trial of the 15 rules a current model may follow without being told (M021, M023, M026, M033, M042, M043, M045, M047, M048, M049, M059, M082, M115, M119, M121). The owner left the call to me: 150 to 300 full runs at xhigh, to save a few hundred tokens of text loaded each session, is not worth it now, and merging and shortening the rules gets most of the gain. Kept as an option for a model release (Track 4's rule pruning), on the one or two rules with a clear incident (M082 first).
+- [ ] CI was red on every run that got a machine (1 to 7 November), unseen until the pull request was prepared: one test (review-packet's swap_tree) wrote over a read-only file, which root may do in the session and an ordinary user may not in CI. Fixed in the test; reproduced and shown passing as a non-root user (TESTS.md, Where CI runs). Closes when CI is green on GitHub.
 - [ ] Merge steps 1 to 4b into main: a pull request with a plain summary and cases for the owner to predict; the owner approves and merges.
 
 ## Next

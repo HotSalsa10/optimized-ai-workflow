@@ -174,6 +174,7 @@ To check the checks, each guard was removed once in a throwaway copy, and the fu
 
 - Linux: every push and pull request (a 25-minute limit: the whole suite takes about 14 minutes, mutate-run's 30 s time-limit case and its signals among it; its two-minute --minutes case runs alongside the rest of that file). Windows and macOS jobs have 30 minutes.
 - Windows (Git Bash) and macOS: release tags and manual runs (decision A19).
+- CI runs the suite as an ordinary user; the cloud sessions this repo is built in run it as root, which can write over read-only files. So a test that writes over a read-only file passes in the session and fails in CI. One did, in every CI run from 1 November (when the Actions minutes came back) to 7 November, unseen: review-packet's swap_tree copied a stored git object, which is read-only, over its own earlier copy. Fixed by removing the copy first; reproduced and shown passing as a non-root user. Before a step closes, its CI run is read, not assumed.
 - Each run step first sends `::stop-commands::` with a random token, so the runner reads no workflow commands from the output that follows. A manual run and a push run on the same branch use different concurrency groups, so neither cancels the other.
 
 ## Running locally
