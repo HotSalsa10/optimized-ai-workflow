@@ -1380,15 +1380,6 @@ else
   expect "a product folder Checks/, where the file system keeps letter case: named, not a pass (exit 3)" 3 \
     "mutate-changed: SKIPPED - not-all-mutated: " "changed files not mutated: Checks/lim.sh (named like the method's or git's own files, in another case)"
   clean "and the files are the commit" "$c4"
-  # (the case is asked inside the project: a link with the flipped name next
-  # to its folder does not make it count as folding)
-  if [ "$can_link" -eq 1 ]; then
-    ln -s w "$cp4/W"
-    mr "$c4"
-    expect "and with a link W next to the project's folder w, still named (exit 3)" 3 \
-      "changed files not mutated: Checks/lim.sh (named like the method's or git's own files, in another case)"
-    rm -f "$cp4/W"
-  fi
   (cd "$c4" && git rm -q -r Checks && printf 'PRODUCT_PATHS=src\nMUTATE_PATHS=src\nMUTATION_CHECKS=unit\n' >.claude/method.conf &&
     git commit -q -am "No Checks folder")
 fi

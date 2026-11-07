@@ -102,10 +102,10 @@
 #                    (runs_in, needs): SKIPPED not-here.
 # Never mutated: the folder this script runs from, .claude/, checks/,
 # .method/, and .gitattributes, .gitignore and .gitmodules anywhere, in any
-# case of letters where the file system folds case (asked inside the
-# working tree: its .git against .GIT); where it keeps case, a file named
-# like them in another case is not theirs, and is named as not mutated (so
-# the run is not a pass).
+# case of letters where the file system folds case (lib/git.pl's
+# Git::case_pin); where it keeps case, a file named like them in another
+# case is not theirs, and is named as not mutated (so the run is not a
+# pass).
 #
 # A mutant runs with your rights, so a file or line that names one of these
 # words gets none: rm, rmdir, unlink, mv, dd, chmod, chown, shred, truncate,
