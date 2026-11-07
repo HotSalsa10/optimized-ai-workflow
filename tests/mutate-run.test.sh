@@ -189,7 +189,7 @@ printf 'PRODUCT_PATHS=src\nMUTATE_PATHS=src\nMUTATION_CHECKS=unit\nMUTATION_CHEC
 (cd "$w" && git add -A && git commit -q -m "Two checks")
 mr "$w" --minutes 1
 expect "when a round cannot fit --minutes it is not run: SKIPPED time-reached (exit 3)" 3 "0 killed (0 by time limit), 0 survived, 3 not run" \
-  "mutate-changed: SKIPPED - time-reached: "
+  "mutate-changed: SKIPPED - time-reached: " "runs B and C and the control run do not fit --minutes 1"
 check "$w" 'if grep -q -- -gt src/a.sh; then echo 0 ok; exit 0; fi; '"$weak"
 mr "$w" --max 1
 expect "a check that passes but examines nothing on a mutant does not kill it" 1 \
@@ -1271,6 +1271,19 @@ expect "a check that does not pass a second time without any mutant: run B stops
   "mutate-changed: FAIL - run B: unit did not pass a second time without any mutant (FAIL: exit 1" "so mutation results cannot be trusted"
 rm -f "$c4/.git/ran-once"
 clean "and the files are the commit" "$c4"
+check "$c4" 'if [ -e .git/ran-once ]; then touch src/new.txt; fi; touch .git/ran-once; '"$strong"
+mr "$c4"
+expect "a check that changes files only in run B: the run stops, naming them (exit 2)" 2 \
+  "mutate-changed: FAIL - run B: the checks changed 1 files (src/new.txt) without any mutant"
+rm -f "$c4/.git/ran-once" "$c4/src/new.txt"
+clean "and once that file is removed, the files are the commit" "$c4"
+# shellcheck disable=SC2016 # the check is written, not run
+check "$c4" 'if [ "$(tail -c 2 src/a.sh | od -An -tx1 | tr -d " \n")" = 0a0a ]; then touch src/new.txt; fi; '"$strong"
+mr "$c4"
+expect "a check that changes files in the control run: the run stops, naming them (exit 2)" 2 \
+  "mutate-changed: FAIL - after the control run: the checks changed 1 files (src/new.txt)"
+rm -f "$c4/src/new.txt"
+clean "and once that file is removed, the files are the commit" "$c4"
 # run C: a check that fails from its fifth run on (A, B, the control run,
 # the one mutant, then C) stops the run after the last mutant
 # shellcheck disable=SC2016 # the check is written, not run
@@ -1280,15 +1293,22 @@ expect "a check that no longer passes after the last mutant: run C stops the run
   "mutate-changed: FAIL - run C: unit no longer passes without a mutant, after the last one (FAIL: exit 1"
 rm -f "$c4/.git/runs"
 clean "and the files are the commit" "$c4"
+# shellcheck disable=SC2016 # the check is written, not run
+check "$c4" 'n=$(cat .git/runs 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" >.git/runs; if [ "$n" -ge 5 ]; then touch src/new.txt; fi; '"$strong"
+mr "$c4" --max 1
+expect "a check that changes files in run C: the run stops, naming them (exit 2)" 2 \
+  "mutate-changed: FAIL - run C: the checks changed 1 files (src/new.txt) without any mutant"
+rm -f "$c4/.git/runs" "$c4/src/new.txt"
+clean "and once that file is removed, the files are the commit" "$c4"
 # no pass while changed lines or files were left out: they are named
 check "$c4" "$strong"
-(cd "$c4" && printf 'unlink tmp\n' >src/d.txt && printf '\377\n' >src/e.bin && git add -A && git commit -q -m "Left out")
+(cd "$c4" && printf 'unlink tmp\n' >src/d.txt && printf '\377\n' >src/e.bin && ln -s a.sh src/f.sh && printf 'rm -f x\n' >src/g.sh && git add -A && git commit -q -m "Left out")
 mr "$c4"
 expect "every mutant killed, but a line and a file left out: SKIPPED not-all-mutated, naming them (exit 3)" 3 \
   "mutate-changed: SKIPPED - not-all-mutated: " "changed lines not mutated, as they name a delete or move command: src/d.txt:1" \
-  "changed files not mutated: src/e.bin (not UTF-8 text)"
+  "changed files not mutated: src/e.bin (not UTF-8 text), src/f.sh (not a regular file), src/g.sh (a shell script, make or batch file that deletes or moves files)"
 clean "and the files are the commit" "$c4"
-(cd "$c4" && git rm -q src/d.txt src/e.bin && git commit -q -m "Not left out")
+(cd "$c4" && git rm -q src/d.txt src/e.bin src/f.sh src/g.sh && git commit -q -m "Not left out")
 # kill -9 during the control run: recovery puts every file back
 # shellcheck disable=SC2016 # the check is written, not run
 check "$c4" 'if [ "$(tail -c 2 src/a.sh | od -An -tx1 | tr -d " \n")" = 0a0a ]; then touch "$MARK"; perl "$BEAT_PL" "$BEAT" ignore; fi; '"$strong"

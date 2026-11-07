@@ -3,13 +3,14 @@
 # small text change (a mutant), the project's fast checks run against it,
 # and the line is put back. A mutant the checks do not notice survives: the
 # tests would not notice that mistake either. The work is done by
-# lib/mutate.pl. No run gives PASS yet: all killed is SKIPPED
-# kills-unchecked, until a repeat and a control run check the kills (step
-# 4b.4).
+# lib/mutate.pl. A kill counts only when the checks give the same result
+# twice without a mutant (runs A and B), still pass after the last one (run
+# C), and pass when only a line end is added at the end of the files that
+# get a mutant (the control run): a check that does not is not used.
 #
 # Usage: bash scripts/method/mutate-changed.sh [--list | --recover] [--max N] [--minutes N]
-#   (none)       run: run A (each check once, with no mutant), then one
-#                mutant at a time
+#   (none)       run: runs A and B (each check twice, with no mutant), the
+#                control run, one mutant at a time, then run C
 #   --list       print the plan: one line per mutant, nothing written, no
 #                check run
 #   --recover    put back what a run that was cut off left on disk, and
@@ -143,20 +144,29 @@
 # number other than 0 and 1 is shown as "a N-digit number becomes that
 # number + 1"), the checks it would run, then one line that starts with
 # mutate-changed: PLAN, SKIPPED or FAIL. A run prints what it put back
-# from a cut-off run, the checks, run A's times and the limits, one line
-# per mutant that survived ("survived: FILE:LINE:COLUMN: ...", naming a
-# check that passed but examined nothing), then the last line: the counts,
-# then "N mutants: K killed (T by time limit), S survived, R not run". File
-# names are escaped.
+# from a cut-off run, the checks, run A's times and the limits, an estimate
+# ("about N mutants x S s, about M min with runs B and C and the control
+# run"), the checks not used and why ("not used: ID (...)": SKIPPED in run
+# A, or not passing the control run), one line per mutant that survived
+# ("survived: FILE:LINE:COLUMN: ...", naming a check that passed but
+# examined nothing), then the last line: the counts, then "N mutants: K
+# killed (ID n, ...; T by time limit), S survived, R not run", each kill
+# counted for the check that made it. File names are escaped.
 #
-# Exit codes: 0 a plan with mutants (--list), or --recover done; 1 a
-# mutant survived (FAIL); 2 bad usage (the usage line), bad settings, files
-# on disk that are not the commit, no main, two merge bases, no shared
-# history, a git error or a damaged stored file, busy, run A failing, a
+# Exit codes: 0 a plan with mutants (--list), --recover done, or PASS:
+# every mutant ran and was killed, and nothing the branch changed under
+# MUTATE_PATHS was left out but the method's or git's own files; 1 a mutant
+# survived (FAIL); 2 bad usage (the usage line), bad settings, files on
+# disk that are not the commit, no main, two merge bases, no shared
+# history, a git error or a damaged stored file, busy, run A failing, run
+# B or C not passing (results that do not repeat cannot be trusted), a
 # check that changed something, a signal, or a refusal to put a file back
 # (the last line says FAIL and why); 3 SKIPPED (not-configured, not-here,
-# nothing-to-mutate, time-reached: --minutes ran out; max-reached: the
-# plan had more than --max; kills-unchecked), never a pass.
+# nothing-to-mutate, no-usable-check: no check passed runs A and B and the
+# control run; time-reached: --minutes ran out; max-reached: the plan had
+# more than --max; not-all-mutated: every mutant was killed, but changed
+# lines kept out by the delete words or changed files skipped are named),
+# never a pass.
 set -u
 unset METHOD_CALLER_PERL_UNICODE METHOD_CALLER_PERL5OPT METHOD_CALLER_PERL5LIB METHOD_CALLER_PERLLIB
 unset METHOD_CALLER_PERL_USE_UNSAFE_INC METHOD_CALLER_PERLIO

@@ -77,7 +77,7 @@ sub left_out {
   my @out;
   push @out, 'changed lines not mutated, as they name a delete or move command: ' . $names->(@{ $pl->{guarded_at} })
     if @{ $pl->{guarded_at} };
-  push @out, 'changed files not mutated: ' . $names->(map {"$_->[0] ($_->[1])"} @{ $pl->{skipped_files} })
+  push @out, 'changed files not mutated: ' . $names->(map {"$_->[0] ($_->[1])"} sort { $a->[0] cmp $b->[0] } @{ $pl->{skipped_files} })
     if @{ $pl->{skipped_files} };
   return @out;
 }
@@ -1155,7 +1155,7 @@ sub run_mutants {
   my (@ctl, @cf);
   for my $m (grep { !$seen{ $_->{path} }++ } @mutants) {
     my $text = Git::cat('blob', $m->{blob}, 1);
-    my $c = $text . ($text =~ /\r\n\z/ ? "\r\n" : "\n");
+    my $c = "$text\n";
     push @cf, { path => $m->{path}, sb => $m->{blob}, mb => Git::object_id('blob', $c, $m->{blob}),
       ss => Digest::SHA::sha256_hex($text), ms => Digest::SHA::sha256_hex($c), text => $text,
       place => 'the control run: a line end added at the end of the file', ml => '0' x 64, mw => '0' x 64 };
