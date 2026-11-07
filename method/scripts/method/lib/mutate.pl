@@ -64,6 +64,24 @@ sub stop {
 }
 
 # skipped KIND DETAIL: nothing to do, which is never a pass (exit 3)
+# left_out PLAN: what keeps a run where every mutant was killed from being a
+# pass: changed lines kept out because they name a delete or move command,
+# and changed files skipped for any reason but being the method's or git's
+# own (each named, at most 10, then how many more)
+sub left_out {
+  my ($pl) = @_;
+  my $names = sub {
+    my @n = @_;
+    return join(', ', @n[0 .. ($#n < 9 ? $#n : 9)]) . (@n > 10 ? ' and ' . (@n - 10) . ' more' : '');
+  };
+  my @out;
+  push @out, 'changed lines not mutated, as they name a delete or move command: ' . $names->(@{ $pl->{guarded_at} })
+    if @{ $pl->{guarded_at} };
+  push @out, 'changed files not mutated: ' . $names->(map {"$_->[0] ($_->[1])"} @{ $pl->{skipped_files} })
+    if @{ $pl->{skipped_files} };
+  return @out;
+}
+
 sub skipped {
   my ($kind, $detail) = @_;
   say_line("SKIPPED - $kind: $detail; this is not a pass");
@@ -268,26 +286,29 @@ sub plan {
   stop('mutate-changed.sh runs from the top folder, so every file would be its own; run the copy in scripts/method')
     if defined $method && $method eq '.';
   my %c = (lines => 0, with => 0, comment => 0, nothing => 0, guarded => 0, files => 0);
-  my %skip;
+  my (%skip, @guarded_at, @skipped_files);
+  # (a changed file skipped for any reason but being the method's or git's
+  # own is named too: a run with such files is not a pass)
+  my $skip = sub { my ($p, $why) = @_; $skip{$why}++; push @skipped_files, [$p, $why] };
   Tree::check_trees($base, $fp->{head});
   my @cand;
   for my $f (Tree::changed($base, $fp->{head})) {
     next if $f->{st} eq 'D';
     next unless under($f->{path}, $conf->{MUTATE_PATHS});
     if (excluded($f->{path}, $method)) { $skip{"left out (the method's or git's own files)"}++; next }
-    if ($f->{m2} !~ /\A100(?:644|755)\z/) { $skip{'not a regular file'}++; next }
+    if ($f->{m2} !~ /\A100(?:644|755)\z/) { $skip->($f->{path}, 'not a regular file'); next }
     push @cand, $f;
   }
   my (@files, $possible);
   for my $f (@cand) {
     my $p = $f->{path};
-    if ($converted{$p}) { $skip{'converted by .gitattributes or in Git LFS'}++; next }
+    if ($converted{$p}) { $skip->($p, 'converted by .gitattributes or in Git LFS'); next }
     my $text = Git::cat('blob', $f->{o2}, 1, $MAX_SIZE);
-    if (!defined $text) { $skip{'larger than 1 MB'}++; next }
-    if ($text =~ m{\Aversion https://git-lfs\.github\.com/spec/}) { $skip{'converted by .gitattributes or in Git LFS'}++; next }
-    if ($text =~ /\0/ || !Esc::utf8_ok($text)) { $skip{'not UTF-8 text'}++; next }
+    if (!defined $text) { $skip->($p, 'larger than 1 MB'); next }
+    if ($text =~ m{\Aversion https://git-lfs\.github\.com/spec/}) { $skip->($p, 'converted by .gitattributes or in Git LFS'); next }
+    if ($text =~ /\0/ || !Esc::utf8_ok($text)) { $skip->($p, 'not UTF-8 text'); next }
     my $batch = $p =~ /\.(?:bat|cmd|ps1)\z/i || $text =~ m{\A#![^\n]*\bpwsh\b} ? 1 : 0;
-    if (shell_like($p, $text) && destructive($text, $batch)) { $skip{'a shell script, make or batch file that deletes or moves files'}++; next }
+    if (shell_like($p, $text) && destructive($text, $batch)) { $skip->($p, 'a shell script, make or batch file that deletes or moves files'); next }
     my @lines = split /\n/, $text, -1;
     pop @lines if @lines && $lines[-1] eq '';
     # a line is read with the lines a backslash joins it to (cont), in every
@@ -304,7 +325,7 @@ sub plan {
     # the old file is read through Git::cat first: git diff does not check a
     # stored file against its id, so one changed by hand could hide lines (an
     # old file over 1 MB is not read, so its file is skipped)
-    if ($old_text && !defined Git::cat('blob', $f->{o1}, 1, $MAX_SIZE)) { $skip{'larger than 1 MB'}++; next }
+    if ($old_text && !defined Git::cat('blob', $f->{o1}, 1, $MAX_SIZE)) { $skip->($p, 'larger than 1 MB'); next }
     my @changed = $old_text ? Tree::added_lines($f->{o1}, $f->{o2}) : (1 .. scalar @lines);
     next unless @changed;
     $c{files}++;
@@ -314,7 +335,7 @@ sub plan {
       next unless defined $l;
       $c{lines}++;
       if (comment_like($l)) { $c{comment}++; next }
-      if ($kept_out->($n - 1)) { $c{guarded}++; next }
+      if ($kept_out->($n - 1)) { $c{guarded}++; push @guarded_at, "$p:$n"; next }
       my ($ms, $count) = mutants_on($l, $max);
       my @m = @$ms;
       if (!@m) { $c{nothing}++; next }
@@ -343,7 +364,7 @@ sub plan {
   my %all = %{ Tree::all_files($fp->{head}) };
   my @none = grep { my $e = $_; !grep { under($_, [$e]) } keys %all } @{ $conf->{MUTATE_PATHS} };
   return { mutants => \@order, possible => $possible || 0, counts => \%c, skipped => \%skip, ref => $ref,
-    base => $base, none => \@none, fp => $fp };
+    base => $base, none => \@none, fp => $fp, guarded_at => \@guarded_at, skipped_files => \@skipped_files };
 }
 
 # counts PLAN: the counts for the last line
@@ -1064,36 +1085,113 @@ sub run_check {
   return ($res, $took);
 }
 
-# run_mutants PLAN CHECKS MINUTES: run A, then one round per mutant while
-# --minutes allows; ends with the last line (never exit 0 in 4b.3: all
-# killed is SKIPPED kills-unchecked until the repeat and control runs exist)
+# run_mutants PLAN CHECKS MINUTES: run A (each check once, timed), run B
+# (the same again: results that do not repeat cannot be trusted), the
+# control run (a line end added at the end of every file that will get a
+# mutant: a check that does not pass it, like one SKIPPED in run A, cannot
+# show it noticed a mutant, so it is not used, and is named), one round per
+# mutant while --minutes allows, then run C (the checks still pass without
+# one); ends with the last line: PASS (exit 0) only when every mutant ran
+# and was killed and nothing the branch changed was left out (left_out)
 sub run_mutants {
   my ($pl, $checks, $minutes) = @_;
   my $start = $pl->{fp};
   my $stash = stash_id();
   my $deadline = Checks::now() + $minutes * 60;
   my $env = Checks::check_env();
-  my (%limit, @a);
+  my @mutants = @{ $pl->{mutants} };
+  my $n = @mutants;
+  my (%limit, %took, @a, @use, @unused);
+  # run A: each check once, timed; one that fails stops the run, and one
+  # SKIPPED (no count, or a count of 0) cannot show it noticed a mutant
   for my $c (@$checks) {
     my ($res, $took) = run_check($c, $env, $deadline - Checks::now(), undef);
     die "run A: $c->{id} did not end within --minutes without any mutant\n" if $res->{kind} eq 'time';
+    if ($res->{status} eq 'SKIPPED') {
+      push @unused, "$c->{id} (SKIPPED without any mutant: $res->{detail})";
+      next;
+    }
     die "run A: $c->{id} did not pass without any mutant ($res->{status}: $res->{detail}); fix it or leave it out of"
       . " MUTATION_CHECKS\n" unless $res->{status} eq 'PASS';
     $limit{ $c->{id} } = 3 * int($took + 0.999) + 30;
+    $took{ $c->{id} } = $took;
     push @a, sprintf('%s passed in %d s', $c->{id}, $took + 0.5);
+    push @use, $c;
   }
   my $why = changes($start, undef);
   die 'run A: ' . join('; ', @$why) . " without any mutant\n" if @$why;
+  my $none = sub {
+    my ($kind, $why) = @_;
+    say_line('not used: ' . join('; ', @unused)) if @unused;
+    skipped($kind, counts($pl) . "; $n mutants: 0 killed (0 by time limit), 0 survived, $n not run ($why)");
+  };
+  $none->('no-usable-check', 'no check can show it noticed one') unless @use;
+  my $per = 0;
+  $per += $took{ $_->{id} } for @use;
+  $per = int($per + 0.999) || 1;
   say_line('run A (no mutant): ' . join(', ', @a) . '; limit per mutant: '
-    . join(', ', map {"$_->{id} $limit{$_->{id}} s"} @$checks));
-  my @mutants = @{ $pl->{mutants} };
-  my ($killed, $by_time, $survived, $done) = (0, 0, 0, 0);
+    . join(', ', map {"$_->{id} $limit{$_->{id}} s"} @use));
+  say_line("estimate: about $n mutants x $per s, about " . int(($n + 3) * $per / 60 + 0.999)
+    . ' min with runs B and C and the control run');
+  # (a round's worst case: each check's limit, and the time around it)
+  my $round = sub { my $s = 5; $s += $limit{ $_->{id} } + 3 for @use; return $s };
+  $none->('time-reached', "runs B and C and the control run do not fit --minutes $minutes")
+    if Checks::now() + 3 * $round->() > $deadline;
+  # run B: the same again; results that are not repeatable cannot be trusted
+  for my $c (@use) {
+    my ($res) = run_check($c, $env, $limit{ $c->{id} }, undef);
+    die "run B: $c->{id} did not pass a second time without any mutant ("
+      . ($res->{kind} eq 'time' ? 'it ran out of time' : "$res->{status}: $res->{detail}") . '); something a run leaves'
+      . " behind changes the next one (a server, a file git ignores, database rows), so mutation results cannot be"
+      . " trusted\n" unless $res->{status} eq 'PASS';
+  }
+  $why = changes($start, undef);
+  die 'run B: ' . join('; ', @$why) . " without any mutant\n" if @$why;
+  # the control run: a line end added at the end of every file that will
+  # get a mutant, through the same write function and journal as a mutant;
+  # a check that does not pass it cannot show it noticed a mutant
+  die "stopped by SIG$SIGNAL\n" if defined $SIGNAL;
+  my %seen;
+  my (@ctl, @cf);
+  for my $m (grep { !$seen{ $_->{path} }++ } @mutants) {
+    my $text = Git::cat('blob', $m->{blob}, 1);
+    my $c = $text . ($text =~ /\r\n\z/ ? "\r\n" : "\n");
+    push @cf, { path => $m->{path}, sb => $m->{blob}, mb => Git::object_id('blob', $c, $m->{blob}),
+      ss => Digest::SHA::sha256_hex($text), ms => Digest::SHA::sha256_hex($c), text => $text,
+      place => 'the control run: a line end added at the end of the file', ml => '0' x 64, mw => '0' x 64 };
+    push @ctl, $c;
+  }
+  my $cj = { start => $start->{head}, stash => $stash, temp => $TEMP, pgid => undef, files => \@cf };
+  journal_write($cj);
+  $OPEN = $cj;
+  for my $i (0 .. $#cf) {
+    die Esc::line($cf[$i]{path}) . " was changed during the run: the control run did not write to it, and the change"
+      . " is kept\n" unless put($cf[$i]{path}, $ctl[$i], 1, $cf[$i]{ss});
+    die "stopped by SIG$SIGNAL\n" if defined $SIGNAL;
+  }
+  my @kept;
+  for my $c (@use) {
+    my ($res) = run_check($c, $env, $limit{ $c->{id} }, $cj);
+    if ($res->{status} eq 'PASS') {
+      push @kept, $c;
+      next;
+    }
+    push @unused, "$c->{id} (" . ($res->{kind} eq 'time' ? 'it ran out of time' : $res->{status} eq 'SKIPPED'
+      ? 'it was SKIPPED' : 'it failed') . ' when only a line end was added at the end of the files that get a mutant,'
+      . ' so it cannot show it noticed a mutant; split it if it also runs tests)';
+  }
+  end_round(0);
+  $why = changes($start, $stash);
+  die 'after the control run: ' . join('; ', @$why) . "\n" if @$why;
+  @use = @kept;
+  $none->('no-usable-check', 'no check can show it noticed one') unless @use;
+  say_line('not used: ' . join('; ', @unused)) if @unused;
+  my ($killed, $by_time, $survived, $done, %by) = (0, 0, 0, 0);
   for my $m (@mutants) {
     # (a signal between rounds: no next mutant is written)
     die "stopped by SIG$SIGNAL\n" if defined $SIGNAL;
-    my $need = 5;
-    $need += $limit{ $_->{id} } + 3 for @$checks;
-    last if Checks::now() + $need > $deadline;
+    # (this round and run C must fit)
+    last if Checks::now() + 2 * $round->() > $deadline;
     $done++;
     my $text = Git::cat('blob', $m->{blob}, 1);
     my $mut = mutated($text, $m);
@@ -1112,7 +1210,7 @@ sub run_mutants {
     # (a signal while put waited for the clock: no check runs on the mutant)
     die "stopped by SIG$SIGNAL\n" if defined $SIGNAL;
     my ($kill, @nothing);
-    for my $c (@$checks) {
+    for my $c (@use) {
       my ($res) = run_check($c, $env, $limit{ $c->{id} }, $j);
       if ($res->{status} eq 'FAIL') { $kill = $res->{kind} eq 'time' ? 'time' : $c->{id}; last }
       push @nothing, $c->{id} if $res->{status} eq 'SKIPPED';
@@ -1128,20 +1226,40 @@ sub run_mutants {
       $by_time++;
     } else {
       $killed++;
+      $by{$kill}++;
     }
   }
   # (a signal during the last round's end: said, not lost)
   die "stopped by SIG$SIGNAL\n" if defined $SIGNAL;
-  my $n = @mutants;
-  my $tail = counts($pl) . "; $n mutants: " . ($killed + $by_time) . " killed ($by_time by time limit), $survived survived, "
-    . ($n - $done) . ' not run';
+  # run C: after the last mutant, the checks still pass without one
+  if ($done) {
+    for my $c (@use) {
+      my ($res) = run_check($c, $env, $limit{ $c->{id} }, undef);
+      die "run C: $c->{id} no longer passes without a mutant, after the last one ("
+        . ($res->{kind} eq 'time' ? 'it ran out of time' : "$res->{status}: $res->{detail}") . '); something a round'
+        . " left behind changes the next run (a file git ignores, a server), so mutation results cannot be trusted\n"
+        unless $res->{status} eq 'PASS';
+    }
+    my $w = changes($start, $stash);
+    die 'run C: ' . join('; ', @$w) . " without any mutant\n" if @$w;
+  }
+  die "stopped by SIG$SIGNAL\n" if defined $SIGNAL;
+  my $kills = join(', ', map {"$_->{id} $by{$_->{id}}"} grep { $by{ $_->{id} } } @use);
+  my $tail = counts($pl) . "; $n mutants: " . ($killed + $by_time) . ' killed (' . ($kills ? "$kills; " : '')
+    . "$by_time by time limit), $survived survived, " . ($n - $done) . ' not run';
   if ($survived) {
     say_line("FAIL - $tail");
     exit 1;
   }
   skipped('time-reached', "$tail (--minutes $minutes)") if $done < $n;
   skipped('max-reached', "$tail (the plan has $pl->{possible})") if $pl->{possible} > $n;
-  skipped('kills-unchecked', "$tail; no repeat or control run checks the kills yet (step 4b.4)");
+  # every mutant ran and was killed: a pass only when nothing the branch
+  # changed under MUTATE_PATHS was left out, but for the method's or git's
+  # own files
+  my @out = left_out($pl);
+  skipped('not-all-mutated', "$tail; " . join('; ', @out)) if @out;
+  say_line("PASS - $tail");
+  exit 0;
 }
 
 main() unless caller;

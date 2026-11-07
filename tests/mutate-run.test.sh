@@ -177,9 +177,9 @@ clean "after it, the files are the commit, no journal is left and the lock is fr
 if [ -x "$w/src/c.sh" ] && [ ! -x "$w/src/a.sh" ]; then pass "each file keeps its mode (755 and 644)"; else fail "each file keeps its mode"; fi
 check "$w" "$strong"
 mr "$w"
-expect "with the boundary cases every mutant is killed, which is not a pass yet: SKIPPED kills-unchecked (exit 3)" 3 \
-  "3 mutants: 3 killed (0 by time limit), 0 survived, 0 not run" \
-  "mutate-changed: SKIPPED - kills-unchecked: " "no repeat or control run checks the kills yet (step 4b.4); this is not a pass"
+expect "with the boundary cases every mutant is killed, after runs B and C and the control run: PASS (exit 0)" 0 \
+  "estimate: about 3 mutants x " "mutate-changed: PASS - 3 changed lines in 3 files" \
+  "3 mutants: 3 killed (unit 3; 0 by time limit), 0 survived, 0 not run"
 lacks "and nothing survived" "survived:"
 clean "the files are the commit again" "$w"
 mr "$w" --max 1
@@ -357,9 +357,10 @@ perl -e 'my $t = time + 10; utime $t, $t, $ARGV[0]' "$sw/src/b.sh"
 rm -f "$work/saw"
 (cd "$sw" && exec env CI= SAW="$work/saw" perl -e 'alarm 300; setpgrp(0, 0); exec @ARGV' bash "$mutate" --max 2) >"$work/w.out" 2>&1 &
 wpid=$!
-# (once the journal names src/b.sh, its write waits for the clock)
-perl -e 'alarm 60; my ($j, $want) = @ARGV; for (;;) { my $t; if (open my $h, "<", $j) { local $/; $t = <$h> } last if defined $t && index($t, $want) >= 0; select undef, undef, undef, 0.01 }' \
-  "$sw/.git/method-mutate-journal" " $(printf 'src/b.sh' | perl -ne 'print unpack "H*", $_') "
+# (once the journal names src/b.sh alone, not as the control run's does
+# with src/a.sh, the mutant's write waits for the clock)
+perl -e 'alarm 60; my ($j, $want, $not) = @ARGV; for (;;) { my $t; if (open my $h, "<", $j) { local $/; $t = <$h> } last if defined $t && index($t, $want) >= 0 && index($t, $not) < 0; select undef, undef, undef, 0.01 }' \
+  "$sw/.git/method-mutate-journal" " $(printf 'src/b.sh' | perl -ne 'print unpack "H*", $_') " " $(printf 'src/a.sh' | perl -ne 'print unpack "H*", $_') "
 kill -INT -- "-$wpid"
 wait "$wpid"
 code=$?
@@ -963,7 +964,7 @@ check "$lw" 'count'
 printf 'count() { i=0; n=0; while [ "$i" -lt 3 ] && [ "$n" -lt 600 ]; do\n  i=$((i + 1))\n  n=$((n + 1)); sleep 0.1; done; }\n' >"$lw/src/b.sh"
 (cd "$lw" && git add -A && git commit -q -m "Step by one")
 mr "$lw"
-expect "a mutant that loops is killed by the time limit" 3 "1 mutants: 1 killed (1 by time limit)"
+expect "a mutant that loops is killed by the time limit (PASS)" 0 "1 mutants: 1 killed (1 by time limit)"
 clean "and the files are the commit, with no process left holding the lock" "$lw"
 
 # --- hand-made journals ---
@@ -1213,6 +1214,100 @@ mr "$rw" --max 2
 expect "a file removed while its mutant's write waits: no mutant was written, and the run stops (exit 2)" 2 \
   "src/b.sh was changed during the run: no mutant was written to it, and the change is kept"
 if [ -e "$rw/.git/method-mutate-journal" ]; then fail "and no journal is left"; else pass "and no journal is left"; fi
+
+# --- step 4b.4: run B, the control run, run C, the kill counts and PASS ---
+cp4=$(new_project "$strong") || abort_sandbox
+c4="$cp4/w"
+# a second check, dist, fails when a file ends with a blank line, as a
+# "build is current" check fails on any change: the control run drops it
+cat >"$c4/dist.sh" <<'EOF'
+for f in src/a.sh src/b.sh src/c.sh; do
+  if [ "$(tail -c 2 "$f" | od -An -tx1 | tr -d ' \n')" = 0a0a ]; then exit 1; fi
+done
+echo 1 ok
+EOF
+printf 'unit\tany\t-\t(\\d+) ok\tbash t.sh\ndist\tany\t-\t(\\d+) ok\tbash dist.sh\n' >"$c4/checks/project.tsv"
+printf 'PRODUCT_PATHS=src\nMUTATE_PATHS=src\nMUTATION_CHECKS=unit\nMUTATION_CHECKS=dist\n' >"$c4/.claude/method.conf"
+(cd "$c4" && git add -A && git commit -q -m "A dist check")
+mr "$c4"
+expect "a check that fails the control run is not used, and is named; the other kills every mutant: PASS (exit 0)" 0 \
+  "not used: dist (it failed when only a line end was added at the end of the files that get a mutant, so it cannot show it noticed a mutant" \
+  "mutate-changed: PASS - " "3 mutants: 3 killed (unit 3; 0 by time limit)"
+clean "and the files are the commit" "$c4"
+printf 'PRODUCT_PATHS=src\nMUTATE_PATHS=src\nMUTATION_CHECKS=dist\n' >"$c4/.claude/method.conf"
+(cd "$c4" && git commit -q -am "The dist check alone")
+mr "$c4"
+expect "with that check alone: SKIPPED no-usable-check, no mutant run (exit 3)" 3 \
+  "not used: dist (it failed" "mutate-changed: SKIPPED - no-usable-check: " "3 mutants: 0 killed (0 by time limit), 0 survived, 3 not run (no check can show it noticed one)"
+clean "and the files are the commit" "$c4"
+# a check SKIPPED in run A (no count) is not used either
+printf 'unit\tany\t-\t(\\d+) ok\tbash t.sh\nquiet\tany\t-\t(\\d+) ok\ttrue\n' >"$c4/checks/project.tsv"
+printf 'PRODUCT_PATHS=src\nMUTATE_PATHS=src\nMUTATION_CHECKS=unit\nMUTATION_CHECKS=quiet\n' >"$c4/.claude/method.conf"
+(cd "$c4" && git commit -q -am "A quiet check")
+mr "$c4"
+expect "a check SKIPPED without any mutant is not used, and is named: PASS with the other (exit 0)" 0 \
+  "not used: quiet (SKIPPED without any mutant: it passed, but no output line matched its count pattern" "mutate-changed: PASS - "
+# the kills counted by the check that made them
+cat >"$c4/t2.sh" <<'EOF'
+. src/a.sh; . src/b.sh; . src/c.sh
+big 100 && ! big 99 && small 3 && ! small 4 || exit 1
+echo 1 ok
+EOF
+check "$c4" 'adult 18 && ! adult 17 && big 200 && small 1 || exit 1'
+printf 'unit\tany\t-\t(\\d+) ok\tbash t.sh\nunit2\tany\t-\t(\\d+) ok\tbash t2.sh\n' >"$c4/checks/project.tsv"
+printf 'PRODUCT_PATHS=src\nMUTATE_PATHS=src\nMUTATION_CHECKS=unit\nMUTATION_CHECKS=unit2\n' >"$c4/.claude/method.conf"
+(cd "$c4" && git add -A && git commit -q -m "Two checks")
+mr "$c4"
+expect "each kill is counted for the check that made it (exit 0)" 0 "3 mutants: 3 killed (unit 1, unit2 2; 0 by time limit)"
+clean "and the files are the commit" "$c4"
+printf 'unit\tany\t-\t(\\d+) ok\tbash t.sh\n' >"$c4/checks/project.tsv"
+printf 'PRODUCT_PATHS=src\nMUTATE_PATHS=src\nMUTATION_CHECKS=unit\n' >"$c4/.claude/method.conf"
+(cd "$c4" && git commit -q -am "One check")
+# run B: a check whose second run differs (it leaves a file git does not
+# see behind) stops the run
+check "$c4" 'if [ -e .git/ran-once ]; then exit 1; fi; touch .git/ran-once; '"$strong"
+mr "$c4"
+expect "a check that does not pass a second time without any mutant: run B stops the run (exit 2)" 2 \
+  "mutate-changed: FAIL - run B: unit did not pass a second time without any mutant (FAIL: exit 1" "so mutation results cannot be trusted"
+rm -f "$c4/.git/ran-once"
+clean "and the files are the commit" "$c4"
+# run C: a check that fails from its fifth run on (A, B, the control run,
+# the one mutant, then C) stops the run after the last mutant
+# shellcheck disable=SC2016 # the check is written, not run
+check "$c4" 'n=$(cat .git/runs 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" >.git/runs; if [ "$n" -ge 5 ]; then exit 1; fi; '"$strong"
+mr "$c4" --max 1
+expect "a check that no longer passes after the last mutant: run C stops the run (exit 2)" 2 \
+  "mutate-changed: FAIL - run C: unit no longer passes without a mutant, after the last one (FAIL: exit 1"
+rm -f "$c4/.git/runs"
+clean "and the files are the commit" "$c4"
+# no pass while changed lines or files were left out: they are named
+check "$c4" "$strong"
+(cd "$c4" && printf 'unlink tmp\n' >src/d.txt && printf '\377\n' >src/e.bin && git add -A && git commit -q -m "Left out")
+mr "$c4"
+expect "every mutant killed, but a line and a file left out: SKIPPED not-all-mutated, naming them (exit 3)" 3 \
+  "mutate-changed: SKIPPED - not-all-mutated: " "changed lines not mutated, as they name a delete or move command: src/d.txt:1" \
+  "changed files not mutated: src/e.bin (not UTF-8 text)"
+clean "and the files are the commit" "$c4"
+(cd "$c4" && git rm -q src/d.txt src/e.bin && git commit -q -m "Not left out")
+# kill -9 during the control run: recovery puts every file back
+# shellcheck disable=SC2016 # the check is written, not run
+check "$c4" 'if [ "$(tail -c 2 src/a.sh | od -An -tx1 | tr -d " \n")" = 0a0a ]; then touch "$MARK"; perl "$BEAT_PL" "$BEAT" ignore; fi; '"$strong"
+rm -f "$work/mark" "$work/beat"
+(cd "$c4" && exec env CI= MARK="$work/mark" BEAT="$work/beat" perl -e 'alarm 300; exec @ARGV' bash "$mutate") >"$work/c.out" 2>&1 &
+cpid=$!
+if wait_for "$work/mark" 60 && wait_for "$work/beat" 10; then pass "setup: the check runs in the control run"; else fail "setup: the check runs in the control run" "$(cat "$work/c.out")"; fi
+kill -9 "$cpid" 2>/dev/null
+wait "$cpid" 2>/dev/null
+if stopped "$work/beat" 10; then pass "setup: the watchdog stops the check"; else fail "setup: the watchdog stops the check"; fi
+mr "$c4" --recover
+expect "kill -9 during the control run: --recover puts every file back" 0 "mutate-changed: RECOVERED - 3 files put back; the journal is removed"
+clean "and the files are the commit" "$c4"
+# TERM during the control run: every file it wrote is put back at once
+# shellcheck disable=SC2016 # the check is written, not run
+check "$c4" 'if [ -n "${SLOW:-}" ] && [ "$(tail -c 2 src/a.sh | od -An -tx1 | tr -d " \n")" = 0a0a ]; then touch "$MARK"; perl "$BEAT_PL" "$BEAT" "$SLOW"; fi; '"$strong"
+run_and "$c4" TERM plain
+expect "TERM during the control run: put back and stopped (exit 2)" 2 "mutate-changed: FAIL - stopped by SIGTERM; src/a.sh put back; the run stopped"
+clean "and the files are the commit" "$c4"
 
 # --- a native Windows perl is refused ---
 # shellcheck disable=SC2016 # perl code, not shell
