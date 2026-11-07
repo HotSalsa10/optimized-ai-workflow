@@ -1329,6 +1329,21 @@ run_and "$c4" TERM plain
 expect "TERM during the control run: put back and stopped (exit 2)" 2 "mutate-changed: FAIL - stopped by SIGTERM; src/a.sh put back; the run stopped"
 clean "and the files are the commit" "$c4"
 
+# --- an edit made while the control run's write waits for the clock: it
+# did not write to that file, the edit is kept, and the rest is put back.
+# The editor, started by run B's check, waits for the control run's
+# journal, which names src/b.sh with src/a.sh ---
+cw=$(new_project "$strong") || abort_sandbox
+cww="$cw/w"
+# shellcheck disable=SC2016 # the check is written, not run
+check "$cww" 'if [ -e .git/ran-once ] && [ ! -e .git/editor ]; then touch .git/editor; perl -MPOSIX -e '\''POSIX::setsid(); alarm 30; my ($j, $f, $also) = @ARGV; my ($want, $with) = map { " " . unpack("H*", $_) . " " } $f, $also; for (;;) { my $t; if (open my $h, "<", $j) { local $/; $t = <$h> } last if defined $t && index($t, $want) >= 0 && index($t, $with) >= 0; select undef, undef, undef, 0.01 } open my $o, ">>", $f; print $o "# edit\n"; close $o'\'' .git/method-mutate-journal src/b.sh src/a.sh </dev/null >/dev/null 2>&1 & fi; touch .git/ran-once; '"$strong"
+perl -e 'my $t = time + 10; utime $t, $t, $ARGV[0]' "$cww/src/b.sh"
+mr "$cww"
+expect "an edit made while the control run's write waits: not written to, the edit kept, the rest put back (exit 2)" 2 \
+  "mutate-changed: FAIL - src/b.sh was changed during the run: the control run did not write to it, and the change is kept; src/a.sh put back"
+if grep -q '^# edit$' "$cww/src/b.sh"; then pass "and the edit is still there"; else fail "and the edit is still there" "$(cat "$cww/src/b.sh")"; fi
+if [ -e "$cww/.git/method-mutate-journal" ]; then fail "and no journal is left"; else pass "and no journal is left"; fi
+
 # --- a native Windows perl is refused ---
 # shellcheck disable=SC2016 # perl code, not shell
 out=$(cd "$w" && env CI= perl -e 'my $f = shift; require $f; $^O = "MSWin32"; Mutate::main()' "$lib/mutate.pl" 2>&1)
