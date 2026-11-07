@@ -368,8 +368,17 @@ printf 'x == 1\n' >"$w5/.method/x.py"
 printf '[submodule "x"]\n\tpath = x == 1\n' >"$w5/.gitmodules"
 feat "$w5" "Method files and a top file"
 MP="$w5/scripts/method/mutate-changed.sh" mp "$w5" --list
-expect "with MUTATE_PATHS=. the method's files, checks/, .claude/ and .gitignore are left out, and the rest is mutated" 0 \
-  "mutate-changed: planned: top.py:1:7: '1' becomes '0'" "9 left out (the method's or git's own files)"
+# (where the file system keeps letter case, .Claude/, Checks/ and
+# .GitAttributes are not the method's or git's: they are named, so a run
+# with them is not a pass)
+if [ -d "$w5/CHECKS" ]; then
+  expect "with MUTATE_PATHS=. the method's files, checks/, .claude/ and .gitignore are left out, and the rest is mutated" 0 \
+    "mutate-changed: planned: top.py:1:7: '1' becomes '0'" "9 left out (the method's or git's own files)"
+else
+  expect "with MUTATE_PATHS=. the method's files, checks/, .claude/ and .gitignore are left out, and the rest is mutated" 0 \
+    "mutate-changed: planned: top.py:1:7: '1' becomes '0'" "6 left out (the method's or git's own files)" \
+    "3 named like the method's or git's own files, in another case"
+fi
 lacks "nor in .method/" ".method/x.py"
 lacks "nor in .gitmodules" ".gitmodules:"
 lacks "nothing in the method's folder" "scripts/method/"

@@ -32,6 +32,10 @@ my $DEFAULT_MINUTES = 8;    # a foreground tool call allows 10 minutes
 # journal of the round whose mutant may be on disk
 my ($LOCK, $JOURNAL, $GITDIR, $TEMP, $SIGNAL, $RUN, $OPEN, $CHECK_OUT);
 my $OUT_N = 0;
+# the control run's place in its journal; KEPT: the files of the control
+# run an edit was made on top of, left as they are (kept_note says so)
+my $CONTROL = 'the control run: a line end added at the end of the file';
+my @KEPT;
 
 sub say_line { print Esc::line("mutate-changed: $_[0]"), "\n" }
 
@@ -56,11 +60,24 @@ sub stop {
     $reason .= '; ' . join(', ', @back) . ' put back' if @back;
     $reason .= "; $e" if $e;
   }
+  $reason .= kept_note();
   if ($OPEN && -f $JOURNAL && !-l $JOURNAL) {
     $reason .= '; the journal stays' . ($reason =~ /--recover/ ? '' : ': once that is fixed, run mutate-changed.sh --recover');
   }
   say_line("FAIL - $reason; the run stopped");
   exit 2;
+}
+
+# kept_note: what the reason adds for KEPT: such a file may still end with
+# the control run's line end (its journal names no line to look for, as
+# that edit is not a mutant)
+sub kept_note {
+  my @n = @KEPT;
+  @KEPT = ();
+  return '' unless @n;
+  return '; ' . join(', ', map { Esc::line($_) } @n) . (@n > 1 ? ' were' : ' was') . ' changed on top of the line end'
+    . ' the control run added at the end, and ' . (@n > 1 ? 'are left as they are' : 'is left as it is')
+    . ': that line end may still be there';
 }
 
 # skipped KIND DETAIL: nothing to do, which is never a pass (exit 3)
@@ -95,15 +112,16 @@ sub usage {
 
 # --- which files: the settings and the built-in exclusions ---
 
-# excluded PATH METHOD: why PATH is never mutated, or undef. The method's own
-# files (the folder mutate-changed.sh runs from, .claude/, checks/), its
-# local folder (.method/), and git's own files, whose change would change
-# what git shows. Compared without case, as a file system that folds case
-# would open them.
+# excluded PATH METHOD EXACT: why PATH is never mutated, or undef. The
+# method's own files (the folder mutate-changed.sh runs from, .claude/,
+# checks/), its local folder (.method/), and git's own files, whose change
+# would change what git shows. Compared without case, as a file system that
+# folds case would open them; with EXACT, in the same case only.
 sub excluded {
-  my ($p, $method) = @_;
-  my $lp = lc $p;
-  return "the method's own files" if defined $method && ($lp eq lc $method || index($lp, lc("$method/")) == 0);
+  my ($p, $method, $exact) = @_;
+  my $lp = $exact ? $p : lc $p;
+  my $lm = !defined $method ? undef : $exact ? $method : lc $method;
+  return "the method's own files" if defined $lm && ($lp eq $lm || index($lp, "$lm/") == 0);
   return "the method's own files" if $lp =~ m{\A(?:\.claude|checks|\.method)/};
   return "git's own files" if $lp =~ m{(?:\A|/)\.git(?:attributes|ignore|modules)\z};
   return undef;
@@ -290,12 +308,23 @@ sub plan {
   # (a changed file skipped for any reason but being the method's or git's
   # own is named too: a run with such files is not a pass)
   my $skip = sub { my ($p, $why) = @_; $skip{$why}++; push @skipped_files, [$p, $why] };
+  # (where the file system keeps letter case, a file named like the
+  # method's or git's own in another case is neither: it is named too)
+  my @pin = Git::case_pin();
+  my $folds = !@pin;
   Tree::check_trees($base, $fp->{head});
   my @cand;
   for my $f (Tree::changed($base, $fp->{head})) {
     next if $f->{st} eq 'D';
     next unless under($f->{path}, $conf->{MUTATE_PATHS});
-    if (excluded($f->{path}, $method)) { $skip{"left out (the method's or git's own files)"}++; next }
+    if (excluded($f->{path}, $method)) {
+      if ($folds || excluded($f->{path}, $method, 1)) {
+        $skip{"left out (the method's or git's own files)"}++;
+      } else {
+        $skip->($f->{path}, "named like the method's or git's own files, in another case");
+      }
+      next;
+    }
     if ($f->{m2} !~ /\A100(?:644|755)\z/) { $skip->($f->{path}, 'not a regular file'); next }
     push @cand, $f;
   }
@@ -742,7 +771,7 @@ sub mutated {
 sub restore {
   my ($f, $fast, $start) = @_;
   my $p = Esc::line($f->{path});
-  my $where = "$f->{place}; lines added above it move it";
+  my $where = $f->{place} . ($f->{place} eq $CONTROL ? '' : '; lines added above it move it');
   my $back = "put the file back as it was when the run started (git restore --source=$start --staged --worktree --"
     . ' and its name)';
   # a file changed on top of its mutant: when the mutant's line is gone
@@ -760,6 +789,7 @@ sub restore {
     die "$p $what, and it cannot tell whether the mutant's change is still in it, as the original has that line, with"
       . " the same lines around it, elsewhere ($where): $back, run mutate-changed.sh --recover, then make your change"
       . " again, leaving that change out\n" unless defined $r;
+    push @KEPT, $f->{path} if $f->{place} eq $CONTROL;
     return 0;
   };
   my $h = sha_file($f->{path});
@@ -921,14 +951,32 @@ sub end_round {
     undef $lost if $cur && join(' ', map {"$_->{path} $_->{mb}"} @{ $cur->{files} })
       eq join(' ', map {"$_->{path} $_->{mb}"} @{ $OPEN->{files} });
   }
-  my @back;
-  if (!eval { @back = map { $_->{path} } grep { restore($_, $fast, $OPEN->{start}) } @{ $OPEN->{files} }; release($OPEN); 1 }) {
-    die $@ unless defined $lost;
+  # (every file is tried: one that cannot be put back does not keep the
+  # others from it)
+  my (@back, @err, @bad);
+  for my $f (@{ $OPEN->{files} }) {
+    my $r = eval { restore($f, $fast, $OPEN->{start}) };
+    if (defined $r) {
+      push @back, $f->{path} if $r;
+      next;
+    }
     (my $e = $@) =~ s/\n\z//;
-    die "$e; and no journal names it, so --recover cannot find it (the journal was removed or changed during the round"
-      . " and could not be written again: $lost): once that is done, make sure "
-      . join(', ', map { Esc::line($_->{path}) . " no longer holds the mutant's change ($_->{place})" } @{ $OPEN->{files} })
-      . "\n";
+    push @err, $e;
+    push @bad, $f;
+  }
+  if (!@err && !eval { release($OPEN); 1 }) {
+    (my $e = $@) =~ s/\n\z//;
+    push @err, $e;
+    @bad = @{ $OPEN->{files} };
+  }
+  if (@err) {
+    my $done = @back ? '; ' . join(', ', map { Esc::line($_) } @back) . ' put back' : '';
+    die join('; ', @err) . "$done\n" unless defined $lost;
+    die join('; ', @err) . '; and no journal names ' . (@bad > 1 ? 'them' : 'it') . ', so --recover cannot find '
+      . (@bad > 1 ? 'them' : 'it') . ' (the journal was removed or changed during the round and could not be written'
+      . " again: $lost): once that is done, make sure "
+      . join(', ', map { Esc::line($_->{path}) . " no longer holds the mutant's change ($_->{place})" } @bad)
+      . "$done\n";
   }
   undef $OPEN;
   die "the journal was removed or changed during the round and could not be written again ($lost); "
@@ -967,7 +1015,7 @@ sub recover {
   die join(' and ', @ops) . ' is in progress, and its autostash can hold a mutant; finish or abort it, then run'
     . " mutate-changed.sh --recover\n" if @ops;
   on_start($j);
-  my ($own, $n) = ($TEMP, 0);
+  my ($own, $n, @err) = ($TEMP, 0);
   $TEMP = $j->{temp};
   for my $f (@{ $j->{files} }) {
     # (a cut-off write's temp file; none where a folder on the way is gone,
@@ -977,10 +1025,21 @@ sub recover {
       my $t = "$dir/$TEMP";
       unlink $t if -f $t && !-l $t;
     }
-    next unless restore($f, 1, $j->{start});
+    my $r = eval { restore($f, 1, $j->{start}) };
+    if (!defined $r) {
+      (my $e = $@) =~ s/\n\z//;
+      push @err, $e;
+      next;
+    }
+    next unless $r;
     $n++;
     say_line("recovered: $f->{path} put back (a run was cut off)");
   }
+  my $note = kept_note();
+  say_line(substr $note, 2) if $note;
+  # (every file is tried: one that cannot be put back does not keep the
+  # others from it)
+  die join('; ', @err) . "\n" if @err;
   release($j);
   $TEMP = $own;
   return $n;
@@ -1118,7 +1177,7 @@ sub run_mutants {
     push @a, sprintf('%s passed in %d s', $c->{id}, $took + 0.5);
     push @use, $c;
   }
-  my $why = changes($start, undef);
+  my $why = changes($start, $stash);
   die 'run A: ' . join('; ', @$why) . " without any mutant\n" if @$why;
   my $none = sub {
     my ($kind, $why) = @_;
@@ -1135,7 +1194,9 @@ sub run_mutants {
     . ' min with runs B and C and the control run');
   # (a round's worst case: each check's limit, and the time around it)
   my $round = sub { my $s = 5; $s += $limit{ $_->{id} } + 3 for @use; return $s };
-  $none->('time-reached', "runs B and C and the control run do not fit --minutes $minutes")
+  $none->('time-reached', "runs B and C and the control run do not fit --minutes $minutes (with the checks' limits,"
+    . ' they and one mutant can take up to '
+    . int((Checks::now() + 4 * $round->() - $deadline) / 60 + $minutes + 0.999) . ' min)')
     if Checks::now() + 3 * $round->() > $deadline;
   # run B: the same again; results that are not repeatable cannot be trusted
   for my $c (@use) {
@@ -1145,30 +1206,44 @@ sub run_mutants {
       . " behind changes the next one (a server, a file git ignores, database rows), so mutation results cannot be"
       . " trusted\n" unless $res->{status} eq 'PASS';
   }
-  $why = changes($start, undef);
+  $why = changes($start, $stash);
   die 'run B: ' . join('; ', @$why) . " without any mutant\n" if @$why;
   # the control run: a line end added at the end of every file that will
   # get a mutant, through the same write function and journal as a mutant;
-  # a check that does not pass it cannot show it noticed a mutant
-  die "stopped by SIG$SIGNAL\n" if defined $SIGNAL;
+  # a check that does not pass it cannot show it noticed a mutant. Each file
+  # is named in the journal just before it is written, so a file the run did
+  # not write is never put back: an edit made to it, even one that equals
+  # the line end, is kept. The journal names no line (64 zeros): an edit
+  # made on top of the line end is left as it is, and said (kept_note)
   my %seen;
-  my (@ctl, @cf);
+  my @cf;
   for my $m (grep { !$seen{ $_->{path} }++ } @mutants) {
     my $text = Git::cat('blob', $m->{blob}, 1);
     my $c = "$text\n";
     push @cf, { path => $m->{path}, sb => $m->{blob}, mb => Git::object_id('blob', $c, $m->{blob}),
-      ss => Digest::SHA::sha256_hex($text), ms => Digest::SHA::sha256_hex($c), text => $text,
-      place => 'the control run: a line end added at the end of the file', ml => '0' x 64, mw => '0' x 64 };
-    push @ctl, $c;
+      ss => Digest::SHA::sha256_hex($text), ms => Digest::SHA::sha256_hex($c), text => $text, place => $CONTROL,
+      ml => '0' x 64, mw => '0' x 64 };
   }
-  my $cj = { start => $start->{head}, stash => $stash, temp => $TEMP, pgid => undef, files => \@cf };
-  journal_write($cj);
-  $OPEN = $cj;
-  for my $i (0 .. $#cf) {
-    die Esc::line($cf[$i]{path}) . " was changed during the run: the control run did not write to it, and the change"
-      . " is kept\n" unless put($cf[$i]{path}, $ctl[$i], 1, $cf[$i]{ss});
+  my $cj = { start => $start->{head}, stash => $stash, temp => $TEMP, pgid => undef, files => [] };
+  for my $f (@cf) {
+    # (a signal: no next file is written)
     die "stopped by SIG$SIGNAL\n" if defined $SIGNAL;
+    push @{ $cj->{files} }, $f;
+    journal_write($cj);
+    $OPEN = $cj;
+    next if put($f->{path}, "$f->{text}\n", 1, $f->{ss});
+    # (nothing was written to it, so it is not put back)
+    pop @{ $cj->{files} };
+    if (@{ $cj->{files} }) {
+      journal_write($cj);
+    } else {
+      undef $OPEN if unlink($JOURNAL) || !(-e $JOURNAL || -l $JOURNAL);
+    }
+    die Esc::line($f->{path}) . " was changed during the run: the control run did not write to it, and the change"
+      . " is kept\n";
   }
+  # (a signal while put waited for the clock: no check runs)
+  die "stopped by SIG$SIGNAL\n" if defined $SIGNAL;
   my @kept;
   for my $c (@use) {
     my ($res) = run_check($c, $env, $limit{ $c->{id} }, $cj);

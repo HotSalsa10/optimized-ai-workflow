@@ -3,10 +3,15 @@
 # small text change (a mutant), the project's fast checks run against it,
 # and the line is put back. A mutant the checks do not notice survives: the
 # tests would not notice that mistake either. The work is done by
-# lib/mutate.pl. A kill counts only when the checks give the same result
-# twice without a mutant (runs A and B), still pass after the last one (run
-# C), and pass when only a line end is added at the end of the files that
-# get a mutant (the control run): a check that does not is not used.
+# lib/mutate.pl. A kill counts only when the checks pass twice without a
+# mutant (runs A and B: one that fails stops the run, exit 2, and one
+# SKIPPED in run A is not used), pass when only a line end is added at the
+# end of the files that get a mutant (the control run: one that does not is
+# not used), and still pass after the last mutant (run C: else exit 2). The
+# control run writes through the same write function and journal as a
+# mutant, naming each file in the journal just before it writes it, so a
+# file it did not write is never put back; an edit made on top of its line
+# end is left as it is, and the line says that line end may still be there.
 #
 # Usage: bash scripts/method/mutate-changed.sh [--list | --recover] [--max N] [--minutes N]
 #   (none)       run: runs A and B (each check twice, with no mutant), the
@@ -16,10 +21,13 @@
 #   --recover    put back what a run that was cut off left on disk, and
 #                nothing else
 #   --max N      at most N mutants (default 100)
-#   --minutes N  stop starting mutants once one more might not end within N
-#                minutes of the start (default 8; 1 to 600). A foreground
-#                tool call allows 10 minutes: for longer runs, raise its
-#                limit or run in the background.
+#   --minutes N  stop starting mutants once one more, and run C after it,
+#                might not end within N minutes of the start (default 8; 1
+#                to 600); runs B and C and the control run must fit before
+#                the first, so with the checks' time limits, less than 3
+#                never runs one (the line says how long they can take). A
+#                foreground tool call allows 10 minutes: for longer runs,
+#                raise its limit or run in the background.
 #
 # A run writes into the working tree with your rights. It holds the lock it
 # shares with run-checks.sh (lib/runstate.pl, in git's own folder), so the
@@ -49,9 +57,11 @@
 # merge, rebase or other git operation is in progress (its autostash can
 # hold it, also when a check started it); a git command that fails there, or
 # ends on a signal, keeps the journal too. A journal a check removed or
-# changed is written again first; when it cannot be, the file is put back
-# all the same, and the line says no journal names it and where the mutant
-# may be. Then the files, HEAD, the branches and tags, and the stash must be
+# changed is written again first; when it cannot be, the files are put back
+# all the same, and the line says no journal names them and where the
+# mutant may be. Every file a journal names is tried, here and in recovery:
+# one that cannot be put back does not keep the others from it. Then the
+# files, HEAD, the branches and tags, and the stash must be
 # as at the start (else exit 2, naming what changed). On INT, TERM, HUP
 # (unless it came ignored, as under nohup) or QUIT, the check's group is
 # killed and the file put back at once (exit 2, naming the signal). After
@@ -91,7 +101,9 @@
 #                    (runs_in, needs): SKIPPED not-here.
 # Never mutated: the folder this script runs from, .claude/, checks/,
 # .method/, and .gitattributes, .gitignore and .gitmodules anywhere, in any
-# case of letters.
+# case of letters where the file system folds case; where it keeps case, a
+# file named like them in another case is not theirs, and is named as not
+# mutated (so the run is not a pass).
 #
 # A mutant runs with your rights, so a file or line that names one of these
 # words gets none: rm, rmdir, unlink, mv, dd, chmod, chown, shred, truncate,
@@ -162,11 +174,13 @@
 # B or C not passing (results that do not repeat cannot be trusted), a
 # check that changed something, a signal, or a refusal to put a file back
 # (the last line says FAIL and why); 3 SKIPPED (not-configured, not-here,
-# nothing-to-mutate, no-usable-check: no check passed runs A and B and the
-# control run; time-reached: --minutes ran out; max-reached: the plan had
-# more than --max; not-all-mutated: every mutant was killed, but changed
-# lines kept out by the delete words or changed files skipped are named),
-# never a pass.
+# nothing-to-mutate, no-usable-check: no check is left once those SKIPPED
+# in run A and those that do not pass the control run are not used;
+# time-reached: --minutes ran out; max-reached: the plan had more than
+# --max; not-all-mutated: every mutant was killed, but changed lines kept
+# out by the delete words or changed files skipped are named), never a
+# pass. A pass is a run's last line "mutate-changed: PASS - ...": exit 0
+# alone is also --list and --recover.
 set -u
 unset METHOD_CALLER_PERL_UNICODE METHOD_CALLER_PERL5OPT METHOD_CALLER_PERL5LIB METHOD_CALLER_PERLLIB
 unset METHOD_CALLER_PERL_USE_UNSAFE_INC METHOD_CALLER_PERLIO
