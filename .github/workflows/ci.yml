@@ -1,0 +1,69 @@
+name: CI
+
+# Linux runs on every change. Windows (Git Bash) and macOS run on release tags
+# and when started by hand, to save the private repo's CI minutes (DECISIONS A19).
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A manual run and a push run on the same branch get different groups, so one
+# never cancels the other; a newer push still cancels an older one.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Each step first stops the runner from reading workflow commands (lines
+# starting with ::) in its output, so text from a file in the repo cannot
+# fake an annotation or hide later output.
+jobs:
+  linux:
+    name: Linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      REQUIRE_SHELLCHECK: "1"
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Repo checks
+        run: |
+          echo "::stop-commands::stop-$RANDOM$RANDOM$RANDOM"
+          bash scripts/dev/validate.sh
+      - name: Tests and planted defects
+        run: |
+          echo "::stop-commands::stop-$RANDOM$RANDOM$RANDOM"
+          bash tests/run.sh
+
+  other-systems:
+    name: ${{ matrix.os }}
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Repo checks
+        run: |
+          echo "::stop-commands::stop-$RANDOM$RANDOM$RANDOM"
+          bash scripts/dev/validate.sh
+      - name: Tests and planted defects
+        run: |
+          echo "::stop-commands::stop-$RANDOM$RANDOM$RANDOM"
+          bash tests/run.sh

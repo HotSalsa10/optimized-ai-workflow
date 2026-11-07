@@ -1,0 +1,106 @@
+# Regression corpus for scripts/dev/lint-portability.sh, used by tests/plants/dev-checks.sh.
+# The plant copies this file into a sandbox as a shell script (with a #! line on
+# top). Every line ending in the RED marker must be reported, and no other line.
+# The file has no .sh name and no #! line, so the repo checks do not lint it.
+script="$(readlink -f "$0")" #RED
+when="$(date -d yesterday +%F)" #RED
+out="$(sed -i 's/a/b/' f)" #RED
+v="$(grep -P 'x' f)" #RED
+sed -ie 's/a/b/' f #RED
+sed -in 's/a/b/' f #RED
+if timeout 5 true; then :; fi #RED
+while md5sum f; do break; done #RED
+if ! sha256sum -c sums; then :; fi #RED
+( tac f ) #RED
+cores="$(nproc)" #RED
+base64 -w0 f #RED
+printf '%s\n' a | xargs -r0 echo #RED
+sed -rn 's/a/b/p' f #RED
+shopt -s inherit_errexit #RED
+declare -l lower #RED
+for i in {01..10}; do :; done #RED
+sed -E -i 's/a/b/' f #RED
+sed -n -e 's/a/b/' -i f #RED
+grep -o -P 'x' f #RED
+printf '%s\n' a | xargs -0 -r echo #RED
+date +%s -d yesterday #RED
+sort -t, -k2 -V f #RED
+[ -v HOME ] #RED
+test -v HOME #RED
+declare -g G #RED
+printf '%(%F)T\n' -1 #RED
+echo "${x:0:-1}" #RED
+exec {fd}>f #RED
+echo "${1,,}" #RED
+head -n -1 f #RED
+if true; then
+  timeout 5 true #RED
+  sha1sum f | tac #RED
+fi
+where="`readlink -f x`" #RED
+msg="`date -d yesterday`" #RED
+age=$(( $(date +%s) - $(date -d "$when" +%s) )) #RED
+jobs=$(( $(nproc) * 2 )) #RED
+n=$(( $(grep -cP 'x' f) + 1 )) #RED
+x=$(case "$y" in a) echo 1 ;; esac) #RED
+ext="$(case "$f" in *.md) echo doc ;; *) echo other ;; esac)" #RED
+kind=$(case "$f" in *.sh) echo shell ;; #RED
+esac)
+declare -n ref=x #RED
+mapfile -t lines <f #RED
+echo "${x@Q}" #RED
+echo "${arr[-1]}" #RED
+cmd |& tee log #RED
+cmd &>>log #RED
+coproc cat #RED
+wait -n #RED
+echo {1..10..2} #RED
+echo "$EPOCHSECONDS" #RED
+read -r -i default x #RED
+stat -c %Y f #RED
+find . -printf '%p\n' #RED
+x=$( #RED
+cat <<END
+it's here (open
+END
+)
+y=$( #RED
+case "$z" in
+  a) echo 1 ;;
+esac
+)
+n=$(wc -l <<<"$list")
+x=$(echo $((1 << 2)))
+msg=$(echo "lower case only")
+echo "${x:-default}"
+echo 'sed -i is mentioned in single quotes'
+echo "the word timeout in a string"
+grep -E 'x' f
+sed -E 's/a/b/' f >g
+sed -n 's/a/b/p' f
+date -u +%s
+sort -t, -k2 f
+head -n 1 f
+tail -n +2 f
+case "$1" in
+  a) echo "$(printf x)" ;;
+esac
+for i in {1..10}; do :; done
+declare -a arr
+y=$(printf '%s' "(")
+z="$(printf '%s' "a)b")"
+echo "${arr[@]}" | xargs echo
+cat <<YAML
+    timeout-minutes: 5
+YAML
+now="`date -u +%s`"
+find . -name '*.tmp' -print0 | xargs -0 rm -rf
+xargs grep -rn foo <list
+find . -name '*.md' -exec sed -n '1p' {} \; -print
+t=${timeout:-30}
+echo ${md5sum:-none}
+tools=(md5sum shasum)
+{ timeout=5; }
+y=$(case "$z" in (a) echo 1 ;; esac)
+x=$(echo case)
+v=${!timeout}

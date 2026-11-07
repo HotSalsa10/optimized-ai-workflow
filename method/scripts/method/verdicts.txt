@@ -1,0 +1,20 @@
+# The one verdict vocabulary (rule M039). The words are settled in DECISIONS
+# A10. Scripts and tests read them through lib/verdicts.pl; no script spells
+# them out itself, and a test checks that.
+# Each line: KIND<TAB>WORDS<TAB>MEANING. Lines starting with # are comments.
+#   verdict         a word a checking agent opens its answer with
+#   trailer-key     the key of the commit trailer
+#   trailer         a trailer value that stands alone
+#   trailer-reason  a trailer value followed by " - " and a reason
+#   ready           a trailer value done-check takes as ready to merge;
+#                   each is also a trailer value (DECISIONS A10, SPEC R4)
+verdict	APPROVE	the change may go ahead
+verdict	REQUEST CHANGES	fix the listed findings, then review again
+verdict	REJECT	wrong approach; plan again
+verdict	ESCALATE	a person must decide
+trailer-key	Review-Verdict	the commit trailer's key; the trailer is the last paragraph of the message, on one line
+trailer	approve	reviewed and approved
+trailer	request-changes-resolved	every requested change was made and checked
+trailer-reason	request-changes-open	changes are still open; the reason names them
+trailer-reason	not-required	no review was needed; the reason says why
+ready	approve	the only trailer value that lets a change merge: the review approved this version (SPEC R4)
