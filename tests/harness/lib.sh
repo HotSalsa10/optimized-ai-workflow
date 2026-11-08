@@ -24,21 +24,27 @@
 #                        runs the client once in the project, "-p go" with
 #                        stream-json output, bounded by SECS, with an
 #                        environment built from a fixed list (no key but the
-#                        dummy one, no outside proxy, HOME and TMPDIR inside
-#                        the case); VAR=VALUE adds to it
+#                        dummy one, the fake as every proxy, HOME and TMPDIR
+#                        inside the case, no retries) and SendMessage
+#                        switched off (H_SEND_MESSAGE=1 keeps it, for a case
+#                        that addresses a stand-in inside the case);
+#                        VAR=VALUE adds to it, and may not replace HOME,
+#                        TMPDIR, a proxy, CLAUDE_CONFIG_DIR or ANTHROPIC_*
 #   h_stop               stops the fake
 # Questions about the case's results, each 0 (yes) or 1 (no), printing
 # nothing: h_reached, h_no_connect, h_no_overcap, h_tmp_clean, h_req_has
-# TEXT, h_tsv_has TEXT, h_ran FILE. h_safe NAME passes or fails the four
-# safety questions as one line. h_init FIELD prints a field of the client's
-# init event.
-
-h_slug() {
-  printf '%s' "$1" | LC_ALL=C sed 's/[^A-Za-z0-9]/-/g'
-}
+# TEXT (any request), h_req_in CONV TEXT (the requests of the fake's
+# conversation CONV only, in what the client sent: system text and
+# non-assistant messages), h_tsv_has TEXT, h_ran FILE. h_safe NAME passes
+# or fails the four safety questions as one line. h_init FIELD prints a
+# field of the client's init event. req-001 is h_fake's own alive probe.
 
 h_case() {
   H_DIR="$H_WORK/it's a case ü/$1"
+  # this run's folder as the client names it (each character that is not
+  # a letter or a digit a dash): unique to the run, and in every name the
+  # client makes from a case's path
+  H_TOKEN=$(perl -e 'my $s = shift; utf8::decode($s); $s =~ s/[^A-Za-z0-9]/-/g; print $s' "$H_WORK")
   H_PROJ="$H_DIR/project"
   rm -rf "$H_DIR"
   mkdir -p "$H_DIR/home" "$H_DIR/tmp" "$H_DIR/fake" "$H_PROJ" || return 1
@@ -89,13 +95,22 @@ h_fake() {
 }
 
 h_client() {
+  local secs start end
   secs=$1
   shift
   h_env=()
   while [ $# -gt 0 ] && [ "$1" != "--" ]; do
     case "$1" in
-      *OAUTH* | *AUTH_TOKEN* | *BEDROCK* | *VERTEX* | ANTHROPIC_API_KEY=* | CLAUDE_CODE_USE_*)
-        echo "harness: refusing to pass $1 to the client: only the dummy key may reach it" >&2
+      *OAUTH* | *AUTH_TOKEN* | *BEDROCK* | *VERTEX* | ANTHROPIC_* | CLAUDE_CODE_USE_* | HOME=* | TMPDIR=* | *_PROXY=* | *_proxy=* | CLAUDE_CONFIG_DIR=* | CLAUDE_CODE_MAX_RETRIES=*)
+        echo "harness: refusing to pass $1 to the client: only the dummy key, the case's own folders and the fake may reach it" >&2
+        rm -f "$H_DIR/out.jsonl" "$H_DIR/err.txt"
+        H_RC=2
+        return 2
+        ;;
+      [A-Za-z_]*=*) ;;
+      *)
+        echo "harness: h_client takes VAR=VALUE before --, not $1" >&2
+        H_RC=2
         return 2
         ;;
     esac
@@ -103,15 +118,19 @@ h_client() {
     shift
   done
   [ "${1:-}" = "--" ] && shift
+  h_no_send=(--disallowedTools SendMessage)
+  [ "${H_SEND_MESSAGE:-0}" = 1 ] && h_no_send=()
   start=$(perl -MTime::HiRes=time -e 'printf "%.3f", time')
+  # (H_TMPDIR is for the plant that shows the /tmp check going red)
   perl "$HARNESS/bound.pl" "$secs" env -i \
-    HOME="$H_DIR/home" PATH=/usr/bin:/bin TMPDIR="$H_DIR/tmp" \
+    HOME="$H_DIR/home" PATH=/usr/bin:/bin TMPDIR="${H_TMPDIR:-$H_DIR/tmp}" \
     ANTHROPIC_BASE_URL="http://127.0.0.1:$H_PORT" ANTHROPIC_API_KEY=dummy \
-    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 DISABLE_AUTOUPDATER=1 \
-    HTTPS_PROXY="http://127.0.0.1:$H_PORT" HTTP_PROXY="http://127.0.0.1:$H_PORT" NO_PROXY=127.0.0.1 \
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 DISABLE_AUTOUPDATER=1 CLAUDE_CODE_MAX_RETRIES=0 \
+    HTTPS_PROXY="http://127.0.0.1:$H_PORT" HTTP_PROXY="http://127.0.0.1:$H_PORT" ALL_PROXY="http://127.0.0.1:$H_PORT" NO_PROXY=127.0.0.1 \
+    https_proxy="http://127.0.0.1:$H_PORT" http_proxy="http://127.0.0.1:$H_PORT" all_proxy="http://127.0.0.1:$H_PORT" no_proxy=127.0.0.1 \
     GIT_CONFIG_NOSYSTEM=1 ${h_env[@]+"${h_env[@]}"} \
     /bin/sh -c 'cd "$1" && shift && exec "$@"' sh "${H_CWD:-$H_PROJ}" \
-    "$H_CLIENT" -p "${H_PROMPT:-go}" --output-format stream-json --verbose "$@" \
+    "$H_CLIENT" -p "${H_PROMPT:-go}" --output-format stream-json --verbose ${h_no_send[@]+"${h_no_send[@]}"} "$@" \
     </dev/null >"$H_DIR/out.jsonl" 2>"$H_DIR/err.txt"
   H_RC=$?
   end=$(perl -MTime::HiRes=time -e 'printf "%.3f", time')
@@ -131,26 +150,32 @@ h_stop() {
 
 # --- questions ---
 
+# a scripted answer to a messages request (not a token count, not over the cap)
 h_reached() {
-  LC_ALL=C grep -q "	POST	/v1/messages" "$H_DIR/fake/requests.tsv" 2>/dev/null
+  perl -e 'open my $f, "<", $ARGV[0] or exit 1; while (<$f>) { chomp; my @c = split /\t/; exit 0 if @c > 6 && $c[2] eq "POST" && $c[3] =~ m{\A/v1/messages(?:\?|\z)} && $c[6] !~ /\A(?:over-cap|other|unknown-path)\z/ } exit 1' "$H_DIR/fake/requests.tsv"
 }
+# no CONNECT, and no request for another host through the proxy (its path
+# is then a whole URL)
 h_no_connect() {
-  ! LC_ALL=C grep -q "CONNECT-REFUSED" "$H_DIR/fake/requests.tsv" 2>/dev/null
+  ! perl -e 'open my $f, "<", $ARGV[0] or exit 1; while (<$f>) { my @c = split /\t/; exit 0 if /CONNECT-REFUSED/ || (@c > 3 && $c[3] =~ m{\A[A-Za-z][A-Za-z0-9+.-]*://}) } exit 1' "$H_DIR/fake/requests.tsv"
 }
 h_no_overcap() {
   ! LC_ALL=C grep -q "	over-cap	" "$H_DIR/fake/requests.tsv" 2>/dev/null
 }
 # the client's own temporary folder for this user, outside the case
+# (H_TMP_ROOT: another folder, for the plant that shows this check red)
 h_tmp_list() {
-  perl -e 'opendir my $d, $ARGV[0] or exit 0; print "$_\n" for sort readdir $d' "/tmp/claude-$(id -u)"
+  perl -e 'opendir my $d, $ARGV[0] or exit 0; print "$_\n" for sort readdir $d' "${H_TMP_ROOT:-/tmp/claude-$(id -u)}"
 }
-# nothing new in it that names this case's project
+# nothing in it that names this run's cases
 h_tmp_clean() {
-  slug=$(h_slug "$H_PROJ")
-  ! h_tmp_list | LC_ALL=C grep -F -q -- "$slug"
+  ! h_tmp_list | LC_ALL=C grep -F -q -- "$H_TOKEN"
 }
 h_req_has() {
   LC_ALL=C grep -F -q -- "$1" "$H_DIR"/fake/req-*.json 2>/dev/null
+}
+h_req_in() {
+  perl "$HARNESS/read.pl" req "$1" "$2" "$H_DIR/fake"
 }
 h_tsv_has() {
   LC_ALL=C grep -F -q -- "$1" "$H_DIR/fake/requests.tsv" 2>/dev/null
@@ -163,6 +188,7 @@ h_init() {
 }
 
 h_safe() {
+  local why
   why=""
   h_reached || why="$why no request reached the fake;"
   h_no_connect || why="$why an outside connection was tried;"

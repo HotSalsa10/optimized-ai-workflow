@@ -221,7 +221,7 @@ sub messages {
       next unless ref $blk && ($blk->{type} || '') eq 'tool_result';
       my $c = ref $blk->{content} ? text_of($blk->{content}) : ($blk->{content} // '');
       $c =~ s/\s+/ /g;
-      push @tr, ($blk->{is_error} ? 'ERR:' : 'OK:') . substr($c, 0, 160);
+      push @tr, ($blk->{is_error} ? 'ERR:' : 'OK:') . substr($c, 0, 4000);
     }
   }
   my ($conv) = grep { my $re = $_->{match}; $ftext =~ /$re/m } @{ $script->{convs} || [] };

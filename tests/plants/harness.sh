@@ -19,6 +19,7 @@ finish() {
   exit
 }
 client=${METHOD_HARNESS_CLIENT:-}
+case $client in '' | /*) ;; *) client=$PWD/$client ;; esac
 if [ -z "$client" ]; then
   skip "harness plants: no client given; set METHOD_HARNESS_CLIENT to a Claude Code binary to run them"
   finish
@@ -65,7 +66,10 @@ if h_fake "$H_DIR/script.json"; then
   h_client 60 -- $D
   H_PORT=$real_port
   h_stop
-  if h_reached; then fail "a client pointed at a dead port: the reach check said a request arrived"; else pass "a client pointed at a dead port: the reach check sees that no request reached the fake"; fi
+  # (the client did start: it wrote its init event, then could not connect)
+  if h_reached; then fail "a client pointed at a dead port: the reach check said a request arrived"
+  elif [ -z "$(h_init session_id 2>/dev/null)" ]; then fail "a client pointed at a dead port: the client never started, so the plant shows nothing" "$(tail -3 "$H_DIR/err.txt")"
+  else pass "a client pointed at a dead port: the reach check sees that no request reached the fake (in $H_SECS s)"; fi
 else
   fail "dead-port: the fake did not answer"
 fi
@@ -95,6 +99,25 @@ else
   fail "trap: the fake did not answer"
 fi
 
+# 4b. a plain-http call through the proxy (no CONNECT): it counts too
+h_case trap-http
+printf '%s\n' '{"convs":[{"name":"main","match":"^go$","turns":[{"tool":"Bash","input":{"command":"curl -s -m 5 http://example.invalid/harness-plain-http >/dev/null; true","description":"a plain-http call"}},{"text":"MAIN-DONE"}]}]}' >"$H_DIR/script.json"
+if h_fake "$H_DIR/script.json"; then
+  # shellcheck disable=SC2086
+  h_client 60 -- $D
+  h_stop
+  if h_no_connect; then fail "a plain-http call through the proxy: the connection check did not see it" "$(cut -f3-7 "$H_DIR/fake/requests.tsv")"; else pass "a plain-http call through the proxy: the connection check sees it (a request for a whole URL)"; fi
+else
+  fail "trap-http: the fake did not answer"
+fi
+
+# 4c. an extra variable that would replace the case's HOME is refused, and
+# nothing runs
+h_case extras
+if h_client 5 HOME=/elsewhere -- --version; then fail "an extra HOME= for the client was let through"
+elif [ "${H_RC:-}" = 2 ] && [ ! -e "$H_DIR/out.jsonl" ]; then pass "an extra variable that would replace the case's HOME is refused, and the client is not started"
+else fail "an extra HOME= for the client is refused" "rc ${H_RC:-?}"; fi
+
 # 5. no refusing hook: the command the case expects refused runs
 h_case no-guard
 h_fixtures
@@ -109,6 +132,48 @@ else
   fail "no-guard: the fake did not answer"
 fi
 
+# 7. a client that writes its temporary files outside the case: the check
+# for them goes red (here the "outside" folder is in the case, so nothing
+# is left in /tmp: the client's own naming is what is checked)
+h_case tmp-outside
+printf '%s\n' "$two" >"$H_DIR/script.json"
+if h_fake "$H_DIR/script.json"; then
+  mkdir -p "$H_DIR/outside"
+  # shellcheck disable=SC2086
+  H_TMPDIR="$H_DIR/outside" h_client 60 -- $D
+  h_stop
+  if H_TMP_ROOT="$H_DIR/outside/claude-$(id -u)" h_tmp_clean; then fail "a client that writes its temporary files outside the case: the check did not see them" "$(ls "$H_DIR/outside" 2>&1)"; else pass "a client that writes its temporary files outside the case: the check sees them (by this run's own word in their names)"; fi
+else
+  fail "tmp-outside: the fake did not answer"
+fi
+
+# 8. SubagentStart's text reaching the main conversation only: the
+# subagent question goes red
+h_case subagent-main
+h_fixtures
+h_settings <<EOF
+{"model":"claude-opus-5-5",
+ "hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"bash \"\$CLAUDE_PROJECT_DIR/.claude/hooks/fixture/say.sh\" HARNESS-SUBAGENT-CONTEXT"}]}]}}
+EOF
+cat >"$H_DIR/script.json" <<'EOF'
+{"convs":[
+  {"name":"sub","match":"HARNESS-SUBAGENT-TASK","turns":[{"text":"APPROVE\nEND-VERDICT harness"}]},
+  {"name":"main","match":"^go$","turns":[
+    {"tool":"Agent","input":{"description":"harness review","prompt":"HARNESS-SUBAGENT-TASK: review the change","subagent_type":"reviewer","run_in_background":false}},
+    {"text":"MAIN-DONE"}]}],
+ "fallback":{"text":"FAKE-FALLBACK"}}
+EOF
+if h_fake "$H_DIR/script.json"; then
+  # shellcheck disable=SC2086
+  h_client 90 -- $D
+  h_stop
+  if h_req_in sub HARNESS-SUBAGENT-CONTEXT; then fail "SubagentStart text in the main conversation only: the subagent question still says yes"
+  elif ! h_req_in main HARNESS-SUBAGENT-CONTEXT; then fail "SubagentStart text in the main conversation only: the text reached no request, so the plant shows nothing"
+  else pass "SubagentStart text in the main conversation only: the subagent question says no"; fi
+else
+  fail "subagent-main: the fake did not answer"
+fi
+
 # 6. the harness file itself, in a copy: a tool missing from tools.txt, a
 # wrong version asked for, a client that is not there
 sb=$(make_sandbox) || abort_sandbox
@@ -118,7 +183,7 @@ if expect_landed "tools.txt without Bash" lacks_line '^Bash	' "$sb/tests/harness
   if printf '%s\n' "$out" | grep -q "FAIL  startup: tools the client offers that tests/harness/tools.txt does not list:.* Bash"; then pass "a tool missing from tools.txt turns the harness red, naming it"; else fail "a tool missing from tools.txt turns the harness red, naming it" "$(printf '%s\n' "$out" | grep -v '^  PASS' | head -5)"; fi
 fi
 out=$(cd "$sb" && METHOD_HARNESS_CLIENT="$client" METHOD_HARNESS_VERSION=0.0.1 bash tests/harness.test.sh 2>&1)
-if printf '%s\n' "$out" | grep -q "FAIL  startup: the client reports '.*', not the version asked for (0.0.1)"; then pass "a client that is not the version asked for turns the harness red"; else fail "a client that is not the version asked for turns the harness red" "$(printf '%s\n' "$out" | grep -v '^  PASS' | head -5)"; fi
+if printf '%s\n' "$out" | grep -q "FAIL  startup: the client reports '[0-9][^']*', not the version asked for (0.0.1)"; then pass "a client that is not the version asked for turns the harness red"; else fail "a client that is not the version asked for turns the harness red" "$(printf '%s\n' "$out" | grep -v '^  PASS' | head -5)"; fi
 out=$(cd "$sb" && METHOD_HARNESS_CLIENT="$sb/no-such-client" bash tests/harness.test.sh 2>&1)
 code=$?
 if [ "$code" -ne 0 ] && printf '%s\n' "$out" | grep -q "FAIL  harness: METHOD_HARNESS_CLIENT is set, but it names no program"; then pass "a client that is named but not there fails the harness (exit $code)"; else fail "a client that is named but not there fails the harness" "exit $code: $out"; fi

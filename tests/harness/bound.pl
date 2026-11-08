@@ -9,6 +9,11 @@ die "fork: $!\n" unless defined $pid;
 if (!$pid) { setpgrp(0, 0); exec @ARGV or do { print STDERR "exec: $!\n"; POSIX::_exit(127) }; }
 my $timed_out = 0;
 local $SIG{ALRM} = sub { $timed_out = 1; kill 'TERM', -$pid; sleep 2; kill 'KILL', -$pid; };
+# Ctrl-C or a TERM ends the group too: it is in a group of its own, so the
+# terminal's signal never reaches it
+for my $sig (qw(INT TERM HUP)) {
+  $SIG{$sig} = sub { kill 'TERM', -$pid; sleep 2; kill 'KILL', -$pid; exit 128 + (POSIX->can("SIG$sig") ? POSIX->can("SIG$sig")->() : 15) };
+}
 alarm $secs;
 waitpid $pid, 0;
 my $st = $?;

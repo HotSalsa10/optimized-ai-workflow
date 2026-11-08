@@ -37,8 +37,8 @@ tgz="$dest/claude-$version.tgz"
 # METHOD_HARNESS_REGISTRY: a stand-in registry, for the plants only
 registry=${METHOD_HARNESS_REGISTRY:-https://registry.npmjs.org}
 url="$registry/@anthropic-ai/claude-code-$platform/-/claude-code-$platform-$version.tgz"
-curl -fsSL --retry 3 -o "$tgz" "$url" || die "could not download $url"
-got=$(perl -MDigest::SHA -MMIME::Base64 -e 'open my $f, "<:raw", $ARGV[0] or exit 1; my $d = Digest::SHA->new(512); $d->addfile($f); print "sha512-", encode_base64($d->digest, "")' "$tgz") || die "could not read $tgz"
+curl -fsSL --retry 3 --connect-timeout 30 --max-time 600 -o "$tgz" "$url" || { rm -f "$tgz"; die "could not download $url"; }
+got=$(perl -MDigest::SHA -MMIME::Base64 -e 'open my $f, "<:raw", $ARGV[0] or exit 1; my $d = Digest::SHA->new(512); $d->addfile($f); print "sha512-", encode_base64($d->digest, "")' "$tgz") || { rm -f "$tgz"; die "could not read $tgz"; }
 if [ "$got" != "$want" ]; then
   rm -f "$tgz"
   die "the download of $version does not match VERSIONS (got $got); nothing was installed"

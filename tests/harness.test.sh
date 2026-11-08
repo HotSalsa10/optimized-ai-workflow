@@ -25,6 +25,8 @@ finish() {
   exit
 }
 client=${METHOD_HARNESS_CLIENT:-}
+# a relative name would not be found once a case changes folder
+case $client in '' | /*) ;; *) client=$PWD/$client ;; esac
 if [ -z "$client" ]; then
   skip "harness: no client given; set METHOD_HARNESS_CLIENT to a Claude Code binary to run it"
   finish
@@ -103,14 +105,15 @@ h_case session-exit1
 h_fixtures
 h_settings <<EOF
 {"model":"claude-opus-5-5",
- "hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"$F/say.sh\" HARNESS-EXIT1-CONTEXT 1"}]}]}}
+ "hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"$F/say.sh\" HARNESS-EXIT1-CONTEXT 1"},{"type":"command","command":"$F/log.sh\" SessionStart"}]}]}}
 EOF
 printf '%s\n' '{"convs":[{"name":"main","match":"^go$","turns":[{"text":"MAIN-DONE"}]}]}' >"$H_DIR/script.json"
 if h_fake "$H_DIR/script.json"; then
   # shellcheck disable=SC2086
   h_client 60 -- $D
   h_stop
-  if h_reached && ! h_req_has HARNESS-EXIT1-CONTEXT; then
+  # (the hooks ran: log.sh, beside say.sh on the same event, wrote its line)
+  if h_reached && LC_ALL=C grep -q "^SessionStart	" "$H_PROJ/.harness/events.tsv" 2>/dev/null && ! h_req_has HARNESS-EXIT1-CONTEXT; then
     pass "session-exit1: SessionStart text printed with exit 1 does not reach the model (so session-status must exit 0)"
   else
     fail "session-exit1: SessionStart text printed with exit 1 does not reach the model"
@@ -142,7 +145,7 @@ if h_fake "$H_DIR/script.json"; then
   # shellcheck disable=SC2086
   h_client 90 -- $D
   h_stop
-  if h_req_has HARNESS-SUBAGENT-CONTEXT && h_tsv_has "conv=sub turn=0"; then pass "subagent: SubagentStart additionalContext reaches the subagent's request"; else fail "subagent: SubagentStart additionalContext reaches the subagent's request" "$(cut -f7- "$H_DIR/fake/requests.tsv")"; fi
+  if h_req_in sub HARNESS-SUBAGENT-CONTEXT && ! h_req_in main HARNESS-SUBAGENT-CONTEXT; then pass "subagent: SubagentStart additionalContext reaches the subagent's request, and only the subagent's"; else fail "subagent: SubagentStart additionalContext reaches the subagent's request, and only the subagent's" "$(cut -f7- "$H_DIR/fake/requests.tsv")"; fi
   if LC_ALL=C grep -q "^block-once	fired" "$H_PROJ/.harness/events.tsv" 2>/dev/null && h_tsv_has "conv=sub turn=1"; then
     pass "subagent: a SubagentStop exit 2 sends the subagent back for one more turn"
   else
@@ -214,14 +217,16 @@ h_fixtures
 mkdir -p "$H_PROJ/sub"
 h_settings <<EOF
 {"model":"claude-opus-5-5",
- "hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"$F/deny.sh\" HARNESS-REFUSE-ME"}]}]}}
+ "hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"$F/deny.sh\" HARNESS-REFUSE-ME"},{"type":"command","command":"CLAUDE_PROJECT_DIR=\"$H_PROJ\" bash \"$H_PROJ/.claude/hooks/fixture/log.sh\" PreToolUse-absolute"}]}]}}
 EOF
 printf '%s\n' '{"convs":[{"name":"main","match":"^go$","turns":[{"tool":"Bash","input":{"command":"touch refused-ran.txt # HARNESS-REFUSE-ME","description":"A command the hook would refuse"}},{"text":"MAIN-DONE"}]}]}' >"$H_DIR/script.json"
 if h_fake "$H_DIR/script.json"; then
   # shellcheck disable=SC2086
   H_CWD="$H_PROJ/sub" h_client 60 -- $D
   h_stop
-  if h_ran sub/refused-ran.txt; then
+  # (a hook with an absolute path, which needs no CLAUDE_PROJECT_DIR, did
+  # not run either: the hooks were not loaded at all)
+  if h_ran sub/refused-ran.txt && ! LC_ALL=C grep -q "PreToolUse-absolute" "$H_PROJ/.harness/events.tsv" 2>/dev/null; then
     pass "subfolder: a client started in a subfolder of the project runs no project hook (known limit, RISKS #16)"
   else
     fail "subfolder: a client started in a subfolder of the project runs no project hook: the hook ran, so RISKS #16 and the plan's note are out of date"

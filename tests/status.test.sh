@@ -512,7 +512,7 @@ rm -rf "$rw/.claude"
 
 # 6. Claude Code, effort and perl
 mkdir -p "$work/cc"
-for v in "2.1.290 (Claude Code)" "2.1.319 (Claude Code)" "2.1.1000 (Claude Code)" "v22.11.0"; do
+for v in "2.1.290 (Claude Code)" "2.1.315 (Claude Code)" "2.1.316 (Claude Code)" "2.1.319 (Claude Code)" "2.1.1000 (Claude Code)" "v22.11.0"; do
   f="$work/cc/claude-$(printf '%s' "$v" | tr -cd '0-9')"
   printf '#!/bin/sh\necho "%s"\n' "$v" >"$f"
   chmod +x "$f"
@@ -521,6 +521,10 @@ st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-21290"
 expect "a Claude Code below the floor is a LOOK" 1 "claude-code: LOOK - 2.1.290 is below the floor 2.1.316; update Claude Code"
 st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-21319"
 expect "a Claude Code at or above the floor passes" 0 "claude-code: PASS - 2.1.319, floor 2.1.316" "effort: PASS - CLAUDE_CODE_EFFORT_LEVEL is not set"
+st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-21315"
+expect "one below the floor is a LOOK" 1 "claude-code: LOOK - 2.1.315 is below the floor 2.1.316; update Claude Code"
+st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-21316"
+expect "the floor itself passes" 0 "claude-code: PASS - 2.1.316, floor 2.1.316"
 st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-211000"
 expect "versions compare as numbers, not as text" 0 "claude-code: PASS - 2.1.1000, floor 2.1.316"
 st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-22110"
