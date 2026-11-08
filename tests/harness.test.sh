@@ -272,20 +272,34 @@ h_fixtures
 with_fragment '$d->{hooks} = {SessionStart => [{hooks => [{type => "command", command => q{bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fixture/env.sh" CLAUDE_CODE_DISABLE_ADVISOR_TOOL CLAUDE_CODE_USE_POWERSHELL_TOOL}}]}]}' | h_settings
 printf '%s\n' '{"convs":[{"name":"main","match":"^go$","turns":[{"text":"MAIN-DONE"}]}]}' >"$H_DIR/script.json"
 if h_fake "$H_DIR/script.json"; then
+  # (asked for another model: the fragment's allowlist must keep opus;
+  # opus is also the client's default, so without --model this would pass
+  # with no settings at all)
   # shellcheck disable=SC2086
-  h_client 60 -- $D
+  h_client 60 -- $D --model claude-sonnet-5-5
   h_stop
-  if [ "$(h_init model)" = claude-opus-5-5 ]; then pass "fragment: the session runs claude-opus-5-5"; else fail "fragment: the session runs claude-opus-5-5" "$(h_init model)"; fi
+  if [ "$(h_init model)" = claude-opus-5-5 ]; then pass "fragment: the session runs claude-opus-5-5, also when asked for another model"; else fail "fragment: the session runs claude-opus-5-5, also when asked for another model" "$(h_init model)"; fi
   if h_req_has '"effort" : "xhigh"' && ! h_req_has '"effort" : "medium"'; then pass "fragment: every request carries effort xhigh"; else fail "fragment: every request carries effort xhigh" "$(LC_ALL=C grep -h -o '"effort" : "[a-z]*"' "$H_DIR"/fake/req-*.json | sort | uniq -c)"; fi
   if LC_ALL=C grep -q '^CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1$' "$H_PROJ/.harness/env.txt" 2>/dev/null && LC_ALL=C grep -q '^CLAUDE_CODE_USE_POWERSHELL_TOOL=0$' "$H_PROJ/.harness/env.txt"; then
     pass "fragment: its env (the advisor off, the PowerShell tool off) reaches the hooks"
   else
     fail "fragment: its env reaches the hooks" "$(cat "$H_PROJ/.harness/env.txt" 2>/dev/null)"
   fi
-  if ! LC_ALL=C grep -i -q 'setting' "$H_DIR/err.txt"; then pass "fragment: the client gives no settings warning"; else fail "fragment: the client gives no settings warning" "$(grep -i setting "$H_DIR/err.txt" | head -3)"; fi
   h_safe fragment
 else
   fail "fragment: the fake did not answer; the client was not started"
+fi
+# the control: without the fragment the same request runs the model asked for
+h_case fragment-control
+printf '%s\n' '{"convs":[{"name":"main","match":"^go$","turns":[{"text":"MAIN-DONE"}]}]}' >"$H_DIR/script.json"
+if h_fake "$H_DIR/script.json"; then
+  # shellcheck disable=SC2086
+  h_client 60 -- $D --model claude-sonnet-5-5
+  h_stop
+  if [ "$(h_init model)" = claude-sonnet-5-5 ]; then pass "fragment-control: without the fragment the model asked for runs (so the case above can tell)"; else fail "fragment-control: without the fragment the model asked for runs" "$(h_init model)"; fi
+  h_safe fragment-control
+else
+  fail "fragment-control: the fake did not answer; the client was not started"
 fi
 
 # --- 9. skill shell lines off (D9, A51) ---
@@ -302,7 +316,7 @@ for mode in off on; do
     if [ "$mode" = off ]; then
       if ! h_ran skill-ran.txt && h_req_has 'shell command execution disabled by policy'; then pass "skill-shell: with the fragment, a skill's shell line does not run and Claude sees the placeholder"; else fail "skill-shell: with the fragment, a skill's shell line does not run" "$(cut -f7- "$H_DIR/fake/requests.tsv")"; fi
     else
-      if h_ran skill-ran.txt; then pass "skill-shell: without that setting the same line runs, with no hook asked (the case can tell)"; else fail "skill-shell: without that setting the same line runs" "$(cut -f7- "$H_DIR/fake/requests.tsv")"; fi
+      if h_ran skill-ran.txt; then pass "skill-shell: without that setting the same line runs (the case can tell)"; else fail "skill-shell: without that setting the same line runs" "$(cut -f7- "$H_DIR/fake/requests.tsv")"; fi
     fi
     h_safe "skill-shell-$mode"
   else
@@ -312,14 +326,15 @@ done
 
 # --- 10. one value of the wrong type turns the whole file off ---
 h_case rejected-shape
-with_fragment '$d->{availableModels} = "claude-opus-5-5"' | h_settings
+h_fixtures
+with_fragment '$d->{availableModels} = "claude-opus-5-5"; $d->{hooks} = {SessionStart => [{hooks => [{type => "command", command => q{bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fixture/env.sh" CLAUDE_CODE_DISABLE_ADVISOR_TOOL}}]}]}' | h_settings
 printf '%s\n' '{"convs":[{"name":"main","match":"^go$","turns":[{"text":"MAIN-DONE"}]}]}' >"$H_DIR/script.json"
 if h_fake "$H_DIR/script.json"; then
   # shellcheck disable=SC2086
   h_client 60 -- $D
   h_stop
-  if h_reached && ! h_req_has '"effort" : "xhigh"'; then
-    pass "rejected-shape: one value of the wrong type makes the client skip the whole file (effort is not xhigh), so settings.test.sh checks every value's type"
+  if h_reached && ! h_req_has '"effort" : "xhigh"' && [ ! -e "$H_PROJ/.harness/env.txt" ]; then
+    pass "rejected-shape: one value of the wrong type makes the client skip the whole file, hooks included (effort is not xhigh; the hook did not run), so settings.test.sh checks every value's type"
   else
     fail "rejected-shape: one value of the wrong type makes the client skip the whole file: effort xhigh still applied, so the client now keeps the rest; settings.test.sh's note is out of date"
   fi

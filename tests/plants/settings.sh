@@ -65,6 +65,16 @@ plant "auto-continue set" "$frag" "it sets autoContinueAtUsageLimit" '$d->{autoC
 plant "bypassPermissions as the default mode" "$frag" "it sets permissions.defaultMode bypassPermissions" '$d->{permissions} = {defaultMode => "bypassPermissions"}'
 plant "workflows switched on" "$frag" "it sets enableWorkflows" '$d->{enableWorkflows} = JSON::PP::true()'
 plant "subprocess scrubbing set" "$frag" "it sets env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB" '$d->{env}{CLAUDE_CODE_SUBPROCESS_ENV_SCRUB} = "1"'
+plant "the remote variable set" "$frag" "it sets env.CLAUDE_CODE_REMOTE" '$d->{env}{CLAUDE_CODE_REMOTE} = "1"'
+plant "workflows switched off by its key" "$frag" "it sets disableWorkflows" '$d->{disableWorkflows} = JSON::PP::true()'
+plant "auto as the default mode" .claude/settings.json "it sets permissions.defaultMode auto" '$d->{permissions} = {defaultMode => "auto"}'
+plant "permissions as a string (the client skips the whole file)" "$frag" "unknown keys: permissions" '$d->{permissions} = "x"'
+plant "a deny list as a string" "$frag" "unknown keys: permissions" '$d->{permissions} = {deny => "mcp__x"}'
+plant "an allow list (permissions come with 5.8's deny list only)" "$frag" "unknown keys: permissions" '$d->{permissions} = {allow => ["Bash(*)"]}'
+plant "an env variable the plan does not set" "$frag" "env has keys the plan does not set: EXTRA_X" '$d->{env}{EXTRA_X} = "1"'
+plant "a second model allowed" "$frag" "availableModels is not exactly" '$d->{availableModels} = ["claude-opus-5-5", "claude-sonnet-5-5"]'
+plant "this repo's settings turn auto memory on" .claude/settings.json "they differ on: autoMemoryEnabled" '$d->{autoMemoryEnabled} = JSON::PP::true()'
+plant "this repo's PowerShell variable differs" .claude/settings.json "they differ on: env.CLAUDE_CODE_USE_POWERSHELL_TOOL" '$d->{env}{CLAUDE_CODE_USE_POWERSHELL_TOOL} = "1"'
 plant "this repo's settings set the effort variable" .claude/settings.json "it sets env.CLAUDE_CODE_EFFORT_LEVEL" '$d->{env}{CLAUDE_CODE_EFFORT_LEVEL} = "max"'
 plant "this repo's effort differs from the fragment's" .claude/settings.json "they differ on: effortLevel" '$d->{effortLevel} = "high"'
 ok_hook='BASH_ENV= ENV= bash "$CLAUDE_PROJECT_DIR/.claude/hooks/method/guard.sh"'
@@ -74,6 +84,20 @@ plant "a hook path not in quotes" "$frag" 'PreToolUse: BASH_ENV= ENV= bash $CLAU
 plant "a hook without the BASH_ENV= ENV= prefix" "$frag" 'PreToolUse: bash "$CLAUDE_PROJECT_DIR' '$d->{hooks} = {PreToolUse => [{matcher => "Bash", hooks => [{type => "command", command => q{bash "$CLAUDE_PROJECT_DIR/.claude/hooks/method/guard.sh"}, onFailure => "block"}]}]}'
 plant "onFailure on SubagentStop" "$frag" "onFailure on SubagentStop" '$d->{hooks} = {SubagentStop => [{matcher => "reviewer", hooks => [{type => "command", command => $ENV{OK_HOOK}, onFailure => "block"}]}]}'
 plant "the guard without onFailure block" "$frag" 'no onFailure "block" on PreToolUse' '$d->{hooks} = {PreToolUse => [{matcher => "Bash", hooks => [{type => "command", command => $ENV{OK_HOOK}}]}]}'
+
+# two plants outside a JSON file: the floor raised with the fragment left
+# as it was, and a committed settings.local.json
+sb=$(make_sandbox) || abort_sandbox
+sed 's/^claude_code_min=.*/claude_code_min=2.1.999/' "$sb/method/scripts/method/REQUIRES" >"$sb/req.tmp" && mv "$sb/req.tmp" "$sb/method/scripts/method/REQUIRES"
+out=$(cd "$sb" && bash tests/settings.test.sh 2>&1)
+case "$out" in *'minimumVersion is "2.1.316", not "2.1.999"'*) pass "the floor raised in REQUIRES with the fragment left as it was" ;; *) fail "the floor raised in REQUIRES: the settings test did not go red for it" "$(printf '%s\n' "$out" | grep FAIL | head -3)" ;; esac
+drop_sandbox "$sb" || true
+sb=$(make_sandbox) || abort_sandbox
+printf '{"model":"claude-opus-5-5"}\n' >"$sb/.claude/settings.local.json"
+(cd "$sb" && git add -f .claude/settings.local.json 2>/dev/null)
+out=$(cd "$sb" && bash tests/settings.test.sh 2>&1)
+case "$out" in *"committed: .claude/settings.local.json"*) pass "a committed settings.local.json" ;; *) fail "a committed settings.local.json: the settings test did not go red for it" "$(printf '%s\n' "$out" | grep FAIL | head -3)" ;; esac
+drop_sandbox "$sb" || true
 
 echo "plants: settings: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]

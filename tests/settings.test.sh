@@ -5,9 +5,12 @@
 # fast: it reads the files, it runs no client (the harness shows the
 # client loading the fragment).
 #
-# One value of the wrong JSON type makes Claude Code skip the whole
+# Some values of the wrong JSON type make Claude Code skip the whole
 # settings file, hooks included (measured: tests/harness.test.sh,
-# "rejected-shape"), so every value's type is checked, not only its text.
+# "rejected-shape", with the model allowlist written as a string; also
+# seen by the review with permissions as a string), so every value's type
+# is checked, not only its text, and a key the plan does not name is
+# refused, permissions too until 5.8 checks its deny list.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=tests/lib.sh
@@ -65,7 +68,10 @@ my %want = (
   minimumVersion => [str => $floor],
   env => [obj => { CLAUDE_CODE_DISABLE_ADVISOR_TOOL => [str => '1'], CLAUDE_CODE_USE_POWERSHELL_TOOL => [str => '0'] }],
 );
-my %later = (hooks => 'hooks (from 5.4)', permissions => 'permissions (5.8)');
+# hooks are checked below (from 5.4); permissions come with their deny
+# list (5.8), and until then any permissions key is refused, as one of the
+# wrong shape makes the client skip the whole file
+my %later = (hooks => 'hooks (from 5.4)');
 sub same {
   my ($spec, $v, $at) = @_;
   my ($type, $w) = @$spec;
@@ -98,8 +104,13 @@ my @unknown = grep { !$want{$_} && !$later{$_} } sort keys %$f;
 check("the fragment sets no key the plan does not name", @unknown ? "unknown keys: @unknown" : undef);
 
 # never set, in any committed settings file (section 5)
-my @files = grep { m{(?:^|/)\.claude/settings(?:\.local)?\.json\z} || m{(?:^|/)settings\.fragment\.json\z} } split /\0/, `git ls-files -z`;
+# (in any letter case: a case-folding file system opens .Claude/Settings.json
+# as .claude/settings.json)
+my @tracked = split /\0/, `git ls-files -z`;
+my @files = grep { m{(?:^|/)\.claude/settings(?:\.local)?\.json\z}i || m{(?:^|/)settings\.fragment\.json\z} } @tracked;
 push @files, $frag unless grep { $_ eq $frag } @files;
+my @local = grep { m{(?:^|/)\.claude/settings\.local\.json\z}i } @tracked;
+check("no settings.local.json is committed (it belongs to one machine)", @local ? "committed: @local" : undef);
 for my $file (@files) {
   my ($s, $e) = read_json($file);
   if (!$s) { bad("$file is one JSON object", $e); next }
@@ -115,12 +126,21 @@ for my $file (@files) {
 # this repo's own settings agree with the fragment on the shared keys (D3)
 my ($mine, $me) = read_json('.claude/settings.json');
 if ($mine) {
+  # every key both set (the hooks are the method's to run in a project, not
+  # here, D3), each env variable both set, and the keys this repo must set
   my @differ;
   for my $k (qw(model availableModels enforceAvailableModels effortLevel attribution)) {
-    push @differ, $k unless exists $mine->{$k} && Json::encode($mine->{$k}) eq Json::encode($f->{$k});
+    push @differ, $k unless exists $mine->{$k};
   }
-  my $a = ref $mine->{env} eq 'HASH' ? $mine->{env}{CLAUDE_CODE_DISABLE_ADVISOR_TOOL} : undef;
-  push @differ, 'env.CLAUDE_CODE_DISABLE_ADVISOR_TOOL' unless defined $a && ref $f->{env} eq 'HASH' && defined $f->{env}{CLAUDE_CODE_DISABLE_ADVISOR_TOOL} && $a eq $f->{env}{CLAUDE_CODE_DISABLE_ADVISOR_TOOL};
+  for my $k (sort grep { exists $f->{$_} && $_ ne '$schema' && $_ ne 'env' && $_ ne 'hooks' } keys %$mine) {
+    push @differ, $k unless Json::encode($mine->{$k}) eq Json::encode($f->{$k});
+  }
+  my %me = ref $mine->{env} eq 'HASH' ? %{ $mine->{env} } : ();
+  my %fe = ref $f->{env} eq 'HASH' ? %{ $f->{env} } : ();
+  push @differ, 'env.CLAUDE_CODE_DISABLE_ADVISOR_TOOL' unless exists $me{CLAUDE_CODE_DISABLE_ADVISOR_TOOL};
+  for my $v (sort grep { exists $fe{$_} } keys %me) {
+    push @differ, "env.$v" unless Json::encode($me{$v}) eq Json::encode($fe{$v});
+  }
   check("this repo's .claude/settings.json agrees with the fragment on the keys they share", @differ ? "they differ on: @differ" : undef);
 } else {
   bad("this repo's .claude/settings.json agrees with the fragment on the keys they share", $me);
