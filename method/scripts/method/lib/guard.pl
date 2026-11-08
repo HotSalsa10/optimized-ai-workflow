@@ -25,6 +25,12 @@
 #      judged; ExitWorktree that would discard changes is refused (judge_git).
 #   G8 mutant-commit (M133, step 5.6): git commit in this repository while
 #      a mutate-changed run, or what one left behind, is there.
+#   G6 protected (M132, step 5.7): a write to the method's files, its
+#      settings, or git's own config and hooks, by an edit tool, an MCP
+#      tool or Bash, and a git command that would bring one of them to
+#      another version (lib/protect.pl).
+#   G12 effort (M134, step 5.7): not a refusal; the first main-session
+#      call below xhigh gets one warning (lib/protect.pl).
 # A call the rules say nothing about is let through.
 package Guard;
 use strict;
@@ -36,6 +42,7 @@ use File::Spec;
 my $lib = dirname(File::Spec->rel2abs(__FILE__));
 require File::Spec->catfile($lib, 'hook.pl');
 require File::Spec->catfile($lib, 'shell.pl');
+require File::Spec->catfile($lib, 'protect.pl');
 
 our $WAY_OUT = 'if the guard is wrong, see .claude/hooks/method/README.md, "When the guard blocks something it should not"';
 
@@ -358,6 +365,42 @@ sub push_rule {
   return ();
 }
 
+# cmd_dirs CMDS START: the folder each command runs in, followed from START
+# through cd, pushd and popd in each scope (lib/shell.pl: a subshell or a
+# new process has its own), or undef where it cannot be told (a folder in a
+# variable, after popd)
+sub cmd_dirs {
+  my ($cmds, $start) = @_;
+  my %dir;    # scope => folder, or undef when it cannot be told
+  my $dir_of;
+  $dir_of = sub {
+    my ($s) = @_;
+    return $dir{$s} if exists $dir{$s};
+    (my $p = $s) =~ s{/[^/]*\z}{};
+    return $dir{$s} = $p eq $s ? $start : $dir_of->($p);
+  };
+  my @out;
+  for my $c (@$cmds) {
+    my @w = @{ $c->{words} };
+    my $scope = defined $c->{scope} ? $c->{scope} : 't';
+    my $here = $dir_of->($scope);
+    push @out, $here;
+    next unless @w;
+    if (($w[0] eq 'cd' || $w[0] eq 'pushd') && !$c->{piped} && !$c->{to_pipe} && !$c->{bg}) {
+      my ($to) = grep { !/\A-/ } @w[1 .. $#w];
+      my ($raw) = grep { !/\A-/ } @{ $c->{raw} }[1 .. $#{ $c->{raw} }];
+      if (!defined $to) { $dir{$scope} = $ENV{HOME} }
+      elsif (defined $raw && $raw =~ /[\$`]/) { $dir{$scope} = undef }
+      elsif (!defined $here) { $dir{$scope} = $to =~ m{\A/} ? $to : undef }
+      else { $to =~ s{\A~(?=/|\z)}{$ENV{HOME} // '~'}e; $dir{$scope} = File::Spec->rel2abs($to, $here) }
+    } elsif ($w[0] eq 'popd') {
+      $dir{$scope} = undef;
+    }
+  }
+  undef $dir_of;
+  return @out;
+}
+
 # judge_git CMDS IN: () to let the call through, or (RULE, TEXT)
 sub judge_git {
   my ($cmds, $in) = @_;
@@ -381,31 +424,13 @@ sub judge_git {
   my $start = (ref $in eq 'HASH' && defined $in->{cwd} && !ref $in->{cwd} && $in->{cwd} ne '') ? $in->{cwd} : $project;
   $start = '.' unless defined $start;
   my $session = defined $project && $project ne '' ? repo($project) : '';
-  my $session_top;
   my ($shapes, $errors);
-  my %dir;    # scope => folder, or undef when it cannot be told
-  my $dir_of;
-  $dir_of = sub {
-    my ($s) = @_;
-    return $dir{$s} if exists $dir{$s};
-    (my $p = $s) =~ s{/[^/]*\z}{};
-    return $dir{$s} = $p eq $s ? $start : $dir_of->($p);
-  };
-  for my $c (@$cmds) {
+  my @dirs = cmd_dirs($cmds, $start);
+  for my $k (0 .. $#$cmds) {
+    my $c = $cmds->[$k];
     my @w = @{ $c->{words} };
     next unless @w;
-    my $scope = defined $c->{scope} ? $c->{scope} : 't';
-    my $here = $dir_of->($scope);
-    if (($w[0] eq 'cd' || $w[0] eq 'pushd') && !$c->{piped} && !$c->{to_pipe} && !$c->{bg}) {
-      my ($to) = grep { !/\A-/ } @w[1 .. $#w];
-      my ($raw) = grep { !/\A-/ } @{ $c->{raw} }[1 .. $#{ $c->{raw} }];
-      if (!defined $to) { $dir{$scope} = $ENV{HOME} }
-      elsif (defined $raw && $raw =~ /[\$`]/) { $dir{$scope} = undef }
-      elsif (!defined $here) { $dir{$scope} = $to =~ m{\A/} ? $to : undef }
-      else { $to =~ s{\A~(?=/|\z)}{$ENV{HOME} // '~'}e; $dir{$scope} = File::Spec->rel2abs($to, $here) }
-      next;
-    }
-    if ($w[0] eq 'popd') { $dir{$scope} = undef; next }
+    my $here = $dirs[$k];
     next unless is_git($c);
     my @r = @{ $c->{raw} };
     my $i = 1;
@@ -472,6 +497,10 @@ sub judge_git {
       return ('G3', 'merging into main here is refused; switch to your task branch, or let the owner merge on GitHub') if $why eq 'off-main';
       my $var = defined $d ? '' : ' (the folder it runs in is held in a variable, so it was judged as this project\'s repository; if it is a scratch folder, write its path out)';
       return ('G3', "\"git $sub\" in this form is not on the method's git list$var; the owner can add a shape to .claude/method-local/git-shapes.txt. Do not try another form of the same command; tell the owner what you needed");
+    }
+    if ($sub =~ /\A(?:switch|checkout|merge|cherry-pick|revert|worktree)\z/) {
+      my @v = Protect::git_versions($tdir, $sub, \@rest, $project);
+      return @v if @v;
     }
     if ($sub eq 'commit') {
       require File::Spec->catfile($lib, 'runstate.pl');
@@ -544,6 +573,8 @@ sub main {
   my $tool = $in->{tool_name};
   $tool = '' unless defined $tool && !ref $tool;
   my $input = $in->{tool_input};
+  my $project = $ENV{CLAUDE_PROJECT_DIR};
+  my $start = (defined $in->{cwd} && !ref $in->{cwd} && $in->{cwd} ne '') ? $in->{cwd} : $project;
   if ($tool eq 'PowerShell') {
     return refuse('G2', "the PowerShell tool is refused in method projects: the method's checks read bash; use the Bash tool ($WAY_OUT)", $tool, $raw, $in);
   }
@@ -555,11 +586,24 @@ sub main {
     my @cmds = Shell::commands($cmd);
     my ($rule, $text) = judge_command($cmd, \@cmds);
     ($rule, $text) = judge_git(\@cmds, $in) unless $rule;
+    ($rule, $text) = Protect::judge_bash(\@cmds, [cmd_dirs(\@cmds, defined $start ? $start : '.')], $project) unless $rule;
+    return refuse($rule, $text, $tool, $raw, $in) if $rule;
+  }
+  if ($tool =~ /\A(?:Edit|Write|MultiEdit|NotebookEdit)\z/) {
+    my $p = ref $input eq 'HASH' ? (defined $input->{file_path} ? $input->{file_path} : $input->{notebook_path}) : undef;
+    my ($rule, $text) = Protect::judge_file($p, $start, $project);
+    return refuse($rule, $text, $tool, $raw, $in) if $rule;
+  }
+  if ($tool =~ /\Amcp__/) {
+    my ($rule, $text) = Protect::judge_mcp($tool, $input, $start, $project);
     return refuse($rule, $text, $tool, $raw, $in) if $rule;
   }
   if ($tool eq 'ExitWorktree' && ref $input eq 'HASH' && $input->{discard_changes}) {
     return refuse('G3', 'leaving a worktree with discard_changes would delete its uncommitted work; commit it first, or keep the worktree and tell the owner', $tool, $raw, $in);
   }
+  # G12: a warning, never a refusal
+  my $warn = eval { Protect::effort($in, $project) };
+  return Hook::warning("guard G12: $warn") if $warn;
   return 0;
 }
 

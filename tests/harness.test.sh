@@ -529,6 +529,33 @@ else
   fail "git-list: the fake did not answer; the client was not started"
 fi
 
+# --- 14. protected files (step 5.7): a write to the settings is refused
+# with its reason and the file is unchanged, a read of them runs; at effort
+# low the first call brings one G12 warning ---
+h_case protect
+h_method "$root"
+PROTECT_SCRIPT=$(perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({convs => [{name => "main", match => "^go\$", turns => [{tool => "Write", input => {file_path => $ARGV[0], content => "{}\n"}}, {tool => "Bash", input => {command => "cat .claude/settings.json > seen.txt", description => "a read"}}, {text => "MAIN-DONE"}]}]})' "$H_PROJ/.claude/settings.json")
+printf '%s\n' "$PROTECT_SCRIPT" >"$H_DIR/protect.json"
+before=$(cksum <"$H_PROJ/.claude/settings.json")
+if h_fake "$H_DIR/protect.json"; then
+  h_client 60 CLAUDE_CODE_EFFORT_LEVEL=low -- --permission-mode acceptEdits --allowedTools Bash Write
+  h_stop
+  if h_tsv_has "guard G6: the project's settings (.claude/settings.json) may not be changed by Claude" && [ "$(cksum <"$H_PROJ/.claude/settings.json")" = "$before" ] && h_ran seen.txt; then
+    pass "protected files: a Write to the project's settings is refused with its reason and the file is unchanged; a read of them runs"
+  else
+    fail "protected files: a Write to the project's settings is refused with its reason; a read of them runs" "$(cut -f7- "$H_DIR/fake/requests.tsv")"
+  fi
+  n=$(LC_ALL=C grep -c 'guard G12: this session runs at effort low' "$H_DIR/out.jsonl" 2>/dev/null)
+  if [ "${n:-0}" -ge 1 ] && [ "$(wc -l <"$H_PROJ/.method/local/effort-warned" 2>/dev/null)" = 1 ]; then
+    pass "G12: at effort low the first call brings one warning (in the client's output) and the session is noted once"
+  else
+    fail "G12: at effort low the first call brings one warning" "$(LC_ALL=C grep -o '.\{0,80\}G12.\{0,80\}' "$H_DIR/out.jsonl" | head -3)"
+  fi
+  h_safe protect
+else
+  fail "protect: the fake did not answer; the client was not started"
+fi
+
 # the owner's way out (README, "When the guard blocks something it should not")
 for way in local flag; do
   h_case "way-out-$way"

@@ -274,6 +274,12 @@ Plan: docs/plans/step5.md (version 3). Decisions A45 to A62. Rules M072 (moved t
   - You will see, from a session whose Claude runs `git push origin HEAD:main`: `guard G3: pushing to main is refused: the owner merges into main on GitHub (until review receipts exist, step 6); push your task branch instead. Do not try another form of the same push; tell the owner what you needed`.
   - [ ] Review round 1 (three reviewers, A62).
 - [ ] 5.7 Protected files: G6 and G12.
+  - [x] Built while 5.1 to 5.6 were in review: lib/protect.pl (the protected paths, the resolver, the Bash read-only rule, where copies and recursive writes land, the edit and MCP routes, the git version check, G12), wired into lib/guard.pl (G3's folder-following moved into cmd_dirs, shared by G3 and G6), the hooks README's G6 and G12 rows. Tests: guard-protect (165 cases, real repositories, a project folder with a non-ASCII letter), a harness case at each version (a Write to the settings refused with its reason, a read runs, one G12 warning at effort low), plants/protect (48 plants, all caught; the first run's 5 misses were 4 plants naming the wrong case and one that showed the call's folder untested past the project's top, now with a case that moves into a subfolder). M132 and M134 done.
+  - [x] Found while building: the hook's input gives paths in characters while the environment and git give them in bytes, so a project folder with a non-ASCII letter let every write through until paths were compared as bytes (the harness case showed it; a plant keeps it); an include file with no settings in it is not in git's own list of the files it reads, so include.path is read too; `Git::run` reads paths literally, so pathspec magic is not used.
+  - [x] Decisions while building (A64): text that only mentions a protected path counts only in code (inline programs, text piped into an interpreter, a sed script that writes), so a commit message naming the settings is not a write; carriers and literal bash -c are judged by what they run; MCP tools named like reads are taken as reading; every config file git reads, include targets, GIT_CONFIG_GLOBAL and SYSTEM, config.worktree and every worktree's files join the list; patch, rm -r, find -delete and -exec, git rm and mv of a folder join the recursive writes; G12 keeps its one-line note through lib/log.pl.
+  - [x] False-refusal run over every recorded call (20,117 Bash calls, 3,325 in main sessions; 417 Edit and Write calls), with this repository as the session's project: G6 refuses 143 Bash calls (0.71%), 13 in main sessions (0.39%), most of them tests that build a method project in a sandbox and then write into it; and 1 Edit (this repository's own settings).
+  - You will see, from a session whose Claude tries to change the settings: `guard G6: the project's settings (.claude/settings.json) may not be changed by Claude, only read; ...`; and from a session at effort low, once: `guard G12: this session runs at effort low, below the method's xhigh, ...`.
+  - [ ] Review round 1 (three reviewers, A62).
 - [ ] 5.8 Outside: G4, the gh and MCP lists, the deny entries.
 - [ ] 5.9 Settings changes and skill hooks: G16, G17, the "holds" cases.
 - [ ] 5.10 Outgoing secrets: G15 (may move to Release 2; the owner is told first).
@@ -281,4 +287,4 @@ Plan: docs/plans/step5.md (version 3). Decisions A45 to A62. Rules M072 (moved t
 
 ## Next
 
-The reviews of 5.1 (round 2) to 5.5, then 5.6: the git list. Then step 5b: gate-receipt.
+Review round 3 of 5.4 and 5.5, the security and fit checks of 5.2's round 3 (cut off by the usage limit), 5.6's round 1 and 5.7's round 1. 5.1 and 5.2 have had their three rounds: the owner decides whether they close. Then 5.8: the outside (G4, the gh and MCP lists, the deny entries).

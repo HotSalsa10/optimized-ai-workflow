@@ -59,6 +59,8 @@ Nothing yet. Release 1 is being built.
 - Tests: 1 new test file (guard) and new harness, status and settings cases.
 - The git list (step 5.6): in this project's repository, Claude's git commands must match a short list of allowed shapes (reading, staging, committing, new branches, fetching, bringing main into a task branch); a push may go only to a task branch, never to main; nothing may point git at other settings or hooks; no commit while a mutate run is in progress (G3, G8). Your own project can add a shape in `.claude/method-local/git-shapes.txt`, and session-status counts them.
 - Tests: 1 new test file (git rules) and 1 new plant file.
+- Protected files (step 5.7): Claude can read the method's files, the project's and your Claude Code settings, and git's own config and hooks, but never write them: not with the edit tools, not with an MCP tool, not with a Bash command (a Bash call that names one of them may only read). Copies and extractions are judged by where they land, and a git command that would bring one of the method's files to another version is refused (G6). A session below effort xhigh shows you one warning at its first tool call (G12).
+- Tests: 1 new test file (protected files) and 1 new plant file.
 
 ### Changed (step 4b)
 
