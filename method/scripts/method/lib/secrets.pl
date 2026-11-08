@@ -46,7 +46,7 @@ use File::Basename qw(dirname);
 use IPC::Open2;
 use File::Spec;
 # lib/esc.pl: $Esc::TERM_CODE, the one pattern for a terminal code
-require File::Spec->catfile(dirname(File::Spec->rel2abs(__FILE__)), 'esc.pl');
+require File::Spec->catfile(dirname(File::Spec->rel2abs(__FILE__)), 'esc.pl') unless defined &Esc::line;
 my $term_code = do { no warnings 'once'; $Esc::TERM_CODE };
 
 # Prints one line of output. Control characters taken from file names or
@@ -314,8 +314,8 @@ sub mask_filter {
 
 # git runs through lib/git.pl's fixed options and cleaned environment, so
 # GIT_INDEX_FILE or a file-system monitor cannot change what is scanned.
-require File::Spec->catfile(dirname(File::Spec->rel2abs(__FILE__)), 'git.pl');
-
+# The command line loads it (in main); the library functions need no git,
+# and loading git.pl cleans the process's environment.
 # git_pipe ARGS: a pipe from git with its warnings discarded, because a
 # warning can quote a file name raw.
 sub git_pipe {
@@ -428,18 +428,25 @@ sub scan_line {
   line_hits($line, sub { report($path, $where, @_, $seen, $skip_seen) });
 }
 
-# The runs of printable bytes in raw content, with every rule or keys only.
-sub scan_runs {
-  my ($path, $label, $raw, $seen, $all_rules) = @_;
+# run_hits RAW ALL_RULES HIT: the runs of printable bytes in raw content,
+# with every rule (as line_hits) or keys only; HIT is called as rules_on
+# calls it. scan_runs reports each find.
+sub run_hits {
+  my ($raw, $all_rules, $hit) = @_;
   for my $run ($raw =~ /([\x20-\x7E]{16,})/g) {
     if ($all_rules) {
-      scan_line($path, "$label (raw bytes)", $run, $seen, 1);
+      line_hits($run, $hit);
       next;
     }
     for my $i (0 .. $#token_rules) {
-      while ($run =~ /$token_cap[$i]/g) { report($path, "$label (binary)", $token_rules[$i][1], $1, 1, $seen, 1) }
+      while ($run =~ /$token_cap[$i]/g) { $hit->($token_rules[$i][1], $1, 1) }
     }
   }
+}
+sub scan_runs {
+  my ($path, $label, $raw, $seen, $all_rules) = @_;
+  my $where = $all_rules ? "$label (raw bytes)" : "$label (binary)";
+  run_hits($raw, $all_rules, sub { report($path, $where, @_, $seen, 1) });
 }
 
 sub share_nul {
@@ -518,9 +525,11 @@ sub scan_name {
 # restored time stamp, and git diff writes the index and runs its hook.
 my (@index, %like, %disk_id);    # index entries [path, mode, id]; path => an id; path => its bytes' id
 # scan_bytes BYTES: the finds in BYTES, one [KIND, MASKED] per distinct
-# text, by the same rules as the file scan (line by line, with the pieces
-# between escapes written as text). For the hooks, which scan text that
-# leaves the machine (M135). Nothing is printed.
+# text, by the same rules as the file scan: UTF-16 decoded, line by line,
+# with the pieces between escapes written as text, and the runs of
+# printable bytes searched when a NUL is present (keys only in binary
+# content). For the hooks, which scan text that leaves the machine (M135).
+# Nothing is printed. A diff's added lines are scanned without their "+".
 # scan_text TEXT: the same for a string of characters (as Json::decode
 # gives them), read as its UTF-8 bytes, as the file scan reads a file. A
 # string whose characters are all below U+0100 looks the same as bytes to
@@ -536,17 +545,24 @@ sub scan_bytes {
   return () unless defined $text;
   die "secrets: scan_bytes was given characters, not bytes\n" if $text =~ /[^\x00-\xFF]/;
   my (@found, %seen);
-  for my $line (split /\r\n|\r|\n/, $text) {
-    line_hits($line, sub {
-      my ($kind, $t, $is_token) = @_;
-      push @found, [$kind, mask($t, $is_token)] unless $seen{"$kind\0$t"}++;
-    });
+  my $hit = sub {
+    my ($kind, $t, $is_token) = @_;
+    push @found, [$kind, mask($t, $is_token)] unless $seen{"$kind\0$t"}++;
+  };
+  my ($chars, $kind, $raw) = classify($text);
+  if ($kind eq 'binary') {
+    run_hits($raw, 0, $hit);
+  } else {
+    line_hits($_, $hit) for split /\r\n|\r|\n/, $chars;
+    run_hits($raw, 1, $hit) if defined $raw;
   }
+  @iban_written = ();    # kept by iban_hits for the mask; not kept here
   return @found;
 }
 
 # The command line (see the top of this file).
 sub main {
+  require File::Spec->catfile(dirname(File::Spec->rel2abs(__FILE__)), 'git.pl');
   while (@ARGV && $ARGV[0] =~ /^--/) {
     my $opt = shift @ARGV;
     if ($opt eq '--ids') { $show_ids = 1 }

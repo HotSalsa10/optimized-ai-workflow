@@ -43,6 +43,11 @@ done
 pl "Json::encode writes compact JSON, keys sorted, ASCII only" 'print(Json::encode({b => 1, a => ["x", "caf\x{e9}", "\x{1F600}"]}) eq q({"a":["x","caf\u00e9","\ud83d\ude00"],"b":1}) ? "ok" : Json::encode({b => 1, a => ["x", "caf\x{e9}", "\x{1F600}"]}))'
 pl "Json::encode escapes control characters" 'print(Json::encode("a\nb\x1b\x00") eq q("a\nb\u001b\u0000") ? "ok" : Json::encode("a\nb\x1b\x00"))'
 pl "what Json::encode writes, Json::decode reads back" 'my $v = {k => ["\x{263a}", 2.5, "line\nbreak"]}; my ($d) = Json::decode(Json::encode($v)); print($d->{k}[0] eq "\x{263a}" && $d->{k}[1] == 2.5 && $d->{k}[2] eq "line\nbreak" ? "ok" : "bad")'
+pl "Json::encode writes every number Json::decode gives (fractions, exponents, long integers)" 'my ($d) = Json::decode(q({"a":1.5,"b":1e3,"c":123456789012345678901234,"d":-7})); my $e = Json::encode($d); print($e eq q({"a":1.5,"b":1000,"c":123456789012345678901234,"d":-7}) ? "ok" : $e)'
+pl "Json::decode's error after non-ASCII text names the place in the text as given, not in its escaped copy" 'require JSON::PP; my $in = qq({"a":"\xc3\xa9\xc3\xa9", x}); eval { JSON::PP->new->utf8->decode($in) }; my ($want) = $@ =~ /(at character offset \d+)/; my (undef, $e) = Json::decode($in); print(defined $e && defined $want && index($e, $want) >= 0 ? "ok" : "got: " . ($e // "no error") . "; JSON::PP: " . ($want // "?"))'
+pl "Json::decode with plain gives perl's own numbers, not objects" 'my ($d) = Json::decode(q({"a":1.5,"b":30}), "plain"); print(!ref $d->{a} && !ref $d->{b} && $d->{a} == 1.5 && Json::encode($d) eq q({"a":1.5,"b":30}) ? "ok" : Json::encode($d))'
+pl "Json::decode reads non-ASCII text as get does, also around backslashes" 'my @c = ([qq({"a":"caf\xc3\xa9 \xf0\x9f\x98\x80","b":"\\\\\xc3\xa9"}), "caf\x{e9} \x{1F600}|\\\x{e9}"], [qq({"a":"\\\xc3\xa9"}), "ERR illegal backslash escape"], [qq({"a":1} \xc3\xa9), "ERR garbage after JSON"], [qq(\xc3\xa9), "ERR malformed JSON string"]); my $bad = ""; for (@c) { my ($in, $want) = @$_; my ($d, $e) = Json::decode($in); my $got = defined $e ? "ERR $e" : "$d->{a}|$d->{b}"; (my $w = $want) =~ s{\AERR }{}; $bad .= " [$got]" unless $want =~ /\AERR / ? $got =~ /\AERR .*\Q$w\E/ : $got eq $want } print($bad eq "" ? "ok" : $bad)'
+pl "Json::decode reads 2 MB of non-ASCII text within 10 s (JSON::PP alone takes the square of its length)" 'my $s = "\x{4e2d}" x 700000; my $j = qq({"c":"$s"}); utf8::encode($j); my $t = time; my ($d, $e) = Json::decode($j); my $took = time - $t; print(!defined $e && length($d->{c}) == 700000 && $took <= 10 ? "ok" : "took $took s, " . ($e // "read"))'
 
 # --- hook.pl: input ---
 # read FILE: runs Hook::read_input on FILE as standard input and prints
@@ -79,9 +84,14 @@ printf '{"c":"a\\u0000b\\u001b[2J\\nc"}' >"$work/ctl.json"
 got=$(read_as "$work/ctl.json")
 if [ "$got" = "ok c" ]; then pass "read_input reads control characters written as JSON escapes"; else fail "read_input reads control characters written as JSON escapes" "$got"; fi
 
+got=$(printf '{"t":1.5,"n":2}' | PERL_UNICODE=S perl -e 'require "$ENV{LIBDIR}/hook.pl"; my ($d, $e) = Hook::read_input(); print defined $e ? $e : (ref $d->{t} ? "object" : "plain") . " $d->{t} $d->{n}"' 2>&1)
+if [ "$got" = "plain 1.5 2" ]; then pass "read_input gives plain numbers, and reads bytes whatever PERL_UNICODE asks"; else fail "read_input gives plain numbers, and reads bytes whatever PERL_UNICODE asks" "$got"; fi
+
 # --- hook.pl: output ---
+# the words a Stop-type hook's stderr must not hold, as Claude Code 2.1.319 reads them
+pl "clean breaks up the words that make a block read as a missing file, wherever they stand" 'my $bad = ""; for my $t ("errNo such file", "x\nNo such file or directory", "x_No such directory", "No\tsuch\tfile", "cannot do it: can\x27t open x", "CAN\x27T OPEN") { my $s = Hook::clean($t); $bad .= " [$s]" if $s =~ /no such file|can\x27t open/i } print($bad eq "" ? "ok" : $bad)'
 pl "clean gives one line with every control and invisible character escaped" 'my $s = Hook::clean("a\nb\rc\x1b[31md\x07e\x{2028}f\x{202E}g\x{200B}h\x00i"); print($s eq q(a\x0Ab\x0Dc\x1B[31md\x07e\u{2028}f\u{202E}g\u{200B}h\x00i) ? "ok" : $s)'
-pl "clean breaks up a missing-file message" 'my $s = Hook::clean("ls: No such file or directory; no such  directory"); print($s !~ /no such (?:file|directory)/i ? "ok" : $s)'
+pl "clean breaks up a missing-file message" 'my $s = Hook::clean("ls: No such file or directory; no such  directory"); print($s !~ /no\s+such\s+(?:file|directory)/i ? "ok" : $s)'
 pl "clean marks a line that would open a packet section" 'print(Hook::clean("=== FAKE ===") =~ /\A\\===/ ? "ok" : Hook::clean("=== FAKE ==="))'
 perl -e 'require "$ENV{LIBDIR}/hook.pl"; exit Hook::block("guard G4: refused \x1b[2J\nsecond line")' 2>"$work/err" >"$work/out"
 code=$?
@@ -107,6 +117,28 @@ if [ "$got" = '{"hookSpecificOutput":{"permissionDecision":"deny","permissionDec
 else
   fail "json prints a decision with its strings cleaned, numbers and true left as they are" "$got"
 fi
+
+pl "json keeps numbers as numbers, also in exponent form, and a number written as text as text" 'my $o; { local *STDOUT; open STDOUT, ">", \$o; Hook::json({a => 1e20, b => 30, c => "30", d => 0.5, e => -2}) } print($o eq qq({"a":1e+20,"b":30,"c":"30","d":0.5,"e":-2}\n) ? "ok" : $o)'
+got=$(PERL_JSON_PP_USE_B=1 perl -e 'require "$ENV{LIBDIR}/hook.pl"; exit Hook::json({n => 30, f => 2.5})' 2>&1)
+if [ "$got" = '{"f":2.5,"n":30}' ]; then pass "json keeps numbers as numbers where JSON::PP reads perl's flags only (as perl 5.14 to 5.26 ship it)"; else fail "json keeps numbers as numbers where JSON::PP reads perl's flags only" "$got"; fi
+pl "json cleans keys too" 'my $o; { local *STDOUT; open STDOUT, ">", \$o; Hook::json({"a\nb" => 1}) } print($o eq qq({"a\\\\x0Ab":1}\n) ? "ok" : $o)'
+got=$(perl -e 'require "$ENV{LIBDIR}/hook.pl"; Hook::warning("one"); Hook::context("two")' 2>&1)
+code=$?
+if [ "$code" -ne 0 ] && printf '%s\n' "$got" | grep -q -x '{"systemMessage":"one"}' && printf '%s\n' "$got" | grep -q "answers on stdout once per run"; then pass "a second answer on stdout dies instead of printing two (exit $code)"; else fail "a second answer on stdout dies instead of printing two" "exit $code: $got"; fi
+got=$(perl -e 'require "$ENV{LIBDIR}/hook.pl"; exit Hook::warning("a", "b")' 2>&1)
+if [ "$got" = '{"systemMessage":"a; b"}' ]; then pass "warning joins several texts into one systemMessage"; else fail "warning joins several texts into one systemMessage" "$got"; fi
+got=$(perl -e 'require "$ENV{LIBDIR}/hook.pl"; exit Hook::context("  {\"decision\":\"block\"}", "{second}")' 2>&1)
+if [ "$got" = "$(printf '  \\x7B"decision":"block"}\n{second}')" ]; then pass "context writes a first line that opens with { so it cannot be read as the hook's JSON"; else fail "context writes a first line that opens with { so it cannot be read as the hook's JSON" "$got"; fi
+for how in "die after a failed kill (errno 3)|\$! = 3; die \"crash\\n\"" "die after a child that exited 3|system(\"exit 3\"); \$! = 0; die \"crash\\n\"" "exit 3 without block|exit 3"; do
+  what=${how%%|*}
+  code_text=${how#*|}
+  perl -e "require \"\$ENV{LIBDIR}/hook.pl\"; $code_text" >/dev/null 2>&1
+  code=$?
+  if [ "$code" -ne 3 ] && [ "$code" -ne 0 ]; then pass "a crash that would exit 3 ($what) exits $code, never the block code"; else fail "a crash that would exit 3 ($what) exits $code"; fi
+done
+perl -e 'require "$ENV{LIBDIR}/hook.pl"; exit Hook::block("refused")' >/dev/null 2>&1
+code=$?
+if [ "$code" -eq 3 ]; then pass "a block still exits 3"; else fail "a block still exits 3" "exit $code"; fi
 
 # --- log.pl ---
 root="$work/repo"
@@ -135,12 +167,41 @@ pl "a planted 5000-line log is trimmed to its cap of 1000, keeping the newest li
 pl "a cap of 3 keeps 3 lines" 'Log::append($ENV{ROOT}, "three.log", 3, rule => "G$_", tool => "Bash", hash => $ENV{H}) for 1 .. 5; my ($ok) = Log::lines($ENV{ROOT}, "three.log"); print(join(",", map { $_->[1] } @$ok) eq "G3,G4,G5" ? "ok" : "bad")'
 pl "a cap that is not a whole number above 0 is refused" 'eval { Log::append($ENV{ROOT}, "x.log", 0, rule => "G1", tool => "Bash", hash => $ENV{H}) }; print($@ =~ /cap/ ? "ok" : "bad: $@")'
 printf 'keep me\n' >"$work/outside.txt"
-ln -s "$work/outside.txt" "$root/link.log"
-pl "a log that is a link is refused and its target left alone" 'eval { Log::append($ENV{ROOT}, "link.log", undef, rule => "G1", tool => "Bash", hash => $ENV{H}) }; open my $f, "<", "$ENV{WORK}/outside.txt"; my $t = do { local $/; <$f> }; print($@ =~ /link\.log is a link or not a regular file/ && $t eq "keep me\n" ? "ok" : "bad: $@ $t")'
-mkdir -p "$work/elsewhere"
-ln -s "$work/elsewhere" "$root/.linked"
-pl "a folder on the way that is a link is refused, and nothing is written through it" 'eval { Log::append($ENV{ROOT}, ".linked/guard.log", undef, rule => "G1", tool => "Bash", hash => $ENV{H}) }; opendir my $d, "$ENV{WORK}/elsewhere"; my @in = grep { !/^\.\.?$/ } readdir $d; print($@ =~ /is a link; the log is not written through it/ && !@in ? "ok" : "bad: $@ @in")'
+export OUTSIDE="$work/outside.txt"
+# kept PATH: the outside file still holds only "keep me"
+kept='open my $f, "<", $ENV{OUTSIDE}; my $t = do { local $/; <$f> }; $t eq "keep me\n"'
+# Git Bash can make a copy where a link was asked for; then the link cases
+# would test a plain file, so they are skipped (not a pass), as in the other
+# test files
+can_link=0
+if ln -s "$work/outside.txt" "$work/link-probe" 2>/dev/null && [ -L "$work/link-probe" ]; then can_link=1; fi
+if [ "$can_link" -eq 1 ]; then
+  ln -s "$work/outside.txt" "$root/link.log"
+  pl "a log that is a link is refused and its target left alone" "eval { Log::append(\$ENV{ROOT}, \"link.log\", undef, rule => \"G1\", tool => \"Bash\", hash => \$ENV{H}) }; print(\$@ =~ /link\\.log is a link or not a regular file/ && do { $kept } ? \"ok\" : \"bad: \$@\")"
+  mkdir -p "$work/elsewhere"
+  ln -s "$work/elsewhere" "$root/.linked"
+  pl "a folder on the way that is a link is refused, and nothing is written through it" 'eval { Log::append($ENV{ROOT}, ".linked/guard.log", undef, rule => "G1", tool => "Bash", hash => $ENV{H}) }; opendir my $d, "$ENV{WORK}/elsewhere"; my @in = grep { !/^\.\.?$/ } readdir $d; print($@ =~ /is a link; the log is not written through it/ && !@in ? "ok" : "bad: $@ @in")'
+  mkdir -p "$root/lk"
+  ln -s "$work/outside.txt" "$root/lk/guard.log.lock"
+  pl "a lock file that is a link is refused and its target left alone" "eval { Log::append(\$ENV{ROOT}, \"lk/guard.log\", undef, rule => \"G1\", tool => \"Bash\", hash => \$ENV{H}) }; print(\$@ =~ /guard\\.log\\.lock is a link or not a regular file/ && do { $kept } && !-e \"\$ENV{ROOT}/lk/guard.log\" ? \"ok\" : \"bad: \$@\")"
+  ln -s "$root" "$work/root-link"
+  pl "a root folder that is a link is refused" 'eval { Log::append("$ENV{WORK}/root-link", "r.log", undef, rule => "G1", tool => "Bash", hash => $ENV{H}) }; print($@ =~ /missing or a link/ ? "ok" : "bad: $@")'
+else
+  skip "the link cases of the log: links cannot be made here"
+fi
+if ln "$work/outside.txt" "$root/hard.log" 2>/dev/null; then
+  pl "a log with a second name (a hard link) is refused, and the other file left alone" "eval { Log::append(\$ENV{ROOT}, \"hard.log\", undef, rule => \"G1\", tool => \"Bash\", hash => \$ENV{H}) }; print(\$@ =~ /another name \\(a hard link\\)/ && do { $kept } ? \"ok\" : \"bad: \$@\")"
+  perl -e 'open my $f, ">", "$ENV{ROOT}/trim.log"; printf $f "2026-01-01T00:00:00Z\tG0\tBash\t%064x\n", $_ for 1 .. 1000'
+  perl -e 'link $ENV{OUTSIDE}, "$ENV{ROOT}/trim.log.tmp.$_" for $$ + 1 .. $$ + 600'
+  pl "the trim never writes through a hard link planted at its temporary file's name" "Log::append(\$ENV{ROOT}, \"trim.log\", undef, rule => \"G9\", tool => \"Bash\", hash => \$ENV{H}); my (\$ok) = Log::lines(\$ENV{ROOT}, \"trim.log\"); print(do { $kept } && @\$ok == 1000 && \$ok->[-1][1] eq \"G9\" ? \"ok\" : \"bad: \" . scalar(@\$ok))"
+else
+  skip "the hard-link cases of the log: hard links cannot be made here"
+fi
 pl "a name that climbs out with .. is refused" 'eval { Log::append($ENV{ROOT}, "../x.log", undef, rule => "G1", tool => "Bash", hash => $ENV{H}) }; print($@ =~ /relative path/ && !-e "$ENV{WORK}/x.log" ? "ok" : "bad: $@")'
+pl "a name with a backslash or a drive letter is refused" 'my $n = 0; for my $name ("a\\\\b.log", "C:x.log", "a/./b.log", "a//b.log") { eval { Log::append($ENV{ROOT}, $name, undef, rule => "G1", tool => "Bash", hash => $ENV{H}) }; $n++ if $@ =~ /relative path/ } print($n == 4 ? "ok" : "only $n of 4 refused")'
+perl -e 'open my $f, ">", "$ENV{ROOT}/huge.log" or die; seek $f, 3 * 1024 * 1024 * 1024, 0; printf $f "2026-01-01T00:00:00Z\tG0\tBash\t%064x\n", $_ for 1 .. 1500'
+pl "a huge, mostly empty log is trimmed from its end, without reading it all" 'alarm 30; my $t = time; Log::append($ENV{ROOT}, "huge.log", undef, rule => "G9", tool => "Bash", hash => $ENV{H}); my ($ok, $bad) = Log::lines($ENV{ROOT}, "huge.log"); print(@$ok == 1000 && $ok->[-1][1] eq "G9" && !$bad && -s "$ENV{ROOT}/huge.log" < 200000 && time - $t < 20 ? "ok" : scalar(@$ok) . " lines, $bad bad, " . (-s "$ENV{ROOT}/huge.log") . " bytes")'
+pl "the time is UTC whatever the time zone" 'local $ENV{TZ} = "Asia/Riyadh"; Log::append($ENV{ROOT}, "tz.log", undef, rule => "G1", tool => "Bash", hash => $ENV{H}); my ($ok) = Log::lines($ENV{ROOT}, "tz.log"); my @g = gmtime; my $h = sprintf "%02d", $g[2]; print($ok->[0][0] =~ /T$h:\d\d:\d\dZ\z/ || $ok->[0][0] =~ /T\d\d:\d\d:\d\dZ\z/ && $g[1] == 0 ? "ok" : $ok->[0][0])'
 for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
   perl -e 'require "$ENV{LIBDIR}/log.pl"; Log::append($ENV{ROOT}, "many.log", undef, rule => "G$ARGV[0]", tool => "Bash", hash => $ENV{H})' "$i" &
 done
@@ -170,6 +231,11 @@ pl "scan_text finds a key right after an escape written as text" 'my $k = "AKIA"
 pl "scan_text reads characters as well as bytes, and gives each find once" 'my $k = "ghp_" . ("Z9y8" x 10); my @f = Secrets::scan_text("caf\x{e9} $k\n$k"); print(@f == 1 && $f[0][0] eq "GitHub token" ? "ok" : join "|", map { @$_ } @f)'
 pl "scan_text reads characters as their UTF-8 bytes, as scan_bytes and the file scan do (a masked length counts bytes)" 'my $c = "password = \"p\x{e4}ssw\x{f6}rd12\""; my $b = $c; utf8::encode($b); my @f = map { join "=", @$_ } Secrets::scan_text($c); my @g = map { join "=", @$_ } Secrets::scan_bytes($b); print("@f" eq "@g" && @f == 1 ? "ok" : "chars: @f bytes: @g")'
 pl "scan_bytes refuses characters, so a caller cannot mix the two up" 'eval { Secrets::scan_bytes("key \x{263a}") }; print($@ =~ /given characters/ ? "ok" : "bad: $@")'
+got=$(GIT_INDEX_FILE=planted perl -e 'my %e = %ENV; require "$ENV{LIBDIR}/secrets.pl"; my @d = grep { !exists $ENV{$_} || $ENV{$_} ne $e{$_} } keys %e; my @n = grep { !exists $e{$_} } keys %ENV; print(!@d && !@n ? "ok" : "changed: @d @n")' 2>&1)
+if [ "$got" = "ok" ]; then pass "loading secrets.pl leaves the environment alone"; else fail "loading secrets.pl leaves the environment alone" "$got"; fi
+pl "scan_bytes reads UTF-16 text and binary content as the file scan does" 'my $k = "ghp_" . ("Z9y8" x 10); my $le = "\xff\xfe" . join("", map { "$_\0" } split //, "token $k\n"); my $nobom = join("", map { "$_\0" } split //, "x token $k\n"); my $bin = "\0\0\x01bin " . "sk-ant-" . ("a1B2" x 10) . "\0"; my @a = Secrets::scan_bytes($le); my @b = Secrets::scan_bytes($nobom); my @c = Secrets::scan_bytes($bin); print(@a == 1 && $a[0][0] eq "GitHub token" && @b == 1 && @c == 1 && $c[0][0] eq "Anthropic API key" ? "ok" : join "|", map { @$_ } @a, @b, @c)'
+got=$(perl -e 'require "$ENV{LIBDIR}/../lib/json.pl"; require "$ENV{LIBDIR}/../lib/esc.pl"; require "$ENV{LIBDIR}/secrets.pl"; require "$ENV{LIBDIR}/hook.pl"; print "loaded"' 2>&1)
+if [ "$got" = "loaded" ]; then pass "the helpers load once, with no warning, when two paths spell their folder differently"; else fail "the helpers load once, with no warning, when two paths spell their folder differently" "$got"; fi
 pl "scan_text finds nothing in clean text" 'my @f = Secrets::scan_text("Step 5.1: shared helpers\n\nReview-Verdict: approve\n"); print(@f ? join("|", map { @$_ } @f) : "ok")'
 
 drop_sandbox "$work" || true

@@ -33,13 +33,22 @@
 # newlines.
 #
 # As a library (load it with require; nothing runs when it is loaded):
-#   Json::decode(BYTES) gives (DATA, undef), or (undef, REASON) when BYTES
-#     are not UTF-8 as RFC 3629 defines it, hold a NUL byte, are not JSON,
-#     or JSON::PP is missing. DATA is undef for the JSON null. "get" reads
-#     its input the same way, with the same reasons.
+#   Json::decode(BYTES [, 'plain']) gives (DATA, undef), or (undef,
+#     REASON) when BYTES are not UTF-8 as RFC 3629 defines it, hold a NUL
+#     byte, are not JSON, or JSON::PP is missing. DATA is undef for the JSON
+#     null. "get" reads its input the same way, with the same reasons.
+#     Numbers are exact (a fraction or a long integer as a Math::BigFloat or
+#     Math::BigInt), unless 'plain' is given: then they are perl's own
+#     numbers, which the hooks use, as loading Math::BigFloat costs more
+#     than a hook's time allows and a million of them fill the memory.
+#     Before JSON::PP reads them, the non-ASCII characters in strings are
+#     written as \uXXXX escapes, which mean the same and are read many
+#     times faster (JSON::PP's time on UTF-8 grows with the square of the
+#     length; 2 MB of Chinese text took 49 s).
 #   Json::encode(DATA) gives compact JSON with sorted keys, in ASCII only
 #     (every other character as \uXXXX), as bytes: the method's one JSON
-#     writer. Its strings are characters, as Json::decode gives them.
+#     writer. Its strings are characters, as Json::decode gives them, and
+#     it writes every number Json::decode gives.
 #   A library caller cleans its own environment (PERL5OPT and the rest)
 #   before perl starts: only "get" starts perl again without them.
 package Json;
@@ -52,7 +61,7 @@ sub reader {
 }
 
 sub decode {
-  my ($text) = @_;
+  my ($text, $mode) = @_;
   return (undef, "perl's JSON::PP module is missing; install it (on Linux, for example, the perl-JSON-PP or libjson-pp-perl package)")
     unless eval { require JSON::PP; 1 };
   $text = '' unless defined $text;
@@ -62,7 +71,21 @@ sub decode {
   my $chars = $text;
   return (undef, 'the input is not valid UTF-8 (or holds a NUL byte)')
     if index($text, "\0") >= 0 || !utf8::decode($chars) || $chars =~ /[\x{D800}-\x{DFFF}]|[^\x{0}-\x{10FFFF}]/;
-  my $data = eval { reader()->decode($text) };
+  my $r = reader();
+  $r->allow_bignum(0) if defined $mode && $mode eq 'plain';
+  # the fast reading: every non-ASCII character as a \uXXXX escape (two for
+  # one above U+FFFF). It means the same wherever the character is valid
+  # JSON (in a string), and stays invalid where it is not, except right
+  # after an odd run of backslashes, where it would turn a bad escape into
+  # a valid one: there the text is read as it is.
+  my $data;
+  if ($chars =~ /[^\x00-\x7F]/ && $chars !~ /(?<!\\)(?:\\\\)*\\[^\x00-\x7F]/) {
+    (my $ascii = $chars) =~ s/([^\x00-\x7F])/esc_char(ord $1)/ge;
+    $data = eval { $r->decode($ascii) };
+    return ($data, undef) if defined $data || !$@;
+    # invalid: read the text as it is, for the error JSON::PP gives on it
+  }
+  $data = eval { $r->decode($text) };
   if (!defined $data && $@) {
     my $err = $@;
     $err =~ s/,? \(before .*//s;    # it quotes the input, which may hold a secret
@@ -73,9 +96,16 @@ sub decode {
   return ($data, undef);
 }
 
+sub esc_char {
+  my ($c) = @_;
+  return sprintf '\\u%04x', $c if $c < 0x10000;
+  $c -= 0x10000;
+  return sprintf '\\u%04x\\u%04x', 0xD800 + ($c >> 10), 0xDC00 + ($c & 0x3FF);
+}
+
 sub encode {
   require JSON::PP;
-  return JSON::PP->new->ascii->canonical->allow_nonref->encode($_[0]);
+  return JSON::PP->new->ascii->canonical->allow_nonref->allow_bignum->encode($_[0]);
 }
 
 sub fail {
