@@ -31,6 +31,30 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|ExitWorktree|SendMessage|Skill|Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "BASH_ENV= ENV= bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/method/guard.sh\"",
+            "timeout": 30,
+            "onFailure": "block"
+          }
+        ]
+      },
+      {
+        "matcher": "^mcp__",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "BASH_ENV= ENV= bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/method/guard.sh\"",
+            "timeout": 30,
+            "onFailure": "block"
+          }
+        ]
+      }
     ]
   }
 }

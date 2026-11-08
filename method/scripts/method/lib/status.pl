@@ -381,6 +381,20 @@ sub effort_lines {
   return ['effort', 'PASS', 'CLAUDE_CODE_EFFORT_LEVEL is not set'];
 }
 
+# the guard's refusals, from its capped log (.method/local/guard.log)
+sub guard_lines {
+  my $name = '.method/local/guard.log';
+  return ['guard', 'PASS', 'no refusal logged'] unless -e $name || -l $name;
+  require File::Spec->catfile($lib, 'log.pl');
+  my ($ok, $bad) = Log::lines('.', $name);
+  return ['guard', 'PASS', 'no refusal logged' . ($bad ? "; $bad lines not in the log's form" : '')] unless @$ok;
+  my %n;
+  $n{ $_->[1] }++ for @$ok;
+  my $rules = join(', ', map { $n{$_} > 1 ? "$_ ($n{$_})" : $_ } sort { substr($a, 1) <=> substr($b, 1) || $a cmp $b } keys %n);
+  return ['guard', 'LOOK', scalar(@$ok) . ' refusals since ' . $ok->[0][0] . ": $rules"
+    . ($bad ? "; $bad lines not in the log's form" : '') . "; see $name, and remove it once read"];
+}
+
 sub perl_lines {
   my @missing;
   for my $m (qw(JSON::PP Digest::SHA)) {
@@ -516,6 +530,7 @@ sub main {
   area('claude-code', \&claude_code_lines);
   area('effort', \&effort_lines);
   area('perl', \&perl_lines);
+  area('guard', \&guard_lines);
   if ($quick) {
     say_area('ci', 'SKIPPED', 'not checked at session start; /start checks it');
   } else {

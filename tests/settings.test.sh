@@ -183,7 +183,9 @@ if (!defined $hooks) {
   check("the guard's PreToolUse and ConfigChange entries block on failure", @missing_block ? "no onFailure \"block\" on @missing_block" : undef);
   # the entries the plan registers so far (section 6.4): EVENT, MATCHER
   # (undef: none, every source), SCRIPT, TIMEOUT (seconds)
-  my @registered = (['SessionStart', undef, 'session-status', 30]);
+  my @registered = (['SessionStart', undef, 'session-status', 30],
+    ['PreToolUse', 'Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|ExitWorktree|SendMessage|Skill|Agent|Task', 'guard', 30],
+    ['PreToolUse', '^mcp__', 'guard', 30]);
   for my $r (@registered) {
     my ($event, $matcher, $name, $timeout) = @$r;
     my $want = qq{BASH_ENV= ENV= bash "\$CLAUDE_PROJECT_DIR/.claude/hooks/method/$name.sh"};
@@ -195,7 +197,7 @@ if (!defined $hooks) {
     check("the fragment runs $name.sh on $event" . (defined $matcher ? " for $matcher" : ', for every source (no matcher)'),
       @hit == 1 ? undef : (@hit ? "it is registered " . scalar(@hit) . " times" : 'it is not registered so'));
     my @t = map { my $g = $_; map { $_->{'timeout'} } grep { ref $_ eq 'HASH' && ($_->{command} // '') eq $want } @{ $g->{hooks} } } @hit;
-    check("$name.sh on $event has a $timeout s time limit, written as a number", (@t && !grep { !defined $_ || ref $_ || Json::encode($_) ne $timeout } @t) ? undef : 'its timeout is ' . join(', ', map { defined $_ ? Json::encode($_) : 'not set' } @t));
+    check("$name.sh on $event" . (defined $matcher ? " for $matcher" : "") . " has a $timeout s time limit, written as a number", (@t && !grep { !defined $_ || ref $_ || Json::encode($_) ne $timeout } @t) ? undef : 'its timeout is ' . join(', ', map { defined $_ ? Json::encode($_) : 'not set' } @t));
   }
 }
 # the hooks folder holds only the three scripts' .sh files

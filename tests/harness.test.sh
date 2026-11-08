@@ -308,7 +308,7 @@ for mode in off on; do
   h_case "skill-shell-$mode"
   mkdir -p "$H_PROJ/.claude/skills/run-x"
   printf '%s\n' '---' 'name: run-x' 'description: A harness skill with a shell line.' 'allowed-tools: Bash(touch *)' '---' 'Shipped: !`touch skill-ran.txt && echo HARNESS-SKILL-RAN`' >"$H_PROJ/.claude/skills/run-x/SKILL.md"
-  if [ "$mode" = off ]; then with_fragment '' | h_settings; else with_fragment 'delete $d->{disableSkillShellExecution}' | h_settings; fi
+  if [ "$mode" = off ]; then with_fragment 'delete $d->{hooks}' | h_settings; else with_fragment 'delete $d->{hooks}; delete $d->{disableSkillShellExecution}' | h_settings; fi
   if h_fake "$H_WORK/skill.json"; then
     # shellcheck disable=SC2086
     h_client 60 -- --permission-mode default --allowedTools Skill
@@ -403,6 +403,90 @@ if h_fake "$H_WORK/ss.json"; then
 else
   fail "session-status-nested: the fake did not answer; the client was not started"
 fi
+
+# --- 12. the guard (step 5.5) ---
+g0='echo $(git rev-parse HEAD) > refused-ran.txt'
+GUARD_SCRIPT=$(CMD="$g0" perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({convs => [{name => "main", match => "^go\$", turns => [{tool => "Bash", input => {command => "git status > allowed.txt", description => "a plain command"}}, {tool => "Bash", input => {command => $ENV{CMD}, description => "an unreadable one"}}, {text => "MAIN-DONE"}]}]})')
+printf '%s\n' "$GUARD_SCRIPT" >"$H_WORK/guard.json"
+for mode in default acceptEdits; do
+  h_case "guard-$mode"
+  h_method "$root"
+  if h_fake "$H_WORK/guard.json"; then
+    h_client 60 -- --permission-mode "$mode" --allowedTools Bash
+    h_stop
+    if h_ran allowed.txt && ! h_ran refused-ran.txt && h_tsv_has "ERR:PreToolUse:Bash hook error: " && h_tsv_has "guard G0: this command holds command substitution"; then
+      pass "guard ($mode mode): a plain command runs; an unreadable one next to git is refused (G0) and its reason reaches Claude"
+    else
+      fail "guard ($mode mode): a plain command runs; an unreadable one next to git is refused (G0)" "$(cut -f7- "$H_DIR/fake/requests.tsv")"
+    fi
+    if LC_ALL=C grep -q "	G0	Bash	" "$H_PROJ/.method/local/guard.log" 2>/dev/null; then pass "guard ($mode mode): the refusal is in .method/local/guard.log"; else fail "guard ($mode mode): the refusal is in .method/local/guard.log"; fi
+    h_safe "guard-$mode"
+  else
+    fail "guard-$mode: the fake did not answer; the client was not started"
+  fi
+done
+h_case guard-monitor
+h_method "$root"
+CMD="$g0" perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({convs => [{name => "main", match => "^go\$", turns => [{tool => "Monitor", input => {command => $ENV{CMD}, description => "watch"}}, {text => "MAIN-DONE"}]}]})' >"$H_DIR/script.json"
+if h_fake "$H_DIR/script.json"; then
+  h_client 60 -- --permission-mode default --allowedTools Bash Monitor
+  h_stop
+  if ! h_ran refused-ran.txt && h_tsv_has "guard G0"; then pass "guard: a Monitor command is checked as a Bash one, and refused"; else fail "guard: a Monitor command is checked as a Bash one, and refused" "$(cut -f7- "$H_DIR/fake/requests.tsv")"; fi
+  h_safe guard-monitor
+else
+  fail "guard-monitor: the fake did not answer; the client was not started"
+fi
+h_case guard-missing
+h_method "$root"
+rm -f "$H_PROJ/.claude/hooks/method/guard.sh"
+printf '%s\n' '{"convs":[{"name":"main","match":"^go$","turns":[{"tool":"Bash","input":{"command":"touch ran.txt","description":"a plain command"}},{"text":"MAIN-DONE"}]}]}' >"$H_DIR/script.json"
+if h_fake "$H_DIR/script.json"; then
+  # shellcheck disable=SC2086
+  h_client 60 -- $D
+  h_stop
+  if ! h_ran ran.txt && h_tsv_has "ERR:"; then pass "guard: with guard.sh missing, even a plain command is blocked (onFailure block)"; else fail "guard: with guard.sh missing, even a plain command is blocked" "$(cut -f7- "$H_DIR/fake/requests.tsv")"; fi
+  h_safe guard-missing
+else
+  fail "guard-missing: the fake did not answer; the client was not started"
+fi
+h_case guard-noperl
+h_method "$root"
+printf '%s\n' '{"convs":[{"name":"main","match":"^go$","turns":[{"tool":"Bash","input":{"command":"touch ran.txt","description":"a plain command"}},{"text":"MAIN-DONE"}]}]}' >"$H_DIR/script.json"
+mkdir -p "$H_DIR/bin"
+for t in bash sh env sed cat git dirname; do
+  w=$(command -v "$t") && ln -s "$w" "$H_DIR/bin/$t"
+done
+if h_fake "$H_DIR/script.json"; then
+  # shellcheck disable=SC2086
+  h_client 60 PATH="$H_DIR/bin" -- $D
+  h_stop
+  if ! h_ran ran.txt && h_tsv_has "guard G1: perl is missing"; then pass "guard: without perl on PATH every call is refused (G1), with the way out"; else fail "guard: without perl on PATH every call is refused (G1)" "$(cut -f7- "$H_DIR/fake/requests.tsv")"; fi
+  h_safe guard-noperl
+else
+  fail "guard-noperl: the fake did not answer; the client was not started"
+fi
+# the owner's way out (README, "When the guard blocks something it should not")
+for way in local flag; do
+  h_case "way-out-$way"
+  h_method "$root"
+  if [ "$way" = local ]; then printf '{"disableAllHooks": true}\n' >"$H_PROJ/.claude/settings.local.json"; fi
+  if h_fake "$H_WORK/guard.json"; then
+    if [ "$way" = flag ]; then
+      h_client 60 -- --permission-mode default --allowedTools Bash --settings '{"disableAllHooks": true}'
+    else
+      h_client 60 -- --permission-mode default --allowedTools Bash
+    fi
+    h_stop
+    if h_ran refused-ran.txt && ! h_req_has 'METHOD-ACTIVE'; then
+      pass "way out ($way): with hooks switched off before the session, the guard does not run, and the missing METHOD-ACTIVE line shows it"
+    else
+      fail "way out ($way): with hooks switched off before the session, the guard does not run" "$(cut -f7- "$H_DIR/fake/requests.tsv")"
+    fi
+    h_safe "way-out-$way"
+  else
+    fail "way-out-$way: the fake did not answer; the client was not started"
+  fi
+done
 
 echo "harness: ${H_RUNS:-0} client runs took ${H_TOTAL_SECS:-0} s"
 drop_sandbox "$H_WORK" || true

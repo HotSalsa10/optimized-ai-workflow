@@ -98,7 +98,16 @@ expect "a clean, pushed project needs no look (exit 0)" 0 "status: w on main at 
   "records: PASS - 9 records present; CLAUDE.md imports AGENTS.md; checks/*.tsv lists no checks" \
   "claude-code: SKIPPED - not run inside Claude Code" "effort: SKIPPED - not run inside Claude Code" "perl: PASS - JSON::PP " \
   "ci: SKIPPED - origin is not on github.com" "status: nothing needs a look; 3 SKIPPED (claude-code, effort, ci)"
-if [ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" -eq 9 ]; then pass "the report is one line per area plus a first and a last line"; else fail "the report is one line per area" "$out"; fi
+if [ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" -eq 10 ]; then pass "the report is one line per area plus a first and a last line"; else fail "the report is one line per area" "$out"; fi
+out=$(cd "$w" && bash "$status" extra 2>&1)
+code=$?
+st "$w"
+expect "a project with no guard log has nothing for the guard area" 0 "guard: PASS - no refusal logged"
+mkdir -p "$w/.method/local"
+printf '2026-11-08T01:00:00Z\tG0\tBash\t%064d\n2026-11-08T01:05:00Z\tG4\tBash\t%064d\n2026-11-08T01:06:00Z\tG4\tmcp__github__merge_pull_request\t%064d\nfree text here\n' 1 2 3 >"$w/.method/local/guard.log"
+st "$w"
+expect "the guard's refusals are a LOOK, with their count, first time and rules" 1 "guard: LOOK - 3 refusals since 2026-11-08T01:00:00Z: G0, G4 (2); 1 lines not in the log's form; see .method/local/guard.log, and remove it once read"
+rm -rf "$w/.method"
 out=$(cd "$w" && bash "$status" extra 2>&1)
 code=$?
 expect "any argument but --quick is bad usage" 2 "status: usage: status.sh [--quick]"

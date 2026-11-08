@@ -89,6 +89,8 @@ plant "onFailure on SessionStart" "$frag" "onFailure on SessionStart" '$d->{hook
 plant "session-status with a 1 s time limit" "$frag" "its timeout is 1" '$d->{hooks}{SessionStart}[0]{hooks}[0]{timeout} = 1'
 plant "session-status with no time limit" "$frag" "its timeout is not set" 'delete $d->{hooks}{SessionStart}[0]{hooks}[0]{timeout}'
 plant "session-status's time limit written as a string (the client skips the file)" "$frag" 'its timeout is "30"' '$d->{hooks}{SessionStart}[0]{hooks}[0]{timeout} = "30"'
+plant "the guard on outside tools with a 600 s time limit" "$frag" "FAIL  guard.sh on PreToolUse for ^mcp__ has a 30 s time limit" '$d->{hooks}{PreToolUse}[1]{hooks}[0]{timeout} = 600'
+plant "the guard on the built-in tools with no time limit" "$frag" "Task has a 30 s time limit" 'delete $d->{hooks}{PreToolUse}[0]{hooks}[0]{timeout}'
 plant "the guard without onFailure block" "$frag" 'no onFailure "block" on PreToolUse' '$d->{hooks}{PreToolUse} = [{matcher => "Bash", hooks => [{type => "command", command => $ENV{OK_HOOK}}]}]'
 plant "a stray .sh in the hooks folder" method/settings.fragment.json "also extra.sh" 'open my $x, ">", "method/.claude/hooks/method/extra.sh" or die'
 

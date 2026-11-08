@@ -28,6 +28,8 @@
 #   effort       CLAUDE_CODE_EFFORT_LEVEL is not set (also checked inside a
 #                hook: CLAUDE_PROJECT_DIR set, CLAUDE_CODE_EXECPATH not)
 #   perl         JSON::PP and Digest::SHA load
+#   guard        the refusals in the guard's log (.method/local/guard.log):
+#                LOOK with their count and rules, else PASS
 #   ci           the newest CI run of each workflow for HEAD and main's tip
 #                (gh, at most 15 seconds; only for a github.com origin)
 #   repo <path>  the work checks for each REPOS entry in .claude/method.conf

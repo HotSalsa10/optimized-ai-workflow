@@ -231,12 +231,32 @@ Plan: docs/plans/step5.md (version 3). Decisions A45 to A62. Rules M072 (moved t
   - [ ] Review round 2.
 - [ ] 5.4 session-status.sh and status.sh --quick.
   - [x] Built while 5.1 to 5.3 were in review: method/.claude/hooks/method/session-status.sh (METHOD-ACTIVE from sh, PERL* variables unset, `command perl`), lib/session.pl (status --quick within 5 s, the weakening settings by name, the caps), status.sh --quick and its hook awareness, the fragment's SessionStart entry (checked by the settings test), the hooks README's first part. Tests: session-status (26 cases), 5 status cases, 5 harness cases (11 client runs at each version), 4 settings plants. Planted breaks: 22, all caught.
-  - [x] Decision while building: the G16 settings snapshot moves to 5.9, beside the rule that reads it; session-status writes nothing in 5.4.
+  - [x] Decision while building: the G16 settings snapshot moves to 5.9, beside the rule that reads it; session-status writes nothing in 5.4. The warning on shapes added in `.claude/method-local/` comes with the shape lists (5.6 to 5.8).
   - You will see, in the first request of a harness session: `METHOD-ACTIVE vunreleased` and `status: 1 areas need a look (work)`.
   - [x] Review round 1 (a reviewer, a security check and a hook-contract check; 18 agents with the refuters): REQUEST CHANGES. The hook printed METHOD-ACTIVE from sh, exited 0, kept its caps and wrote nothing; most planted defects went red. Found by running: the harness's resume case passed when the hook printed nothing on resume (the resumed request still held the first session's line); a maxEffortLevel in .claude/settings.local.json lowered every request's effort with no LOOK (only user settings were checked); the "gh is not called" case could not fail (the project's origin was not on github.com, so the ci area stopped before gh anyway); a crash in the perl part left METHOD-ACTIVE with no line saying the rest was missing.
   - [x] Repair loop 1: each fixed with a test (session-status: 26 to 38 cases; settings: 2 plants; a harness case that now goes red when the hook is silent on resume). Also from the notes: a settings file is read only when it is a regular file of at most 4 MB (a FIFO held the hook past its 30 s and lost METHOD-ACTIVE); user settings are read where Claude Code reads them ($CLAUDE_CONFIG_DIR); every PreToolUse or PermissionRequest hook in local or user settings counts, as a copy of the method's would replace the project's entry with its own fields (async); per-model effort caps count; local settings are read from the project, not from the folder Claude moved into; input that cannot be read is a LOOK; another repository's LOOK line is kept whatever its name's letters; user settings name only what adds to a session, with words that are true for them; a model id is shown only in its own shape; status --quick names the oldest unverdicted commit by its id, not its subject (free text); the lines are measured as printed (cleaned twice); the settings test checks the SessionStart time limit and that it is a JSON number (a string makes the client skip the file); run_limited ends a child that ignored TERM; the README's cost is the hook's own (0.2 to 0.3 s). Left for 5.9: an exported function named command or unset, and SHELLOPTS, from a settings env (bash -p would refuse them); the PERL* clearing moves to lib/hook-env.sh in 5.5 (compgen, no sed).
   - [ ] Review round 2.
 - [ ] 5.5 Guard frame: the command reader, G0 to G2, the log, the false-refusal run, "when the guard blocks wrongly".
+  - [x] Built while 5.1 to 5.4 were in review: method/.claude/hooks/method/guard.sh (perl's stderr kept aside, so a crash shows only the wrapper's line), lib/hook-env.sh (PERL* variables cleared for both hooks), lib/shell.pl (the command reader and its "cannot read" list), lib/guard.pl (G0, G1, G2, the refusal log), the fragment's two PreToolUse entries (the built-in tools, and `^mcp__`, each with onFailure "block" and a 30 s limit), status's guard line (PASS, or LOOK with each rule's count since the oldest refusal), the hooks README's guard part with "When the guard blocks something it should not". Tests: guard (64 cases), 7 harness cases at each version, status cases for the guard line. Planted breaks: 38, all 37 that apply caught. M128 and M129 done.
+  - [x] False-refusal run (plan section 6.2): every Bash command recorded on the build machine, replayed through G0 (counts only; no command kept). The first G0, which refused a call holding any unreadable shape when any part of it named a watched word, refused 38% of 16,965 (51% of main-session commands). G0 now judges each command by its own text (A57, updated). The last run:
+
+    | | All sessions | Main sessions |
+    |---|---|---|
+    | Bash commands read | 17,072 | 2,740 |
+    | G0 refuses | 1,323 (7.7%) | 314 (11.5%) |
+    | of which name the method's own files (G6 refuses them in a project anyway) | 735 | 245 |
+    | left | 588 (3.4%) | 69 (2.5%) |
+    | by shape: command substitution or backticks | 462 | 20 |
+    | an inline program (perl -e, python -c...) | 422 | 269 |
+    | a variable as the command word | 253 | 7 |
+    | a pipe or here-document into an interpreter | 83 | 14 |
+    | a case statement | 82 | 2 |
+    | bash -c with an expansion, eval of an expansion, expanded here-document text, text the reader could not split | 21 | 2 |
+
+    G1 and G2 refuse nothing here: perl was always there and no PowerShell call was recorded.
+  - [x] Decisions while building: the fast exit the plan allowed for was not built, as a call takes 29 ms median and 37 ms at the 90th percentile, under the plan's 40 and 60; a script file run by a shell and a variable in a write target left the "cannot read" list (A57: a script written and then run is a known limit, A50; G6 judges where a write lands); an inline program counts only when it can start a program or names a method file; the plan's "a cd to a path that is not written out, before a write" moves to G6 (5.7), which resolves where each write lands and so is the rule that needs the folder.
+  - You will see, from a session whose Claude runs `echo $(git rev-parse HEAD) > file`: `guard G0: this command holds command substitution or backticks, which the guard cannot read with confidence, ...`; and in status: `guard: LOOK - 1 refusals since ...: G0; see .method/local/guard.log, and remove it once read`.
+  - [ ] Review round 1 (three reviewers, A62).
 - [ ] 5.6 The git list: G3 and G8.
 - [ ] 5.7 Protected files: G6 and G12.
 - [ ] 5.8 Outside: G4, the gh and MCP lists, the deny entries.
@@ -246,4 +266,4 @@ Plan: docs/plans/step5.md (version 3). Decisions A45 to A62. Rules M072 (moved t
 
 ## Next
 
-Step 5.1: the shared helpers. Then step 5b: gate-receipt.
+The reviews of 5.1 (round 2) to 5.5, then 5.6: the git list. Then step 5b: gate-receipt.

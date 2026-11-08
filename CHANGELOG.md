@@ -55,6 +55,8 @@ Nothing yet. Release 1 is being built.
 - Tests: 1 new test file (settings) and 1 new plant file.
 - session-status (step 5.4): at every session start, Claude is told the method is on (METHOD-ACTIVE), what status finds that needs a look, and which settings in this session weaken the method; at most 10 lines. status.sh gains --quick, which leaves CI to /start.
 - Tests: 1 new test file (session-status) and new status and harness cases.
+- The guard's frame (step 5.5): before each command, edit and outside tool, the guard reads the call. It refuses what it cannot read when that could touch git, gh, claude, curl, wget or the method's files (G0), every call when perl is missing (G1), and every PowerShell call (G2), with one line saying why and what to do instead. Refusals are logged without the command's text, and status shows them. The hooks README says how to switch the guard off for a session when it is wrong.
+- Tests: 1 new test file (guard) and new harness, status and settings cases.
 
 ### Changed (step 4b)
 
