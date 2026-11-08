@@ -1,0 +1,9 @@
+# The Claude Code versions the harness runs (DECISIONS A49). The floor is
+# claude_code_min in method/scripts/method/REQUIRES; "tested" is the newest
+# version proven here. Both are raised by hand in /research-update (A21).
+# Each pinned line: VERSION<TAB>PLATFORM<TAB>the npm registry's integrity
+# (sha512, base64) of the package @anthropic-ai/claude-code-PLATFORM, which
+# holds the client. get-client.sh refuses a download that does not match.
+tested	2.1.319
+2.1.316	linux-x64	sha512-RQDM6N285IjNKcmlPRriayNzpTkEJreAw5/vBU+V0R3qljkQ5z6/pSbzcVUAXvasoOlvub0RIma3NWvSuZA8Cg==
+2.1.319	linux-x64	sha512-FO4Sd23BO1VCQPiJe5vG3bNnmV5+YiTau7o1lqK3Fr5VlE4TLdKiyYpwQRwEXO91kE2l12Ep2i7J19T8Md2oOQ==

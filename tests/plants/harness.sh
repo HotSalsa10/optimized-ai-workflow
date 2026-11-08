@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# Plants for the harness's own checks (step 5.2): each must turn red for its
+# stated reason, so a harness that passes is known to look. Like the
+# harness, it needs a client: METHOD_HARNESS_CLIENT names one; without it
+# this file says SKIPPED, which is never a pass. Runs in throwaway folders
+# and copies only.
+set -u
+here=$(cd "$(dirname "$0")" && pwd)
+# shellcheck source=tests/lib.sh
+. "$here/../lib.sh" || {
+  echo "plants: cannot load tests/lib.sh; stopping before anything runs"
+  exit 1
+}
+
+echo "plants: harness"
+finish() {
+  echo "plants: harness: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
+  [ "$tests_fail" -eq 0 ]
+  exit
+}
+client=${METHOD_HARNESS_CLIENT:-}
+if [ -z "$client" ]; then
+  skip "harness plants: no client given; set METHOD_HARNESS_CLIENT to a Claude Code binary to run them"
+  finish
+fi
+
+root=$(repo_root)
+HARNESS="$root/tests/harness"
+H_CLIENT=$client
+H_WORK=$(new_sandbox_dir) || abort_sandbox
+# shellcheck source=tests/harness/lib.sh
+. "$HARNESS/lib.sh"
+trap 'h_stop' EXIT
+# shellcheck disable=SC2329 # called through expect_landed
+lacks_line() {
+  ! grep -q -- "$1" "$2"
+}
+D="--permission-mode default --allowedTools Bash WebFetch"
+two='{"convs":[{"name":"main","match":"^go$","turns":[{"tool":"Bash","input":{"command":"touch one.txt","description":"one"}},{"text":"MAIN-DONE"}]}]}'
+
+# 1. a fake that never answers: the case stops before the client starts
+cat >"$H_WORK/silent.pl" <<'EOF'
+use IO::Socket::INET; my %a = @ARGV; my $s = IO::Socket::INET->new(LocalAddr => '127.0.0.1', LocalPort => 0, Listen => 5, ReuseAddr => 1) or die;
+open my $p, '>', "$a{'--port-file'}.tmp" or die; print $p $s->sockport, "\n"; close $p; rename "$a{'--port-file'}.tmp", $a{'--port-file'};
+alarm 60; my @held; while (my $c = $s->accept) { push @held, $c }
+EOF
+h_case silent
+printf '%s\n' "$two" >"$H_DIR/script.json"
+start=$(perl -e 'print time')
+if H_FAKE_API="$H_WORK/silent.pl" h_fake "$H_DIR/script.json"; then
+  h_stop
+  fail "a fake that never answers stops the case before the client starts: it was taken as up"
+else
+  took=$(($(perl -e 'print time') - start))
+  if [ "$took" -le 15 ] && [ ! -e "$H_DIR/out.jsonl" ]; then pass "a fake that never answers stops the case before the client starts (in ${took} s)"; else fail "a fake that never answers stops the case before the client starts" "took ${took} s"; fi
+fi
+
+# 2. a client pointed at a dead port: "no request reached the fake"
+h_case dead-port
+printf '%s\n' "$two" >"$H_DIR/script.json"
+if h_fake "$H_DIR/script.json"; then
+  real_port=$H_PORT
+  H_PORT=$(perl -MIO::Socket::INET -e 'my $s = IO::Socket::INET->new(LocalAddr => "127.0.0.1", LocalPort => 0, Listen => 1) or die; print $s->sockport')
+  # shellcheck disable=SC2086 # D holds several arguments on purpose
+  h_client 60 -- $D
+  H_PORT=$real_port
+  h_stop
+  if h_reached; then fail "a client pointed at a dead port: the reach check said a request arrived"; else pass "a client pointed at a dead port: the reach check sees that no request reached the fake"; fi
+else
+  fail "dead-port: the fake did not answer"
+fi
+
+# 3. a request cap of 1: the cap check goes red
+h_case cap-one
+printf '%s\n' "$two" >"$H_DIR/script.json"
+if h_fake "$H_DIR/script.json" 1; then
+  # shellcheck disable=SC2086
+  h_client 60 -- $D
+  h_stop
+  if h_no_overcap; then fail "a request cap of 1: the cap check did not see the cap reached"; else pass "a request cap of 1: the cap check sees the cap reached"; fi
+else
+  fail "cap-one: the fake did not answer"
+fi
+
+# 4. an outside call through the trap: the connection check goes red
+h_case trap
+printf '%s\n' '{"model":"claude-opus-5-5","skipWebFetchPreflight":true}' | h_settings
+printf '%s\n' '{"convs":[{"name":"main","match":"^go$","turns":[{"tool":"WebFetch","input":{"url":"https://example.invalid/","prompt":"summarize"}},{"text":"MAIN-DONE"}]}]}' >"$H_DIR/script.json"
+if h_fake "$H_DIR/script.json"; then
+  # shellcheck disable=SC2086
+  h_client 60 -- $D
+  h_stop
+  if h_no_connect; then fail "an outside call through the trap: the connection check did not see it" "$(cut -f7- "$H_DIR/fake/requests.tsv")"; else pass "an outside call through the trap: the connection check sees it (CONNECT refused and logged)"; fi
+else
+  fail "trap: the fake did not answer"
+fi
+
+# 5. no refusing hook: the command the case expects refused runs
+h_case no-guard
+h_fixtures
+printf '%s\n' '{"model":"claude-opus-5-5"}' | h_settings
+printf '%s\n' '{"convs":[{"name":"main","match":"^go$","turns":[{"tool":"Bash","input":{"command":"touch refused-ran.txt # HARNESS-REFUSE-ME","description":"A refused command"}},{"text":"MAIN-DONE"}]}]}' >"$H_DIR/script.json"
+if h_fake "$H_DIR/script.json"; then
+  # shellcheck disable=SC2086
+  h_client 60 -- $D
+  h_stop
+  if h_ran refused-ran.txt; then pass "with no refusing hook, the command a case expects refused runs, so the refusal check can tell"; else fail "with no refusing hook, the command a case expects refused runs"; fi
+else
+  fail "no-guard: the fake did not answer"
+fi
+
+# 6. the harness file itself, in a copy: a tool missing from tools.txt, a
+# wrong version asked for, a client that is not there
+sb=$(make_sandbox) || abort_sandbox
+grep -v '^Bash	' "$sb/tests/harness/tools.txt" >"$sb/tools.tmp" && mv "$sb/tools.tmp" "$sb/tests/harness/tools.txt"
+if expect_landed "tools.txt without Bash" lacks_line '^Bash	' "$sb/tests/harness/tools.txt"; then
+  out=$(cd "$sb" && METHOD_HARNESS_CLIENT="$client" bash tests/harness.test.sh 2>&1)
+  if printf '%s\n' "$out" | grep -q "FAIL  startup: tools the client offers that tests/harness/tools.txt does not list:.* Bash"; then pass "a tool missing from tools.txt turns the harness red, naming it"; else fail "a tool missing from tools.txt turns the harness red, naming it" "$(printf '%s\n' "$out" | grep -v '^  PASS' | head -5)"; fi
+fi
+out=$(cd "$sb" && METHOD_HARNESS_CLIENT="$client" METHOD_HARNESS_VERSION=0.0.1 bash tests/harness.test.sh 2>&1)
+if printf '%s\n' "$out" | grep -q "FAIL  startup: the client reports '.*', not the version asked for (0.0.1)"; then pass "a client that is not the version asked for turns the harness red"; else fail "a client that is not the version asked for turns the harness red" "$(printf '%s\n' "$out" | grep -v '^  PASS' | head -5)"; fi
+out=$(cd "$sb" && METHOD_HARNESS_CLIENT="$sb/no-such-client" bash tests/harness.test.sh 2>&1)
+code=$?
+if [ "$code" -ne 0 ] && printf '%s\n' "$out" | grep -q "FAIL  harness: METHOD_HARNESS_CLIENT is set, but it names no program"; then pass "a client that is named but not there fails the harness (exit $code)"; else fail "a client that is named but not there fails the harness" "exit $code: $out"; fi
+out=$(cd "$sb" && METHOD_HARNESS_CLIENT='' bash tests/harness.test.sh 2>&1)
+code=$?
+if [ "$code" -eq 0 ] && printf '%s\n' "$out" | grep -q "SKIP  harness: no client given" && printf '%s\n' "$out" | grep -q "0 passed, 0 failed, 1 skipped"; then pass "with no client named, the harness says SKIPPED and passes nothing"; else fail "with no client named, the harness says SKIPPED and passes nothing" "exit $code: $out"; fi
+drop_sandbox "$sb" || true
+
+# 7. get-client: a download that does not match the pinned checksum is refused
+reg="$H_WORK/registry/@anthropic-ai/claude-code-linux-x64/-"
+mkdir -p "$reg" "$H_WORK/pkg/package"
+printf '#!/bin/sh\necho planted\n' >"$H_WORK/pkg/package/claude"
+tested=$(sed -n 's/^tested	//p' "$HARNESS/VERSIONS")
+(cd "$H_WORK/pkg" && tar -czf "$reg/claude-code-linux-x64-$tested.tgz" package)
+case "$(uname -s)/$(uname -m)" in
+  Linux/x86_64)
+    out=$(METHOD_HARNESS_REGISTRY="file://$H_WORK/registry" bash "$HARNESS/get-client.sh" tested "$H_WORK/got" 2>&1)
+    code=$?
+    if [ "$code" -eq 1 ] && printf '%s\n' "$out" | grep -q "does not match VERSIONS" && [ ! -e "$H_WORK/got/claude" ]; then pass "get-client refuses a download that does not match the pinned checksum, and installs nothing"; else fail "get-client refuses a download that does not match the pinned checksum" "exit $code: $out"; fi
+    ;;
+  *) skip "get-client's checksum plant: get-client pins Linux x64 only" ;;
+esac
+
+drop_sandbox "$H_WORK" || true
+finish

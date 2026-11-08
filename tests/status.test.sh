@@ -512,42 +512,42 @@ rm -rf "$rw/.claude"
 
 # 6. Claude Code, effort and perl
 mkdir -p "$work/cc"
-for v in "2.1.290 (Claude Code)" "2.1.312 (Claude Code)" "2.1.1000 (Claude Code)" "v22.11.0"; do
+for v in "2.1.290 (Claude Code)" "2.1.319 (Claude Code)" "2.1.1000 (Claude Code)" "v22.11.0"; do
   f="$work/cc/claude-$(printf '%s' "$v" | tr -cd '0-9')"
   printf '#!/bin/sh\necho "%s"\n' "$v" >"$f"
   chmod +x "$f"
 done
 st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-21290"
-expect "a Claude Code below the floor is a LOOK" 1 "claude-code: LOOK - 2.1.290 is below the floor 2.1.295; update Claude Code"
-st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-21312"
-expect "a Claude Code at or above the floor passes" 0 "claude-code: PASS - 2.1.312, floor 2.1.295" "effort: PASS - CLAUDE_CODE_EFFORT_LEVEL is not set"
+expect "a Claude Code below the floor is a LOOK" 1 "claude-code: LOOK - 2.1.290 is below the floor 2.1.316; update Claude Code"
+st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-21319"
+expect "a Claude Code at or above the floor passes" 0 "claude-code: PASS - 2.1.319, floor 2.1.316" "effort: PASS - CLAUDE_CODE_EFFORT_LEVEL is not set"
 st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-211000"
-expect "versions compare as numbers, not as text" 0 "claude-code: PASS - 2.1.1000, floor 2.1.295"
+expect "versions compare as numbers, not as text" 0 "claude-code: PASS - 2.1.1000, floor 2.1.316"
 st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-22110"
 expect "an output that is not a Claude Code version is SKIPPED" 0 "claude-code: SKIPPED - the version could not be read"
 # shellcheck disable=SC2016 # a script for the stand-in to run
-printf '#!/bin/sh\nif read -r x; then echo "read: $x"; else echo "2.1.312 (Claude Code)"; fi\n' >"$work/cc/claude-stdin"
-printf '#!/bin/sh\necho "2.1.312 (Claude Code)"\nexit 1\n' >"$work/cc/claude-fails"
+printf '#!/bin/sh\nif read -r x; then echo "read: $x"; else echo "2.1.319 (Claude Code)"; fi\n' >"$work/cc/claude-stdin"
+printf '#!/bin/sh\necho "2.1.319 (Claude Code)"\nexit 1\n' >"$work/cc/claude-fails"
 chmod +x "$work/cc/claude-stdin" "$work/cc/claude-fails"
 printf 'hello\n' >"$work/hello"
 st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-stdin" <"$work/hello"
-expect "Claude Code is asked for its version with no input" 0 "claude-code: PASS - 2.1.312"
+expect "Claude Code is asked for its version with no input" 0 "claude-code: PASS - 2.1.319"
 st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-fails"
 expect "a version command that fails is SKIPPED" 0 "claude-code: SKIPPED - the version could not be read"
 mkdir -p "$work/m"
 cp -R "$root/method/scripts/method/." "$work/m/"
 printf 'claude_code_min=2.1\n' >"$work/m/REQUIRES"
-out=$(cd "$rw" && unset CLAUDE_CODE_EFFORT_LEVEL && CLAUDE_CODE_EXECPATH="$work/cc/claude-21312" bash "$work/m/status.sh" 2>&1)
+out=$(cd "$rw" && unset CLAUDE_CODE_EFFORT_LEVEL && CLAUDE_CODE_EXECPATH="$work/cc/claude-21319" bash "$work/m/status.sh" 2>&1)
 code=$?
 expect "an area that fails is a LOOK with its reason, and the next areas still report" 1 \
   "claude-code: LOOK - could not be checked: REQUIRES line 1: claude_code_min: a version like 2.1.295" "effort: PASS" "perl: PASS"
-(cd "$work/cc" && cd "$rw" && unset CLAUDE_CODE_EFFORT_LEVEL && CLAUDE_CODE_EXECPATH=claude-21312 PATH="$work/cc:$PATH" bash "$status") >"$work/out" 2>&1
+(cd "$work/cc" && cd "$rw" && unset CLAUDE_CODE_EFFORT_LEVEL && CLAUDE_CODE_EXECPATH=claude-21319 PATH="$work/cc:$PATH" bash "$status") >"$work/out" 2>&1
 code=$?
 out=$(cat "$work/out")
 expect "a relative CLAUDE_CODE_EXECPATH is never run" 0 "claude-code: SKIPPED - CLAUDE_CODE_EXECPATH is not an absolute path"
-st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-21312" CLAUDE_CODE_EFFORT_LEVEL=high
+st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-21319" CLAUDE_CODE_EFFORT_LEVEL=high
 expect "CLAUDE_CODE_EFFORT_LEVEL set is a LOOK" 1 "effort: LOOK - CLAUDE_CODE_EFFORT_LEVEL is set; it overrides every per-role effort (DECISIONS A4)"
-st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-21312" CLAUDE_CODE_EFFORT_LEVEL=
+st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-21319" CLAUDE_CODE_EFFORT_LEVEL=
 expect "CLAUDE_CODE_EFFORT_LEVEL set but empty is a LOOK" 1 "effort: LOOK - CLAUDE_CODE_EFFORT_LEVEL is set"
 st "$rw" CLAUDE_CODE_EFFORT_LEVEL=low
 expect "CLAUDE_CODE_EFFORT_LEVEL set outside Claude Code is a LOOK" 1 "effort: LOOK - CLAUDE_CODE_EFFORT_LEVEL is set"

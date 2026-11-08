@@ -42,6 +42,34 @@ jobs:
           echo "::stop-commands::stop-$RANDOM$RANDOM$RANDOM"
           bash tests/run.sh
 
+  # The $0 harness (DECISIONS A49): the real Claude Code client, at the floor
+  # (REQUIRES) and at the tested version (tests/harness/VERSIONS), each
+  # fetched from the npm registry and checked against its pinned sha512,
+  # runs against a local fake Claude. Fetched each run rather than cached,
+  # so no other action is needed. A failed fetch fails the job (M053).
+  harness:
+    name: Harness (real Claude Code, fake API)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Harness at the floor version
+        run: |
+          echo "::stop-commands::stop-$RANDOM$RANDOM$RANDOM"
+          floor=$(sed -n 's/^claude_code_min=//p' method/scripts/method/REQUIRES)
+          bash tests/harness/get-client.sh floor "$RUNNER_TEMP/claude-floor"
+          METHOD_HARNESS_CLIENT="$RUNNER_TEMP/claude-floor/claude" METHOD_HARNESS_VERSION="$floor" bash tests/harness.test.sh
+      - name: Harness at the tested version, and its plants
+        run: |
+          echo "::stop-commands::stop-$RANDOM$RANDOM$RANDOM"
+          tested=$(awk -F '\t' '$1 == "tested" { print $2 }' tests/harness/VERSIONS)
+          bash tests/harness/get-client.sh tested "$RUNNER_TEMP/claude-tested"
+          METHOD_HARNESS_CLIENT="$RUNNER_TEMP/claude-tested/claude" METHOD_HARNESS_VERSION="$tested" bash tests/harness.test.sh
+          METHOD_HARNESS_CLIENT="$RUNNER_TEMP/claude-tested/claude" bash tests/plants/harness.sh
+
   other-systems:
     name: ${{ matrix.os }}
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'

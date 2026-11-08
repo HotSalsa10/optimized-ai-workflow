@@ -1,0 +1,261 @@
+#!/usr/bin/env bash
+# The $0 harness (step 5.2, DECISIONS A49): the real Claude Code client runs
+# against the local fake Claude (tests/harness/fake-api.pl) with test-only
+# fixture hooks, and each case looks at what the client did: the requests
+# the fake got, the files written, the fake MCP server's log. It proves that
+# hooks fire and what their exit codes and output do in the real client.
+#
+# It needs a client: METHOD_HARNESS_CLIENT names the binary (CI's harness
+# job fetches the pinned versions with tests/harness/get-client.sh). Without
+# it the file says SKIPPED, which is never a pass. With it set to something
+# that is not a program, the file fails. METHOD_HARNESS_VERSION, when set,
+# is the version the client must report (CI sets it).
+set -u
+here=$(cd "$(dirname "$0")" && pwd)
+# shellcheck source=tests/lib.sh
+. "$here/lib.sh" || {
+  echo "tests: cannot load tests/lib.sh; stopping before anything runs"
+  exit 1
+}
+
+echo "tests: harness (the real client against the fake)"
+finish() {
+  echo "tests: harness: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
+  [ "$tests_fail" -eq 0 ]
+  exit
+}
+client=${METHOD_HARNESS_CLIENT:-}
+if [ -z "$client" ]; then
+  skip "harness: no client given; set METHOD_HARNESS_CLIENT to a Claude Code binary to run it"
+  finish
+fi
+if [ ! -f "$client" ] || [ ! -x "$client" ]; then
+  fail "harness: METHOD_HARNESS_CLIENT is set, but it names no program: $client"
+  finish
+fi
+
+HARNESS="$here/harness"
+H_CLIENT=$client
+H_WORK=$(new_sandbox_dir) || abort_sandbox
+# shellcheck source=tests/harness/lib.sh
+. "$HARNESS/lib.sh"
+trap 'h_stop' EXIT
+root=$(repo_root)
+D="--permission-mode default --allowedTools Bash"
+# shellcheck disable=SC2016 # the hook command is literal text; Claude Code expands it
+F='bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/fixture'
+
+# --- 1. startup: version, tools, SessionStart context, a PreToolUse refusal ---
+h_case startup
+h_fixtures
+h_settings <<EOF
+{"model":"claude-opus-5-5",
+ "hooks":{
+  "SessionStart":[{"hooks":[{"type":"command","command":"$F/say.sh\" HARNESS-SESSION-CONTEXT"},
+                            {"type":"command","command":"$F/log.sh\" SessionStart"}]}],
+  "PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"$F/deny.sh\" HARNESS-REFUSE-ME"}]}]}}
+EOF
+cat >"$H_DIR/script.json" <<'EOF'
+{"convs":[{"name":"main","match":"^go$","turns":[
+  {"tool":"Bash","input":{"command":"touch allowed.txt","description":"An allowed command"}},
+  {"tool":"Bash","input":{"command":"touch refused-ran.txt # HARNESS-REFUSE-ME","description":"A refused command"}},
+  {"text":"MAIN-DONE"}]}],
+ "fallback":{"text":"FAKE-FALLBACK"}}
+EOF
+if h_fake "$H_DIR/script.json"; then
+  # shellcheck disable=SC2086 # D holds several arguments on purpose
+  h_client 60 -- $D
+  h_stop
+  version=$(h_init claude_code_version)
+  floor=$(sed -n 's/^claude_code_min=//p' "$root/method/scripts/method/REQUIRES")
+  if [ -n "$version" ] && perl -e 'my @a = split /\./, $ARGV[0]; my @b = split /\./, $ARGV[1]; for (0 .. 2) { exit 0 if $a[$_] > $b[$_]; exit 1 if $a[$_] < $b[$_] } exit 0' "$version" "$floor"; then
+    pass "startup: the client reports $version, at or above the floor $floor (REQUIRES)"
+  else
+    fail "startup: the client's version '$version' is not at or above the floor $floor" "$(tail -3 "$H_DIR/err.txt")"
+  fi
+  if [ -n "${METHOD_HARNESS_VERSION:-}" ]; then
+    if [ "$version" = "$METHOD_HARNESS_VERSION" ]; then pass "startup: the client is the version asked for ($METHOD_HARNESS_VERSION)"; else fail "startup: the client reports '$version', not the version asked for ($METHOD_HARNESS_VERSION)"; fi
+  fi
+  tools=$(h_init tools)
+  missing=""
+  for t in $tools; do
+    LC_ALL=C grep -q "^$t	" "$HARNESS/tools.txt" || missing="$missing $t"
+  done
+  if [ -n "$tools" ] && [ -z "$missing" ]; then
+    pass "startup: every tool the client offers is in tests/harness/tools.txt, marked guarded or not"
+  else
+    fail "startup: tools the client offers that tests/harness/tools.txt does not list:${missing:- (no tool list)}"
+  fi
+  if h_req_has HARNESS-SESSION-CONTEXT; then pass "startup: SessionStart text printed with exit 0 reaches the model's request"; else fail "startup: SessionStart text printed with exit 0 reaches the model's request"; fi
+  if h_ran allowed.txt; then pass "startup: a command the PreToolUse hook lets through runs"; else fail "startup: a command the PreToolUse hook lets through runs" "$(tail -3 "$H_DIR/err.txt")"; fi
+  if ! h_ran refused-ran.txt && h_tsv_has "ERR:PreToolUse:Bash hook error: " && h_tsv_has "HARNESS-DENY"; then
+    pass "startup: a PreToolUse exit 2 stops the command, and its reason reaches the model as an error"
+  else
+    fail "startup: a PreToolUse exit 2 stops the command, and its reason reaches the model as an error" "$(cut -f7- "$H_DIR/fake/requests.tsv")"
+  fi
+  h_safe startup
+else
+  fail "startup: the fake did not answer; the client was not started"
+fi
+
+# --- 2. a SessionStart hook that exits 1: its text is not added ---
+h_case session-exit1
+h_fixtures
+h_settings <<EOF
+{"model":"claude-opus-5-5",
+ "hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"$F/say.sh\" HARNESS-EXIT1-CONTEXT 1"}]}]}}
+EOF
+printf '%s\n' '{"convs":[{"name":"main","match":"^go$","turns":[{"text":"MAIN-DONE"}]}]}' >"$H_DIR/script.json"
+if h_fake "$H_DIR/script.json"; then
+  # shellcheck disable=SC2086
+  h_client 60 -- $D
+  h_stop
+  if h_reached && ! h_req_has HARNESS-EXIT1-CONTEXT; then
+    pass "session-exit1: SessionStart text printed with exit 1 does not reach the model (so session-status must exit 0)"
+  else
+    fail "session-exit1: SessionStart text printed with exit 1 does not reach the model"
+  fi
+  h_safe session-exit1
+else
+  fail "session-exit1: the fake did not answer; the client was not started"
+fi
+
+# --- 3. a subagent: SubagentStart context, a SubagentStop block ---
+h_case subagent
+h_fixtures
+h_settings <<EOF
+{"model":"claude-opus-5-5",
+ "hooks":{
+  "SubagentStart":[{"matcher":"reviewer","hooks":[{"type":"command","command":"$F/context.sh\" SubagentStart HARNESS-SUBAGENT-CONTEXT"}]}],
+  "SubagentStop":[{"matcher":"reviewer","hooks":[{"type":"command","command":"$F/block-once.sh\""}]}]}}
+EOF
+cat >"$H_DIR/script.json" <<'EOF'
+{"convs":[
+  {"name":"sub","match":"HARNESS-SUBAGENT-TASK","turns":[{"text":"partial review, no verdict yet"},{"text":"APPROVE\nEND-VERDICT harness"}]},
+  {"name":"main","match":"^go$","turns":[
+    {"tool":"Agent","input":{"description":"harness review","prompt":"HARNESS-SUBAGENT-TASK: review the change","subagent_type":"reviewer","run_in_background":false}},
+    {"text":"MAIN-DONE"}]}],
+ "fallback":{"text":"FAKE-FALLBACK"}}
+EOF
+mkdir -p "$H_PROJ/.harness"
+if h_fake "$H_DIR/script.json"; then
+  # shellcheck disable=SC2086
+  h_client 90 -- $D
+  h_stop
+  if h_req_has HARNESS-SUBAGENT-CONTEXT && h_tsv_has "conv=sub turn=0"; then pass "subagent: SubagentStart additionalContext reaches the subagent's request"; else fail "subagent: SubagentStart additionalContext reaches the subagent's request" "$(cut -f7- "$H_DIR/fake/requests.tsv")"; fi
+  if LC_ALL=C grep -q "^block-once	fired" "$H_PROJ/.harness/events.tsv" 2>/dev/null && h_tsv_has "conv=sub turn=1"; then
+    pass "subagent: a SubagentStop exit 2 sends the subagent back for one more turn"
+  else
+    fail "subagent: a SubagentStop exit 2 sends the subagent back for one more turn" "$(cut -f7- "$H_DIR/fake/requests.tsv")"
+  fi
+  h_safe subagent
+else
+  fail "subagent: the fake did not answer; the client was not started"
+fi
+
+# --- 4. onFailure: a hook that cannot start blocks only with "block" ---
+printf '%s\n' '{"convs":[{"name":"main","match":"^go$","turns":[{"tool":"Bash","input":{"command":"touch ran.txt","description":"Write a marker"}},{"text":"MAIN-DONE"}]}]}' >"$H_WORK/onfail.json"
+for mode in block unset; do
+  h_case "onfailure-$mode"
+  h_fixtures
+  if [ "$mode" = block ]; then on=',"onFailure":"block"'; else on=""; fi
+  h_settings <<EOF
+{"model":"claude-opus-5-5",
+ "hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"$F/no-such-hook.sh\""$on}]}]}}
+EOF
+  if h_fake "$H_WORK/onfail.json"; then
+    # shellcheck disable=SC2086
+    h_client 60 -- $D
+    h_stop
+    if [ "$mode" = block ]; then
+      if ! h_ran ran.txt && h_tsv_has "ERR:"; then pass "onfailure: with onFailure \"block\", a hook that cannot start blocks the call"; else fail "onfailure: with onFailure \"block\", a hook that cannot start blocks the call" "$(cut -f7- "$H_DIR/fake/requests.tsv")"; fi
+    else
+      if h_ran ran.txt; then pass "onfailure: without it, a hook that cannot start lets the call through (why the guard sets it)"; else fail "onfailure: without it, a hook that cannot start lets the call through"; fi
+    fi
+    h_safe "onfailure-$mode"
+  else
+    fail "onfailure-$mode: the fake did not answer; the client was not started"
+  fi
+done
+
+# --- 5. MCP: a ^mcp__ PreToolUse refusal stops the tool ---
+printf '%s\n' '{"convs":[{"name":"main","match":"^go$","turns":[{"tool":"mcp__fake__merge_pull_request","input":{"pull_number":1}},{"text":"MAIN-DONE"}]}]}' >"$H_WORK/mcp.json"
+for mode in refused control; do
+  h_case "mcp-$mode"
+  h_fixtures
+  if [ "$mode" = refused ]; then
+    h_settings <<EOF
+{"model":"claude-opus-5-5",
+ "hooks":{"PreToolUse":[{"matcher":"^mcp__","hooks":[{"type":"command","command":"$F/deny.sh\" pull_number"}]}]}}
+EOF
+  else
+    printf '%s\n' '{"model":"claude-opus-5-5"}' | h_settings
+  fi
+  perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({mcpServers => {fake => {type => "stdio", command => "perl", args => [$ARGV[0], $ARGV[1]]}}})' \
+    "$HARNESS/fake-mcp.pl" "$H_DIR/mcp.log" >"$H_DIR/mcp.json"
+  if h_fake "$H_WORK/mcp.json"; then
+    # shellcheck disable=SC2086
+    h_client 60 -- $D mcp__fake__merge_pull_request --mcp-config "$H_DIR/mcp.json" --strict-mcp-config
+    h_stop
+    if [ "$mode" = refused ]; then
+      if [ -s "$H_DIR/mcp.log" ] && ! LC_ALL=C grep -q '^CALLED' "$H_DIR/mcp.log" && h_tsv_has HARNESS-DENY; then pass "mcp: a ^mcp__ PreToolUse refusal stops the MCP tool before it is called"; else fail "mcp: a ^mcp__ PreToolUse refusal stops the MCP tool before it is called" "$(cut -f7- "$H_DIR/fake/requests.tsv")"; fi
+    else
+      if LC_ALL=C grep -q '^CALLED' "$H_DIR/mcp.log" 2>/dev/null; then pass "mcp: without the hook the same MCP tool is called (the case can tell)"; else fail "mcp: without the hook the same MCP tool is called" "$(cut -f7- "$H_DIR/fake/requests.tsv")"; fi
+    fi
+    h_safe "mcp-$mode"
+  else
+    fail "mcp-$mode: the fake did not answer; the client was not started"
+  fi
+done
+
+# --- 6. started in a subfolder: no project hook runs (RISKS #16) ---
+h_case subfolder
+h_fixtures
+mkdir -p "$H_PROJ/sub"
+h_settings <<EOF
+{"model":"claude-opus-5-5",
+ "hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"$F/deny.sh\" HARNESS-REFUSE-ME"}]}]}}
+EOF
+printf '%s\n' '{"convs":[{"name":"main","match":"^go$","turns":[{"tool":"Bash","input":{"command":"touch refused-ran.txt # HARNESS-REFUSE-ME","description":"A command the hook would refuse"}},{"text":"MAIN-DONE"}]}]}' >"$H_DIR/script.json"
+if h_fake "$H_DIR/script.json"; then
+  # shellcheck disable=SC2086
+  H_CWD="$H_PROJ/sub" h_client 60 -- $D
+  h_stop
+  if h_ran sub/refused-ran.txt; then
+    pass "subfolder: a client started in a subfolder of the project runs no project hook (known limit, RISKS #16)"
+  else
+    fail "subfolder: a client started in a subfolder of the project runs no project hook: the hook ran, so RISKS #16 and the plan's note are out of date"
+  fi
+  h_safe subfolder
+else
+  fail "subfolder: the fake did not answer; the client was not started"
+fi
+
+# --- 7. a resumed session: SessionStart fires with source "resume" ---
+h_case resume
+h_fixtures
+h_settings <<EOF
+{"model":"claude-opus-5-5",
+ "hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"$F/log.sh\" SessionStart"}]}]}}
+EOF
+printf '%s\n' '{"convs":[{"name":"main","match":"^go$","turns":[{"text":"FIRST-DONE"},{"text":"SECOND-DONE"}]}]}' >"$H_DIR/script.json"
+if h_fake "$H_DIR/script.json"; then
+  # shellcheck disable=SC2086
+  h_client 60 -- $D
+  sid=$(h_init session_id)
+  # shellcheck disable=SC2086
+  H_PROMPT=again h_client 60 -- $D --resume "$sid"
+  h_stop
+  if [ -n "$sid" ] && LC_ALL=C grep -l '"source":"resume"' "$H_PROJ"/.harness/SessionStart-*.json >/dev/null 2>&1; then
+    pass "resume: a resumed session fires SessionStart with source resume"
+  else
+    fail "resume: a resumed session fires SessionStart with source resume" "session '$sid'; $(cat "$H_PROJ"/.harness/SessionStart-*.json 2>/dev/null | cut -c1-200)"
+  fi
+  h_safe resume
+else
+  fail "resume: the fake did not answer; the client was not started"
+fi
+
+echo "harness: ${H_RUNS:-0} client runs took ${H_TOTAL_SECS:-0} s"
+drop_sandbox "$H_WORK" || true
+finish

@@ -216,6 +216,10 @@ Plan: docs/plans/step5.md (version 3). Decisions A45 to A62. Rules M072 (moved t
   - Left for later, each where it applies: G15 (5.10) splits NUL-separated git output into records before scanning, honours the project's scan-allow.txt or says why not, and splits at real terminal codes as mask_text does; 5.8 logs an MCP tool by its server only, as a tool's name is chosen by whoever wrote the server; the hooks load the helpers through hook.pl and their own lib path only (loading json.pl or esc.pl again by another spelling warns); Windows: the wrapper gives perl a POSIX path (A27).
   - [ ] Review round 3 (the last, A7).
 - [ ] 5.2 Harness skeleton, the floor at 2.1.316 (A45), the CI harness job.
+  - [x] Built while 5.1 was in review: tests/harness/ (the fake Messages API, a fake MCP server, the time limit, fixture hooks and agent, tools.txt, VERSIONS, get-client.sh), tests/harness.test.sh (24 checks at 2.1.316 and 2.1.319, 10 client runs in about 7 s, $0) and tests/plants/harness.sh (10 plants). The floor is 2.1.316 in REQUIRES, SPEC and the status tests. CI gets a harness job.
+  - [x] Decisions while building: the client comes from the npm registry's platform package, checked against the registry's sha512 (the plan said a SHA-256); it is fetched each run, not cached, so the job needs no action beside checkout (A49 updated). Harness cases for the method's own hooks come with each hook (5.3 onward).
+  - You will see: `tests: harness: 24 passed, 0 failed, 0 skipped` at 2.1.316 and at 2.1.319, and `harness: 10 client runs took 6.3 s`.
+  - [ ] Review round 1: a reviewer and a security check (A62's minimum), and a third reviewer who checks what each case proves and how it holds up, as every later hook proof rests on the harness.
 - [ ] 5.3 Settings fragment and settings test.
 - [ ] 5.4 session-status.sh and status.sh --quick.
 - [ ] 5.5 Guard frame: the command reader, G0 to G2, the log, the false-refusal run, "when the guard blocks wrongly".
