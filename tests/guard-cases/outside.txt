@@ -1,0 +1,377 @@
+@@ G4 Bash another Claude is refused: claude -p
+claude -p hello
+@@ G4 Bash another Claude is refused: by a full path
+/usr/local/bin/claude --model claude-opus-5-5 -p hello
+@@ G4 Bash another Claude is refused: after env
+env FOO=1 claude -p hello
+@@ G4 Bash another Claude is refused: under nohup
+nohup claude -p hello >out.txt
+@@ G4 Bash another Claude is refused: under timeout
+timeout 60 claude -p hello
+@@ G4 Bash another Claude is refused: inside bash -c
+bash -c 'claude -p hello'
+@@ G4 Bash another Claude is refused: claude.exe
+claude.exe -p hello
+@@ G4 Bash another Claude is refused: the npm package through npx
+npx @anthropic-ai/claude-code -p hello
+@@ G4 Bash another Claude is refused: npx -y with a version
+npx -y @anthropic-ai/claude-code@2.1.319 -p hello
+@@ G4 Bash another Claude is refused: bunx
+bunx @anthropic-ai/claude-code -p hello
+@@ G4 Bash setting CLAUDE_CONFIG_DIR is refused
+CLAUDE_CONFIG_DIR=/tmp/other ls
+@@ G4 Bash exporting CLAUDE_CODE_SIMPLE is refused
+export CLAUDE_CODE_SIMPLE=1
+@@ G4 Bash CLAUDE_CODE_SAFE_MODE through env is refused
+env CLAUDE_CODE_SAFE_MODE=1 ls
+@@ allow Bash the word claude as text passes
+echo claude is here; grep -rn claude src; cat CLAUDE.md
+@@ allow Bash reading the user's Claude folder passes
+ls ~/.claude
+@@ G4 Bash curl PUT to GitHub's API is refused
+curl -X PUT https://api.github.com/repos/o/r/contents/x
+@@ G4 Bash curl -XPOST to GitHub is refused
+curl -sXPOST https://api.github.com/repos/o/r/issues
+@@ G4 Bash curl --request DELETE to GitHub is refused
+curl --request DELETE https://api.github.com/repos/o/r
+@@ G4 Bash curl with data to GitHub is refused
+curl -d '{"title":"x"}' https://api.github.com/repos/o/r/issues
+@@ G4 Bash curl --data-binary to GitHub is refused
+curl --data-binary @f.json https://api.github.com/repos/o/r/pulls
+@@ G4 Bash curl --json to GitHub is refused
+curl --json '{}' https://api.github.com/repos/o/r/issues
+@@ G4 Bash curl uploading a file to GitHub is refused
+curl -T x.zip https://uploads.github.com/repos/o/r/releases/1/assets
+@@ G4 Bash curl with a form to GitHub is refused
+curl -F f=@x https://uploads.github.com/repos/o/r/releases/1/assets
+@@ G4 Bash curl with a config file naming GitHub is refused
+curl -K cfg.txt https://github.com
+@@ G4 Bash wget posting to GitHub is refused
+wget --post-data=x https://api.github.com/repos/o/r/issues
+@@ G4 Bash wget with a method to GitHub is refused
+wget --method=PUT https://api.github.com/repos/o/r/contents/x
+@@ allow Bash curl reading GitHub's API passes
+curl -s https://api.github.com/repos/o/r
+@@ allow Bash curl downloading a raw file from GitHub passes
+curl -sSfL https://raw.githubusercontent.com/o/r/main/x.sh -o x.sh
+@@ allow Bash curl -X GET to GitHub passes
+curl -X GET https://api.github.com/repos/o/r
+@@ allow Bash curl -I to GitHub passes
+curl -I https://github.com
+@@ allow Bash curl posting elsewhere passes
+curl -d x=1 https://example.com/post
+@@ allow Bash wget downloading from GitHub passes
+wget https://github.com/o/r/archive/main.zip
+@@ G4 Bash gh pr merge is refused
+gh pr merge 1
+@@ G4 Bash gh pr merge --squash is refused
+gh pr merge --squash --delete-branch 1
+@@ G4 Bash gh api -X PUT is refused
+gh api -X PUT repos/o/r/contents/x
+@@ G4 Bash gh api -f is refused (it makes a POST)
+gh api -f x=y repos/o/r/pulls
+@@ G4 Bash gh api --method POST is refused
+gh api --method POST repos/o/r/issues
+@@ G4 Bash gh api -F after the path is refused
+gh api repos/o/r/pulls -F title=x
+@@ G4 Bash gh api --input is refused
+gh api --input body.json repos/o/r/issues
+@@ G4 Bash gh gist create is refused
+gh gist create notes.txt
+@@ G4 Bash gh release create is refused
+gh release create v1
+@@ G4 Bash gh secret set is refused
+gh secret set TOKEN
+@@ G4 Bash gh repo delete is refused
+gh repo delete o/r --yes
+@@ G4 Bash gh workflow run is refused
+gh workflow run ci.yml
+@@ G4 Bash gh pr review --approve is refused
+gh pr review --approve 1
+@@ allow Bash gh pr create from a named branch passes
+gh pr create --head task --title "a title" --body "a body" --base main
+@@ G4 Bash gh pr create without --head is refused (gh could push the branch itself)
+gh pr create --title "a title" --body "a body" --base main
+@@ allow Bash gh pr view passes
+gh pr view 1 --json title,state
+@@ allow Bash gh pr checks passes
+gh pr checks 1
+@@ allow Bash gh pr diff passes
+gh pr diff 1
+@@ allow Bash gh pr comment passes
+gh pr comment 1 --body "a comment"
+@@ allow Bash gh issue create passes
+gh issue create --title x --body y
+@@ allow Bash gh run view with its log passes
+gh run view 123 --log
+@@ allow Bash gh search code passes
+gh search code "a phrase"
+@@ allow Bash gh api GET passes
+gh api repos/o/r/pulls --paginate --jq '.[].title'
+@@ allow Bash gh auth status passes
+gh auth status
+@@ allow Bash gh --version passes
+gh --version
+@@ allow Bash gh pr merge --help passes
+gh pr merge --help
+@@ allow Bash gh repo view passes
+gh repo view
+@@ G4 mcp__github__merge_pull_request the GitHub MCP merge tool is refused
+{"owner":"example-owner","repo":"example-repo","pullNumber":1}
+@@ G4 mcp__plugin_github_github__merge_pull_request the merge tool under another server name is refused
+{"owner":"example-owner","repo":"example-repo","pullNumber":1}
+@@ G4 mcp__github__enable_pr_auto_merge auto-merge is refused
+{"owner":"example-owner","repo":"example-repo","pullNumber":1}
+@@ G4 mcp__claude-code-remote__create_session starting another session is refused
+{"prompt":"x"}
+@@ G4 mcp__claude-code-remote__send_message messaging another session is refused
+{"session_id":"x","message":"y"}
+@@ G4 mcp__claude-code-remote__create_trigger a scheduled task is refused
+{"name":"x","prompt":"y","initiation":"own_initiative"}
+@@ G4 mcp__some_server__do_a_thing an MCP tool not on the list is refused
+{"x":1}
+@@ G4 mcp__github__create_pull_request a pull request from main is refused
+{"owner":"example-owner","repo":"example-repo","title":"t","head":"main","base":"task"}
+@@ G4 mcp__github__create_pull_request a pull request on another repository is refused
+{"owner":"someone-else","repo":"other","title":"t","head":"task","base":"main"}
+@@ G4 mcp__github__push_files a push of files to main is refused
+{"owner":"example-owner","repo":"example-repo","branch":"main","files":[],"message":"m"}
+@@ G4 mcp__github__create_or_update_file a file written on refs/heads/main is refused
+{"owner":"example-owner","repo":"example-repo","path":"x","content":"y","message":"m","branch":"refs/heads/main"}
+@@ allow mcp__github__create_pull_request a pull request from a task branch of this repository passes
+{"owner":"example-owner","repo":"example-repo","title":"t","head":"task","base":"main"}
+@@ allow mcp__github__push_files a push of files to a task branch passes
+{"owner":"Example-Owner","repo":"example-repo","branch":"task","files":[],"message":"m"}
+@@ allow mcp__github__get_file_contents a read passes
+{"owner":"anyone","repo":"anything","path":"x"}
+@@ allow mcp__github__list_pull_requests a list passes
+{"owner":"anyone","repo":"anything"}
+@@ allow mcp__github__search_code a search passes
+{"query":"x"}
+@@ allow mcp__claude-code-remote__send_later a message to this same session passes
+{"message":"check CI"}
+@@ allow mcp__claude-code-remote__subscribe_pr_activity watching a pull request passes
+{"owner":"example-owner","repo":"example-repo","pullNumber":1}
+@@ G4 SendMessage SendMessage is refused
+{"to":"x","message":"y"}
+@@ G4 Bash another Claude is refused: under xargs
+xargs claude -p < prompts.txt
+@@ G4 Bash another Claude is refused: after command
+command claude -p hello
+@@ G4 Bash another Claude is refused: after cd in a chain
+cd sub && claude -p hello
+@@ G0 Bash another Claude is refused: run from a python program (G0 refuses it first)
+python3 -c "import os; os.system('claude -p hello')"
+@@ G0 Bash another Claude is refused: run from a perl program (G0 refuses it first)
+perl -e 'exec "/opt/bin/claude", "-p", "hello"'
+@@ G0 Bash another Claude is refused: piped into a shell (G0 refuses it first)
+echo 'claude -p hello' | bash
+@@ G4 Bash setting CLAUDE_CONFIG_DIR inside a python program is refused
+python3 -c "import os; os.environ['CLAUDE_CONFIG_DIR']='/tmp/x'"
+@@ allow Bash a program that names Claude's folders passes
+perl -e 'print "/tmp/claude-0/x and ~/.claude/projects\n"'
+@@ allow Bash a program that prints the word passes when it does not run it
+python3 -c "print(len('abc'))"
+@@ allow Bash reading CLAUDE_CONFIG_DIR passes
+echo "$CLAUDE_CONFIG_DIR"
+@@ G4 Bash curl with an option after the GitHub address is refused
+curl https://api.github.com/repos/o/r/issues -X POST
+@@ G4 Bash curl with a shortened --data is refused
+curl --data-urlen x=1 https://api.github.com/repos/o/r/issues
+@@ G4 Bash curl with a shortened --upload-file is refused
+curl --upload x.zip https://uploads.github.com/repos/o/r/releases/1/assets
+@@ G4 Bash curl with -d inside an option cluster is refused
+curl -sSd x=1 https://api.github.com/repos/o/r/issues
+@@ G4 Bash curl --request=PATCH to GitHub is refused
+curl --request=PATCH https://api.github.com/repos/o/r
+@@ G4 Bash curl to GitHub in capitals is refused
+curl -X POST HTTPS://API.GITHUB.COM/repos/o/r/issues
+@@ G4 Bash curl setting CURL_HOME is refused
+CURL_HOME=/tmp/c curl -s https://api.github.com/repos/o/r
+@@ G4 Bash wget with a shortened --post-data is refused
+wget --post-d=x https://api.github.com/repos/o/r/issues
+@@ G4 Bash wget with a wgetrc command is refused
+wget -e method=POST https://api.github.com/repos/o/r/issues
+@@ G4 Bash wget with a wgetrc command in a cluster is refused
+wget -qe post_data=x https://api.github.com/repos/o/r/issues
+@@ allow Bash curl with a header and an output file passes
+curl -sS -H 'Accept: application/json' -o out.json -w '%{http_code}' https://api.github.com/repos/o/r
+@@ allow Bash curl with an output name holding the letter d passes
+curl -sSLodata.zip https://github.com/o/r/archive/main.zip
+@@ allow Bash curl --request GET passes
+curl --request GET https://api.github.com/repos/o/r
+@@ allow Bash wget --method=HEAD passes
+wget --method=HEAD https://github.com/o/r
+@@ allow Bash wget writing its download to stdout passes
+wget -qO- https://raw.githubusercontent.com/o/r/main/x.sh
+@@ G4 Bash gh api -XPOST is refused
+gh api -XPOST repos/o/r/issues
+@@ G4 Bash gh api graphql with a query field is refused (a POST)
+gh api graphql -f query='{viewer{login}}'
+@@ G4 Bash gh pr create on another repository is refused
+gh pr create -R someone-else/other --head task --title x --body y
+@@ G4 Bash gh issue comment with --repo= is refused
+gh issue comment 1 --repo=someone-else/other --body y
+@@ G4 Bash gh auth token is refused
+gh auth token
+@@ G4 Bash gh run rerun is refused
+gh run rerun 123
+@@ G4 Bash gh by a full path is judged too
+/usr/bin/gh pr merge 1
+@@ G4 Bash gh.exe is judged too
+gh.exe pr merge 1
+@@ G4 Bash gh after env is judged too
+env GH_PAGER=cat gh pr merge 1
+@@ G4 Bash setting GH_REPO for gh is refused
+GH_REPO=someone-else/other gh pr create --head task --title x --body y
+@@ G4 Bash exporting GH_REPO before gh is refused
+export GH_REPO=someone-else/other; gh issue create --title x --body y
+@@ G4 Bash a gh alias is not on the list
+gh m 1
+@@ allow Bash gh api -X GET passes
+gh api -X GET repos/o/r/pulls
+@@ allow Bash gh api --method=GET passes
+gh api --method=GET repos/o/r
+@@ allow Bash gh api with a header passes
+gh api -H 'Accept: application/vnd.github+json' repos/o/r/commits
+@@ allow Bash gh pr view on another repository passes (a read)
+gh pr view 1 -R someone-else/other
+@@ allow Bash gh run watch passes
+gh run watch 123 --exit-status
+@@ allow Bash gh -h passes
+gh -h
+@@ allow Bash gh help pr passes
+gh help pr
+@@ allow mcp__github__actions_list a read named otherwise passes on any repository
+{"method":"list_workflow_runs","owner":"anyone","repo":"anything"}
+@@ allow mcp__claude-code-remote__read_documentation reading this environment's documentation passes
+{"topic":"github.access"}
+@@ allow mcp__github__update_pull_request editing a pull request of this repository passes
+{"owner":"example-owner","repo":"example-repo","pullNumber":1,"body":"x"}
+@@ allow mcp__github__get_me a get passes
+{}
+@@ G4 mcp__github__pull_request_review_write a review is refused
+{"method":"create","owner":"example-owner","repo":"example-repo","pullNumber":1,"event":"APPROVE"}
+@@ G4 mcp__github__create_branch a branch named main is refused
+{"owner":"example-owner","repo":"example-repo","branch":"main"}
+@@ G4 mcp__github__delete_file a delete on main is refused
+{"owner":"example-owner","repo":"example-repo","path":"x","message":"m","branch":"main"}
+@@ G4 mcp__github__push_files a push with no owner is refused
+{"repo":"example-repo","branch":"task","files":[],"message":"m"}
+@@ G4 mcp__github__actions_run_trigger a workflow run is refused
+{"method":"run_workflow","owner":"example-owner","repo":"example-repo","workflow_id":"ci.yml","ref":"task"}
+@@ G4 mcp__claude-code-remote__fire_trigger firing a scheduled task is refused
+{"trigger_id":"trig_x"}
+@@ G4 mcp__claude-code-remote__unarchive_session bringing back another session is refused
+{"session_id":"x"}
+@@ G4 Bash gh api --field is refused
+gh api --field title=x repos/o/r/issues
+@@ G4 Bash gh api --raw-field is refused
+gh api --raw-field title=x repos/o/r/issues
+@@ G4 Bash gh pr comment on another repository is refused
+gh pr comment 1 -R someone-else/other --body y
+@@ G4 Bash gh issue create with --repo is refused
+gh issue create --repo someone-else/other --title x --body y
+@@ G4 Bash gh issue close is refused
+gh issue close 1
+@@ G4 Bash gh label create is refused
+gh label create urgent
+@@ G4 Bash gh release delete is refused
+gh release delete v1 --yes
+@@ G4 Bash gh workflow enable is refused
+gh workflow enable ci.yml
+@@ G4 Bash gh repo edit is refused
+gh repo edit --visibility public
+@@ allow Bash gh search repos passes
+gh search repos "a phrase" --limit 5
+@@ allow Bash gh issue view passes
+gh issue view 1 --comments
+@@ allow Bash gh run list passes
+gh run list --branch task --limit 5
+@@ allow Bash gh workflow list passes
+gh workflow list
+@@ allow Bash gh release view passes
+gh release view v1
+@@ allow Bash gh label list passes
+gh label list
+@@ G4 mcp__github__update_pull_request editing a pull request of another repository is refused
+{"owner":"someone-else","repo":"other","pullNumber":1,"body":"x"}
+@@ G4 mcp__github__create_pull_request a pull request from master is refused
+{"owner":"example-owner","repo":"example-repo","title":"t","head":"master","base":"main"}
+@@ allow Bash gh api -X GET with query fields passes (gh puts them in the query string)
+gh api -X GET --raw-field per_page=5 repos/o/r/pulls --jq '.[].title'
+@@ allow Bash gh api --method GET with -f passes
+gh api --method GET -f state=open repos/o/r/issues
+@@ G4 Bash gh api -X GET with -F is refused (it can read a file)
+gh api -X GET -F x=@notes.txt repos/o/r/issues
+@@ G4 Bash gh api -X POST with -f is refused
+gh api -X POST -f title=x repos/o/r/issues
+@@ allow Bash gh pr create with -H passes
+gh pr create -H task -t x -b y
+@@ G4 Bash gh pr create asking for reviewers is refused
+gh pr create --head task --title x --body y --reviewer=someone
+@@ G4 Bash gh pr create with an option the list does not name is refused
+gh pr create --head task --title x --body y --recover=f.json
+@@ G4 Bash gh pr comment on a URL is refused (it could name another repository)
+gh pr comment https://github.com/someone-else/other/pull/1 --body y
+@@ G4 Bash gh pr comment --edit-last is refused
+gh pr comment 1 --edit-last --body y
+@@ allow Bash gh pr edit of the title passes
+gh pr edit 1 --title "a better title"
+@@ G4 Bash gh pr edit of the base is refused
+gh pr edit 1 --base=other
+@@ G4 Bash gh pr view --web is refused (it runs the browser program)
+gh pr view 1 --web
+@@ allow Bash gh run list -w (its workflow) passes
+gh run list -w ci.yml
+@@ G4 Bash gh auth status -t is refused (it prints the token)
+gh auth status -t
+@@ G4 Bash gh auth status --show-token is refused
+gh auth status --show-token
+@@ allow Bash gh auth status -h with a host passes
+gh auth status -h github.com
+@@ G4 Bash gh auth token -h is not help (under auth, -h names a host)
+gh auth token -h github.com
+@@ G4 Bash --help on an alias is refused (it runs the alias)
+gh co 1 --help
+@@ G4 Bash --help after -- is not help
+gh pr merge 1 -- --help
+@@ allow Bash GH_PAGER=cat passes
+GH_PAGER=cat gh pr view 1
+@@ allow Bash GH_PROMPT_DISABLED passes
+GH_PROMPT_DISABLED=1 gh pr view 1
+@@ G4 Bash GH_BROWSER is refused (a program gh runs)
+GH_BROWSER=x gh pr view 1
+@@ G4 Bash GH_PAGER with a program is refused
+GH_PAGER=less gh pr view 1
+@@ G4 Bash GH_TOKEN is refused (another account)
+GH_TOKEN=x gh pr view 1
+@@ G4 mcp__github__create_pull_request a pull request from another owner's branch is refused
+{"owner":"example-owner","repo":"example-repo","title":"t","head":"someone-else:task","base":"main"}
+@@ G4 mcp__github__create_pull_request a pull request asking for reviewers is refused
+{"owner":"example-owner","repo":"example-repo","title":"t","head":"task","base":"main","reviewers":["someone"]}
+@@ allow mcp__github__create_pull_request a pull request with an empty reviewers list passes
+{"owner":"example-owner","repo":"example-repo","title":"t","head":"task","base":"main","reviewers":[]}
+@@ G4 mcp__github__update_pull_request closing a pull request is refused
+{"owner":"example-owner","repo":"example-repo","pullNumber":1,"state":"closed"}
+@@ G4 mcp__github__issue_write editing an issue is refused
+{"method":"update","owner":"example-owner","repo":"example-repo","issue_number":1,"state":"closed"}
+@@ allow mcp__github__issue_write opening an issue passes
+{"method":"create","owner":"example-owner","repo":"example-repo","title":"t","body":"b"}
+@@ G4 mcp__github__issue_write opening an issue with assignees is refused
+{"method":"create","owner":"example-owner","repo":"example-repo","title":"t","assignees":["someone"]}
+@@ G4 mcp__github__create_or_update_file re-pointing a link is refused
+{"owner":"example-owner","repo":"example-repo","path":"x","content":"y","message":"m","branch":"task","allow_symlink_write":true}
+@@ allow mcp__github__create_or_update_file a file on a task branch passes
+{"owner":"example-owner","repo":"example-repo","path":"x","content":"y","message":"m","branch":"feature/task-1"}
+@@ G4 mcp__github__update_pull_request_branch merging main into a pull request's branch is refused
+{"owner":"example-owner","repo":"example-repo","pullNumber":1}
+@@ G4 mcp__github__update_issue_comment rewriting a comment is refused
+{"owner":"example-owner","repo":"example-repo","comment_id":1,"body":"x"}
+@@ G4 Bash gh pr create -H with an option the list does not name is refused
+gh pr create -H task -t x --recover=f.json
+@@ G4 Bash gh issue create with assignees is refused
+gh issue create --title x --body y --assignee=someone
+@@ G4 Bash gh issue comment --edit-last is refused
+gh issue comment 1 --edit-last --body y
+@@ END

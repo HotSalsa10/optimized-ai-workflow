@@ -61,6 +61,8 @@ Nothing yet. Release 1 is being built.
 - Tests: 1 new test file (git rules) and 1 new plant file.
 - Protected files (step 5.7): Claude can read the method's files, the project's and your Claude Code settings, and git's own config and hooks, but never write them: not with the edit tools, not with an MCP tool, not with a Bash command (a Bash call that names one of them may only read). Copies and extractions are judged by where they land, and a git command that would bring one of the method's files to another version is refused (G6). A session below effort xhigh shows you one warning at its first tool call (G12).
 - Tests: 1 new test file (protected files) and 1 new plant file.
+- The outside (step 5.8): Claude can open a pull request from its task branch, comment, open issues and read GitHub, but cannot merge, approve, run workflows, change settings, release, or write through GitHub's API, by gh, curl, wget or an MCP tool (`gh-shapes.txt` and `mcp-tools.txt` list what passes; your project can add lines). It cannot start another Claude, another session or a scheduled task, or message one. The settings also take the merge, auto-merge, session and trigger tools away on every MCP server, which holds with the hooks off.
+- Tests: 1 new test file (the outside, its cases in a file of their own) and 1 new plant file; the settings test checks the deny list.
 
 ### Changed (step 4b)
 

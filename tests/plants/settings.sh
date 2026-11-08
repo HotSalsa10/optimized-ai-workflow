@@ -68,9 +68,14 @@ plant "subprocess scrubbing set" "$frag" "it sets env.CLAUDE_CODE_SUBPROCESS_ENV
 plant "the remote variable set" "$frag" "it sets env.CLAUDE_CODE_REMOTE" '$d->{env}{CLAUDE_CODE_REMOTE} = "1"'
 plant "workflows switched off by its key" "$frag" "it sets disableWorkflows" '$d->{disableWorkflows} = JSON::PP::true()'
 plant "auto as the default mode" .claude/settings.json "it sets permissions.defaultMode auto" '$d->{permissions} = {defaultMode => "auto"}'
-plant "permissions as a string (the client skips the whole file)" "$frag" "unknown keys: permissions" '$d->{permissions} = "x"'
-plant "a deny list as a string" "$frag" "unknown keys: permissions" '$d->{permissions} = {deny => "mcp__x"}'
-plant "an allow list (permissions come with 5.8's deny list only)" "$frag" "unknown keys: permissions" '$d->{permissions} = {allow => ["Bash(*)"]}'
+plant "permissions as a string (the client skips the whole file)" "$frag" "permissions is not an object" '$d->{permissions} = "x"'
+plant "a deny list as a string" "$frag" "permissions.deny is not a list" '$d->{permissions}{deny} = "mcp__*__merge_pull_request"'
+plant "an allow list (permissions hold the deny list only)" "$frag" "permissions has keys the plan does not set: allow" '$d->{permissions}{allow} = ["Bash(*)"]'
+# each deny entry dropped (5.8, M139), and the merge entry for one server only
+for t in merge_pull_request enable_pr_auto_merge create_session send_message create_trigger fire_trigger update_trigger unarchive_session; do
+  plant "the deny entry for $t dropped" "$frag" "permissions.deny is not exactly" "\$d->{permissions}{deny} = [grep { \$_ ne 'mcp__*__$t' } @{ \$d->{permissions}{deny} }]"
+done
+plant "the merge tool denied on one server name only" "$frag" "permissions.deny is not exactly" '$_ = "mcp__github__merge_pull_request" for grep { $_ eq "mcp__*__merge_pull_request" } @{ $d->{permissions}{deny} }'
 plant "an env variable the plan does not set" "$frag" "env has keys the plan does not set: EXTRA_X" '$d->{env}{EXTRA_X} = "1"'
 plant "a second model allowed" "$frag" "availableModels is not exactly" '$d->{availableModels} = ["claude-opus-5-5", "claude-sonnet-5-5"]'
 plant "this repo's settings turn auto memory on" .claude/settings.json "they differ on: autoMemoryEnabled" '$d->{autoMemoryEnabled} = JSON::PP::true()'

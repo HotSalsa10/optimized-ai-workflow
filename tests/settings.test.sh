@@ -10,7 +10,7 @@
 # "rejected-shape", with the model allowlist written as a string; also
 # seen by the review with permissions as a string), so every value's type
 # is checked, not only its text, and a key the plan does not name is
-# refused, permissions too until 5.8 checks its deny list.
+# refused (permissions may hold only the deny list, 5.8).
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=tests/lib.sh
@@ -67,10 +67,13 @@ my %want = (
   disableAllHooks => [bool => 0],
   minimumVersion => [str => $floor],
   env => [obj => { CLAUDE_CODE_DISABLE_ADVISOR_TOOL => [str => '1'], CLAUDE_CODE_USE_POWERSHELL_TOOL => [str => '0'] }],
+  # the tools that merge, or start, message or schedule other sessions, on
+  # every server name (5.8, M139: holds with the hooks off); nothing else
+  # under permissions, as one of the wrong shape makes the client skip the
+  # whole file
+  permissions => [obj => { deny => [list => [map { "mcp__*__$_" } qw(merge_pull_request enable_pr_auto_merge create_session send_message create_trigger fire_trigger update_trigger unarchive_session)]] }],
 );
-# hooks are checked below (from 5.4); permissions come with their deny
-# list (5.8), and until then any permissions key is refused, as one of the
-# wrong shape makes the client skip the whole file
+# hooks are checked below (from 5.4)
 my %later = (hooks => 'hooks (from 5.4)');
 sub same {
   my ($spec, $v, $at) = @_;

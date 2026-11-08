@@ -13,7 +13,7 @@
 # show text from the call. Without perl nothing can be checked, so every
 # call is refused (G1).
 # Rules done here (docs/rule-map.md): M128 (G0, G1), M129 (G2), M130 (G3), M133 (G8),
-# M132 (G6), M134 (G12).
+# M132 (G6), M134 (G12), M131 (G4).
 case "$0" in
   */*) here=${0%/*} ;;
   *) here=. ;;

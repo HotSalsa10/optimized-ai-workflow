@@ -558,6 +558,114 @@ else
   fail "protect: the fake did not answer; the client was not started"
 fi
 
+# --- 15. the outside (step 5.8): gh by its list (a stand-in gh only
+# notes that it ran), MCP tools by theirs, and the settings' deny entries,
+# which take the merge tool away under any server name, hooks on or off ---
+# outside_case NAME SETTINGS-PERL [VAR=VALUE...]: a method project whose
+# origin names a GitHub repository (never contacted), on branch task, with
+# the fake MCP server under two names (github and plugin_github_github,
+# each with its own log); SETTINGS-PERL changes the settings ($d) first
+outside_case() {
+  h_case "$1"
+  h_method "$root"
+  OUT_PERL=$2 perl -MJSON::PP -e 'my $f = $ARGV[0]; open my $h, "<", $f or die; my $d = decode_json(do { local $/; <$h> }); close $h; eval "$ENV{OUT_PERL}; 1" or die $@; open $h, ">", $f or die; print $h JSON::PP->new->canonical->pretty->encode($d)' "$H_PROJ/.claude/settings.json" || fail "$1: the settings could not be changed"
+  { hg remote add origin https://github.com/example-owner/example-repo.git && hg switch -q -c task; } || fail "$1: the case's origin could not be set"
+  mkdir -p "$H_DIR/bin"
+  printf '#!/bin/sh\nprintf "%%s\\n" "$*" >>gh-ran.txt\n' >"$H_DIR/bin/gh" && chmod +x "$H_DIR/bin/gh"
+  perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({mcpServers => {map { $_ => {type => "stdio", command => "perl", args => [$ARGV[0], "$ARGV[1]/$_.log", qw(merge_pull_request create_pull_request)]} } qw(github plugin_github_github)}})' \
+    "$HARNESS/fake-mcp.pl" "$H_DIR" >"$H_DIR/mcp.json"
+}
+# deny_loaded: the client's debug log says the eight deny rules loaded from
+# the project's settings, and that no rule was found invalid (a rule the
+# client rejects prints nothing on stderr or in the stream)
+deny_loaded() {
+  LC_ALL=C grep -q "Adding 8 deny rule(s) to destination 'projectSettings'" "$H_DIR/debug.log" 2>/dev/null && ! LC_ALL=C grep -q 'Invalid permission rule\|Invalid setting' "$H_DIR/debug.log"
+}
+# called LOG [TEXT]: the fake MCP server under that name was called (with
+# TEXT in the call)
+called() {
+  LC_ALL=C grep "^CALLED" "$H_DIR/$1.log" 2>/dev/null | LC_ALL=C grep -q -- "${2:-}"
+}
+OUT_SCRIPT='{"convs":[{"match":"^go$","name":"main","turns":[{"input":{"command":"gh pr merge 1","description":"a merge"},"tool":"Bash"},{"input":{"command":"gh pr create --head task --title t --body b","description":"a pull request"},"tool":"Bash"},{"input":{"owner":"example-owner","pullNumber":1,"repo":"example-repo"},"tool":"mcp__github__merge_pull_request"},{"input":{"owner":"example-owner","pullNumber":1,"repo":"example-repo"},"tool":"mcp__plugin_github_github__merge_pull_request"},{"input":{"base":"main","head":"task","owner":"someone-else","repo":"other","title":"OTHER-REPO"},"tool":"mcp__github__create_pull_request"},{"input":{"base":"main","head":"task","owner":"example-owner","repo":"example-repo","title":"THIS-REPO"},"tool":"mcp__github__create_pull_request"},{"text":"MAIN-DONE"}]}]}'
+printf '%s\n' "$OUT_SCRIPT" >"$H_WORK/outside.json"
+MERGE_ONLY='{"convs":[{"match":"^go$","name":"main","turns":[{"input":{"owner":"example-owner","pullNumber":1,"repo":"example-repo"},"tool":"mcp__github__merge_pull_request"},{"input":{"owner":"example-owner","pullNumber":1,"repo":"example-repo"},"tool":"mcp__plugin_github_github__merge_pull_request"},{"text":"MAIN-DONE"}]}]}'
+printf '%s\n' "$MERGE_ONLY" >"$H_WORK/outside-merge.json"
+OUT_ARGS="--permission-mode default --allowedTools Bash mcp__github__create_pull_request mcp__github__merge_pull_request mcp__plugin_github_github__merge_pull_request"
+
+outside_case outside ''
+if h_fake "$H_WORK/outside.json"; then
+  # shellcheck disable=SC2086
+  h_client 60 PATH="$H_DIR/bin:/usr/bin:/bin" -- $OUT_ARGS --mcp-config "$H_DIR/mcp.json" --debug-file "$H_DIR/debug.log"
+  h_stop
+  if h_req_in main '"gh pr merge" in this form is not on the method' && LC_ALL=C grep -q '^pr create --head task' "$H_PROJ/gh-ran.txt" 2>/dev/null && ! LC_ALL=C grep -q 'merge' "$H_PROJ/gh-ran.txt"; then
+    pass "outside: gh pr merge is refused (G4) with its reason; gh pr create from the task branch runs"
+  else
+    fail "outside: gh pr merge is refused (G4); gh pr create from the task branch runs" "$(cut -f7- "$H_DIR/fake/requests.tsv")"
+  fi
+  if h_req_in main 'No such tool available: mcp__github__merge_pull_request' && h_req_in main 'No such tool available: mcp__plugin_github_github__merge_pull_request' && ! called github merge && ! called plugin_github_github merge; then
+    pass "outside: the MCP merge tool is taken away under both server names by the settings' deny entries, and never called"
+  else
+    fail "outside: the MCP merge tool is taken away under both server names" "$(cut -f7- "$H_DIR/fake/requests.tsv")"
+  fi
+  # (read from every message: the client can add a reminder after a tool
+  # result, and the fake's log sums up the last message only)
+  if h_req_in main 'guard G4: the MCP tool create_pull_request may write only to this repository' && ! called github OTHER-REPO && called github THIS-REPO; then
+    pass "outside: an MCP pull request on another repository is refused (G4); one from this repository's task branch is made"
+  else
+    fail "outside: an MCP pull request on another repository is refused (G4); one from the task branch is made" "$(cut -f7- "$H_DIR/fake/requests.tsv")"
+  fi
+  if deny_loaded; then pass "outside: the client's debug log shows the eight deny rules loaded from the project's settings, none invalid"; else fail "outside: the eight deny rules loaded, none invalid" "$(LC_ALL=C grep -i 'deny rule\|invalid' "$H_DIR/debug.log" 2>/dev/null | head -3)"; fi
+  if LC_ALL=C grep -q '	G4	mcp__github	' "$H_PROJ/.method/local/guard.log" 2>/dev/null && ! LC_ALL=C grep -q 'create_pull_request' "$H_PROJ/.method/local/guard.log"; then
+    pass "outside: the MCP refusal is in guard.log under the tool's server only"
+  else
+    fail "outside: the MCP refusal is in guard.log under the tool's server only" "$(cut -f2-3 "$H_PROJ/.method/local/guard.log" 2>&1 | head -5)"
+  fi
+  h_safe outside
+else
+  fail "outside: the fake did not answer; the client was not started"
+fi
+# the controls: the same rules under allow are found invalid (so the debug
+# log check can tell), and without the deny entries the merge tool is
+# there, and only the guard (G4) stops it
+outside_case outside-nodeny '$d->{permissions} = {allow => $d->{permissions}{deny}}'
+if h_fake "$H_WORK/outside-merge.json"; then
+  # shellcheck disable=SC2086
+  h_client 60 -- $OUT_ARGS --mcp-config "$H_DIR/mcp.json" --debug-file "$H_DIR/debug.log"
+  h_stop
+  if ! deny_loaded && h_req_in main 'guard G4: the MCP tool merge_pull_request is not on' && ! h_req_has 'No such tool available' && ! called github && ! called plugin_github_github; then
+    pass "outside (control): the rules under allow are found invalid, and without the deny entries the merge tool is there and only the guard stops it"
+  else
+    fail "outside (control): without the deny entries the merge tool is there and only the guard stops it" "$(cut -f7- "$H_DIR/fake/requests.tsv")"
+  fi
+  h_safe outside-nodeny
+else
+  fail "outside-nodeny: the fake did not answer; the client was not started"
+fi
+# with the hooks switched off (the owner's way out), the deny entries still
+# hold (M139); without them, the merge is called (the case can tell)
+for deny in yes no; do
+  if [ "$deny" = yes ]; then outside_case outside-hooksoff ''; else outside_case outside-hooksoff-nodeny 'delete $d->{permissions}'; fi
+  printf '{"disableAllHooks": true}\n' >"$H_PROJ/.claude/settings.local.json"
+  if h_fake "$H_WORK/outside-merge.json"; then
+    # shellcheck disable=SC2086
+    h_client 60 -- $OUT_ARGS --mcp-config "$H_DIR/mcp.json"
+    h_stop
+    if [ "$deny" = yes ]; then
+      if h_req_in main 'No such tool available: mcp__github__merge_pull_request' && h_req_in main 'No such tool available: mcp__plugin_github_github__merge_pull_request' && ! called github && ! called plugin_github_github && [ ! -e "$H_PROJ/.method/local/guard.log" ]; then
+        pass "outside: with the hooks off, the deny entries still take the merge tool away under both server names (M139)"
+      else
+        fail "outside: with the hooks off, the deny entries still take the merge tool away" "$(cut -f7- "$H_DIR/fake/requests.tsv")"
+      fi
+      h_safe outside-hooksoff
+    else
+      if called github && called plugin_github_github; then pass "outside (control): with the hooks off and no deny entries, the merge tool is called on both servers"; else fail "outside (control): with the hooks off and no deny entries, the merge tool is called" "$(cut -f7- "$H_DIR/fake/requests.tsv")"; fi
+      h_safe outside-hooksoff-nodeny
+    fi
+  else
+    fail "outside-hooksoff ($deny): the fake did not answer; the client was not started"
+  fi
+done
+
 # the owner's way out (README, "When the guard blocks something it should not")
 for way in local flag; do
   h_case "way-out-$way"

@@ -1,9 +1,11 @@
 #!/usr/bin/env perl
-# fake-mcp.pl LOGFILE: the harness's fake MCP server (stdio,
-# newline-delimited JSON-RPC) with one tool, merge_pull_request, that only
-# logs that it was called. Never shipped; core perl.
+# fake-mcp.pl LOGFILE [TOOL...]: the harness's fake MCP server (stdio,
+# newline-delimited JSON-RPC) with the tools named (merge_pull_request when
+# none is), each of which only logs that it was called. Never shipped; core
+# perl.
 use strict; use warnings; use JSON::PP;
-my $log = shift or die "usage: fake-mcp.pl LOGFILE\n";
+my $log = shift or die "usage: fake-mcp.pl LOGFILE [TOOL...]\n";
+my @tools = @ARGV ? @ARGV : ('merge_pull_request');
 my $J = JSON::PP->new->utf8->canonical;
 $| = 1;
 open my $L, '>>', $log or die "log: $!\n";
@@ -19,8 +21,8 @@ while (my $line = <STDIN>) {
         $res = { protocolVersion => ($m->{params}{protocolVersion} || '2025-06-18'),
                  capabilities => { tools => {} }, serverInfo => { name => 'fake', version => '0.0.1' } };
     } elsif ($meth eq 'tools/list') {
-        $res = { tools => [ { name => 'merge_pull_request', description => 'Merge a pull request (fake, logs only).',
-                 inputSchema => { type => 'object', properties => { pull_number => { type => 'number' } }, required => ['pull_number'] } } ] };
+        $res = { tools => [ map { { name => $_, description => "$_ (fake, logs only).",
+                 inputSchema => { type => 'object', properties => { pull_number => { type => 'number' } }, additionalProperties => JSON::PP::true } } } @tools ] };
     } elsif ($meth eq 'tools/call') {
         print $L "CALLED ", $J->encode($m->{params}), "\n";
         $res = { content => [ { type => 'text', text => 'FAKE-MERGED' } ] };

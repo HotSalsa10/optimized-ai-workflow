@@ -106,7 +106,7 @@ tool "Edit of a file named like a setting elsewhere passes" Edit "$(jpath "$proj
 tool "an MCP write tool given a protected path is refused" mcp__fs__write_file "$(perl -MJSON::PP -e 'print JSON::PP->new->encode({path => $ARGV[0], content => "x"})' "$proj/.claude/settings.json")" G6
 tool "an MCP move given a protected path in a list is refused" mcp__fs__move_file "$(perl -MJSON::PP -e 'print JSON::PP->new->encode({paths => ["a", $ARGV[0]]})' "$proj/.git/config")" G6
 tool "an MCP read tool given a protected path passes" mcp__fs__read_file "$(perl -MJSON::PP -e 'print JSON::PP->new->encode({path => $ARGV[0]})' "$proj/.claude/settings.json")" allow
-tool "an MCP write tool given another path passes" mcp__fs__write_file "$(perl -MJSON::PP -e 'print JSON::PP->new->encode({path => $ARGV[0], content => "x"})' "$proj/src/app.py")" allow
+tool "an MCP write tool given another path passes G6 (and G4 refuses it: it is not on the MCP list)" mcp__fs__write_file "$(perl -MJSON::PP -e 'print JSON::PP->new->encode({path => $ARGV[0], content => "x"})' "$proj/src/app.py")" G4
 
 # --- Bash: a call that names a protected path may only read ---
 for c in 'cat .claude/settings.json' 'head -5 scripts/method/status.sh' 'grep -rn guard .claude/hooks/method' 'ls -la .claude/hooks/method' \

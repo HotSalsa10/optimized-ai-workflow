@@ -20,6 +20,18 @@
     "CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "1",
     "CLAUDE_CODE_USE_POWERSHELL_TOOL": "0"
   },
+  "permissions": {
+    "deny": [
+      "mcp__*__merge_pull_request",
+      "mcp__*__enable_pr_auto_merge",
+      "mcp__*__create_session",
+      "mcp__*__send_message",
+      "mcp__*__create_trigger",
+      "mcp__*__fire_trigger",
+      "mcp__*__update_trigger",
+      "mcp__*__unarchive_session"
+    ]
+  },
   "hooks": {
     "SessionStart": [
       {

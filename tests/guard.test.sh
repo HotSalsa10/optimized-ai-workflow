@@ -185,7 +185,9 @@ done
 # Claude Code's own commit and PR forms: a here-document read by cat, with
 # nothing to expand, is plain text
 judge "Claude Code's commit form (a quoted here-document read by cat) is let through" "$(bash_call "$(printf 'git commit -m "$(cat <<'"'"'EOF'"'"'\nFix: don'"'"'t break the build\n\nCo-Authored-By: x <x@example.invalid>\nEOF\n)"')")" allow
-judge "and its PR form" "$(bash_call "$(printf 'gh pr create --title "x" --body "$(cat <<'"'"'EOF'"'"'\n## Summary\n- one\nEOF\n)"')")" allow
+# (with --head: this folder is no repository, so a pull request without
+# one is refused until the branch is pushed, G4, step 5.8)
+judge "and its PR form" "$(bash_call "$(printf 'gh pr create --head task --title "x" --body "$(cat <<'"'"'EOF'"'"'\n## Summary\n- one\nEOF\n)"')")" allow
 judge "a here-document read by cat that would expand something is still not read" "$(bash_call "$(printf 'git commit -m "$(cat <<EOF\n$(git push origin main)\nEOF\n)"')")" G0
 judge "a carriage return ends a here-document's end line, so a CRLF commit message passes" "$(bash_call "$(printf 'git commit -F - <<EOF\r\nmsg\r\nEOF\r\ngit log -1\r\n')")" allow
 err=$(cd "$proj" && printf '%s' "$(bash_call "$(printf 'git commit -F - <<SECRETDELIM42\nmsg')")" | CLAUDE_PROJECT_DIR="$proj" bash "$guard" 2>&1)

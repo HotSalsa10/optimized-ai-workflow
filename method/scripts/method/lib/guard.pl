@@ -31,6 +31,9 @@
 #      another version (lib/protect.pl).
 #   G12 effort (M134, step 5.7): not a refusal; the first main-session
 #      call below xhigh gets one warning (lib/protect.pl).
+#   G4 outside (M131, step 5.8): gh by a list, curl and wget to GitHub only
+#      reading, no nested Claude, MCP tools by a list, no SendMessage
+#      (lib/outside.pl).
 # A call the rules say nothing about is let through.
 package Guard;
 use strict;
@@ -43,6 +46,7 @@ my $lib = dirname(File::Spec->rel2abs(__FILE__));
 require File::Spec->catfile($lib, 'hook.pl');
 require File::Spec->catfile($lib, 'shell.pl');
 require File::Spec->catfile($lib, 'protect.pl');
+require File::Spec->catfile($lib, 'outside.pl');
 
 our $WAY_OUT = 'if the guard is wrong, see .claude/hooks/method/README.md, "When the guard blocks something it should not"';
 
@@ -84,6 +88,9 @@ sub log_refusal {
   $root = $in->{cwd} if (!defined $root || !-d $root) && ref $in eq 'HASH' && defined $in->{cwd} && !ref $in->{cwd};
   return unless defined $root && -d $root;
   (my $t = defined $tool && !ref $tool ? $tool : 'unknown') =~ s/[^A-Za-z0-9_.:-]/_/g;
+  # (an MCP tool by its server only: the rest of its name is chosen by
+  # whoever wrote the server)
+  $t =~ s/\A(mcp__[A-Za-z0-9_.:-]*?)__.*\z/$1/s;
   $t = substr($t, 0, 128) || 'unknown';
   eval {
     require File::Spec->catfile($lib, 'log.pl');
@@ -586,6 +593,7 @@ sub main {
     my @cmds = Shell::commands($cmd);
     my ($rule, $text) = judge_command($cmd, \@cmds);
     ($rule, $text) = judge_git(\@cmds, $in) unless $rule;
+    ($rule, $text) = Outside::judge_bash(\@cmds, $project, [cmd_dirs(\@cmds, defined $start ? $start : '.')]) unless $rule;
     ($rule, $text) = Protect::judge_bash(\@cmds, [cmd_dirs(\@cmds, defined $start ? $start : '.')], $project) unless $rule;
     return refuse($rule, $text, $tool, $raw, $in) if $rule;
   }
@@ -596,7 +604,11 @@ sub main {
   }
   if ($tool =~ /\Amcp__/) {
     my ($rule, $text) = Protect::judge_mcp($tool, $input, $start, $project);
+    ($rule, $text) = Outside::judge_mcp($tool, $input, $project) unless $rule;
     return refuse($rule, $text, $tool, $raw, $in) if $rule;
+  }
+  if ($tool eq 'SendMessage') {
+    return refuse('G4', "messages to other agents or sessions are refused in this method (step 5; D10): they can start work that runs without this project's hooks; tell the owner what you needed", $tool, $raw, $in);
   }
   if ($tool eq 'ExitWorktree' && ref $input eq 'HASH' && $input->{discard_changes}) {
     return refuse('G3', 'leaving a worktree with discard_changes would delete its uncommitted work; commit it first, or keep the worktree and tell the owner', $tool, $raw, $in);
