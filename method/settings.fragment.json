@@ -38,8 +38,21 @@
         "hooks": [
           {
             "type": "command",
-            "command": "BASH_ENV= ENV= bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/method/session-status.sh\"",
+            "command": "BASH_ENV= ENV= bash -p \"$CLAUDE_PROJECT_DIR/.claude/hooks/method/session-status.sh\"",
             "timeout": 30
+          }
+        ]
+      }
+    ],
+    "ConfigChange": [
+      {
+        "matcher": "user_settings|project_settings|local_settings",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "BASH_ENV= ENV= bash -p \"$CLAUDE_PROJECT_DIR/.claude/hooks/method/guard.sh\"",
+            "timeout": 30,
+            "onFailure": "block"
           }
         ]
       }
@@ -50,7 +63,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "BASH_ENV= ENV= bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/method/guard.sh\"",
+            "command": "BASH_ENV= ENV= bash -p \"$CLAUDE_PROJECT_DIR/.claude/hooks/method/guard.sh\"",
             "timeout": 30,
             "onFailure": "block"
           }
@@ -61,7 +74,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "BASH_ENV= ENV= bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/method/guard.sh\"",
+            "command": "BASH_ENV= ENV= bash -p \"$CLAUDE_PROJECT_DIR/.claude/hooks/method/guard.sh\"",
             "timeout": 30,
             "onFailure": "block"
           }

@@ -19,6 +19,8 @@
 #   in .claude/method-local/ (git, gh and MCP), counted. Names only,
 #   never a settings value: a model id only in the shape Anthropic's ids
 #   have, the effort level by name.
+# It also writes G16's snapshot of the local and user settings when a
+# session starts (lib/watch.pl; step 5.9), never at clear, compact or fork.
 # Over the caps, the last line says how many more and to run status.sh.
 # Every line is one clean line (Hook::clean); anything that goes wrong
 # becomes a LOOK line, never a crash that hides the rest.
@@ -245,6 +247,10 @@ sub main {
   my ($in, $in_err) = Hook::read_input();
   my $top = ref $in eq 'HASH' && defined $in->{cwd} && !ref $in->{cwd} && -d $in->{cwd} ? $in->{cwd} : ($ENV{CLAUDE_PROJECT_DIR} // '.');
   chdir $top;
+  # G16's snapshot (a failure leaves none: G16 then judges what the files
+  # hold)
+  my $project = defined $ENV{CLAUDE_PROJECT_DIR} && -d $ENV{CLAUDE_PROJECT_DIR} ? $ENV{CLAUDE_PROJECT_DIR} : $top;
+  eval { require File::Spec->catfile($lib, 'watch.pl'); Watch::snapshot($in, $project) };
   # (within 20 s in all, so the hook ends well inside its 30 s and
   # METHOD-ACTIVE always reaches Claude; a nested run skips status only)
   my @lines;

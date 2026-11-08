@@ -548,7 +548,7 @@ if h_fake "$H_DIR/protect.json"; then
     fail "protected files: a Write to the project's settings is refused with its reason; a read of them runs" "$(cut -f7- "$H_DIR/fake/requests.tsv")"
   fi
   n=$(LC_ALL=C grep -c 'guard G12: this session runs at effort low' "$H_DIR/out.jsonl" 2>/dev/null)
-  if [ "${n:-0}" -ge 1 ] && [ "$(wc -l <"$H_PROJ/.method/local/effort-warned" 2>/dev/null)" = 1 ]; then
+  if [ "${n:-0}" -ge 1 ] && [ "$(wc -l <"$H_PROJ/.method/local/effort-warned" 2>/dev/null | tr -d ' ')" = 1 ]; then
     pass "G12: at effort low the first call brings one warning (in the client's output) and the session is noted once"
   else
     fail "G12: at effort low the first call brings one warning" "$(LC_ALL=C grep -o '.\{0,80\}G12.\{0,80\}' "$H_DIR/out.jsonl" | head -3)"
@@ -688,6 +688,97 @@ for way in local flag; do
     fail "way-out-$way: the fake did not answer; the client was not started"
   fi
 done
+
+# --- 16. settings changes and skill hooks (step 5.9): the "holds" cases
+# that rest on the client itself (the other rules' bypasses are proven
+# through guard.sh with a real hook input: guard*.test.sh; A68) ---
+# a. the hook prefix and command perl hold at a session's start: with
+# BASH_ENV and an exported function named perl in the user's settings env,
+# the guard runs and refuses a Write to the project's settings
+h_holds_start "$root"
+if [ -z "$H_HOLD" ]; then pass "holds: with BASH_ENV and functions named perl and command in the user's env at start, the hooks run none of them, and the guard refuses a Write to the settings"; else fail "holds: the hook prefix and command perl" "$H_HOLD $(cut -f7- "$H_DIR/fake/requests.tsv" 2>/dev/null)"; fi
+h_safe holds-start
+# b. mid-session, while the client waits for an answer, disableAllHooks is
+# written to the local settings: refused at ConfigChange (logged), the
+# guard still refuses the next write, and the next call it lets through
+# brings G16's one-time message. Without the ConfigChange entry (the
+# control) the same change switches the guard off, so the case can tell.
+# (The client notices a changed file within a few seconds: the fake waits
+# 8 s before it answers.)
+nocc() { perl -MJSON::PP -e 'local $/; my $d = JSON::PP->new->decode(<STDIN>); delete $d->{hooks}{ConfigChange}; print JSON::PP->new->canonical->encode($d)' <"$H_PROJ/.claude/settings.json" >"$H_DIR/s.json" && cp "$H_DIR/s.json" "$H_PROJ/.claude/settings.json"; }
+for mode in guard control; do
+  h_case "g16-local-$mode"
+  h_method "$root"
+  [ "$mode" = guard ] || nocc
+  printf '{}\n' >"$H_PROJ/.claude/settings.local.json"
+  perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({convs => [{name => "main", match => "^go\$", turns => [{write => {path => $ARGV[0], text => "{\"disableAllHooks\": true}\n"}, pause => 8, tool => "Bash", input => {command => "echo x > .claude/settings.json", description => "a write"}}, {tool => "Bash", input => {command => "echo ok > seen.txt", description => "a plain write"}}, {text => "MAIN-DONE"}]}]})' "$H_PROJ/.claude/settings.local.json" >"$H_DIR/g16.json"
+  before=$(cksum <"$H_PROJ/.claude/settings.json")
+  if h_fake "$H_DIR/g16.json"; then
+    h_client 90 -- --permission-mode default --allowedTools Bash
+    h_stop
+    if [ "$mode" = guard ]; then
+      if h_tsv_has 'guard G6: ' && [ "$(cksum <"$H_PROJ/.claude/settings.json")" = "$before" ] && LC_ALL=C grep -q '	G16	ConfigChange	' "$H_PROJ/.method/local/guard.log" 2>/dev/null; then
+        pass "G16: disableAllHooks written to the local settings mid-session is refused (and logged); the guard still refuses the next write"
+      else
+        fail "G16: disableAllHooks written mid-session is refused" "$(cut -f7- "$H_DIR/fake/requests.tsv"; cat "$H_PROJ/.method/local/guard.log" 2>/dev/null)"
+      fi
+      if h_ran seen.txt && LC_ALL=C grep -q 'guard G16: a settings change was refused during this session' "$H_DIR/out.jsonl"; then
+        pass "G16: the next call the guard lets through brings the one-time message"
+      else
+        fail "G16: the next call brings the one-time message" "$(LC_ALL=C grep -o '.\{0,80\}G16.\{0,80\}' "$H_DIR/out.jsonl" | head -3)"
+      fi
+    else
+      if h_tsv_has 'turn=1' && ! h_tsv_has 'guard G6: ' && [ ! -e "$H_PROJ/.method/local/guard.log" ]; then pass "G16 (control): without the ConfigChange entry the same change switches the guard off mid-session (the case can tell)"; else fail "G16 (control): without the ConfigChange entry the change switches the guard off" "$(cut -f7- "$H_DIR/fake/requests.tsv")"; fi
+    fi
+    h_safe "g16-local-$mode"
+  else
+    fail "g16-local-$mode: the fake did not answer; the client was not started"
+  fi
+done
+# c. mid-session, an env variable is added to the user's settings: refused,
+# so the next command's shell does not see it; without the ConfigChange
+# entry (the control) it does (G16 refuses any env change: BASH_ENV, PATH
+# and the like reach later commands this way)
+for mode in guard control; do
+  h_case "g16-env-$mode"
+  h_method "$root"
+  [ "$mode" = guard ] || nocc
+  mkdir -p "$H_DIR/home/.claude"
+  printf '{}\n' >"$H_DIR/home/.claude/settings.json"
+  perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({convs => [{name => "main", match => "^go\$", turns => [{write => {path => $ARGV[0], text => "{\"env\": {\"HARNESS_ADDED\": \"yes\"}}\n"}, pause => 8, tool => "Bash", input => {command => "printf \"%s\" \"\$HARNESS_ADDED\" > seen.txt", description => "a plain write"}}, {text => "MAIN-DONE"}]}]})' "$H_DIR/home/.claude/settings.json" >"$H_DIR/g16env.json"
+  if h_fake "$H_DIR/g16env.json"; then
+    h_client 90 -- --permission-mode default --allowedTools Bash
+    h_stop
+    got=$(cat "$H_PROJ/seen.txt" 2>/dev/null)
+    if [ "$mode" = guard ]; then
+      if h_ran seen.txt && [ -z "$got" ] && LC_ALL=C grep -q '	G16	ConfigChange	' "$H_PROJ/.method/local/guard.log" 2>/dev/null; then pass "G16: an env variable added to the user's settings mid-session is refused; the next command's shell does not see it"; else fail "G16: an env variable added mid-session is refused" "seen: '$got'; $(cut -f7- "$H_DIR/fake/requests.tsv")"; fi
+    else
+      if [ "$got" = yes ]; then pass "G16 (control): without the ConfigChange entry the next command's shell sees it (the case can tell)"; else fail "G16 (control): without the ConfigChange entry the next command sees the variable" "seen: '$got'"; fi
+    fi
+    h_safe "g16-env-$mode"
+  else
+    fail "g16-env-$mode: the fake did not answer; the client was not started"
+  fi
+done
+# d. G17: a project skill whose frontmatter declares a hook is refused,
+# and its hook never runs
+h_case g17
+h_method "$root"
+mkdir -p "$H_PROJ/.claude/skills/helper"
+printf '%s\n' '---' 'name: helper' 'description: A harness skill with a hook.' 'hooks:' '  PreToolUse:' '    - matcher: Bash' '      hooks:' '        - type: command' '          command: touch "$CLAUDE_PROJECT_DIR/skill-hook-ran.txt"' '---' 'Say HARNESS-HELPER.' >"$H_PROJ/.claude/skills/helper/SKILL.md"
+printf '%s\n' '{"convs":[{"name":"main","match":"^go$","turns":[{"tool":"Skill","input":{"skill":"helper"}},{"tool":"Bash","input":{"command":"echo ok > seen.txt","description":"a plain write"}},{"text":"MAIN-DONE"}]}]}' >"$H_DIR/g17.json"
+if h_fake "$H_DIR/g17.json"; then
+  h_client 60 -- --permission-mode default --allowedTools Skill Bash
+  h_stop
+  if h_tsv_has 'guard G17: the skill "helper" declares hooks in its frontmatter' && h_ran seen.txt && ! h_ran skill-hook-ran.txt; then
+    pass "G17: a skill whose frontmatter declares a hook is refused, and its hook never runs"
+  else
+    fail "G17: a skill whose frontmatter declares a hook is refused" "$(cut -f7- "$H_DIR/fake/requests.tsv")"
+  fi
+  h_safe g17
+else
+  fail "g17: the fake did not answer; the client was not started"
+fi
 
 echo "harness: ${H_RUNS:-0} client runs took ${H_TOTAL_SECS:-0} s"
 finish

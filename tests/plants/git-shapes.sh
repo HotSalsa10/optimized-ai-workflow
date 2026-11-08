@@ -116,9 +116,22 @@ plant "a fetch with a refspec" "$list" "not on the list: git fetch origin main:r
 plant "a cherry-pick of a range" "$list" "not on the list: git cherry-pick HEAD~2..HEAD" 's/^cherry-pick -x COMMIT/cherry-pick -x ARG.../m'
 plant "a list line with no reason" "$list" "the method's git list reads" 's/\z/stash\n/'
 plant "the push-alone check removed" "$guard" "push refused: git checkout main && git push origin HEAD" 's/return "a push may not share its Bash call with git \$sub, which can move what it sends; run the push on its own";/next;/'
-plant "the symref check removed" "$guard" "a push of a branch that is a symbolic ref is refused (K3a)" 's/return "\\"\$src\\" is a symbolic ref, so where this push goes cannot be told; push your task branch by its own name" if \$sym == 0;//'
+plant "the symref check removed" "$guard" "a push of a branch that is a symbolic ref is refused (K3a)" 's/return "what this push sends is a symbolic ref, so where it goes cannot be told; push your task branch by its own name" if \$sym == 0;//'
 plant "the effective settings read limited to the repository's file" "$guard" "a remote.*.mirror setting in the global settings refuses the push" 's/git_at\(\$dir, \x27config\x27, \x27--get-regexp\x27/git_at(\$dir, \x27config\x27, \x27--local\x27, \x27--get-regexp\x27/'
 plant "GIT_ settings let through" "$guard" "a GIT_ setting is refused: GIT_DIR=../clone/.git git status" 's/    next unless \@bad;\n/    next;\n/'
+# review round 1 of 5.6 (repair loop 1)
+plant "a cd that may have failed is followed" "$guard" "a reset after a cd that may have failed is judged as this repository's" 's/\$dir\{\$scope\} = undef unless \(\$c->\{next_op\} \/\/ \x27\x27\) eq \x27&&\x27;//'
+plant "an unknown remote taken for a folder" "$guard" "a push from a clone made in the same call is judged in full" 's/\} elsif \(\$target =~ m\{/} elsif (1 || \$target =~ m{/'
+plant "git's own options read as its subcommand" "$guard" "git -C before a switch next to a push" 's/my \(\$sub, \@args\) = git_sub\(\@w\);/my (\$sub, \@args) = grep { !\/\\A-\/ } \@w[1 .. \$#w];/'
+plant "reading forms next to a push refused" "$guard" "reading git commands next to a push pass" 's/      next if git_reads\(\$sub, \@args\);\n//'
+plant "HOME on git let through" "$guard" "HOME set on a push" 's/if \(\(\$is_session \|\| \$sub eq \x27push\x27\) && grep/if (0 && grep/'
+plant "~ in git -C not read as the home folder" "$guard" "git -C with ~ is read as the home folder" 's/elsif \(\$v =~ s\{\\A~/elsif (0 && \$v =~ s{\\A~/'
+plant "a refusal names the push's remote" "$guard" "a push refusal names no word of the push (a URL can hold a token)" 's/"this push\x27s remote is not one of this repository\x27s remotes; \$form"/"\\"\$target\\" is not one of this repository\x27s remotes; \$form"/'
+plant "git rm -f allowed" "$list" "git rm -f drops uncommitted changes: refused" 's/^rm -\* !-f !--force/rm -*/m'
+plant "git worktree remove --force allowed" "$list" "git worktree remove --force is refused" 's/^worktree remove NAME/worktree remove -* NAME/m'
+plant "a pull that can merge allowed" "$list" "a plain git pull is still refused (it can merge)" 's/^pull \+--ff-only/pull --ff-only/m'
+plant "git init with a template allowed" "$list" "git init with a template is refused in this repository" 's/^init -b=/init --template= -b=/m'
+plant "G8 judging commit only" "$guard" "a cherry-pick --continue while a mutate journal is there is refused (G8)" 's/\(\?:commit\|merge\|cherry-pick\|revert\|pull\)/(?:commit)/'
 
 drop_sandbox "$work" || true
 echo "plants: git list: $tests_pass passed, $tests_fail failed, $tests_skip skipped"

@@ -141,7 +141,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M133 | No commit while a mutation run or its journal exists | research: decision A41 | method/.claude/hooks/method/guard.sh | done |
 | M134 | Effort below xhigh is announced at a session's first tool call | research: decision A3 | method/.claude/hooks/method/guard.sh | done |
 | M135 | Secrets, personal data and Claude attribution are stopped before they leave the machine: a push, gh text and MCP writes are scanned | incident | method/.claude/hooks/method/guard.sh | step 5 |
-| M136 | A settings change that switches off or weakens the hooks is refused mid-session | research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | step 5 |
-| M137 | A skill or agent that declares its own hooks is refused unless it is a method file | research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | step 5 |
+| M136 | A settings change that switches off or weakens the hooks is refused mid-session | research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | done |
+| M137 | A skill or agent that declares its own hooks is refused (the method's own declare none) | research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | done |
 | M138 | Skills run no inline shell lines in method projects | research: measured, step 5 plan | method/settings.fragment.json @disableSkillShellExecution | done |
 | M139 | Merge tools, and tools that start, message or schedule other sessions, are denied in settings, so the deny holds with hooks off | research: measured, step 5 plan | method/settings.fragment.json @mcp__*__merge_pull_request | done |

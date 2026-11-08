@@ -64,6 +64,9 @@ reflog show -* ARG... :: reads the reflog
 stash list -* ARG... :: reads the stash list
 stash show -* ARG... :: reads a stash
 submodule status -* ARG... :: reads the submodules
+submodule update -* !--remote ARG... :: checks out the submodules at the commits this repository records
+submodule init -* ARG... :: registers the submodules
+submodule sync -* ARG... :: copies the submodules' addresses into their settings
 worktree list -* :: lists worktrees
 remote -v --verbose :: lists remotes
 remote get-url -* REMOTE :: reads a remote's address
@@ -84,13 +87,13 @@ tag +--list -n -n: --contains= --no-contains= --merged= --no-merged= --points-at
 
 # Starting a repository elsewhere: nothing in this one changes.
 archive -* !--remote !--exec ARG... :: packs files from a commit; the repository is unchanged
-init -* ARG... :: makes a new repository
+init -b= --initial-branch= NAME? :: makes a new repository; no template, other git folder or bare form, which could install hooks or move git's folder
 clone -* !--upload-pack !-u ARG... :: copies a repository into a new folder
 
 # The index and commits. Which paths may be changed is G6's (from 5.7).
 add -* ARG... :: stages files
-rm -* ARG... :: removes files and stages that
-mv -* ARG... :: moves files and stages that
+rm -* !-f !--force ARG... :: removes files and stages that; never with -f, which drops uncommitted changes
+mv -* !-f !--force ARG... :: moves files and stages that; never with -f, which overwrites
 restore +--staged ARG... :: unstages files; the working tree is kept
 restore +-S ARG... :: unstages files; the working tree is kept
 commit -* -m= -F= -c= -C= -t= --author= --date= --fixup= --squash= --cleanup= --trailer= -u: -S: !-n !--no-verify ARG... :: makes a commit, with the commit hooks run
@@ -105,11 +108,14 @@ checkout +-b=NEWBRANCH --track -t --no-track COMMIT? :: makes a new branch and s
 branch NEWBRANCH COMMIT? :: makes a branch; nothing is switched
 branch +-d BRANCH :: deletes a branch that is merged (git refuses otherwise)
 branch +--delete BRANCH :: deletes a branch that is merged (git refuses otherwise)
-worktree add +-b=NEWBRANCH NAME :: makes a new branch in a new worktree, from HEAD
+worktree add +-b=NEWBRANCH NAME COMMIT? :: makes a new branch in a new worktree, from HEAD or a start point
+worktree remove NAME :: removes a worktree with no uncommitted changes (git refuses otherwise; never --force)
+worktree prune -n --dry-run -v --verbose :: forgets worktrees whose folders are gone
 
 # Bringing in work.
-fetch --prune -p --tags -t REMOTE? :: fetches the remote's branches by its own settings: no refspec, not from a folder
-fetch --prune -p --tags -t REMOTE REFNAME... :: fetches named branches of a remote into its own remote-tracking refs: no refspec, so nothing else moves (K4)
+pull +--ff-only -q --quiet REMOTE? NAME? @off-main :: brings in commits pushed to this branch from elsewhere, only when nothing local is lost (fast-forward)
+fetch --prune -p --tags -t --unshallow --deepen= --depth= --shallow-since= REMOTE? :: fetches the remote's branches by its own settings: no refspec, not from a folder
+fetch --prune -p --tags -t --unshallow --deepen= --depth= --shallow-since= REMOTE REFNAME... :: fetches named branches of a remote into its own remote-tracking refs: no refspec, so nothing else moves (K4)
 merge --no-edit --ff-only MAIN @off-main :: brings the remote's main into a task branch
 merge +--abort :: stops a merge and puts back what was there before it
 merge +--continue :: finishes a merge once its conflicts are resolved

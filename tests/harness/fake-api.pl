@@ -22,6 +22,10 @@
 #   STEP = {"text": "..."} | {"tool": "Bash", "input": {...}}
 #        | {"blocks": [ {"type":"text","text":".."}, {"type":"tool_use","name":"..","input":{..}} ]}
 #        | {"http_status": 400, "error": "message"}
+#   Any STEP may also hold "write": {"path": P, "text": T}, a file written
+#   (once) before the answer, as a change made outside the client during
+#   the session, and "pause": S, seconds (at most 10) waited before the
+#   answer, so the client sees the change first (step 5.9's cases).
 # The turn index is the number of assistant messages already in the
 # request, so a case is a plain list of answers, one per model call of that
 # conversation.
@@ -53,6 +57,7 @@ die "fake-api: --script, --log-dir and --port-file are required\n"
   unless $script_f && $log_dir && $port_file;
 
 my $J  = JSON::PP->new->utf8->canonical;
+my %WROTE;    # the steps whose file is written
 my $JP = JSON::PP->new->utf8->canonical->pretty;
 my $JC = JSON::PP->new->canonical;    # character strings, for JSON inside JSON
 
@@ -243,6 +248,10 @@ sub messages {
     $step = $script->{fallback} || { text => 'FAKE-FALLBACK' };
   }
   my $info = "conv=$name turn=$turn" . (@tr ? ' results=[' . join(' | ', @tr) . ']' : '');
+  if (ref $step->{write} eq 'HASH' && defined $step->{write}{path} && !$WROTE{"$name/$turn"}++) {
+    if (open my $w, '>', $step->{write}{path}) { print $w $step->{write}{text} // ''; close $w }
+  }
+  select(undef, undef, undef, $step->{pause}) if $step->{pause} && $step->{pause} =~ /\A[0-9.]+\z/ && $step->{pause} <= 10;
   if ($step->{http_status}) {
     return ("$name:error", err_json($step->{http_status}, 'invalid_request_error', $step->{error} || 'fake error'), $info);
   }

@@ -100,6 +100,33 @@ h_method() {
   (cd "$H_PROJ" && HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git add -A && HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git commit -q -m "the method")
 }
 
+# h_holds_start ROOT: step 5.9's case for the hook prefix and command perl,
+# with the method from the repository at ROOT (a planted copy in
+# tests/plants/harness.sh): BASH_ENV and exported functions named perl and
+# command in the user's settings env at the session's start (each leaves a mark
+# only when a method hook runs it), and a Write to the project's settings.
+# H_HOLD says what went wrong, or is empty
+h_holds_start() {
+  local before
+  H_HOLD=""
+  if ! { h_case holds-start && h_method "$1"; }; then H_HOLD="the case could not be made;"; return 0; fi
+  mkdir -p "$H_DIR/home/.claude"
+  # shellcheck disable=SC2016 # $0 is for the BASH_ENV script, read when it runs
+  printf 'case "$0" in *hooks/method/*) touch "%s/bashenv-ran.txt" ;; esac\n' "$H_PROJ" >"$H_DIR/bashenv.sh"
+  perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({env => {BASH_ENV => $ARGV[0], "BASH_FUNC_perl%%" => "() {  touch \"$ARGV[1]/perlfunc-ran.txt\"; return 0\n}", "BASH_FUNC_command%%" => "() {  touch \"$ARGV[1]/commandfunc-ran.txt\"; return 0\n}"}})' "$H_DIR/bashenv.sh" "$H_PROJ" >"$H_DIR/home/.claude/settings.json"
+  perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({convs => [{name => "main", match => "^go\$", turns => [{tool => "Write", input => {file_path => $ARGV[0], content => "{}\n"}}, {text => "MAIN-DONE"}]}]})' "$H_PROJ/.claude/settings.json" >"$H_DIR/holds.json"
+  before=$(cksum <"$H_PROJ/.claude/settings.json")
+  h_fake "$H_DIR/holds.json" || { H_HOLD="the fake did not answer;"; return 0; }
+  h_client 60 -- --permission-mode acceptEdits --allowedTools Write
+  h_stop
+  h_tsv_has "guard G6: the project's settings" || H_HOLD="$H_HOLD the Write was not refused by the guard;"
+  [ "$(cksum <"$H_PROJ/.claude/settings.json")" = "$before" ] || H_HOLD="$H_HOLD the settings changed;"
+  [ ! -e "$H_PROJ/bashenv-ran.txt" ] || H_HOLD="$H_HOLD a method hook's bash ran BASH_ENV;"
+  [ ! -e "$H_PROJ/perlfunc-ran.txt" ] || H_HOLD="$H_HOLD a method hook ran the function named perl;"
+  [ ! -e "$H_PROJ/commandfunc-ran.txt" ] || H_HOLD="$H_HOLD a method hook ran the function named command;"
+  return 0
+}
+
 h_fixtures() {
   mkdir -p "$H_PROJ/.claude/hooks/fixture" "$H_PROJ/.claude/agents" &&
     cp "$HARNESS"/hooks/*.sh "$H_PROJ/.claude/hooks/fixture/" &&

@@ -50,6 +50,7 @@ use strict;
 use warnings;
 use Cwd ();
 use File::Basename qw(dirname basename);
+use File::Glob qw(bsd_glob GLOB_QUOTE GLOB_NOSORT);
 use File::Spec;
 
 my $lib = dirname(File::Spec->rel2abs(__FILE__));
@@ -109,11 +110,27 @@ sub physical {
   return $cur eq '' ? '/' : $cur;
 }
 
+# the value of the variable NAME at the start of a word ($HOME, $PWD,
+# $CLAUDE_PROJECT_DIR), as the shell reads it in the folder BASE, or undef
+my $START_VAR = qr/\A\$(?:\{(HOME|PWD|CLAUDE_PROJECT_DIR)\}|(HOME|PWD|CLAUDE_PROJECT_DIR)\b)/;
+sub start_var {
+  my ($name, $base) = @_;
+  my $v = $name eq 'HOME' ? home() : $name eq 'PWD' ? $base : $ENV{CLAUDE_PROJECT_DIR};
+  return defined $v && $v ne '' ? slashes($v) : undef;
+}
+
 sub resolve {
   my ($w, $base) = @_;
   return undef unless defined $w && $w ne '' && $w !~ /\0/;
   my $p = slashes($w);
   $base = bytes($base);
+  # (a path that starts with $HOME, $PWD or $CLAUDE_PROJECT_DIR; 5.7
+  # repair loop 1)
+  if ($p =~ s/$START_VAR//) {
+    my $v = start_var(defined $1 ? $1 : $2, $base);
+    return undef unless defined $v;
+    $p = $v . $p;
+  }
   if ($p =~ m{\A~(?=/|\z)}) {
     my $h = home();
     return undef unless defined $h;
@@ -125,6 +142,34 @@ sub resolve {
     $p = slashes($base) . "/$p";
   }
   return physical($p);
+}
+
+# the paths WORD names in the folder BASE: the path itself, and, when WORD
+# holds *, ? or [, every path it matches, as the shell would expand it
+# (at most 200; 5.7 repair loop 1)
+sub glob_quote { my ($s) = @_; $s =~ s/([\\*?\[\]{}~])/\\$1/g; return $s }
+sub paths {
+  my ($w, $base) = @_;
+  my $p = resolve($w, $base);
+  my @out = defined $p ? ($p) : ();
+  return @out unless defined $w && $w =~ /[*?\[]/ && $w !~ /\0/;
+  my $pat = slashes($w);
+  if ($pat =~ s/$START_VAR//) {
+    my $v = start_var(defined $1 ? $1 : $2, bytes($base));
+    return @out unless defined $v;
+    $pat = glob_quote($v) . $pat;
+  } elsif ($pat =~ s{\A~(?=/|\z)}{}) {
+    my $h = home();
+    return @out unless defined $h;
+    $pat = glob_quote($h) . $pat;
+  } elsif ($pat !~ m{\A/}) {
+    return @out unless defined $base && $base ne '';
+    $pat = glob_quote(slashes(bytes($base))) . "/$pat";
+  }
+  my @m = bsd_glob($pat, GLOB_QUOTE | GLOB_NOSORT);
+  splice @m, 200 if @m > 200;
+  push @out, grep { defined } map { physical($_) } @m;
+  return @out;
 }
 
 # does the file system fold letter case? Looked at once, at DIR: the same
@@ -156,10 +201,12 @@ sub set {
   $project = '.' unless defined $project && $project ne '';
   return $SET{$project} if $SET{$project};
   my @s;
+  # (a relative path, as git gives a settings file's, is read from the
+  # project, not from the folder the hook runs in; 5.7 repair loop 1)
   my $add = sub {
     my ($p, $kind, $what, $name) = @_;
     return unless defined $p && $p ne '';
-    my $r = physical(slashes($p) =~ m{\A/} ? slashes($p) : File::Spec->rel2abs(slashes($p)));
+    my $r = physical(slashes($p) =~ m{\A/} ? slashes($p) : File::Spec->rel2abs(slashes($p), File::Spec->rel2abs(slashes($project))));
     push @s, { path => $r, kind => $kind, what => $what, name => $name } if defined $r;
   };
   my $proj = physical(File::Spec->rel2abs(slashes($project)));
@@ -189,6 +236,10 @@ sub set {
       $add->("$g/config.worktree", 'file', "git's settings (.git/config.worktree)");
       $add->($g, 'prefix', "the method's files in git's folder (.git/method-*)", 'method-');
     }
+    # where the remote's main stands, which the method's checks compare
+    # against (5.7 repair loop 1)
+    $add->("$common/refs/remotes", 'dir', "git's record of the remote's branches (.git/refs/remotes/)");
+    $add->("$common/packed-refs", 'file', "git's record of branches (.git/packed-refs)");
     # every config file git reads, and the hooks folder it is told to use
     my ($cst, $cout) = Git::run('-C', $project, 'config', '--show-origin', '--null', '--list');
     if ($cst == 0) {
@@ -197,6 +248,7 @@ sub set {
       for (my $i = 0; $i + 1 <= $#f; $i += 2) {
         my ($origin, $kv) = @f[$i, $i + 1];
         my $from = $origin =~ /\Afile:(.+)\z/s ? $1 : undef;
+        $from = File::Spec->rel2abs(slashes($from), File::Spec->rel2abs(slashes($project))) if defined $from && slashes($from) !~ m{\A/};
         $add->($from, 'file', "a git settings file") if defined $from;
         $hp = $1 if $kv =~ /\Acore\.hookspath\n(.*)\z/si;
         # a file an include names, also while it is empty or missing (read
@@ -221,6 +273,13 @@ sub set {
     for my $c (@cfg) {
       $add->($c, 'prefix', "your Claude Code settings (~/.claude/settings*.json)", 'settings');
       $add->("$c/$_", 'dir', "your Claude Code $_ (~/.claude/$_/)") for qw(agents skills commands);
+      # a settings file, agent, skill or command that is a link: its real
+      # path too (5.7 repair loop 1)
+      my $q = glob_quote(slashes($c));
+      $add->($_, 'file', "your Claude Code settings (~/.claude/settings*.json)") for grep { -l } bsd_glob("$q/settings*.json", GLOB_QUOTE | GLOB_NOSORT);
+      for my $d (qw(agents skills commands)) {
+        $add->($_, 'dir', "your Claude Code $d (~/.claude/$d/)") for grep { -l } bsd_glob("$q/$d/*", GLOB_QUOTE | GLOB_NOSORT);
+      }
     }
     $add->("$h/.gitconfig", 'file', "your git settings (~/.gitconfig)");
     my $xdg = defined $ENV{XDG_CONFIG_HOME} && $ENV{XDG_CONFIG_HOME} ne '' ? $ENV{XDG_CONFIG_HOME} : "$h/.config";
@@ -270,7 +329,9 @@ sub above {
 # in read_only)
 my %READ = map { $_ => 1 } qw(cat head tail grep egrep fgrep ls wc diff cmp stat file sha256sum sha1sum sha512sum shasum md5sum sort uniq
   cut tr nl od xxd jq cd pwd test [ [[ realpath readlink basename dirname sed find echo printf true false);
-my %GIT_READ = map { $_ => 1 } qw(status log diff show blame ls-files ls-tree cat-file rev-parse grep shortlog describe rev-list whatchanged);
+# (git add changes only git's index, never a file; 5.7 repair loop 1)
+my %GIT_READ = map { $_ => 1 } qw(status log diff show blame ls-files ls-tree cat-file rev-parse grep shortlog describe rev-list whatchanged
+  add for-each-ref show-ref name-rev merge-base check-ignore check-attr var version help count-objects cherry range-diff);
 # carriers: their inner command is a command of its own (lib/shell.pl)
 my %CARRIER = map { $_ => 1 } qw(nohup time command builtin exec nice ionice sudo doas stdbuf setsid chronic caffeinate timeout env eval);
 
@@ -297,26 +358,158 @@ sub positionals {
   return @pos;
 }
 
+# sed's WORDS: (in place, a script from a file, the scripts), its options
+# read as sed reads them, long ones in any shortened form
+sub sed_parse {
+  my (undef, @w) = @_;
+  my ($inplace, $file, @scripts, @pos) = (0, 0);
+  while (@w) {
+    my $x = shift @w;
+    if ($x eq '--') { push @pos, @w; last }
+    if ($x =~ /\A--/) {
+      if ($x =~ /\A--i/) { $inplace = 1 }
+      elsif ($x =~ /\A--fi/) { $file = 1 }
+      elsif ($x =~ /\A--e[a-z-]*=(.*)\z/s) { push @scripts, $1 }
+      elsif ($x =~ /\A--e/) { push @scripts, shift(@w) // '' }
+      elsif ($x =~ /\A--l[a-z-]*\z/) { shift @w }
+      next;
+    }
+    if ($x =~ /\A-(.+)\z/s) {
+      my @l = split //, $1;
+      while (defined(my $l = shift @l)) {
+        if ($l eq 'i') { $inplace = 1; last }
+        if ($l eq 'f') { $file = 1; last }
+        if ($l eq 'e') { push @scripts, @l ? join('', @l) : (shift(@w) // ''); last }
+        if ($l eq 'l') { shift @w unless @l; last }
+      }
+      next;
+    }
+    push @pos, $x;
+  }
+  push @scripts, $pos[0] if !@scripts && !$file && @pos;
+  return ($inplace, $file, @scripts);
+}
+
+# does the sed script S only print, delete, substitute and the like: no w,
+# W, r, R, e, a, i or c, and nothing else it cannot read? (5.7 repair loop
+# 1: a list of what is plain, as sed's addresses and commands have many
+# forms)
+sub sed_plain {
+  my ($s) = @_;
+  my ($i, $n) = (0, length $s);
+  my $addr = sub {
+    if (substr($s, $i) =~ /\A(?:[0-9]+(?:~[0-9]+)?|\$)/) { $i += length $&; return 1 }
+    return 0 unless substr($s, $i, 1) eq '/';
+    my $j = $i + 1;
+    while ($j < $n && substr($s, $j, 1) ne '/') { $j++ if substr($s, $j, 1) eq '\\'; $j++ }
+    return 0 if $j >= $n;
+    $i = $j + 1;
+    $i++ while $i < $n && substr($s, $i, 1) =~ /[IM]/;
+    return 1;
+  };
+  while ($i < $n) {
+    my $c = substr($s, $i, 1);
+    if ($c =~ /[\s;{}]/) { $i++; next }
+    if ($addr->()) {
+      if (substr($s, $i, 1) eq ',') {
+        $i++;
+        if (substr($s, $i) =~ /\A[+~][0-9]+/) { $i += length $& }
+        elsif (!$addr->()) { return 0 }
+      }
+      $i++ while $i < $n && substr($s, $i, 1) =~ /[ \t!]/;
+      next;
+    }
+    if ($c =~ /[pdqQ=lnNPDgGhHxzF]/) { $i++; next }
+    if ($c eq '#' || $c eq ':' || $c =~ /[btT]/) {
+      # a comment, a label, a branch to one: to the end of the line or ;
+      my $e = $c eq '#' ? index($s, "\n", $i) : do { my $k = $i; $k++ while $k < $n && substr($s, $k, 1) !~ /[;\n]/; $k };
+      $i = $e < 0 ? $n : $e;
+      next;
+    }
+    if ($c eq 's' || $c eq 'y') {
+      my $d = substr($s, $i + 1, 1);
+      return 0 if $d eq '' || $d =~ /[\s\\]/;
+      my ($j, $parts) = ($i + 2, 0);
+      while ($j < $n && $parts < 2) {
+        my $ch = substr($s, $j, 1);
+        if ($ch eq '\\') { $j += 2; next }
+        $parts++ if $ch eq $d;
+        $j++;
+      }
+      return 0 if $parts < 2;
+      $i = $j;
+      $i += length $1 if $c eq 's' && substr($s, $i) =~ /\A([gpiImM0-9]*)/;
+      next;
+    }
+    return 0;
+  }
+  return 1;
+}
+
+# find's -exec, -execdir, -ok and -okdir commands, each as its words
+sub find_execs {
+  my @a = @_;
+  my @ex;
+  for (my $i = 0; $i <= $#a; $i++) {
+    next unless $a[$i] =~ /\A-(?:exec|execdir|ok|okdir)\z/;
+    my @c;
+    $i++;
+    while ($i <= $#a && $a[$i] ne ';' && $a[$i] ne '+') { push @c, $a[ $i++ ] }
+    push @ex, \@c;
+  }
+  return @ex;
+}
+
 # is the simple command C one that only reads?
 sub read_only {
-  my ($c) = @_;
+  my ($c, $depth) = @_;
+  $depth //= 0;
+  return 0 if $depth > 4;
   my @w = @{ $c->{words} };
   return 1 unless @w;
   my $n = name_of($w[0]);
+  # xargs running a command that only reads (5.7 repair loop 1)
+  if ($n eq 'xargs') {
+    my $i = 1;
+    while ($i <= $#w && $w[$i] =~ /\A-/) {
+      my $o = $w[ $i++ ];
+      last if $o eq '--';
+      $i++ if $o =~ /\A-[aEdILnPs]\z/ || $o =~ /\A--(?:arg-file|delimiter|eof|max-lines|max-args|max-procs|max-chars|replace|process-slot-var)\z/;
+    }
+    return $i > $#w ? 1 : read_only({ words => [@w[$i .. $#w]] }, $depth + 1);
+  }
+  # python -m json.tool reading one file (a second one is its output)
+  if ($n =~ /\Apython[0-9.]*\z/ && @w >= 3 && $w[1] eq '-m' && $w[2] eq 'json.tool') {
+    my @p;
+    for (my $i = 3; $i <= $#w; $i++) {
+      if ($w[$i] eq '--indent') { $i++; next }
+      push @p, $w[$i] unless $w[$i] =~ /\A-/;
+    }
+    return @p <= 1 ? 1 : 0;
+  }
   if ($n eq 'git') {
     my $i = 1;
     while ($i <= $#w && $w[$i] =~ /\A-/) { $i += ($w[$i] =~ /\A-[Cc]\z/) ? 2 : 1 }
+    # (--output writes a file, whatever the subcommand; 5.7 repair loop 1)
+    return 0 if grep { /\A--output(?:=|\z)/ } @w;
     return defined $w[$i] && $GIT_READ{ $w[$i] } ? 1 : 0;
   }
   return 0 unless $READ{$n};
   my @a = @w[1 .. $#w];
   if ($n eq 'sed') {
-    return 0 if grep { /\A-[A-Za-z]*i/ || /\A--in-place/ } @a;
-    # a script that writes (w, W, s///w) or runs a command (e, s///e)
-    return 0 if grep { /(?:\A|[;\n{}])\s*(?:[0-9,\$]+|\/[^\/]*\/)?\s*[wWe](?:\s|\z)/ || m{s(.)(?:(?!\1).)*\1(?:(?!\1).)*\1[gpiImM0-9]*[we]} } @a;
+    # in place, a script from a file, or a script that is not plain
+    # (5.7 repair loop 1: sed's own reading of its options and scripts)
+    my ($inplace, $file, @scripts) = sed_parse(@w);
+    return 0 if $inplace || $file || grep { !sed_plain($_) } @scripts;
   }
-  return 0 if $n eq 'sort' && grep { /\A-[A-Za-z]*o/ || /\A--output/ } @a;
-  return 0 if $n eq 'find' && grep { /\A-(?:exec|execdir|ok|okdir|delete|fprint|fprint0|fprintf|fls)\z/ } @a;
+  # (sort's --output and --compress-program, in any shortened form)
+  return 0 if $n eq 'sort' && grep { /\A-[A-Za-z]*o/ || /\A--(?:o|com)/ } @a;
+  if ($n eq 'find') {
+    return 0 if grep { /\A-(?:delete|fprint|fprint0|fprintf|fls)\z/ } @a;
+    # (-exec of a command that only reads, such as grep, reads; 5.7 repair
+    # loop 1)
+    for my $e (find_execs(@a)) { return 0 unless @$e && read_only({ words => $e }, $depth + 1) }
+  }
   return 0 if $n eq 'xxd' && (grep({ /\A-r/ } @a) || positionals(\@w, qr/\A-[cglson]\z/) > 1);
   return 0 if $n eq 'uniq' && positionals(\@w, qr/\A-[fsw]\z/) > 1;
   return 0 if $n eq 'file' && grep { /\A-[A-Za-z]*C/ || /\A--compile/ } @a;
@@ -340,14 +533,16 @@ sub method_script {
   return 0;
 }
 
-sub is_write_redir { my ($op) = @_; return $op =~ /\A[0-9]*(?:>|>>|>\||<>|&>|&>>)\z/ }
+# (>& to a word that is not a number writes that file; 5.7 repair loop 1)
+sub is_write_redir { my ($op) = @_; return $op =~ /\A[0-9]*(?:>|>>|>\||<>|&>|&>>|>&)\z/ }
 
 # the text forms of the protected paths, for code an interpreter runs
 sub text_re {
   my ($set) = @_;
   my $abs = join '|', map { quotemeta $_->{path} } @{ $set->{list} };
   my $re = q!(?:\A|[\s'"=:(/,\[{])\.claude/(?:hooks/method|agents/method|rules/method|method-local|settings(?:\.local)?\.json)!
-    . q!|(?:\A|[\s'"=:(,\[{])(?:\./)?scripts/method\b|\.git/(?:hooks|config)\b|\.gitconfig\b|\.config/git\b|managed-settings|ClaudeCode!;
+    . q!|(?:\A|[\s'"=:(,\[{])(?:\./)?scripts/method\b|\.git/(?:hooks|config)\b|\.gitconfig\b|\.config/git\b|managed-settings|ClaudeCode!
+    . q!|(?:~|HOME\}?)/\.claude/(?:agents|skills|commands)\b|\.git/(?:method-|refs/remotes\b|packed-refs\b)!;
   $re .= "|$abs" if $abs ne '';
   return $FOLD ? qr/$re/i : qr/$re/;
 }
@@ -373,18 +568,35 @@ sub judge_bash {
     my @w = @{ $c->{words} };
     my @look = (@w ? (($w[0] =~ m{[/\\]}) ? $w[0] : ()) : ());
     push @look, @w[1 .. $#w] if @w > 1;
+    # a plain cp only reads its sources (not -l or -s, which make links);
+    # where it writes is judged below (5.7 repair loop 1)
+    if (@w && name_of($w[0]) eq 'cp' && !grep { /\A-[A-Za-z]*[ls]/ && !/\A--/ || /\A--(?:l|sy)/ } @w[1 .. $#w]) {
+      my %src;
+      $src{$_}++ for cp_sources(@w);
+      @look = grep { !($src{$_} && $src{$_}-- > 0) } @look;
+    }
     push @look, map { /\A[A-Za-z_][A-Za-z0-9_]*\+?=(.*)\z/s ? $1 : () } @{ $c->{assigns} || [] };
     push @look, map { $_->[1] } grep { $_->[0] !~ /\A[0-9]*<<[-<]?\z/ } @{ $c->{redirs} || [] };
     my @more = map { /\A[^=]*=(.+)\z/s ? $1 : () } @look;
     for my $x (@look, @more) {
       next if $x =~ m{\A[A-Za-z][A-Za-z0-9+.-]*://};
-      my $e = protected(resolve($x, $base), $set);
-      if ($e) { $named = $e; last }
+      for my $p (paths($x, $base)) {
+        my $e = protected($p, $set);
+        if ($e) { $named = $e; last }
+      }
+      last if $named;
     }
     last if $named;
     # an inline program's code, the text piped into an interpreter, or a
     # sed script that writes
-    if ((grep { /\A(?:an inline program for|a pipe, here-document or here-string into) / } @{ $c->{unread} || [] }) || (@w && name_of($w[0]) eq 'sed' && !read_only($c))) {
+    # (a sed script's text counts when the script itself writes, not when
+    # sed -i edits the file it is given; 5.7 repair loop 1)
+    my $sed_writes = 0;
+    if (@w && name_of($w[0]) eq 'sed') {
+      my (undef, $file, @scripts) = sed_parse(@w);
+      $sed_writes = $file || grep { !sed_plain($_) } @scripts;
+    }
+    if ((grep { /\A(?:an inline program for|a pipe, here-document or here-string into) / } @{ $c->{unread} || [] }) || $sed_writes) {
       my $code = bytes(join "\n", @w, $c->{hbody} // '', $c->{pipe_from} // '');
       if ($code =~ $text) { $named = { what => "one of the method's protected files" }; last }
     }
@@ -419,6 +631,16 @@ sub judge_bash {
   return ();
 }
 
+# a cp's sources: its positionals but the last, or all of them with -t
+my $CP_TAKES = qr/\A-[tSgmo]\z|\A--(?:target-directory|suffix|group|mode|owner)\z/;
+sub cp_sources {
+  my @w = @_;
+  my @pos = positionals(\@w, $CP_TAKES);
+  return @pos if grep { /\A-[A-Za-z]*?t/ && !/\A--/ || /\A--target-directory/ } @w[1 .. $#w];
+  pop @pos;
+  return @pos;
+}
+
 # does the write C makes land on a protected path, or recursively into a
 # folder that holds one? The reason, or undef
 sub lands {
@@ -429,20 +651,33 @@ sub lands {
   my $flags = join '', map { /\A-([A-Za-z]+)\z/ ? $1 : () } grep { !/\A--/ } @a;
   my %long = map { /\A--([a-z-]+)/ ? ($1 => 1) : () } @a;
   if ($n =~ /\A(?:cp|mv|ln|install|rsync)\z/) {
-    my $takes = $n eq 'cp' || $n eq 'mv' || $n eq 'ln' || $n eq 'install' ? qr/\A-[tSgmo]\z|\A--(?:target-directory|suffix|group|mode|owner)\z/ : qr/\A-[efT]\z|\A--(?:rsh|exclude|include|filter|files-from|temp-dir|partial-dir|backup-dir|suffix|chmod|chown)\z/;
+    my $takes = $n eq 'cp' || $n eq 'mv' || $n eq 'ln' || $n eq 'install' ? $CP_TAKES : qr/\A-[efT]\z|\A--(?:rsh|exclude|include|filter|files-from|temp-dir|partial-dir|backup-dir|suffix|chmod|chown)\z/;
     my @pos = positionals(\@w, $takes);
-    my ($tdir) = map { /\A--target-directory=(.+)\z/s ? $1 : () } @a;
-    for my $i (0 .. $#a - 1) { $tdir = $a[ $i + 1 ] if $a[$i] eq '-t' && $n ne 'rsync' }
+    # the target folder: -t DIR, -tDIR, a cluster ending in t, or
+    # --target-directory with = or a space (5.7 repair loop 1)
+    my $tdir;
+    if ($n ne 'rsync') {
+      for my $i (0 .. $#a) {
+        if ($a[$i] =~ /\A--target-directory=(.+)\z/s) { $tdir = $1 }
+        elsif ($a[$i] eq '--target-directory' && defined $a[ $i + 1 ]) { $tdir = $a[ $i + 1 ] }
+        elsif ($a[$i] =~ /\A-[A-Za-z]*?t(.*)\z/s && $a[$i] !~ /\A--/) {
+          if ($1 ne '') { $tdir = $1 }
+          elsif (defined $a[ $i + 1 ]) { $tdir = $a[ $i + 1 ]; @pos = grep { $_ ne $tdir } @pos }
+        }
+      }
+    }
     return undef if !defined $tdir && @pos < 2;
     my $dest = defined $tdir ? $tdir : pop @pos;
     return undef if $n eq 'rsync' && $dest =~ m{\A[^/]*:};    # another machine
     my $dpath = $R->($dest);
     return undef unless defined $dpath;
-    my $into = defined $tdir || @pos > 1 || -d $dpath || $dest =~ m{/\z};
+    # (-T: the target is the path itself, never a folder to put things in)
+    my $no_into = $n ne 'rsync' && ($flags =~ /T/ || $long{'no-target-directory'});
+    my $into = !$no_into && (defined $tdir || @pos > 1 || -d $dpath || $dest =~ m{/\z});
     my $rec = $n eq 'rsync' || $flags =~ /[rRa]/ || $long{recursive} || $long{archive};
-    for my $s (@pos) {
-      my $sp = $R->($s);
-      my $contents = $s =~ m{/\.?\z};
+    for my $s (map { my $w = $_; map { [$w, $_] } paths($w, $base) } @pos) {
+      my ($sw, $sp) = @$s;
+      my $contents = $sw =~ m{/\.?\z};
       my $r = $into && !($contents && $rec) ? (defined $sp ? "$dpath/" . basename($sp) : undef) : $dpath;
       next unless defined $r;
       $r = physical($r);
@@ -461,52 +696,112 @@ sub lands {
   if ($n eq 'tar') {
     my $x = (@a && $a[0] =~ /\A[A-Za-z]*x/ && $a[0] !~ /\A-/) || $flags =~ /x/ || $long{extract} || $long{get};
     return undef unless $x;
-    my $t = $base;
+    # every folder it extracts into: -C DIR, -CDIR, a cluster ending in C,
+    # --directory with = or a space (5.7 repair loop 1)
+    my @t = ($base);
     for my $i (0 .. $#a) {
-      $t = $a[ $i + 1 ] if ($a[$i] eq '-C' || $a[$i] eq '--directory') && defined $a[ $i + 1 ];
-      $t = $1 if $a[$i] =~ /\A--directory=(.+)\z/s;
+      if (($a[$i] eq '--directory' || $a[$i] =~ /\A-[A-Za-z]*C\z/) && defined $a[ $i + 1 ]) { push @t, $a[ $i + 1 ] }
+      elsif ($a[$i] =~ /\A--directory=(.+)\z/s || $a[$i] =~ /\A-C(.+)\z/s) { push @t, $1 }
     }
-    my $tp = $R->($t);
-    my $e = protected($tp, $set) || above($tp, $set);
-    return "this tar extracts into a folder that holds $e->{what}; extract into a new subfolder" if $e;
+    # (the folder it runs in is judged only when none is named)
+    shift @t if @t > 1;
+    for my $t (@t) {
+      for my $tp (paths($t, $base)) {
+        my $e = protected($tp, $set) || above($tp, $set);
+        return "this tar extracts into a folder that holds $e->{what}; extract into a new subfolder" if $e;
+      }
+    }
     return undef;
   }
+  # patch given the file it changes: that file, and its -o and -r files
+  # (5.7 repair loop 1)
+  if ($n eq 'patch') {
+    my ($dir, @out, @pos) = ($base);
+    for (my $i = 1; $i <= $#w; $i++) {
+      my $x = $w[$i];
+      if ($x =~ /\A-[BDFVYdgioprz]\z/) {
+        my $v = $w[ ++$i ];
+        next unless defined $v;
+        push @out, $v if $x eq '-o' || $x eq '-r';
+        $dir = $v if $x eq '-d';
+        next;
+      }
+      if ($x =~ /\A-([or])(.+)\z/s || $x =~ /\A--(output|reject-file)=(.+)\z/s) { push @out, $2; next }
+      if ($x =~ /\A-d(.+)\z/s || $x =~ /\A--directory=(.+)\z/s) { $dir = $1; next }
+      next if $x =~ /\A-/;
+      push @pos, $x;
+    }
+    my $d = resolve($dir, $base);
+    if (@pos && defined $d && -f (resolve($pos[0], $d) // '')) {
+      for my $f ($pos[0], @out) {
+        my $e = protected(resolve($f, $d), $set);
+        return "this patch writes into $e->{what}, which Claude may only read" if $e;
+      }
+      return undef;
+    }
+  }
   if ($n eq 'unzip' || $n eq 'patch') {
-    return undef if $n eq 'unzip' && $flags =~ /[ltvZp]/;
-    my $t = $base;
-    for my $i (0 .. $#a) { $t = $a[ $i + 1 ] if $a[$i] eq '-d' && defined $a[ $i + 1 ]; $t = $1 if $a[$i] =~ /\A--directory=(.+)\z/s }
-    my $tp = $R->($t);
-    my $e = protected($tp, $set) || above($tp, $set);
-    return "this $n writes into a folder that holds $e->{what}; run it in a new subfolder" if $e;
+    # (its listing forms write nothing; a -dDIR word is not a cluster)
+    return undef if $n eq 'unzip' && (join '', map { /\A-([A-Za-z]+)\z/ ? $1 : () } grep { !/\A-d/ } @a) =~ /[ltvZp]/;
+    my @t = ($base);
+    for my $i (0 .. $#a) {
+      if (($a[$i] eq '-d' || $a[$i] eq '--directory') && defined $a[ $i + 1 ]) { push @t, $a[ $i + 1 ] }
+      elsif ($a[$i] =~ /\A--directory=(.+)\z/s || $a[$i] =~ /\A-d(.+)\z/s) { push @t, $1 }
+    }
+    # (the last folder named is the one it uses; the folder it runs in is
+    # judged only when none is named)
+    shift @t if @t > 1;
+    for my $t (@t) {
+      for my $tp (paths($t, $base)) {
+        my $e = protected($tp, $set) || above($tp, $set);
+        return "this $n writes into a folder that holds $e->{what}; run it in a new subfolder" if $e;
+      }
+    }
     return undef;
   }
   if ($n eq 'rm' && ($flags =~ /[rR]/ || $long{recursive})) {
     for my $s (positionals(\@w)) {
-      my $e = above($R->($s), $set);
-      return "this rm deletes a folder that holds $e->{what}" if $e;
+      for my $sp (paths($s, $base)) {
+        my $e = above($sp, $set);
+        return "this rm deletes a folder that holds $e->{what}" if $e;
+      }
     }
     return undef;
   }
-  if ($n eq 'find' && grep { /\A-(?:exec|execdir|ok|okdir|delete)\z/ } @a) {
+  if ($n eq 'find' && !read_only($c)) {
     my @start;
-    for my $x (@a) { last if $x =~ /\A[-(!]/; push @start, $x }
+    # (find's own options come before its paths: -H, -L, -P, -D WHAT, -O1;
+    # 5.7 repair loop 1)
+    my @b = @a;
+    while (@b && $b[0] =~ /\A-(?:[HLP]+|D|O[0-9]*)\z/) { my $o = shift @b; shift @b if $o eq '-D' }
+    for my $x (@b) { last if $x =~ /\A[-(!]/; push @start, $x }
     @start = ('.') unless @start;
     for my $s (@start) {
-      my $sp = $R->($s);
-      my $e = protected($sp, $set) || above($sp, $set);
-      return "this find deletes or runs a command in a folder that holds $e->{what}; start it in a subfolder" if $e;
+      for my $sp (paths($s, $base)) {
+        my $e = protected($sp, $set) || above($sp, $set);
+        return "this find deletes or runs a command in a folder that holds $e->{what}; start it in a subfolder" if $e;
+      }
     }
     return undef;
   }
   if ($n eq 'git') {
     my $i = 1;
-    while ($i <= $#w && $w[$i] =~ /\A-/) { $i += ($w[$i] =~ /\A-[Cc]\z/) ? 2 : 1 }
+    # (git -C DIR: its paths are read from DIR; 5.7 repair loop 1)
+    my $gbase = $base;
+    while ($i <= $#w && $w[$i] =~ /\A-/) {
+      if ($w[$i] eq '-C' && defined $w[ $i + 1 ]) {
+        my $d = resolve($w[ $i + 1 ], $gbase);
+        $gbase = $d if defined $d;
+      }
+      $i += ($w[$i] =~ /\A-[Cc]\z/) ? 2 : 1;
+    }
     my $sub = $w[$i] // '';
     return undef unless $sub eq 'rm' || $sub eq 'mv';
     for my $s (grep { !/\A-/ } @w[$i + 1 .. $#w]) {
-      my $sp = $R->($s);
-      my $e = protected($sp, $set) || above($sp, $set);
-      return "this git $sub removes or moves a folder that holds $e->{what}" if $e;
+      for my $sp (paths($s, $gbase)) {
+        my $e = protected($sp, $set) || above($sp, $set);
+        return "this git $sub removes or moves a folder that holds $e->{what}" if $e;
+      }
     }
   }
   return undef;
@@ -540,6 +835,8 @@ sub judge_mcp {
   undef $walk;
   my $set;
   for my $s (@strings) {
+    # (a file:// address is the path it names; 5.7 repair loop 1)
+    $s =~ s{\Afile://(?:localhost)?(?=/)}{}i;
     next unless $s =~ m{[/\\]|\A\.|\A~} && $s !~ m{\A[A-Za-z][A-Za-z0-9+.-]*://};
     $set ||= set($project);
     my ($top) = @{ $set->{tops} };
@@ -558,9 +855,21 @@ my @SPECS = qw(.claude/hooks/method .claude/agents/method .claude/rules/method .
 sub differ {
   my ($dir, $a, $b, @only) = @_;
   my @specs = @only ? @only : @SPECS;
+  # (run at the top folder: git reads paths from the folder it runs in;
+  # 5.7 repair loop 1)
+  $dir = top_of($dir);
+  return undef unless defined $dir;
   my ($st, $out) = Git::run('-C', $dir, 'diff', '--no-ext-diff', '--no-textconv', '--name-only', '-z', $a, $b, '--', @specs);
   return undef unless $st == 0;
   return [grep { $_ ne '' } split /\0/, $out];
+}
+
+# the top folder of the worktree DIR is in, or undef
+sub top_of {
+  my ($dir) = @_;
+  my ($st, $out) = Git::run('-C', $dir, 'rev-parse', '--show-toplevel');
+  my ($top) = $st == 0 ? split(/\n/, $out) : ();
+  return defined $top && $top ne '' ? $top : undef;
 }
 
 sub git_versions {
@@ -574,7 +883,9 @@ sub git_versions {
   my $short = 'mXsFcCbB';
   for (my $i = 0; $i <= $#r; $i++) {
     my $x = $r[$i];
-    if ($x eq '--') { last }
+    # (after --, checkout reads paths; the others read their commits and
+    # branches; 5.7 repair loop 1)
+    if ($x eq '--') { push @pos, @r[ $i + 1 .. $#r ] unless $sub eq 'checkout'; last }
     if ($x =~ /\A--/) { $i++ if $val{$x}; next }
     if ($x =~ /\A-([A-Za-z]+)\z/) {
       # a cluster such as -qb: its first letter that takes a value takes
@@ -598,10 +909,12 @@ sub git_versions {
     return () unless @pos && $pos[0] eq 'add';
     @targets = ([@pos > 2 ? $pos[-1] : 'HEAD']);
   } elsif ($sub eq 'cherry-pick' || $sub eq 'revert') {
+    my $top = top_of($dir);
+    return ('G6', "whether this $sub changes the method's protected files cannot be told, so it is refused; tell the owner what you needed") unless defined $top;
     for my $cmt (@pos) {
       # the protected files the commit changes (against no files, for a
       # first commit)
-      my ($st, $out) = Git::run('-C', $dir, 'diff-tree', '--root', '--no-commit-id', '--no-ext-diff', '--no-textconv', '-r', '--name-only', '-z', $cmt, '--', @SPECS);
+      my ($st, $out) = Git::run('-C', $top, 'diff-tree', '--root', '--no-commit-id', '--no-ext-diff', '--no-textconv', '-r', '--name-only', '-z', $cmt, '--', @SPECS);
       my $ch = $st == 0 ? [grep { $_ ne '' } split /\0/, $out] : undef;
       return ('G6', "whether this $sub changes the method's protected files cannot be told, so it is refused; tell the owner what you needed") unless $ch;
       next unless @$ch;
@@ -627,7 +940,10 @@ sub git_versions {
     return ('G6', "whether this $sub changes the method's protected files cannot be told, so it is refused; tell the owner what you needed") unless $m;
     next unless @$m;
     my $shown = $m->[0] =~ m{\A[A-Za-z0-9._/-]{1,200}\z} ? $m->[0] : 'a protected file';
-    return ('G6', "this $sub would bring $shown to a version that is neither this branch's nor the remote main's$NO");
+    # (an old local branch is usually only behind the remote's main: the
+    # way forward is a new branch from there; 5.7 repair loop 1)
+    my $way = $sub eq 'switch' || $sub eq 'checkout' ? "; if that branch is only behind the remote's main, start a new branch from it instead (git switch -c NEW origin/main)" : '';
+    return ('G6', "this $sub would bring $shown to a version that is neither this branch's nor the remote main's$way$NO");
   }
   return ();
 }
@@ -650,7 +966,9 @@ sub effort {
     require File::Spec->catfile($lib, 'log.pl');
     my ($lines) = eval { Log::lines($root, '.method/local/effort-warned') };
     return undef if $lines && grep { $_->[3] eq $hash } @$lines;
-    eval { Log::append($root, '.method/local/effort-warned', 1, rule => 'G12', tool => 'effort', hash => $hash) };
+    # (the last 20 sessions, so sessions run side by side are each warned
+    # once; 5.7 repair loop 1)
+    eval { Log::append($root, '.method/local/effort-warned', 20, rule => 'G12', tool => 'effort', hash => $hash) };
   }
   return "this session runs at effort $shown, below the method's xhigh, so its work may be shallower than the method assumes; switch with /effort xhigh";
 }

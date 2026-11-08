@@ -171,6 +171,8 @@ if [ "$code" -eq 0 ] && [ -z "$err" ]; then pass "ExitWorktree that keeps change
 journal=$(cd "$proj" && git rev-parse --git-path method-mutate-journal)
 (cd "$proj" && printf 'x\n' >"$journal")
 judge "a commit while a mutate journal is there is refused (G8)" "$proj" 'git commit -qm x' G8
+judge "a cherry-pick --continue while a mutate journal is there is refused (G8)" "$proj" 'git cherry-pick --continue' G8
+judge "a merge while a mutate journal is there is refused (G8)" "$proj" 'git merge --no-edit --ff-only origin/main' G8
 judge "a status while a mutate journal is there passes" "$proj" 'git status' allow
 (cd "$proj" && rm -f "$journal")
 judge "a commit with no mutate journal passes" "$proj" 'git commit -qm x' allow
@@ -186,6 +188,56 @@ judge "a line in the owner's list that cannot be read refuses git here, saying w
 printf 'stash ::   \n' >"$proj/.claude/method-local/git-shapes.txt"
 judge "a line in the owner's list with an empty reason is not read, so git is refused here" "$proj" 'git stash' G3
 rm -rf "$proj/.claude/method-local"
+
+# --- review round 1 of 5.6 (repair loop 1; A66: what a careless agent
+# could plausibly hit) ---
+# a cd that may have failed leaves the folder unknown: judged as this
+# repository
+judge "a push after a cd that may have failed is judged as this repository's" "$proj" "cd $work/no-such-clone; git push -q origin HEAD:main" G3
+judge "a reset after a cd that may have failed is judged as this repository's" "$proj" "cd /tmp; git reset --hard HEAD~1" G3
+judge "cd - leaves the folder unknown" "$proj" "cd - && git reset --hard HEAD~1" G3
+judge "a cd with && is followed: work in a scratch clone passes" "$proj" "cd $work/scratch && git reset -q --hard HEAD" allow
+# a remote the guard cannot read is judged in full, not taken for a folder
+judge "a remote added in the same call is not taken for a folder" "$work/scratch" "git remote add gh https://github.com/owner/repo.git && git push -q gh HEAD:main" G3
+judge "a push from a clone made in the same call is judged in full" "$proj" "git clone -q https://github.com/owner/repo.git $work/newclone && cd $work/newclone && git push -q origin HEAD:main" G3
+judge "a push to a local folder written as a path still passes" "$work/scratch" "git push -q $work/other.git HEAD:main" allow
+# git's own options before a switch do not hide it from a push
+judge "git -C before a switch next to a push" "$proj" "git -C . switch main && git push -q origin HEAD:task" G3
+judge "git -c before a checkout next to a push" "$proj" "git -c core.quotepath=false checkout main; git push -q origin HEAD:task" G3
+judge "reading git commands next to a push pass" "$proj" "git branch --show-current && git remote -v && git push -q -u origin HEAD" allow
+judge "git config --get next to a push passes" "$proj" "git config --get remote.origin.url && git push -q origin HEAD" allow
+# HOME and XDG_CONFIG_HOME on git point it at other settings and hooks
+judge "HOME set on a push" "$proj" "HOME=/tmp/elsewhere git push -q origin HEAD" G3
+judge "XDG_CONFIG_HOME set on a commit in this repository" "$proj" "XDG_CONFIG_HOME=/tmp/elsewhere git commit -qm x" G3
+# ~ in git -C is the home folder
+judge "git -C with ~ is read as the home folder" "$work/scratch" "git -C ~/../proj reset -q --hard HEAD" G3
+# git init, rm -f and mv -f
+judge "git init with a template is refused in this repository" "$proj" "git init --template=/tmp/t" G3
+judge "a plain git init passes" "$proj" "git init -q" allow
+judge "git rm -f drops uncommitted changes: refused" "$proj" "git rm -f a.txt" G3
+judge "git rm -rf is refused too" "$proj" "git rm -rf ." G3
+judge "git rm --cached passes" "$proj" "git rm -q --cached a.txt" allow
+judge "git mv -f is refused" "$proj" "git mv -f a.txt c.txt" G3
+# honest work the list now lets through
+judge "git pull --ff-only on a task branch passes" "$proj" "git pull --ff-only" allow
+judge "a plain git pull is still refused (it can merge)" "$proj" "git pull" G3
+judge "git submodule update --init --recursive passes" "$proj" "git submodule update --init --recursive" allow
+judge "git fetch --unshallow passes" "$proj" "git fetch --unshallow" allow
+judge "git fetch --depth passes" "$proj" "git fetch --depth=10 origin" allow
+judge "git worktree add -b from the remote main passes" "$proj" "git worktree add -b wt-one ../wt-one origin/main" allow
+judge "git worktree remove passes" "$proj" "git worktree remove ../wt-one" allow
+judge "git worktree remove --force is refused" "$proj" "git worktree remove --force ../wt-one" G3
+judge "git worktree prune passes" "$proj" "git worktree prune" allow
+# a refusal names no word of the push: a remote's URL can hold a token
+tok="tok$(printf '%s' 'en12345')"
+host=github.com
+CMD="git push https://user:${tok}@${host}/o/r.git HEAD:main" CWD="$proj" perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({tool_name => "Bash", tool_input => {command => $ENV{CMD}}, cwd => $ENV{CWD}})' >"$work/in.json"
+err=$(cd "$proj" && CLAUDE_PROJECT_DIR="$proj" perl -e 'alarm 60; exec @ARGV' bash "$guard" <"$work/in.json" 2>&1 >/dev/null)
+case "$err" in
+  "guard G3: "*"$tok"*) fail "a push refusal names no word of the push (a URL can hold a token)" "$err" ;;
+  "guard G3: "*) pass "a push refusal names no word of the push (a URL can hold a token)" ;;
+  *) fail "a push to a URL is refused" "$err" ;;
+esac
 
 # --- the method's list itself ---
 got=$(perl -e 'require "$ARGV[0]/gitlist.pl"; open my $h, "<", $ARGV[1] or die; local $/; my ($s, $e) = GitList::parse(<$h>, "git-shapes.txt"); my @no = grep { $_->{reason} !~ /\S/ } @$s; print scalar(@$s), " shapes; ", scalar(@$e), " errors; ", scalar(@no), " without a reason"' "$lib" "$root/method/.claude/hooks/method/git-shapes.txt")

@@ -79,6 +79,7 @@ tool() {
   want "$1" "$4"
 }
 jpath() { perl -MJSON::PP -e 'print JSON::PP->new->encode({file_path => $ARGV[0]})' "$1"; }
+jstr() { perl -MJSON::PP -e 'print JSON::PP->new->allow_nonref->encode($ARGV[0])' "$1"; }
 
 # --- the edit tools: each protected path, by its resolved path ---
 for p in "$proj/.claude/settings.json" "$proj/.claude/settings.local.json" "$proj/.claude/hooks/method/guard.sh" "$proj/.claude/hooks/method/new.sh" \
@@ -184,6 +185,69 @@ HOME="$work/home2" tool "Write to ~/.gitconfig before it exists is refused" Writ
 tool "Write to the settings of the project's other worktree is refused" Write "$(jpath "$work/wt-a/.claude/settings.json")" G6
 tool "Write to the method's files in a worktree's own git folder is refused" Write "$(jpath "$proj/.git/worktrees/wt-a/method-lock")" G6
 
+# --- review round 1 of 5.7 (repair loop 1; A66: the forms a careless
+# agent could plausibly write) ---
+# a redirect with >&, and paths that start with $HOME, $PWD or
+# $CLAUDE_PROJECT_DIR
+for c in 'echo x >& .claude/settings.json' 'echo "{}" > "$HOME/.claude/settings.json"' 'cp x/settings.json ${HOME}/.claude/settings.json' \
+  'echo x > $PWD/.claude/settings.json' 'cp notes.txt "$CLAUDE_PROJECT_DIR/.claude/settings.json"' \
+  'rm -rf .clau*' 'rm -rf scr*' 'cp x/settings.json .claude/sett*.json' 'cp --target-directory .claude x/settings.json' \
+  'cp -t.claude x/settings.json' 'cp -rt . x/.' 'cp -rT x .claude' \
+  'echo x > .git/refs/remotes/origin/main' 'cp notes.txt .git/packed-refs'; do
+  judge "a write is refused (5.7 repair loop 1): $c" "$proj" "$c" G6
+done
+for c in 'echo hi >&2' 'echo hi 2>&1 > out.txt' 'cp notes.txt $PWD/build/' 'rm -rf buil*' 'cp -tbuild notes.txt' 'cp -rT src build' \
+  'tar -xf x.tar -Cbuild' 'unzip x.zip -dbuild' 'cat .git/packed-refs' 'ls .git/refs/remotes/origin'; do
+  judge "an ordinary write or read passes (5.7 repair loop 1): $c" "$proj" "$c" allow
+done
+judge "tar -C with the folder attached is read (from a subfolder)" "$proj/sub" 'tar -xf x.tar -C../.claude' G6
+judge "unzip -d with the folder attached is read (from a subfolder)" "$proj/sub" 'unzip x.zip -d../.claude' G6
+judge "find's own options before its path do not hide the path" "$proj/sub" 'find -L .. -name x -delete' G6
+judge "git -C: the paths git rm is given are read from that folder" "$proj" 'git -C .claude rm -r -q --cached hooks' G6
+if ! (git init -q "$work/other" && cd "$work/other" && printf 'o\n' >o.txt && git add o.txt && git commit -qm o); then fail "setup: another repository"; fi
+judge "git log --output into a protected file, from another repository, is refused" "$work/other" "git log -1 --output=$proj/.claude/settings.json" G6
+judge "git log --output elsewhere passes" "$work/other" "git log -1 --output=$work/log.txt" allow
+judge "a switch run from a subfolder is judged over the whole tree" "$proj/sub" 'git switch evil' G6
+judge "a cherry-pick with -- before the commit is still judged" "$proj" "git cherry-pick -x -- $evil" G6
+tool "Write to git's packed refs is refused" Write "$(jpath "$proj/.git/packed-refs")" G6
+# a settings file, or a skill, that is a link: its real path is protected
+mkdir -p "$work/dot/myskill" && printf '{}\n' >"$work/dot/claude-local.json" && printf 'skill\n' >"$work/dot/myskill/SKILL.md"
+if ! (ln -s "$work/dot/claude-local.json" "$HOME/.claude/settings.local.json" && mkdir -p "$HOME/.claude/skills" && ln -s "$work/dot/myskill" "$HOME/.claude/skills/myskill"); then fail "setup: linked settings"; fi
+tool "Write to the real file a linked settings file points at is refused" Write "$(jpath "$work/dot/claude-local.json")" G6
+tool "Write into the real folder a linked skill points at is refused" Write "$(jpath "$work/dot/myskill/SKILL.md")" G6
+tool "Write to another file in that folder passes" Write "$(jpath "$work/dot/notes.md")" allow
+rm -f "$HOME/.claude/settings.local.json" "$HOME/.claude/skills/myskill"
+# sed and sort as they read their options; reads that were refused
+for c in "sed -n '1~2w .claude/settings.json' notes.txt" "sed '\$!w .claude/settings.json' notes.txt" 'sed --in-pl s/a/b/ .claude/settings.json' 'python3 -m json.tool notes.txt .claude/settings.json' \
+  'sed -ne "s/a/b/w .claude/settings.json" notes.txt' 'sort --out=.claude/settings.json notes.txt' 'cp -l .claude/settings.json linked.json' \
+  'cp -s .claude/settings.json linked.json' 'patch -o .claude/settings.json notes.txt < x.diff' 'find .claude -name x -exec sed -i s/a/b/ {} +'; do
+  judge "a write is refused (5.7 repair loop 1, round 1's second part): $c" "$proj" "$c" G6
+done
+for c in 'sed -n -e 1,5p .claude/settings.json' "sed -n '/a/,/b/p' .claude/settings.json" "sed ':a;N;\$!ba;s/x/y/g' .claude/settings.json" \
+  "sed -i 's,old,.claude/settings.json,' notes.txt" 'find . -name "*.sh" -exec grep -l guard {} +' 'find .claude -name "*.json" -exec wc -l {} ;' \
+  'find .claude/hooks/method -name "*.sh" | xargs grep -n guard' 'python3 -m json.tool .claude/settings.json' "cp .claude/settings.json $work/copy.json" \
+  "cp -r .claude/hooks/method $work/hooks-copy" 'git add .claude/settings.json' 'patch notes.txt < x.diff'; do
+  judge "a read, or a write elsewhere, passes (5.7 repair loop 1, round 1's second part): $c" "$proj" "$c" allow
+done
+judge "from a subfolder, a .git folder there is not the project's" "$proj/sub" 'rm -rf .git' allow
+judge "pushd with no folder leaves the folder unknown" "$proj" 'pushd && rm -f scripts/method/status.sh' G6
+if ! (mkdir -p "$work/elsewhere/deep" && ln -s "$work/elsewhere/deep" "$proj/lnk"); then fail "setup: a link out of the project"; fi
+judge "cd reads .. as written, before the link (as bash does)" "$proj" 'cd lnk/.. && rm -f .claude/settings.json' G6
+rm -f "$proj/lnk"
+tool "NotebookEdit is judged by both its path fields" NotebookEdit "{\"file_path\":$(jstr "$proj/notes.ipynb"),\"notebook_path\":$(jstr "$proj/.claude/settings.json"),\"new_source\":\"x\"}" G6
+tool "an MCP tool given a file:// address of a protected path is refused" mcp__fs__write_file "{\"path\":$(jstr "file://$proj/.claude/settings.json"),\"content\":\"x\"}" G6
+# the text forms an interpreter's code is searched for
+cat >"$work/forms.txt" <<'TEXT'
+open(os.path.expanduser('~/.claude/skills/x/SKILL.md'), 'w')
+open(f"{HOME}/.claude/agents/a.md", "w")
+open('.git/method-lock', 'w')
+open('.git/packed-refs', 'w')
+open('.git/refs/remotes/origin/main', 'w')
+open('notes.txt', 'w')
+TEXT
+out=$(cd "$proj" && perl -e 'require $ARGV[0]; my $re = Protect::text_re(Protect::set($ARGV[1])); open my $h, "<", $ARGV[2] or die; while (my $t = <$h>) { chomp $t; print $t =~ $re ? "y" : "n" }' "$lib/protect.pl" "$proj" "$work/forms.txt")
+if [ "$out" = "yyyyyn" ]; then pass "an interpreter's code naming ~/.claude/skills, agents, .git/method-*, packed-refs or refs/remotes is found"; else fail "the text forms" "$out (wanted yyyyyn)"; fi
+
 # --- G12: one warning per session below xhigh ---
 effort() {
   SID="$1" LEVEL="$2" AGENT="$3" CWD="$proj" perl -MJSON::PP -e 'my %h = (tool_name => "Bash", tool_input => {command => "ls"}, cwd => $ENV{CWD}, hook_event_name => "PreToolUse", session_id => $ENV{SID}); $h{effort} = {level => $ENV{LEVEL}} if $ENV{LEVEL} ne ""; $h{agent_id} = $ENV{AGENT} if $ENV{AGENT} ne ""; print JSON::PP->new->canonical->encode(\%h)' >"$work/in.json"
@@ -209,7 +273,13 @@ effort e6 '' ''
 if [ ! -s "$work/out.txt" ]; then pass "G12: a call with no effort field gets no warning"; else fail "G12: no effort field" "$(cat "$work/out.txt")"; fi
 effort e7 'low"x' ''
 case "$(cat "$work/out.txt")" in *"not one the method knows"*) pass "G12: an effort word the method does not know is not shown" ;; *) fail "G12: an unknown effort word" "$(cat "$work/out.txt")" ;; esac
-if [ "$(wc -l <"$proj/.method/local/effort-warned")" -eq 1 ]; then pass "G12: its note of the warned session is one line"; else fail "G12: its note is one line" "$(cat "$proj/.method/local/effort-warned")"; fi
+# (sessions run side by side are each warned once: the note keeps the last
+# 20; 5.7 repair loop 1)
+effort e1 high ''
+if [ ! -s "$work/out.txt" ]; then pass "G12: a session warned before another one is not warned again"; else fail "G12: a session warned before another one is not warned again" "$(cat "$work/out.txt")"; fi
+if [ "$(wc -l <"$proj/.method/local/effort-warned")" -eq 3 ]; then pass "G12: its note has one line per warned session"; else fail "G12: its note has one line per warned session" "$(cat "$proj/.method/local/effort-warned")"; fi
+for n in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do effort "f$n" high ''; done
+if [ "$(wc -l <"$proj/.method/local/effort-warned")" -eq 20 ]; then pass "G12: its note keeps the last 20 sessions"; else fail "G12: its note keeps the last 20 sessions" "$(wc -l <"$proj/.method/local/effort-warned") lines"; fi
 
 # --- speed ---
 CMD='cp -r src build/ && npm test' CWD="$proj" perl -MJSON::PP -e 'print JSON::PP->new->encode({tool_name => "Bash", tool_input => {command => $ENV{CMD}}, cwd => $ENV{CWD}})' >"$work/in.json"

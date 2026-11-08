@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # guard.sh: the method's guard (steps 5.5 to 5.10; R7; docs/plans/step5.md,
 # section 6.2; README.md beside it). Claude Code runs it before each
-# command, edit and outside tool (PreToolUse), as
-#   BASH_ENV= ENV= bash "$CLAUDE_PROJECT_DIR/.claude/hooks/method/guard.sh"
+# command, edit and outside tool (PreToolUse), and when a settings file
+# changes during a session (ConfigChange, G16), as
+#   BASH_ENV= ENV= bash -p "$CLAUDE_PROJECT_DIR/.claude/hooks/method/guard.sh"
 # with onFailure "block", so a guard that cannot start or times out blocks.
 # The rules are in lib/guard.pl. This wrapper turns its answers into exit
 # codes Claude Code reads: 0 lets the call through (with perl's stdout, a
@@ -13,7 +14,7 @@
 # show text from the call. Without perl nothing can be checked, so every
 # call is refused (G1).
 # Rules done here (docs/rule-map.md): M128 (G0, G1), M129 (G2), M130 (G3), M133 (G8),
-# M132 (G6), M134 (G12), M131 (G4).
+# M132 (G6), M134 (G12), M131 (G4), M136 (G16), M137 (G17).
 case "$0" in
   */*) here=${0%/*} ;;
   *) here=. ;;

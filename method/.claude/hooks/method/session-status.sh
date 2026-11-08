@@ -2,7 +2,7 @@
 # session-status.sh: the method's SessionStart hook (step 5.4; R1, M073;
 # docs/plans/step5.md, section 6.1; README.md beside it). Claude Code runs it
 # at every session start, resume, /clear, compaction and fork, as
-#   BASH_ENV= ENV= bash "$CLAUDE_PROJECT_DIR/.claude/hooks/method/session-status.sh"
+#   BASH_ENV= ENV= bash -p "$CLAUDE_PROJECT_DIR/.claude/hooks/method/session-status.sh"
 # Its plain output, at most 10 lines and 1,200 bytes, is added to Claude's
 # context. It always exits 0: SessionStart cannot block, and text printed
 # with any other exit code does not reach Claude (measured).

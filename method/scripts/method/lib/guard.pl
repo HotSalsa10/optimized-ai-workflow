@@ -23,8 +23,10 @@
 #      settings that could redirect it absent, nothing beside it that could
 #      move what it sends); GIT_ variables and git's global options are
 #      judged; ExitWorktree that would discard changes is refused (judge_git).
-#   G8 mutant-commit (M133, step 5.6): git commit in this repository while
-#      a mutate-changed run, or what one left behind, is there.
+#   G8 mutant-commit (M133, step 5.6): git commit, or a merge, cherry-pick,
+#      revert or pull (which can make a commit; 5.6 repair loop 1), in this
+#      repository while a mutate-changed run, or what one left behind, is
+#      there.
 #   G6 protected (M132, step 5.7): a write to the method's files, its
 #      settings, or git's own config and hooks, by an edit tool, an MCP
 #      tool or Bash, and a git command that would bring one of them to
@@ -34,6 +36,14 @@
 #   G4 outside (M131, step 5.8): gh by a list, curl and wget to GitHub only
 #      reading, no nested Claude, MCP tools by a list, no SendMessage
 #      (lib/outside.pl).
+#   G16 settings-change (M136, step 5.9): at the ConfigChange event, a
+#      change to the project's settings, or to the hooks, env, plugins,
+#      disableAllHooks, deny entries or skill shell setting of the local or
+#      user settings, during a session; the next call let through brings a
+#      one-time message (lib/watch.pl).
+#   G17 skill-and-agent-hooks (M137, step 5.9): a Skill, Agent or Task call
+#      whose skill or agent declares hooks in its frontmatter
+#      (lib/watch.pl).
 # A call the rules say nothing about is let through.
 package Guard;
 use strict;
@@ -322,6 +332,29 @@ my %PUSH_MOVES = map { $_ => 1 } qw(checkout switch merge reset branch config ch
 
 sub is_git { my ($c) = @_; return @{ $c->{words} } && $c->{words}[0] =~ m{(?:\A|/)git(?:\.exe)?\z} }
 
+# git's WORDS: (its subcommand, the words after it), git's own options and
+# their values (-C DIR, -c KEY=VALUE) skipped
+sub git_sub {
+  my (undef, @w) = @_;
+  while (@w && $w[0] =~ /\A-/) {
+    my $o = shift @w;
+    shift @w if $o eq '-C' || $o eq '-c' || $o eq '--git-dir' || $o eq '--work-tree' || $o eq '--namespace';
+  }
+  return @w;
+}
+
+# does git SUB ARGS only read (a form of a moving subcommand that changes
+# nothing): branch --show-current or a listing, remote -v or get-url,
+# config --get, stash list or show
+sub git_reads {
+  my ($sub, @a) = @_;
+  return 1 if $sub eq 'branch' && (!@a || !grep { !/\A-(?:-show-current|a|r|v|vv|-list|l|-all|-remotes|-verbose|-contains|-merged|-no-merged|-format=.*)\z/ } @a);
+  return 1 if $sub eq 'remote' && (!@a || (@a == 1 && $a[0] =~ /\A-(?:v|-verbose)\z/) || $a[0] eq 'get-url' || $a[0] eq 'show');
+  return 1 if $sub eq 'config' && @a && $a[0] =~ /\A--(?:get|get-all|get-regexp|list)\z|\A-l\z/;
+  return 1 if $sub eq 'stash' && @a && ($a[0] eq 'list' || $a[0] eq 'show');
+  return 0;
+}
+
 # the GIT_ settings a command makes: its assignments, env's, export's
 sub git_env {
   my ($c) = @_;
@@ -435,7 +468,12 @@ sub push_rule {
     if ($rem->{$target}) {
       my ($st, $out) = git_at($dir, 'remote', 'get-url', '--push', '--all', $target);
       @urls = $st == 0 ? split(/\n/, $out) : ();
-    } else { @urls = ($target) }
+    } elsif ($target =~ m{\A(?:file://|[./~]|[A-Za-z]:[\\/])|/} && -e (local_path($target, $dir) // '')) {
+      @urls = ($target);
+    }
+    # (a bare name that is not one of its remotes, in a folder the guard
+    # cannot read yet or with a remote added in the same call, is a remote
+    # it cannot tell: judged in full; 5.6 repair loop 1)
     my $here = repo($dir);
     my $all_local = @urls ? 1 : 0;
     for my $u (@urls) {
@@ -446,10 +484,11 @@ sub push_rule {
     }
     return () if $all_local;
   }
-  my $form = 'only git push [-q] [-u] <remote> HEAD, HEAD:<branch>, <branch> or <branch>:<branch> is allowed';
-  return "$bad is refused on a push; $form" if defined $bad;
+  # (refusals name no word of the push: a remote's URL can hold a token)
+  my $form = 'write it as git push [-q] [-u] <remote> HEAD, HEAD:<branch>, <branch> or <branch>:<branch>';
+  return "this option is refused on a push; $form" if defined $bad;
   return "this push names no remote and branch; $form" unless @pos == 2;
-  return "\"$target\" is not one of this repository's remotes; $form" unless $rem->{$target};
+  return "this push's remote is not one of this repository's remotes; $form" unless $rem->{$target};
   my $spec = $pos[1];
   return "a forced, deleting or pattern push is refused; $form" if $spec =~ /\A\+|\A:|\*/;
   my ($src, $dst) = $spec =~ /\A([^:]+)(?::(.+))?\z/ or return "this push's branch cannot be read; $form";
@@ -459,16 +498,16 @@ sub push_rule {
     return 'HEAD is not on a branch, so where this push goes cannot be told; switch to your task branch first' if $st != 0 || $out eq '';
     $dst //= $out;
   } else {
-    return "\"$src\" is not a local branch; $form" if $src =~ /\A-/ || $src =~ m{\Arefs/(?!heads/)};
+    return "what this push sends is not a local branch; $form" if $src =~ /\A-/ || $src =~ m{\Arefs/(?!heads/)};
     (my $b = $src) =~ s{\Arefs/heads/}{};
     my ($st) = git_at($dir, 'show-ref', '--verify', '-q', "refs/heads/$b");
-    return "\"$src\" is not a local branch; $form" if $st != 0;
+    return "what this push sends is not a local branch; $form" if $st != 0;
     my ($sym) = git_at($dir, 'symbolic-ref', '-q', "refs/heads/$b");
-    return "\"$src\" is a symbolic ref, so where this push goes cannot be told; push your task branch by its own name" if $sym == 0;
+    return "what this push sends is a symbolic ref, so where it goes cannot be told; push your task branch by its own name" if $sym == 0;
     $dst //= $b;
   }
   $dst =~ s{\A(?:refs/)?heads/}{};
-  return "this push goes to $dst, which is not a branch; $form" if $dst =~ m{\Arefs/} || $dst eq '' || $dst =~ /\A-/;
+  return "this push's destination is not a branch; $form" if $dst =~ m{\Arefs/} || $dst eq '' || $dst =~ /\A-/;
   return "pushing to $dst is refused: the owner merges into main on GitHub (until review receipts exist, step 6); push your task branch instead"
     if main_names($dir)->{ lc $dst };
   my ($st, $out) = git_at($dir, 'config', '--get-regexp', '^remote\..*\.(push|mirror)$');
@@ -482,8 +521,9 @@ sub push_rule {
     my $n = $w[0];
     $n =~ s{.*/}{};
     if (is_git($o)) {
-      my ($sub) = grep { !/\A-/ } @w[1 .. $#w];
+      my ($sub, @args) = git_sub(@w);
       next unless defined $sub && $PUSH_MOVES{$sub};
+      next if git_reads($sub, @args);
       return "a push may not share its Bash call with git $sub, which can move what it sends; run the push on its own";
     }
     return 'a push may not share its Bash call with a command that names git\'s own folder; run the push on its own'
@@ -495,7 +535,10 @@ sub push_rule {
 # cmd_dirs CMDS START: the folder each command runs in, followed from START
 # through cd, pushd and popd in each scope (lib/shell.pl: a subshell or a
 # new process has its own), or undef where it cannot be told (a folder in a
-# variable, after popd)
+# variable, after popd, cd -, ~user, a CDPATH, and after a cd that the next
+# command does not depend on: not followed by &&, so it may have failed and
+# left the folder as it was; 5.6 repair loop 1). Where it cannot be told,
+# G3 judges git as this repository and G6 judges from the project's top.
 sub cmd_dirs {
   my ($cmds, $start) = @_;
   my %dir;    # scope => folder, or undef when it cannot be told
@@ -516,10 +559,23 @@ sub cmd_dirs {
     if (($w[0] eq 'cd' || $w[0] eq 'pushd') && !$c->{piped} && !$c->{to_pipe} && !$c->{bg}) {
       my ($to) = grep { !/\A-/ } @w[1 .. $#w];
       my ($raw) = grep { !/\A-/ } @{ $c->{raw} }[1 .. $#{ $c->{raw} }];
-      if (!defined $to) { $dir{$scope} = $ENV{HOME} }
-      elsif (defined $raw && $raw =~ /[\$`]/) { $dir{$scope} = undef }
+      if ((grep { $_ eq '-' } @w[1 .. $#w]) || (defined $to && $to =~ /\A~[^\/]/) || (defined $to && $to !~ m{\A[/.~]} && ($ENV{CDPATH} // '') ne '')) { $dir{$scope} = undef }
+      elsif (!defined $to) { $dir{$scope} = $w[0] eq 'pushd' ? undef : $ENV{HOME} }
+      elsif (defined $raw && $raw =~ /[\$`*?\[]/) { $dir{$scope} = undef }
       elsif (!defined $here) { $dir{$scope} = $to =~ m{\A/} ? $to : undef }
       else { $to =~ s{\A~(?=/|\z)}{$ENV{HOME} // '~'}e; $dir{$scope} = File::Spec->rel2abs($to, $here) }
+      # (cd reads .. in the path as written, before any link, unless -P;
+      # 5.7 repair loop 1)
+      if (defined $dir{$scope} && !grep { /\A-[A-Za-z]*P/ } @w[1 .. $#w]) {
+        my @p;
+        for my $part (split m{/+}, $dir{$scope}) {
+          next if $part eq '' || $part eq '.';
+          if ($part eq '..') { pop @p } else { push @p, $part }
+        }
+        $dir{$scope} = '/' . join('/', @p);
+      }
+      # (a cd the next command does not depend on may have failed)
+      $dir{$scope} = undef unless ($c->{next_op} // '') eq '&&';
     } elsif ($w[0] eq 'popd') {
       $dir{$scope} = undef;
     }
@@ -568,7 +624,8 @@ sub judge_git {
       if ($o eq '-C') {
         my $v = $w[ $i + 1 ];
         return ('G3', "git -C needs a folder; write the folder out") unless defined $v;
-        if (($r[ $i + 1 ] // '') =~ /[\$`]/) { $d = undef }
+        if (($r[ $i + 1 ] // '') =~ /[\$`]/ || $v =~ /\A~[^\/]/) { $d = undef }
+        elsif ($v =~ s{\A~(?=/|\z)}{}) { $d = defined $ENV{HOME} ? $ENV{HOME} . $v : undef }
         elsif ($v ne '' && defined $d) { $d = File::Spec->rel2abs($v, $d) }
         elsif ($v ne '') { $d = $v =~ m{\A/} ? $v : undef }
         $i += 2;
@@ -595,12 +652,19 @@ sub judge_git {
     # that folder is still this repository's
     $is_session = 1 if $session ne '' && defined $d && index(real_dir($d) . '/', "$session/") == 0;
     my $tdir = defined $d ? real_dir($d) : (defined $project ? $project : $start);
+    # HOME or XDG_CONFIG_HOME set on git points it at other settings (and
+    # other hooks): refused in this repository and on a push (5.6 repair
+    # loop 1)
+    if (($is_session || $sub eq 'push') && grep { /\A(?:HOME|XDG_CONFIG_HOME)=/ } @{ $c->{assigns} || [] }) {
+      return ('G3', "setting HOME or XDG_CONFIG_HOME on git here is refused, as it points git at other settings and hooks; run the git command without it");
+    }
     if ($other_c && ($is_session || $sub eq 'push')) {
       return ('G3', "git -c with that setting is refused (it can run a program or change where git writes); only core.quotepath, color.*, user.name, user.email and commit.gpgsign may be set with -c");
     }
     if ($sub eq 'push') {
       my ($why) = push_rule($tdir, [@rest[1 .. $#rest]], $is_session ? 1 : 0, $session, $c, $cmds);
-      return ('G3', "$why. Do not try another form of the same push; tell the owner what you needed") if $why;
+      # (only a push to main has no allowed form to rewrite it in)
+      return ('G3', $why =~ /\Apushing to / ? "$why. Do not try another form of the same push; tell the owner what you needed" : "$why.") if $why;
       next;
     }
     if (!$is_session) {
@@ -629,11 +693,12 @@ sub judge_git {
       my @v = Protect::git_versions($tdir, $sub, \@rest, $project);
       return @v if @v;
     }
-    if ($sub eq 'commit') {
+    if ($sub =~ /\A(?:commit|merge|cherry-pick|revert|pull)\z/) {
       require File::Spec->catfile($lib, 'runstate.pl');
       my $p = eval { RunState::probe($tdir) };
       if (!$p || $p->{unknown} || $p->{journal} || $p->{mutate}) {
-        return ('G8', 'a mutate-changed run, or what one left behind, is in this repository, so this commit could hold a mutant; wait for the run to end, or run bash scripts/method/mutate-changed.sh --recover, then commit');
+        my $what = $sub eq 'commit' ? 'this commit' : "the commit git $sub can make";
+        return ('G8', "a mutate-changed run, or what one left behind, is in this repository, so $what could hold a mutant; wait for the run to end, or run bash scripts/method/mutate-changed.sh --recover, then commit");
       }
     }
   }
@@ -702,6 +767,14 @@ sub main {
   my $input = $in->{tool_input};
   my $project = $ENV{CLAUDE_PROJECT_DIR};
   my $start = (defined $in->{cwd} && !ref $in->{cwd} && $in->{cwd} ne '') ? $in->{cwd} : $project;
+  # G16: a settings file changed during the session (ConfigChange)
+  if (($in->{hook_event_name} // '') eq 'ConfigChange') {
+    require File::Spec->catfile($lib, 'watch.pl');
+    my ($rule, $text) = Watch::judge_change($in, $project);
+    return 0 unless $rule;
+    Watch::note_refused($project);
+    return refuse($rule, $text, 'ConfigChange', $raw, $in);
+  }
   if ($tool eq 'PowerShell') {
     return refuse('G2', "the PowerShell tool is refused in method projects: the method's checks read bash; use the Bash tool ($WAY_OUT)", $tool, $raw, $in);
   }
@@ -720,9 +793,13 @@ sub main {
     return refuse($rule, $text, $tool, $raw, $in) if $rule;
   }
   if ($tool =~ /\A(?:Edit|Write|MultiEdit|NotebookEdit)\z/) {
-    my $p = ref $input eq 'HASH' ? (defined $input->{file_path} ? $input->{file_path} : $input->{notebook_path}) : undef;
-    my ($rule, $text) = Protect::judge_file($p, $start, $project);
-    return refuse($rule, $text, $tool, $raw, $in) if $rule;
+    # (both path fields are judged; 5.7 repair loop 1)
+    for my $k (qw(file_path notebook_path)) {
+      my $p = ref $input eq 'HASH' ? $input->{$k} : undef;
+      next unless defined $p;
+      my ($rule, $text) = Protect::judge_file($p, $start, $project);
+      return refuse($rule, $text, $tool, $raw, $in) if $rule;
+    }
   }
   if ($tool =~ /\Amcp__/) {
     my ($rule, $text) = Protect::judge_mcp($tool, $input, $start, $project);
@@ -735,9 +812,22 @@ sub main {
   if ($tool eq 'ExitWorktree' && ref $input eq 'HASH' && $input->{discard_changes}) {
     return refuse('G3', 'leaving a worktree with discard_changes would delete its uncommitted work; commit it first, or keep the worktree and tell the owner', $tool, $raw, $in);
   }
-  # G12: a warning, never a refusal
+  # G17: a skill or agent whose frontmatter declares hooks
+  if ($tool =~ /\A(?:Skill|Agent|Task)\z/) {
+    require File::Spec->catfile($lib, 'watch.pl');
+    my ($rule, $text) = Watch::judge_def($tool, $input, $project);
+    return refuse($rule, $text, $tool, $raw, $in) if $rule;
+  }
+  # warnings, never refusals: G16's one-time message, G12
+  my @say;
+  if (defined $project && $project ne '' && -e File::Spec->catfile($project, '.method', 'local', 'settings-refused')) {
+    require File::Spec->catfile($lib, 'watch.pl');
+    my $note = eval { Watch::take_note($project) };
+    push @say, "guard G16: $note" if $note;
+  }
   my $warn = eval { Protect::effort($in, $project) };
-  return Hook::warning("guard G12: $warn") if $warn;
+  push @say, "guard G12: $warn" if $warn;
+  return Hook::warning(@say) if @say;
   return 0;
 }
 

@@ -177,7 +177,7 @@ if (!defined $hooks) {
       if (ref $list ne 'ARRAY') { push @form, "$event has an entry with no hooks list"; next }
       for my $h (@$list) {
         my $cmd = ref $h eq 'HASH' ? $h->{command} : undef;
-        my ($name) = defined $cmd && !ref $cmd ? $cmd =~ m{\ABASH_ENV= ENV= bash "\$CLAUDE_PROJECT_DIR/\.claude/hooks/method/([a-z-]+)\.sh"\z} : ();
+        my ($name) = defined $cmd && !ref $cmd ? $cmd =~ m{\ABASH_ENV= ENV= bash -p "\$CLAUDE_PROJECT_DIR/\.claude/hooks/method/([a-z-]+)\.sh"\z} : ();
         if (!(ref $h eq 'HASH' && ($h->{type} // '') eq 'command') || !defined $name || !$script{$name}) {
           push @form, "$event: " . (defined $cmd && !ref $cmd ? $cmd : '(no command)');
           next;
@@ -190,17 +190,18 @@ if (!defined $hooks) {
       }
     }
   }
-  check("every hook command is one of the three method scripts, as BASH_ENV= ENV= bash \"\$CLAUDE_PROJECT_DIR/.claude/hooks/method/NAME.sh\"", @form ? join('; ', @form) : undef);
+  check("every hook command is one of the three method scripts, as BASH_ENV= ENV= bash -p \"\$CLAUDE_PROJECT_DIR/.claude/hooks/method/NAME.sh\"", @form ? join('; ', @form) : undef);
   check("no onFailure where it has no effect (RISKS #16)", @onfail ? "onFailure on @onfail" : undef);
   check("the guard's PreToolUse and ConfigChange entries block on failure", @missing_block ? "no onFailure \"block\" on @missing_block" : undef);
   # the entries the plan registers so far (section 6.4): EVENT, MATCHER
   # (undef: none, every source), SCRIPT, TIMEOUT (seconds)
   my @registered = (['SessionStart', undef, 'session-status', 30],
     ['PreToolUse', 'Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|ExitWorktree|SendMessage|Skill|Agent|Task', 'guard', 30],
-    ['PreToolUse', '^mcp__', 'guard', 30]);
+    ['PreToolUse', '^mcp__', 'guard', 30],
+    ['ConfigChange', 'user_settings|project_settings|local_settings', 'guard', 30]);
   for my $r (@registered) {
     my ($event, $matcher, $name, $timeout) = @$r;
-    my $want = qq{BASH_ENV= ENV= bash "\$CLAUDE_PROJECT_DIR/.claude/hooks/method/$name.sh"};
+    my $want = qq{BASH_ENV= ENV= bash -p "\$CLAUDE_PROJECT_DIR/.claude/hooks/method/$name.sh"};
     my @hit = grep {
       my $g = $_;
       ref $g eq 'HASH' && (defined $matcher ? defined $g->{matcher} && $g->{matcher} eq $matcher : !exists $g->{matcher})

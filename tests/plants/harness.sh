@@ -265,6 +265,25 @@ code=$?
 if [ "$code" -eq 0 ] && printf '%s\n' "$out" | grep -q "SKIP  harness: no client given" && printf '%s\n' "$out" | grep -q "0 passed, 0 failed, 1 skipped"; then pass "with no client named, the harness says SKIPPED and passes nothing"; else fail "with no client named, the harness says SKIPPED and passes nothing" "exit $code: $out"; fi
 drop_sandbox "$sb" || true
 
+# 14. step 5.9's holds case (h_holds_start): with the hooks' whole command
+# form (BASH_ENV= ENV= bash -p) reduced to plain bash, the case goes red.
+# (A plant of -p alone, or of "command" before perl, stays green here: on
+# Linux the client starts hooks through /bin/sh, and dash drops the
+# exported-function variables before bash sees them. bash -p's own effect
+# is shown in tests/guard-watch.test.sh, with plain bash as the control;
+# A68)
+sb=$(make_sandbox) || abort_sandbox
+perl -pi -e 's/BASH_ENV= ENV= bash -p /bash /g' "$sb/method/settings.fragment.json"
+landed=$(grep -c 'bash -p' "$sb/method/settings.fragment.json")
+if [ "$landed" != 0 ]; then
+  fail "holds (plain bash plant): the plant did not apply, so the check result would mean nothing"
+else
+  h_holds_start "$sb"
+  h_stop
+  if [ -n "$H_HOLD" ]; then pass "holds: with the hooks run as plain bash, the case goes red ($H_HOLD)"; else fail "holds: with the hooks run as plain bash, the case stayed green"; fi
+fi
+drop_sandbox "$sb" || true
+
 # 13. get-client: a download that does not match the pinned checksum is refused
 reg="$H_WORK/registry/@anthropic-ai/claude-code-linux-x64/-"
 mkdir -p "$reg" "$H_WORK/pkg/package"

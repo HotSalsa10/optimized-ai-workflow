@@ -736,6 +736,8 @@ sub commands {
     my $piped = ($op eq '|' || $op eq '|&') ? 1 : 0;
     if (@{ $cur->{words} } || @{ $cur->{assigns} } || @{ $cur->{redirs} }) {
       $cur->{bg} = 1 if $op eq '&';
+      # (what follows it: && runs the rest only when it succeeded)
+      $cur->{next_op} = $op;
       $cur->{to_pipe} = 1 if $piped;
       push @cmds, $cur;
     }
