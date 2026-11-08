@@ -31,7 +31,8 @@ H_CLIENT=$client
 H_WORK=$(new_sandbox_dir) || abort_sandbox
 # shellcheck source=tests/harness/lib.sh
 . "$HARNESS/lib.sh"
-trap 'h_stop' EXIT
+# the case folders, the fake's logs among them, go on any exit (a TERM too)
+trap 'h_stop; drop_sandbox "$H_WORK" || true' EXIT
 # shellcheck disable=SC2329 # called through expect_landed
 lacks_line() {
   ! grep -q -- "$1" "$2"
@@ -99,7 +100,7 @@ else
   fail "trap: the fake did not answer"
 fi
 
-# 4b. a plain-http call through the proxy (no CONNECT): it counts too
+# 5. a plain-http call through the proxy (no CONNECT): it counts too
 h_case trap-http
 printf '%s\n' '{"convs":[{"name":"main","match":"^go$","turns":[{"tool":"Bash","input":{"command":"curl -s -m 5 http://example.invalid/harness-plain-http >/dev/null; true","description":"a plain-http call"}},{"text":"MAIN-DONE"}]}]}' >"$H_DIR/script.json"
 if h_fake "$H_DIR/script.json"; then
@@ -111,14 +112,17 @@ else
   fail "trap-http: the fake did not answer"
 fi
 
-# 4c. an extra variable that would replace the case's HOME is refused, and
-# nothing runs
+# 6. an extra variable that would replace one of the case's own settings,
+# or carry a key, is refused, and nothing runs
 h_case extras
-if h_client 5 HOME=/elsewhere -- --version; then fail "an extra HOME= for the client was let through"
-elif [ "${H_RC:-}" = 2 ] && [ ! -e "$H_DIR/out.jsonl" ]; then pass "an extra variable that would replace the case's HOME is refused, and the client is not started"
-else fail "an extra HOME= for the client is refused" "rc ${H_RC:-?}"; fi
+for extra in HOME=/elsewhere NODE_OPTIONS=--require=x DISABLE_AUTOUPDATER=0 GIT_CONFIG_GLOBAL=/x LD_PRELOAD=/x MY_TOKEN=x DB_PASSWORD=x; do
+  rm -f "$H_DIR/out.jsonl"
+  if h_client 5 "$extra" -- --version 2>"$H_DIR/refused.txt"; then fail "an extra $extra for the client was let through"
+  elif [ "${H_RC:-}" = 2 ] && [ ! -e "$H_DIR/out.jsonl" ] && LC_ALL=C grep -q "refusing to pass ${extra%%=*}=" "$H_DIR/refused.txt"; then pass "an extra $extra for the client is refused by name, and the client is not started"
+  else fail "an extra $extra for the client is refused" "rc ${H_RC:-?}: $(cat "$H_DIR/refused.txt")"; fi
+done
 
-# 5. no refusing hook: the command the case expects refused runs
+# 7. no refusing hook: the command the case expects refused runs
 h_case no-guard
 h_fixtures
 printf '%s\n' '{"model":"claude-opus-5-5"}' | h_settings
@@ -132,7 +136,7 @@ else
   fail "no-guard: the fake did not answer"
 fi
 
-# 7. a client that writes its temporary files outside the case: the check
+# 8. a client that writes its temporary files outside the case: the check
 # for them goes red (here the "outside" folder is in the case, so nothing
 # is left in /tmp: the client's own naming is what is checked)
 h_case tmp-outside
@@ -143,11 +147,48 @@ if h_fake "$H_DIR/script.json"; then
   H_TMPDIR="$H_DIR/outside" h_client 60 -- $D
   h_stop
   if H_TMP_ROOT="$H_DIR/outside/claude-$(id -u)" h_tmp_clean; then fail "a client that writes its temporary files outside the case: the check did not see them" "$(ls "$H_DIR/outside" 2>&1)"; else pass "a client that writes its temporary files outside the case: the check sees them (by this run's own word in their names)"; fi
+  if h_tmp_used; then fail "a client that does not use the case's TMPDIR: the check did not see it" "$(ls "$H_DIR/tmp" 2>&1)"; else pass "a client that does not use the case's TMPDIR: the check sees it (no claude-$(id -u) folder in the case's own)"; fi
 else
   fail "tmp-outside: the fake did not answer"
 fi
 
-# 8. SubagentStart's text reaching the main conversation only: the
+# 9. a request with a key other than the dummy one (here from an
+# apiKeyHelper in the project's settings): the key check goes red
+h_case key-helper
+printf '%s\n' '{"model":"claude-opus-5-5","apiKeyHelper":"echo not-the-dummy-key"}' | h_settings
+printf '%s\n' '{"convs":[{"name":"main","match":"^go$","turns":[{"text":"MAIN-DONE"}]}]}' >"$H_DIR/script.json"
+if h_fake "$H_DIR/script.json"; then
+  # shellcheck disable=SC2086
+  h_client 60 -- $D
+  h_stop
+  if h_keys_ok; then fail "a request with a key other than the dummy one: the check did not see it" "$(cut -f9 "$H_DIR/fake/requests.tsv")"; else pass "a request with a key other than the dummy one: the check sees it (the fake logs each key's kind, never the key)"; fi
+  if LC_ALL=C grep -r -q not-the-dummy-key "$H_DIR/fake"; then fail "the fake keeps no key: the planted key is in its logs"; else pass "the fake keeps no key: the planted key is in none of its logs"; fi
+else
+  fail "key-helper: the fake did not answer"
+fi
+
+# 10. a run without --strict-mcp-config: a .mcp.json above the project
+# starts its server, so the harness's mcp-stray case can tell
+h_case mcp-stray
+printf '%s\n' '{"model":"claude-opus-5-5","enableAllProjectMcpServers":true}' | h_settings
+perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({mcpServers => {stray => {type => "stdio", command => "perl", args => [$ARGV[0], $ARGV[1]]}}})' \
+  "$HARNESS/fake-mcp.pl" "$H_DIR/stray.log" >"$H_DIR/.mcp.json"
+printf '%s\n' '{"convs":[{"name":"main","match":"^go$","turns":[{"text":"MAIN-DONE"}]}]}' >"$H_DIR/script.json"
+if lacks_line ' --strict-mcp-config ' "$HARNESS/lib.sh"; then
+  fail "h_client no longer gives --strict-mcp-config, so this plant cannot remove it"
+elif h_fake "$H_DIR/script.json"; then
+  (
+    eval "$(declare -f h_client | sed 's/ --strict-mcp-config / /')"
+    # shellcheck disable=SC2086
+    h_client 60 -- $D
+  )
+  h_stop
+  if [ -e "$H_DIR/stray.log" ]; then pass "without --strict-mcp-config, a .mcp.json above the project starts its server (the mcp-stray case can tell)"; else fail "without --strict-mcp-config, a .mcp.json above the project starts its server"; fi
+else
+  fail "mcp-stray: the fake did not answer"
+fi
+
+# 11. SubagentStart's text reaching the main conversation only: the
 # subagent question goes red
 h_case subagent-main
 h_fixtures
@@ -174,7 +215,7 @@ else
   fail "subagent-main: the fake did not answer"
 fi
 
-# 6. the harness file itself, in a copy: a tool missing from tools.txt, a
+# 12. the harness file itself, in a copy: a tool missing from tools.txt, a
 # wrong version asked for, a client that is not there
 sb=$(make_sandbox) || abort_sandbox
 grep -v '^Bash	' "$sb/tests/harness/tools.txt" >"$sb/tools.tmp" && mv "$sb/tools.tmp" "$sb/tests/harness/tools.txt"
@@ -192,7 +233,7 @@ code=$?
 if [ "$code" -eq 0 ] && printf '%s\n' "$out" | grep -q "SKIP  harness: no client given" && printf '%s\n' "$out" | grep -q "0 passed, 0 failed, 1 skipped"; then pass "with no client named, the harness says SKIPPED and passes nothing"; else fail "with no client named, the harness says SKIPPED and passes nothing" "exit $code: $out"; fi
 drop_sandbox "$sb" || true
 
-# 7. get-client: a download that does not match the pinned checksum is refused
+# 13. get-client: a download that does not match the pinned checksum is refused
 reg="$H_WORK/registry/@anthropic-ai/claude-code-linux-x64/-"
 mkdir -p "$reg" "$H_WORK/pkg/package"
 printf '#!/bin/sh\necho planted\n' >"$H_WORK/pkg/package/claude"
@@ -207,5 +248,4 @@ case "$(uname -s)/$(uname -m)" in
   *) skip "get-client's checksum plant: get-client pins Linux x64 only" ;;
 esac
 
-drop_sandbox "$H_WORK" || true
 finish

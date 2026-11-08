@@ -42,10 +42,26 @@ H_CLIENT=$client
 H_WORK=$(new_sandbox_dir) || abort_sandbox
 # shellcheck source=tests/harness/lib.sh
 . "$HARNESS/lib.sh"
-trap 'h_stop' EXIT
+# the case folders, the fake's logs among them, go on any exit (a TERM too)
+trap 'h_stop; drop_sandbox "$H_WORK" || true' EXIT
 root=$(repo_root)
 D="--permission-mode default --allowedTools Bash"
 F='bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/fixture'
+
+# the request reader finds text as written: non-ASCII, quotes and line
+# breaks, in the system text and the user's messages, not the assistant's
+mkdir -p "$H_WORK/rq"
+perl -MJSON::PP -e 'print JSON::PP->new->utf8->encode({info => "conv=x turn=0", body => {system => [{type => "text", text => "Gr\x{fc}\x{df}e \"quoted\" HARNESS-MARK"}], messages => [{role => "assistant", content => "HARNESS-ASSISTANT"}, {role => "user", content => [{type => "text", text => "two\nlines"}]}]}})' >"$H_WORK/rq/req-001.json"
+if perl "$HARNESS/read.pl" req x 'Grüße "quoted" HARNESS-MARK' "$H_WORK/rq" && perl "$HARNESS/read.pl" req x "two
+lines" "$H_WORK/rq" && ! perl "$HARNESS/read.pl" req x HARNESS-ASSISTANT "$H_WORK/rq" && ! perl "$HARNESS/read.pl" req y HARNESS-MARK "$H_WORK/rq"; then
+  pass "read.pl req finds non-ASCII text, quotes and line breaks as written, in the conversation asked for, and not in the assistant's own words"
+else
+  fail "read.pl req finds text as written"
+fi
+# Ctrl-C during a bounded run (INT to the shell's whole process group, as a
+# terminal sends it) stops the shell too, not just the run
+sig=$(perl -e 'my $pid = fork; if (!$pid) { setpgrp(0, 0); exec "bash", "-c", q{perl "$0" 60 sleep 30; echo HARNESS-WENT-ON}, $ARGV[0] } sleep 1; kill "INT", -$pid; waitpid $pid, 0; print $? & 127' "$HARNESS/bound.pl")
+if [ "$sig" = 2 ]; then pass "Ctrl-C during a bounded run stops the harness shell too (bound.pl dies by the same signal)"; else fail "Ctrl-C during a bounded run stops the harness shell too" "the shell ended by signal '$sig'"; fi
 
 # --- 1. startup: version, tools, SessionStart context, a PreToolUse refusal ---
 h_case startup
@@ -113,10 +129,14 @@ if h_fake "$H_DIR/script.json"; then
   h_client 60 -- $D
   h_stop
   # (the hooks ran: log.sh, beside say.sh on the same event, wrote its line)
-  if h_reached && LC_ALL=C grep -q "^SessionStart	" "$H_PROJ/.harness/events.tsv" 2>/dev/null && ! h_req_has HARNESS-EXIT1-CONTEXT; then
+  if ! LC_ALL=C grep -q "^SessionStart	" "$H_PROJ/.harness/events.tsv" 2>/dev/null; then
+    fail "session-exit1: SessionStart text printed with exit 1 does not reach the model" "the SessionStart hooks did not run (log.sh wrote no line), so the case shows nothing"
+  elif h_req_has HARNESS-EXIT1-CONTEXT; then
+    fail "session-exit1: SessionStart text printed with exit 1 does not reach the model" "it reached the model: the client now passes it on, so session-status's exit 0 rule can be revisited"
+  elif h_reached; then
     pass "session-exit1: SessionStart text printed with exit 1 does not reach the model (so session-status must exit 0)"
   else
-    fail "session-exit1: SessionStart text printed with exit 1 does not reach the model"
+    fail "session-exit1: SessionStart text printed with exit 1 does not reach the model" "no request reached the fake"
   fi
   h_safe session-exit1
 else
@@ -210,6 +230,23 @@ EOF
     fail "mcp-$mode: the fake did not answer; the client was not started"
   fi
 done
+# a .mcp.json the harness did not write (here in the case folder, above
+# the project, with the project's settings approving it) starts no server:
+# every run is given --strict-mcp-config
+h_case mcp-stray
+printf '%s\n' '{"model":"claude-opus-5-5","enableAllProjectMcpServers":true}' | h_settings
+perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({mcpServers => {stray => {type => "stdio", command => "perl", args => [$ARGV[0], $ARGV[1]]}}})' \
+  "$HARNESS/fake-mcp.pl" "$H_DIR/stray.log" >"$H_DIR/.mcp.json"
+printf '%s\n' '{"convs":[{"name":"main","match":"^go$","turns":[{"text":"MAIN-DONE"}]}]}' >"$H_DIR/script.json"
+if h_fake "$H_DIR/script.json"; then
+  # shellcheck disable=SC2086
+  h_client 60 -- $D
+  h_stop
+  if h_reached && [ ! -e "$H_DIR/stray.log" ]; then pass "mcp-stray: a .mcp.json above the project, approved by its settings, starts no server in a harness run"; else fail "mcp-stray: a .mcp.json above the project started its server" "$(head -c 300 "$H_DIR/stray.log" 2>/dev/null)"; fi
+  h_safe mcp-stray
+else
+  fail "mcp-stray: the fake did not answer; the client was not started"
+fi
 
 # --- 6. started in a subfolder: no project hook runs (RISKS #16) ---
 h_case subfolder
@@ -489,5 +526,4 @@ for way in local flag; do
 done
 
 echo "harness: ${H_RUNS:-0} client runs took ${H_TOTAL_SECS:-0} s"
-drop_sandbox "$H_WORK" || true
 finish

@@ -28,7 +28,8 @@
 #
 # Logs, in DIR: requests.tsv (one line per request: number, seconds, method,
 # path, model, stream or json, kind, then conv=NAME turn=N and the tool
-# results that came back), and req-NNN.json with each whole request, its key
+# results that came back, then the kinds of key it carried: dummy-key,
+# other-HEADER, or no-key), and req-NNN.json with each whole request, its key
 # headers redacted. A request past --max-requests is answered with an error
 # and logged as over-cap.
 use strict;
@@ -174,7 +175,15 @@ sub text_of {
 sub handle {
   my ($r, $n) = @_;
   my %h = %{ $r->{headers} };
-  for (qw(x-api-key authorization proxy-authorization)) { $h{$_} = '<redacted>' if exists $h{$_}; }
+  # keys are never logged, only what kind each is: the dummy key, or
+  # another (a real key or token the client found somewhere), which every
+  # case's safety check refuses
+  my @kinds;
+  for (qw(x-api-key authorization proxy-authorization)) {
+    next unless exists $h{$_};
+    push @kinds, $_ eq 'x-api-key' && $h{$_} eq 'dummy' ? 'dummy-key' : "other-$_";
+    $h{$_} = '<redacted>';
+  }
   my $body = eval { $J->decode($r->{body}) };
   my $rec = { n => $n, t => sprintf('%.3f', time - $t0), method => $r->{method}, path => $r->{path},
     headers => \%h, body => (defined $body ? $body : $r->{body}) };
@@ -204,7 +213,7 @@ sub handle {
   if (open my $fh, '>', sprintf('%s/req-%03d.json', $log_dir, $n)) { print $fh $JP->encode($rec); close $fh; }
   my $model = ref $body eq 'HASH' ? ($body->{model} || '') : '';
   my $stream = ref $body eq 'HASH' && $body->{stream} ? 'stream' : 'json';
-  print $sum join("\t", $n, $rec->{t}, $r->{method}, $r->{path}, $model, $stream, $kind, $info), "\n";
+  print $sum join("\t", $n, $rec->{t}, $r->{method}, $r->{path}, $model, $stream, $kind, $info, join(',', @kinds) || 'no-key'), "\n";
   return $resp;
 }
 

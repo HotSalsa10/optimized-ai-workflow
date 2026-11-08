@@ -39,6 +39,9 @@
 # or fails the four safety questions as one line. h_init FIELD prints a
 # field of the client's init event. req-001 is h_fake's own alive probe.
 
+# settings a caller's environment must not carry into every case
+unset H_CWD H_PROMPT H_TMPDIR H_TMP_ROOT H_FAKE_API H_SEND_MESSAGE
+
 h_case() {
   H_DIR="$H_WORK/it's a case ü/$1"
   # this run's folder as the client names it (each character that is not
@@ -114,15 +117,20 @@ h_client() {
   h_env=()
   while [ $# -gt 0 ] && [ "$1" != "--" ]; do
     case "$1" in
-      *OAUTH* | *AUTH_TOKEN* | *BEDROCK* | *VERTEX* | ANTHROPIC_* | CLAUDE_CODE_USE_* | HOME=* | TMPDIR=* | *_PROXY=* | *_proxy=* | CLAUDE_CONFIG_DIR=* | CLAUDE_CODE_MAX_RETRIES=*)
-        echo "harness: refusing to pass $1 to the client: only the dummy key, the case's own folders and the fake may reach it" >&2
-        rm -f "$H_DIR/out.jsonl" "$H_DIR/err.txt"
-        H_RC=2
-        return 2
-        ;;
       [A-Za-z_]*=*) ;;
       *)
         echo "harness: h_client takes VAR=VALUE before --, not $1" >&2
+        H_RC=2
+        return 2
+        ;;
+    esac
+    # (judged by the name: a name that would replace one of the case's own
+    # settings, or that can carry a key, is refused; PATH may be given)
+    case "${1%%=*}=" in
+      *OAUTH*= | *AUTH_TOKEN*= | *BEDROCK*= | *VERTEX*= | ANTHROPIC_*= | CLAUDE_CODE_USE_*= | HOME= | TMPDIR= | *_PROXY= | *_proxy= | CLAUDE_CONFIG_DIR= | CLAUDE_CODE_MAX_RETRIES= | \
+        DISABLE_AUTOUPDATER= | CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC= | GIT_CONFIG*= | LD_*= | DYLD_*= | NODE_OPTIONS= | XDG_*= | *TOKEN*= | *SECRET*= | *KEY= | *PASSWORD*=)
+        echo "harness: refusing to pass $1 to the client: only the dummy key, the case's own folders and the fake may reach it" >&2
+        rm -f "$H_DIR/out.jsonl" "$H_DIR/err.txt"
         H_RC=2
         return 2
         ;;
@@ -143,7 +151,7 @@ h_client() {
     https_proxy="http://127.0.0.1:$H_PORT" http_proxy="http://127.0.0.1:$H_PORT" all_proxy="http://127.0.0.1:$H_PORT" no_proxy=127.0.0.1 \
     GIT_CONFIG_NOSYSTEM=1 ${h_env[@]+"${h_env[@]}"} \
     /bin/sh -c 'cd "$1" && shift && exec "$@"' sh "${H_CWD:-$H_PROJ}" \
-    "$H_CLIENT" -p "${H_PROMPT:-go}" --output-format stream-json --verbose ${h_no_send[@]+"${h_no_send[@]}"} "$@" \
+    "$H_CLIENT" -p "${H_PROMPT:-go}" --output-format stream-json --verbose --strict-mcp-config ${h_no_send[@]+"${h_no_send[@]}"} "$@" \
     </dev/null >"$H_DIR/out.jsonl" 2>"$H_DIR/err.txt"
   H_RC=$?
   end=$(perl -MTime::HiRes=time -e 'printf "%.3f", time')
@@ -184,6 +192,15 @@ h_tmp_list() {
 h_tmp_clean() {
   ! h_tmp_list | LC_ALL=C grep -F -q -- "$H_TOKEN"
 }
+# the client used the case's own temporary folder (it makes claude-<uid>
+# there on every run seen), which a client that ignored TMPDIR would not
+h_tmp_used() {
+  [ -d "${H_TMPDIR:-$H_DIR/tmp}/claude-$(id -u)" ]
+}
+# every request carried the dummy key or none: no other key or token
+h_keys_ok() {
+  ! LC_ALL=C grep -q '	[^	]*other-[^	]*$' "$H_DIR/fake/requests.tsv" 2>/dev/null
+}
 h_req_has() {
   LC_ALL=C grep -F -q -- "$1" "$H_DIR"/fake/req-*.json 2>/dev/null
 }
@@ -207,6 +224,8 @@ h_safe() {
   h_no_connect || why="$why an outside connection was tried;"
   h_no_overcap || why="$why the request cap was reached;"
   h_tmp_clean || why="$why the client left files in /tmp/claude-$(id -u);"
+  h_tmp_used || why="$why the client did not use the case's TMPDIR;"
+  h_keys_ok || why="$why a request carried a key or token other than the dummy one;"
   if [ -z "$why" ]; then
     pass "$1: reached the fake, no outside connection, under the cap, no files outside the case"
   else
