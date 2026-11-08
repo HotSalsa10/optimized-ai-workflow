@@ -77,13 +77,17 @@ plant "this repo's settings turn auto memory on" .claude/settings.json "they dif
 plant "this repo's PowerShell variable differs" .claude/settings.json "they differ on: env.CLAUDE_CODE_USE_POWERSHELL_TOOL" '$d->{env}{CLAUDE_CODE_USE_POWERSHELL_TOOL} = "1"'
 plant "this repo's settings set the effort variable" .claude/settings.json "it sets env.CLAUDE_CODE_EFFORT_LEVEL" '$d->{env}{CLAUDE_CODE_EFFORT_LEVEL} = "max"'
 plant "this repo's effort differs from the fragment's" .claude/settings.json "they differ on: effortLevel" '$d->{effortLevel} = "high"'
+plant "session-status on startup only" "$frag" "it is not registered so" '$d->{hooks}{SessionStart}[0]{matcher} = "startup"'
+plant "no hooks at all" "$frag" "it has no hooks key" 'delete $d->{hooks}'
 ok_hook='BASH_ENV= ENV= bash "$CLAUDE_PROJECT_DIR/.claude/hooks/method/guard.sh"'
 export OK_HOOK="$ok_hook"
-plant "a fourth hook script" "$frag" "PreToolUse: BASH_ENV= ENV= bash" '$d->{hooks} = {PreToolUse => [{matcher => "Bash", hooks => [{type => "command", command => q{BASH_ENV= ENV= bash "$CLAUDE_PROJECT_DIR/.claude/hooks/method/extra.sh"}, onFailure => "block"}]}]}'
-plant "a hook path not in quotes" "$frag" 'PreToolUse: BASH_ENV= ENV= bash $CLAUDE_PROJECT_DIR' '$d->{hooks} = {PreToolUse => [{matcher => "Bash", hooks => [{type => "command", command => q{BASH_ENV= ENV= bash $CLAUDE_PROJECT_DIR/.claude/hooks/method/guard.sh}, onFailure => "block"}]}]}'
-plant "a hook without the BASH_ENV= ENV= prefix" "$frag" 'PreToolUse: bash "$CLAUDE_PROJECT_DIR' '$d->{hooks} = {PreToolUse => [{matcher => "Bash", hooks => [{type => "command", command => q{bash "$CLAUDE_PROJECT_DIR/.claude/hooks/method/guard.sh"}, onFailure => "block"}]}]}'
-plant "onFailure on SubagentStop" "$frag" "onFailure on SubagentStop" '$d->{hooks} = {SubagentStop => [{matcher => "reviewer", hooks => [{type => "command", command => $ENV{OK_HOOK}, onFailure => "block"}]}]}'
-plant "the guard without onFailure block" "$frag" 'no onFailure "block" on PreToolUse' '$d->{hooks} = {PreToolUse => [{matcher => "Bash", hooks => [{type => "command", command => $ENV{OK_HOOK}}]}]}'
+plant "a fourth hook script" "$frag" "PreToolUse: BASH_ENV= ENV= bash" '$d->{hooks}{PreToolUse} = [{matcher => "Bash", hooks => [{type => "command", command => q{BASH_ENV= ENV= bash "$CLAUDE_PROJECT_DIR/.claude/hooks/method/extra.sh"}, onFailure => "block"}]}]'
+plant "a hook path not in quotes" "$frag" 'PreToolUse: BASH_ENV= ENV= bash $CLAUDE_PROJECT_DIR' '$d->{hooks}{PreToolUse} = [{matcher => "Bash", hooks => [{type => "command", command => q{BASH_ENV= ENV= bash $CLAUDE_PROJECT_DIR/.claude/hooks/method/guard.sh}, onFailure => "block"}]}]'
+plant "a hook without the BASH_ENV= ENV= prefix" "$frag" 'PreToolUse: bash "$CLAUDE_PROJECT_DIR' '$d->{hooks}{PreToolUse} = [{matcher => "Bash", hooks => [{type => "command", command => q{bash "$CLAUDE_PROJECT_DIR/.claude/hooks/method/guard.sh"}, onFailure => "block"}]}]'
+plant "onFailure on SubagentStop" "$frag" "onFailure on SubagentStop" '$d->{hooks}{SubagentStop} = [{matcher => "reviewer", hooks => [{type => "command", command => $ENV{OK_HOOK}, onFailure => "block"}]}]'
+plant "onFailure on SessionStart" "$frag" "onFailure on SessionStart" '$d->{hooks}{SessionStart}[0]{hooks}[0]{onFailure} = "block"'
+plant "the guard without onFailure block" "$frag" 'no onFailure "block" on PreToolUse' '$d->{hooks}{PreToolUse} = [{matcher => "Bash", hooks => [{type => "command", command => $ENV{OK_HOOK}}]}]'
+plant "a stray .sh in the hooks folder" method/settings.fragment.json "also extra.sh" 'open my $x, ">", "method/.claude/hooks/method/extra.sh" or die'
 
 # two plants outside a JSON file: the floor raised with the fragment left
 # as it was, and a committed settings.local.json

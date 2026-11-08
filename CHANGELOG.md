@@ -53,6 +53,8 @@ Nothing yet. Release 1 is being built.
 - Tests: 1 new test file (harness) and 1 new plant file.
 - The settings file every method project will get (step 5.3): Opus 5.5 only at effort xhigh, the advisor, auto memory and commit attribution off, skills' shell lines off, /code-review left to you, hooks on, the minimum version 2.1.316. Its test checks every value and its type, because the client was seen to skip a whole settings file over one value of the wrong type.
 - Tests: 1 new test file (settings) and 1 new plant file.
+- session-status (step 5.4): at every session start, Claude is told the method is on (METHOD-ACTIVE), what status finds that needs a look, and which settings in this session weaken the method; at most 10 lines. status.sh gains --quick, which leaves CI to /start.
+- Tests: 1 new test file (session-status) and new status and harness cases.
 
 ### Changed (step 4b)
 

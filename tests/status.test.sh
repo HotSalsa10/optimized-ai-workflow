@@ -101,7 +101,23 @@ expect "a clean, pushed project needs no look (exit 0)" 0 "status: w on main at 
 if [ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" -eq 9 ]; then pass "the report is one line per area plus a first and a last line"; else fail "the report is one line per area" "$out"; fi
 out=$(cd "$w" && bash "$status" extra 2>&1)
 code=$?
-expect "any argument is bad usage" 2 "status: usage: status.sh (it takes no arguments)"
+expect "any argument but --quick is bad usage" 2 "status: usage: status.sh [--quick]"
+out=$(cd "$w" && bash "$status" --quick extra 2>&1)
+code=$?
+expect "--quick with another argument is bad usage" 2 "status: usage: status.sh [--quick]"
+(cd "$w" && unset CLAUDE_CODE_EXECPATH CLAUDE_CODE_EFFORT_LEVEL && bash "$status" --quick) >"$work/out" 2>&1
+code=$?
+out=$(cat "$work/out")
+expect "--quick leaves the ci area to /start" 0 "ci: SKIPPED - not checked at session start; /start checks it" "status: nothing needs a look; 3 SKIPPED (claude-code, effort, ci)"
+(cd "$w" && unset CLAUDE_CODE_EXECPATH CLAUDE_CODE_EFFORT_LEVEL && CLAUDE_PROJECT_DIR="$w" bash "$status") >"$work/out" 2>&1
+code=$?
+out=$(cat "$work/out")
+expect "inside a hook (CLAUDE_PROJECT_DIR set, CLAUDE_CODE_EXECPATH not) the client's version is left to /start and effort is checked" 0 \
+  "claude-code: SKIPPED - a hook cannot see the client's version; /start checks it" "effort: PASS - CLAUDE_CODE_EFFORT_LEVEL is not set"
+(cd "$w" && unset CLAUDE_CODE_EXECPATH && CLAUDE_PROJECT_DIR="$w" CLAUDE_CODE_EFFORT_LEVEL=low bash "$status") >"$work/out" 2>&1
+code=$?
+out=$(cat "$work/out")
+expect "inside a hook, CLAUDE_CODE_EFFORT_LEVEL set is a LOOK" 1 "effort: LOOK - CLAUDE_CODE_EFFORT_LEVEL is set"
 mkdir -p "$work/plain"
 (cd "$work/plain" && GIT_CEILING_DIRECTORIES=$work bash "$status") >"$work/out" 2>&1
 code=$?
@@ -601,6 +617,11 @@ if [ "$(cat "$work/gh/args")" = "run list -R https://github.com/example/project.
 else
   fail "gh is asked about origin and this commit, with GH_REPO removed" "$(cat "$work/gh/args" "$work/gh/env")"
 fi
+: >"$work/gh/args"
+(cd "$gw" && unset CLAUDE_CODE_EXECPATH CLAUDE_CODE_EFFORT_LEVEL GH_REPO && PATH="$work/gh:$PATH" bash "$status" --quick) >"$work/out" 2>&1
+code=$?
+out=$(cat "$work/out")
+if [ ! -s "$work/gh/args" ] && printf '%s\n' "$out" | grep -F -q "ci: SKIPPED - not checked at session start"; then pass "--quick never calls gh, even for a github.com origin"; else fail "--quick never calls gh, even for a github.com origin" "gh was asked: $(cat "$work/gh/args"); $out"; fi
 gh_says "[$(run_ok build completed success),$(run_ok lint completed skipped)]"
 st "$gw" PATH="$work/gh:$PATH"
 expect "passed and skipped runs pass" 0 "ci: PASS - 2 workflows passed for "

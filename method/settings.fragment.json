@@ -19,5 +19,18 @@
   "env": {
     "CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "1",
     "CLAUDE_CODE_USE_POWERSHELL_TOOL": "0"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "BASH_ENV= ENV= bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/method/session-status.sh\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
   }
 }

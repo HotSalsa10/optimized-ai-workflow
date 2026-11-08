@@ -343,6 +343,63 @@ else
   fail "rejected-shape: the fake did not answer; the client was not started"
 fi
 
+# --- 11. session-status (step 5.4): METHOD-ACTIVE reaches Claude ---
+printf '%s\n' '{"convs":[{"name":"main","match":"^(go|again)$","turns":[{"text":"FIRST-DONE"},{"text":"SECOND-DONE"}]}]}' >"$H_WORK/ss.json"
+h_case session-status
+h_method "$root"
+if h_fake "$H_WORK/ss.json"; then
+  # shellcheck disable=SC2086
+  h_client 60 -- $D
+  sid=$(h_init session_id)
+  if h_req_has 'METHOD-ACTIVE vunreleased' && { h_req_has 'status: nothing needs a look' || h_req_has ' areas need a look ('; }; then pass "session-status: METHOD-ACTIVE and status's summary reach the first request"; else fail "session-status: METHOD-ACTIVE and status's summary reach the first request" "$(LC_ALL=C grep -h -o 'METHOD-ACTIVE[^"]*' "$H_DIR"/fake/req-*.json | head -3)"; fi
+  rm -f "$H_DIR"/fake/req-*.json
+  # shellcheck disable=SC2086
+  H_PROMPT=again h_client 60 -- $D --resume "$sid"
+  h_stop
+  if h_req_has 'METHOD-ACTIVE vunreleased'; then pass "session-status: a resumed session gets METHOD-ACTIVE again"; else fail "session-status: a resumed session gets METHOD-ACTIVE again"; fi
+  h_safe session-status
+else
+  fail "session-status: the fake did not answer; the client was not started"
+fi
+h_case session-status-dirty
+h_method "$root"
+printf 'x\n' >"$H_PROJ/uncommitted.txt"
+if h_fake "$H_WORK/ss.json"; then
+  # shellcheck disable=SC2086
+  h_client 60 -- $D
+  h_stop
+  if h_req_has 'METHOD-ACTIVE vunreleased' && h_req_has 'work: LOOK - ' && h_req_has 'status: 1 areas need a look (work)'; then pass "session-status: with a dirty tree (status exits 1) the line and the LOOK still reach Claude"; else fail "session-status: with a dirty tree the line and the LOOK still reach Claude"; fi
+  h_safe session-status-dirty
+else
+  fail "session-status-dirty: the fake did not answer; the client was not started"
+fi
+h_case session-status-noperl
+h_method "$root"
+mkdir -p "$H_DIR/bin"
+for t in bash sh env sed cat git dirname; do
+  w=$(command -v "$t") && ln -s "$w" "$H_DIR/bin/$t"
+done
+if h_fake "$H_WORK/ss.json"; then
+  # shellcheck disable=SC2086
+  h_client 60 PATH="$H_DIR/bin" -- $D
+  h_stop
+  if h_req_has 'METHOD-ACTIVE vunreleased' && h_req_has 'perl or its JSON::PP module is missing'; then pass "session-status: without perl on PATH, METHOD-ACTIVE and a LOOK saying so still reach Claude"; else fail "session-status: without perl on PATH, METHOD-ACTIVE and a LOOK saying so still reach Claude" "$(tail -3 "$H_DIR/err.txt")"; fi
+  h_safe session-status-noperl
+else
+  fail "session-status-noperl: the fake did not answer; the client was not started"
+fi
+h_case session-status-nested
+h_method "$root"
+if h_fake "$H_WORK/ss.json"; then
+  # shellcheck disable=SC2086
+  h_client 60 METHOD_NESTED=1 -- $D
+  h_stop
+  if h_req_has 'METHOD-ACTIVE vunreleased (nested: status skipped)'; then pass "session-status: a nested run (METHOD_NESTED=1) gets the one short line"; else fail "session-status: a nested run gets the one short line"; fi
+  h_safe session-status-nested
+else
+  fail "session-status-nested: the fake did not answer; the client was not started"
+fi
+
 echo "harness: ${H_RUNS:-0} client runs took ${H_TOTAL_SECS:-0} s"
 drop_sandbox "$H_WORK" || true
 finish

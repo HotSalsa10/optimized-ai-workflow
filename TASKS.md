@@ -230,6 +230,10 @@ Plan: docs/plans/step5.md (version 3). Decisions A45 to A62. Rules M072 (moved t
   - [x] Repair loop 1: `permissions` is refused until 5.8 brings its deny list and the check for it; the agreement check covers every key and env variable both files set; a committed settings.local.json is refused, and settings paths are matched in any letter case; 12 plants (28 to 40); the model case asks for claude-sonnet-5-5 and has a control without the fragment; the warning case is gone (RISKS #3 records that -p prints none); the rejected-shape case shows its hook did not run either. Left for 5.4: a hook entry's timeout written as a string (the review saw the client skip the file over it) is checked with the hook entries.
   - [ ] Review round 2.
 - [ ] 5.4 session-status.sh and status.sh --quick.
+  - [x] Built while 5.1 to 5.3 were in review: method/.claude/hooks/method/session-status.sh (METHOD-ACTIVE from sh, PERL* variables unset, `command perl`), lib/session.pl (status --quick within 5 s, the weakening settings by name, the caps), status.sh --quick and its hook awareness, the fragment's SessionStart entry (checked by the settings test), the hooks README's first part. Tests: session-status (26 cases), 5 status cases, 5 harness cases (11 client runs at each version), 4 settings plants. Planted breaks: 22, all caught.
+  - [x] Decision while building: the G16 settings snapshot moves to 5.9, beside the rule that reads it; session-status writes nothing in 5.4.
+  - You will see, in the first request of a harness session: `METHOD-ACTIVE vunreleased` and `status: 1 areas need a look (work)`.
+  - [ ] Review round 1 (three reviewers, A62).
 - [ ] 5.5 Guard frame: the command reader, G0 to G2, the log, the false-refusal run, "when the guard blocks wrongly".
 - [ ] 5.6 The git list: G3 and G8.
 - [ ] 5.7 Protected files: G6 and G12.

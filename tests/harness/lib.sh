@@ -66,6 +66,19 @@ h_settings() {
   cat >"$H_PROJ/.claude/settings.json"
 }
 
+# h_method ROOT: lays the method out in the project as sync will (scripts/
+# method/, .claude/hooks/method/, the fragment as .claude/settings.json,
+# the project records), from the repository at ROOT, and commits it all
+h_method() {
+  mkdir -p "$H_PROJ/scripts" "$H_PROJ/.claude/hooks" &&
+    cp -R "$1/method/scripts/method" "$H_PROJ/scripts/method" &&
+    cp -R "$1/method/.claude/hooks/method" "$H_PROJ/.claude/hooks/method" &&
+    cp "$1/method/settings.fragment.json" "$H_PROJ/.claude/settings.json" || return 1
+  for r in AGENTS.md SPEC.md TASKS.md DECISIONS.md ROADMAP.md RISKS.md CHANGELOG.md TESTS.md; do printf '# %s\n' "$r" >"$H_PROJ/$r"; done
+  printf '@AGENTS.md\n' >"$H_PROJ/CLAUDE.md"
+  (cd "$H_PROJ" && HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git add -A && HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git commit -q -m "the method")
+}
+
 h_fixtures() {
   mkdir -p "$H_PROJ/.claude/hooks/fixture" "$H_PROJ/.claude/agents" &&
     cp "$HARNESS"/hooks/*.sh "$H_PROJ/.claude/hooks/fixture/" &&

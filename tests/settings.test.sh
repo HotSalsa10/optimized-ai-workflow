@@ -152,7 +152,7 @@ my @scripts = qw(session-status guard gate-receipt);
 my %script = map { $_ => 1 } @scripts;
 my %no_onfailure = map { $_ => 1 } qw(SessionStart SubagentStart SubagentStop Stop TaskCompleted TeammateIdle);
 if (!defined $hooks) {
-  skip("the fragment's hook entries: it has none yet (from 5.4)");
+  bad("the fragment registers the method's hooks", "it has no hooks key");
 } elsif (ref $hooks ne 'HASH') {
   bad("the fragment's hooks are an object of events", "hooks is not an object");
 } else {
@@ -181,6 +181,19 @@ if (!defined $hooks) {
   check("every hook command is one of the three method scripts, as BASH_ENV= ENV= bash \"\$CLAUDE_PROJECT_DIR/.claude/hooks/method/NAME.sh\"", @form ? join('; ', @form) : undef);
   check("no onFailure where it has no effect (RISKS #16)", @onfail ? "onFailure on @onfail" : undef);
   check("the guard's PreToolUse and ConfigChange entries block on failure", @missing_block ? "no onFailure \"block\" on @missing_block" : undef);
+  # the entries the plan registers so far (section 6.4): EVENT, MATCHER (undef: none, every source), SCRIPT
+  my @registered = (['SessionStart', undef, 'session-status']);
+  for my $r (@registered) {
+    my ($event, $matcher, $name) = @$r;
+    my $want = qq{BASH_ENV= ENV= bash "\$CLAUDE_PROJECT_DIR/.claude/hooks/method/$name.sh"};
+    my @hit = grep {
+      my $g = $_;
+      ref $g eq 'HASH' && (defined $matcher ? defined $g->{matcher} && $g->{matcher} eq $matcher : !exists $g->{matcher})
+        && ref $g->{hooks} eq 'ARRAY' && grep { ref $_ eq 'HASH' && ($_->{command} // '') eq $want } @{ $g->{hooks} }
+    } @{ ref $hooks->{$event} eq 'ARRAY' ? $hooks->{$event} : [] };
+    check("the fragment runs $name.sh on $event" . (defined $matcher ? " for $matcher" : ', for every source (no matcher)'),
+      @hit == 1 ? undef : (@hit ? "it is registered " . scalar(@hit) . " times" : 'it is not registered so'));
+  }
 }
 # the hooks folder holds only the three scripts' .sh files
 my $hd = 'method/.claude/hooks/method';
@@ -190,7 +203,7 @@ if (-d $hd) {
   my @other = grep { my $n = $_; $n =~ s/\.sh\z//; !$script{$n} } sort @sh;
   check("the hooks folder holds no .sh but the three scripts", @other ? "also @other" : undef);
 } else {
-  skip("the hooks folder: none yet (from 5.4)");
+  bad("the hooks folder holds no .sh but the three scripts", "$hd is missing");
 }
 print "$_\n" for @out;
 PERL

@@ -339,8 +339,17 @@ sub records_lines {
 
 # --- Claude Code, its effort setting, perl ---
 
+# in_hook: run by one of the method's hooks. Claude Code gives a hook
+# CLAUDE_PROJECT_DIR but not CLAUDE_CODE_EXECPATH (measured, 2.1.319), and
+# the settings' variables do reach it.
+sub in_hook {
+  return defined $ENV{CLAUDE_PROJECT_DIR} && $ENV{CLAUDE_PROJECT_DIR} ne ''
+    && !(defined $ENV{CLAUDE_CODE_EXECPATH} && $ENV{CLAUDE_CODE_EXECPATH} ne '');
+}
+
 sub claude_code_lines {
   my $p = $ENV{CLAUDE_CODE_EXECPATH};
+  return ['claude-code', 'SKIPPED', "a hook cannot see the client's version; /start checks it"] if in_hook();
   return ['claude-code', 'SKIPPED', 'not run inside Claude Code (CLAUDE_CODE_EXECPATH is not set)']
     unless defined $p && $p ne '';
   return ['claude-code', 'SKIPPED', 'CLAUDE_CODE_EXECPATH is not an absolute path, so it was not run']
@@ -366,7 +375,7 @@ sub effort_lines {
   return ['effort', 'LOOK', 'CLAUDE_CODE_EFFORT_LEVEL is set; it overrides every per-role effort (DECISIONS A4);'
     . ' remove it where it is set and start a new session'] if exists $ENV{CLAUDE_CODE_EFFORT_LEVEL};
   return ['effort', 'SKIPPED', "not run inside Claude Code; its settings' variables are not visible here"]
-    unless defined $ENV{CLAUDE_CODE_EXECPATH} && $ENV{CLAUDE_CODE_EXECPATH} ne '';
+    unless in_hook() || defined $ENV{CLAUDE_CODE_EXECPATH} && $ENV{CLAUDE_CODE_EXECPATH} ne '';
   return ['effort', 'PASS', 'CLAUDE_CODE_EFFORT_LEVEL is not set'];
 }
 
@@ -466,8 +475,11 @@ sub main {
   binmode STDOUT, ':raw';
   binmode STDERR, ':raw';
   $| = 1;
-  if (@ARGV) {
-    print "status: usage: status.sh (it takes no arguments)\n";
+  my $quick = 0;
+  if (@ARGV == 1 && $ARGV[0] eq '--quick') {
+    $quick = 1;
+  } elsif (@ARGV) {
+    print "status: usage: status.sh [--quick]\n";
     exit 2;
   }
   my ($top, $elsewhere) = Git::top();
@@ -500,7 +512,11 @@ sub main {
   area('claude-code', \&claude_code_lines);
   area('effort', \&effort_lines);
   area('perl', \&perl_lines);
-  area('ci', \&ci_lines);
+  if ($quick) {
+    say_area('ci', 'SKIPPED', 'not checked at session start; /start checks it');
+  } else {
+    area('ci', \&ci_lines);
+  }
   for my $entry (@{ $conf->{REPOS} || [] }) {
     area("repo $entry", sub { repo_lines($top, $entry) });
   }
