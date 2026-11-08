@@ -44,9 +44,25 @@ our $WAY_OUT = 'if the guard is wrong, see .claude/hooks/method/README.md, "When
 # wget standing as a word of its own (so /tmp/claude-0 or github.com do not
 # count); a watched path is one of the method's files, its settings, or
 # git's own config and hooks.
-our $WATCHED_WORD = qr{(?:\A|[\s;&|(`'"=])(?:[\w./-]*/)?(?:git(?:-[a-z][a-z0-9-]*)?|gh|claude|curl|wget)(?=\z|[\s;&|)`'"])};
+# (in any letter case, as a file system that ignores case runs GIT as git,
+# and with .exe; a backslash, brace, comma, < or > around it counts as a
+# word's edge, as bash ends or splits words there)
+our $WATCHED_WORD = qr{(?:\A|[\s;&|(`'"=\\{},<>])(?:[\w./\\-]*[/\\])?(?i:git(?:-[a-z][a-z0-9-]*)?|gh|claude|curl|wget)(?i:\.exe)?(?=\z|[\s;&|)`'"\\{},<>])};
 our $WATCHED_PATH = qr{\.claude/(?:hooks/method|agents/method|rules/method|method-local|settings(?:\.local)?\.json)|(?:\A|[\s/'"=])scripts/method\b|\.git/(?:hooks|config)\b|\.gitconfig\b|\.config/git\b|managed-settings}i;
 our $WATCHED = qr{$WATCHED_WORD|$WATCHED_PATH};
+
+# TEXT as bash would mostly read it: ANSI-C quoting decoded, line
+# continuations, quotes and backslashes removed, // and /./ made one /.
+# Watched words are looked for in this copy too, so g''it, \git, g\it and
+# meth''od are seen.
+sub norm_text {
+  my ($t) = @_;
+  $t =~ s/\$'((?:[^'\\]|\\.)*)'/Shell::ansi_c($1)/ge;
+  $t =~ s/\\\r?\n//g;
+  $t =~ s/['"\\]//g;
+  1 while $t =~ s{/\.?/}{/}g;
+  return $t;
+}
 
 sub sha256_hex {
   require Digest::SHA;
@@ -78,9 +94,12 @@ sub refuse {
 
 # the shapes whose meaning can come from elsewhere in the call: judged
 # against the whole call, not their own text
-my $WIDE = qr{variable as the command word|eval of anything|-c with an expansion|could not split|case statement|nested too deep|trap of anything};
+my $WIDE = qr{variable as the command word|eval of anything|-c with an expansion|could not split|case statement|nested too deep|trap of anything|a coprocess|from a process substitution|source of a process substitution};
 # what lets an inline program start another program
-our $STARTS = qr{\b(?:system|exec\w*|qx|popen\w*|spawn\w*|execSync|execFile\w*|subprocess|child_process|Popen|Runtime|ProcessBuilder|IPC::\w+|open[23]|shell_exec|passthru|proc_open|Start-Process|Invoke-Expression|iex|Process)\b|\bDeno\.(?:Command|run)\b|`|%x[\[(\x7B<]|\bos\.(?:system|popen|exec\w*|spawn\w*)|open\s*\(?[^;]*["']\s*\||\|\s*["']\s*\)|["']-\|["']|\|-|-\|};
+# (a name joined to another by _ counts too: create_subprocess_shell,
+# posix_spawnp, pcntl_exec; and awk's and perl's pipes, osascript's do shell
+# script)
+our $STARTS = qr{(?<![A-Za-z0-9])(?:system\w*|exec\w*|qx|popen\w*|spawn\w*|execSync|execFile\w*|subprocess|child_process|Popen|Runtime|ProcessBuilder|IPC::\w+|shell_exec|passthru|proc_open|Start-Process|Invoke-Expression|iex|Process|readpipe|pcntl_exec|posix_spawn\w*|create_subprocess_\w+)(?![A-Za-z0-9])|(?i:open[23])|\bDeno\.(?:Command|run)\b|`|%x[\[(\x7B<]|\bos\.(?:system|popen|exec\w*|spawn\w*)|open\s*\(?[^;]*["']\s*\||open\s*\(?[^;]*\|\s*["']|\|\s*["']\s*\)|["']-\|["']|\|-|-\||\|\s*getline|\bprintf?\b[^|;]*\|\s*["']|do\s+shell\s+script};
 
 # judge_command TEXT: () to let it through, or (RULE, TEXT) to refuse. A
 # simple command the reader cannot read is refused (G0) when it runs git,
@@ -93,13 +112,16 @@ sub judge_command {
   my @cmds = $read ? @$read : Shell::commands($cmd);
   # (with ANSI-C quoting decoded, also where the reader stopped early)
   (my $decoded = $cmd) =~ s/\$'((?:[^'\\]|\\.)*)'/Shell::ansi_c($1)/ge;
-  my $call_watched = join("\n", $cmd, $decoded, map { join(' ', @{ $_->{words} }, $_->{hbody} // '') } @cmds) =~ $WATCHED;
+  my $call_watched = join("\n", $cmd, $decoded, norm_text($cmd), map { join(' ', @{ $_->{words} }, $_->{hbody} // '') } @cmds) =~ $WATCHED;
   for my $c (@cmds) {
     next unless @{ $c->{unread} };
     # (its assignments and a for header's words, as written, are its own
     # text too: what they run is judged)
     my $words = join(' ', @{ $c->{assigns_raw} || [] }, @{ $c->{raw} || [] }, @{ $c->{words} }, map { $_->[1] } @{ $c->{redirs} });
     my $own = join(' ', $words, $c->{hbody} // '', $c->{pipe_from} // '');
+    # (and each as bash would mostly read it)
+    $words .= "\n" . norm_text($words);
+    $own .= "\n" . norm_text($own);
     my $wide = grep { $_ =~ $WIDE } @{ $c->{unread} };
     # code from a variable or a substitution, piped or written into a shell
     # or an interpreter, is not this command's own text
@@ -112,19 +134,26 @@ sub judge_command {
     # (PowerShell's inline program is shell commands: a watched word runs)
     my $shell_like = @{ $c->{words} } && $c->{words}[0] =~ m{(?:\A|[/\\])(?:pwsh|powershell)(?:\.exe)?\z}i;
     # a glob or brace in the command word hides which program runs at all
-    my $hit = (grep { $_ eq 'a glob or a brace in the command word' } @{ $c->{unread} }) ? 1
+    my $hit = (grep { $_ eq 'a glob or a brace in the command word' || $_ eq 'an alias definition' } @{ $c->{unread} }) ? 1
       : $wide ? $call_watched
       # an inline program: what is piped into it is data, not code; it
       # touches a watched command only by starting a program
       : $inline_only ? ($words =~ $WATCHED_PATH || ($words =~ $WATCHED_WORD && ($shell_like || $words =~ $STARTS)))
       # a glob can hide which file is written: any write near the method's
       # folders or git's own
-      : $glob_only ? (join(' ', map { $_->[1] } grep { $_->[0] =~ />/ } @{ $c->{redirs} }) =~ m{\.claude|scripts/method|\.git\b|gitconfig}i || $own =~ $WATCHED)
+      # (a glob in a folder's name can hide .claude or scripts/method, so a
+      # glob target with a folder in it, or one that starts with a dot or a
+      # glob, counts as near them)
+      : $glob_only ? ((grep { $_->[0] =~ />/ && ($_->[1] =~ m{/|\A[.*?\[\x7B]} || $_->[1] =~ m{\.claude|scripts/method|\.git\b|gitconfig}i) } @{ $c->{redirs} }) || $own =~ $WATCHED)
       : $own =~ $WATCHED;
     next unless $hit;
     my $why = $c->{unread}[0];
     if (grep { $_ eq 'a glob or a brace in the command word' } @{ $c->{unread} }) {
       return ('G0', "this command's name holds a glob or a brace, so which program runs cannot be told; write the program's name out ($WAY_OUT)");
+    }
+    # (an alias can make any later word, built from any pieces, run git)
+    if (grep { $_ eq 'an alias definition' } @{ $c->{unread} }) {
+      return ('G0', "this call defines an alias, which can make a later word run any program; write each command out instead ($WAY_OUT)");
     }
     return ('G0', "this command holds $why, which the guard cannot read with confidence, in a call that names git, gh, claude, curl, wget or a method file;"
       . " write it as plain commands, one per line, with every word written out (a commit message or PR body can go on stdin: git commit -F - with a here-document);"

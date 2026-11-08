@@ -1,0 +1,9 @@
+@@ allow a comment with a quote in it inside $( ) is read as a comment
+x=$(date # it's now
+); git status
+@@ allow a here-document delimiter written with a backslash inside $( )
+x=$(cat <<\EOF
+)
+EOF
+); git status
+@@ END

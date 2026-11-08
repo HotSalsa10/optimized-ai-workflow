@@ -61,7 +61,9 @@ git log||'
 reads "if, for and while are read through to their commands" 'if git diff --quiet; then echo same; fi; for f in a b; do git add "$f"; done' 'git diff --quiet||
 echo same||
 git add $f||'
-reads "command substitution and backticks cannot be read" 'echo $(git rev-parse HEAD); echo `date`' 'echo $(git rev-parse HEAD)||command substitution or backticks
+reads "command substitution and backticks cannot be read, and what they run is read as commands of their own, first" 'echo $(git rev-parse HEAD); echo `date`' 'git rev-parse HEAD|substitution|
+echo $(git rev-parse HEAD)||command substitution or backticks
+date|substitution|
 echo `date`||command substitution or backticks'
 reads "a variable as the command word cannot be read" '$CMD push' '$CMD push||a variable as the command word'
 reads "a pipe or here-string into a shell or an interpreter cannot be read" 'printf x | sh; python3 <<< "print(1)"' 'printf x||
@@ -73,8 +75,10 @@ awk {print} f||an inline program for awk'
 reads "eval of an expansion, bash -c with an expansion and source cannot be read" 'eval "$X"; bash -c "$Y"; source f' 'eval $X||eval of anything but a literal
 bash -c $Y||bash -c with an expansion
 source f||source or .'
-reads "a carriage return is a space, so lines ending in CRLF read as lines" "$(printf 'git status\r\ngit log -1\r')" 'git status||
-git log -1||'
+reads "a carriage return before a line break is a space, so lines ending in CRLF read as lines" "$(printf 'git status\r\ngit log -1\r\necho end')" 'git status||
+git log -1||
+echo end||'
+reads "a carriage return elsewhere is part of a word, as bash reads it, so a # after it starts no comment" "$(printf 'echo x\r# ; git push')" "$(printf 'echo x\r#||\ngit push||')"
 reads "ANSI-C quoting is decoded, so its escapes cannot hide a word" '$'"'"'\x67it'"'"' push origin main' 'git push origin main||'
 reads "a glob in a write target cannot be read; a variable there is G6's to judge" 'echo x > *.txt; echo y > "$F"' 'echo x||a glob or a brace in a write target
 echo y||'
@@ -150,6 +154,29 @@ for c in '{git,push,origin,main}' '/usr/bin/gi? push origin main' 'env -S "git p
 done
 judge "a test with [ is not a glob in the command word" "$(bash_call '[ -f .claude/hooks/method/guard.sh ] && git status')" allow
 judge "ANSI-C quoting is decoded for the whole call too, also where the reader stopped early" "$(bash_call "echo \"\$(echo \$'\\x67it' push origin main\"")" G0
+
+# --- review round 2 of 5.5: each shape that let git run or a method file be
+# written, as a case (read from tests/guard-cases/round2.txt, so no shell
+# quoting stands in the way: "@@ RULE NAME" opens a case, its command
+# follows, "@@ END" ends the list) ---
+round2_cases=$(cat "$here/guard-cases/round2.txt")
+round2_input() {
+  printf '%s\n' "$round2_cases" | CASE="$1" PROJ="$proj" perl -MJSON::PP -e 'local $/; my $t = <STDIN>; my @c = split /^@@ /m, $t; for (@c) { my ($head, $body) = /\A([^\n]*)\n(.*)\z/s or next; next unless $head eq $ENV{CASE}; $body =~ s/\n\z//; print JSON::PP->new->canonical->encode({tool_name => "Bash", tool_input => {command => $body}, cwd => $ENV{PROJ}, hook_event_name => "PreToolUse"}); last }'
+}
+printf '%s\n' "$round2_cases" | sed -n 's/^@@ \(G[0-9]* .*\)$/\1/p' >"$work/round2.txt"
+while IFS= read -r head; do
+  judge "${head#* }" "$(round2_input "$head")" "${head%% *}"
+done <"$work/round2.txt"
+# what reading these right lets through, which a misreading would refuse
+# (an unclosed $( is judged against the whole call, which names git)
+round2_ok=$(cat "$here/guard-cases/round2-allow.txt")
+printf '%s\n' "$round2_ok" | sed -n 's/^@@ \(allow .*\)$/\1/p' >"$work/round2-ok.txt"
+while IFS= read -r head; do
+  judge "${head#* }" "$(round2_cases=$round2_ok round2_input "$head")" allow
+done <"$work/round2-ok.txt"
+# a CR inside a word, and in a here-document's delimiter
+judge "a carriage return is part of a word, so a # after it starts no comment" "$(bash_call "$(printf 'echo x\r# ; git push --force origin main')")" G3
+judge "a here-document delimiter with a carriage return in it is not read" "$(bash_call "$(printf 'cat <<EOF\rX\nsafe\nEOF\rX\ngit push --force origin main\nEOF\n')")" G0
 judge "git's dashed names (git-push) are watched like git: piped into a shell, refused" "$(bash_call "echo git-push origin main | sh")" G0
 # data piped into a program file or module is data
 for c in 'curl -s https://api.github.com/repos/o/r | python3 -m json.tool' 'git diff | python3 scripts/count_changes.py' 'gh pr view 42 --json files | node scripts/files.js'; do
