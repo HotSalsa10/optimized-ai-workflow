@@ -12,7 +12,8 @@ Steps, each reviewed in a fresh context and committed with a verdict trailer:
 3. run-checks.sh and status.sh.
 4. done-check.sh.
 4b. The mutation wrapper (mutate-changed.sh), split from step 4 after its design critique (TASKS.md).
-5. The three hooks, the settings fragment, a free test harness that proves the hooks fire.
+5. The settings fragment, a free test harness that proves the hooks fire, session-status and the guard (docs/plans/step5.md).
+5b. gate-receipt, the third hook, split from step 5 after its plan review (A54).
 6. Method rules, agents (including the architect) and skills (including setup and design).
 7. Project templates, setup, sync, the money, ERPNext and documents packs, three example projects.
 8. Installer and uninstall.

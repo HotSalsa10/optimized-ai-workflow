@@ -1,6 +1,6 @@
 # TASKS
 
-Current phase: Release 1. Steps 1 to 4b are merged into main (dd860c3); step 5 next.
+Current phase: Release 1. Steps 1 to 4b are merged into main (dd860c3); step 5 is being built (docs/plans/step5.md).
 
 ## Step 1: repo skeleton, records, rule map, CI with planted defects
 
@@ -200,6 +200,24 @@ Rules: M044 (the mutation half), M122 (new, the parameter half, step 6). Designe
 - [x] Merge steps 1 to 4b into main: pull request 1, with a plain summary, the decisions the owner had not settled, what the checks would miss, and six cases to predict, each answered from the test log. The owner merged it on 7 November (merge commit dd860c3). CI green on the pull request's head (Linux); the owner chose not to run Windows and macOS for this merge, as the owner works on Linux; they are still required before a release (R9).
 - [x] The merge commit has no verdict line: typing it was a step in the pull request, and it did not land. status says verdicts SKIPPED (no commit on main carries a line yet), not LOOK; judging starts at the first later commit that has one, so dd860c3 is never judged, and main is not rewritten (A30). The approval is the owner's merge on GitHub. Next time, the owner says "merge" and I merge through GitHub with the verdict line in the commit message, so nobody types it.
 
+## Step 5: settings fragment, harness, session-status, guard
+
+Plan: docs/plans/step5.md (version 3). Decisions A45 to A62. Rules M072 (moved to lib/log.pl), M073, M076, M104, M128 to M139. Reviewers per round: A62.
+
+- [x] Plan. Six agents drafted it: a docs check, a probe that ran the real client 2.1.319 against a local fake at $0 (26 checks pass, 8 s), a requirements inventory, an architect and two critics. Version 1 drew REQUEST CHANGES from both critics: a feasibility critic (14 findings) and a bypass critic, whose 16 attacks at $0 got past the v1 guard 6 times. Version 2 drew REQUEST CHANGES from a fresh checker (10 findings, more ways past). Version 3 turns the guard's git, gh and MCP rules into allowed lists (A50), measured against the 16,014 Bash calls recorded on this machine (shapes only): about 4 in 100 of the git commands typed in this repo's main sessions would be refused. Its consistency check found 15 issues, all fixed in the plan. Its red-team pass stopped before measuring anything (a safety check stopped the agent's response) and was not re-run in another form; each guard increment's review includes a security reviewer instead (A50).
+- [x] The owner approved version 3 with every recommendation ("choose whatever is best", 8 November). The owner left the four predictions (plan section 1, M125) to be compared after the build.
+- [ ] 5.1 Shared helpers: lib/hook.pl, lib/log.pl, lib/json.pl split into a library and its command line, a text function in lib/secrets.pl.
+- [ ] 5.2 Harness skeleton, the floor at 2.1.316 (A45), the CI harness job.
+- [ ] 5.3 Settings fragment and settings test.
+- [ ] 5.4 session-status.sh and status.sh --quick.
+- [ ] 5.5 Guard frame: the command reader, G0 to G2, the log, the false-refusal run, "when the guard blocks wrongly".
+- [ ] 5.6 The git list: G3 and G8.
+- [ ] 5.7 Protected files: G6 and G12.
+- [ ] 5.8 Outside: G4, the gh and MCP lists, the deny entries.
+- [ ] 5.9 Settings changes and skill hooks: G16, G17, the "holds" cases.
+- [ ] 5.10 Outgoing secrets: G15 (may move to Release 2; the owner is told first).
+- [ ] 5.11 Close step 5; the owner says "merge" and I merge with the verdict line.
+
 ## Next
 
-Step 5: the three hooks, the settings fragment, a free test harness that proves the hooks fire.
+Step 5.1: the shared helpers. Then step 5b: gate-receipt.
