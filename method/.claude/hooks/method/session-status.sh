@@ -22,14 +22,18 @@ case "$0" in
   */*) here=${0%/*} ;;
   *) here=. ;;
 esac
-lib="$here/../../../scripts/method/lib"
+# (as the shell sees it: under Git Bash a C:/ path becomes /c/..., which
+# perl reads as absolute)
+lib=$(cd "$here/../../../scripts/method/lib" 2>/dev/null && pwd) || lib="$here/../../../scripts/method/lib"
+# a nested run (claude -p inside a session) skips status, not the settings
+# checks: METHOD_NESTED set in a settings file then shows among them
 if [ "${METHOD_NESTED:-}" = 1 ]; then
   echo "METHOD-ACTIVE v$version (nested: status skipped)"
-  exit 0
+else
+  echo "METHOD-ACTIVE v$version"
 fi
-echo "METHOD-ACTIVE v$version"
 if [ ! -f "$lib/session.pl" ] || [ ! -f "$lib/hook-env.sh" ]; then
-  echo "session-status: LOOK - the method's scripts are missing ($lib); run the method's sync"
+  echo "session-status: LOOK - the method's scripts are missing (scripts/method/lib); run the method's sync"
   exit 0
 fi
 # shellcheck source=method/scripts/method/lib/hook-env.sh

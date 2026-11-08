@@ -46,7 +46,11 @@ my @FRAGMENT_KEYS = qw(model availableModels enforceAvailableModels effortLevel 
 # the env variables the fragment sets: the project's value wins over a user
 # setting of the same name
 my %FRAGMENT_ENV = map { $_ => 1 } qw(CLAUDE_CODE_DISABLE_ADVISOR_TOOL CLAUDE_CODE_USE_POWERSHELL_TOOL);
-our $SETTINGS_MAX = 4 * 1024 * 1024;
+# (a settings file is small; a larger one is named, not read, so reading
+# it cannot take the hook past its time)
+our $SETTINGS_MAX = 1024 * 1024;
+# the whole hook's perl part ends within this many seconds
+our $DEADLINE = 20;
 
 sub look { return "session-status: LOOK - $_[0]" }
 
@@ -56,10 +60,13 @@ sub read_settings {
   my ($path) = @_;
   return (undef, undef) unless -e $path || -l $path;
   return (undef, 'is not a regular file') unless -f $path;
-  return (undef, 'is over 4 MB') if -s _ > $SETTINGS_MAX;
+  return (undef, 'is over 1 MB') if -s _ > $SETTINGS_MAX;
   open my $f, '<:raw', $path or return (undef, "cannot be read");
   my $text = do { local $/; <$f> };
   return (undef, 'is not a regular file') unless -f $f;
+  # (a byte-order mark at the start, as some Windows editors write: Claude
+  # Code reads such a file, so it is read here too)
+  $text =~ s/\A\xEF\xBB\xBF//;
   my ($d, $e) = Json::decode($text, 'plain');
   return (undef, 'is not JSON') if defined $e || ref $d ne 'HASH';
   return ($d, undef);
@@ -82,6 +89,9 @@ sub effort_caps {
   if (ref $s->{modelSettings} eq 'HASH') {
     my $n = grep { ref $s->{modelSettings}{$_} eq 'HASH' && $low->($s->{modelSettings}{$_}{maxEffortLevel}) } keys %{ $s->{modelSettings} };
     push @what, "a maxEffortLevel below xhigh for $n model" . ($n == 1 ? '' : 's') . ' (modelSettings)' if $n;
+    # (an effort level set for one model wins over the project's for it)
+    my $e = grep { ref $s->{modelSettings}{$_} eq 'HASH' && $low->($s->{modelSettings}{$_}{effortLevel}) } keys %{ $s->{modelSettings} };
+    push @what, "an effortLevel below xhigh for $e model" . ($e == 1 ? '' : 's') . ' (modelSettings)' if $e;
   }
   return @what;
 }
@@ -97,10 +107,15 @@ sub weakens {
   my ($s, $user) = @_;
   my @what;
   if (!$user) {
-    push @what, grep { exists $s->{$_} } @FRAGMENT_KEYS;
+    my $skill_off = exists $s->{disableSkillShellExecution} && !$s->{disableSkillShellExecution};
+    # (switched off, the skill shell setting is named once, as such)
+    push @what, grep { exists $s->{$_} && !($skill_off && $_ eq 'disableSkillShellExecution') } @FRAGMENT_KEYS;
     push @what, 'disableAllHooks' if $s->{disableAllHooks};
-    push @what, 'disableSkillShellExecution false' if exists $s->{disableSkillShellExecution} && !$s->{disableSkillShellExecution};
+    push @what, 'disableSkillShellExecution false' if $skill_off;
   }
+  # (a list is added to the project's, not replaced by it: a model listed
+  # in user settings can be chosen in every session)
+  push @what, 'availableModels (lists add up across settings files)' if $user && exists $s->{availableModels};
   if (ref $s->{env} eq 'HASH') {
     my @k = grep { !$user || !$FRAGMENT_ENV{$_} } keys %{ $s->{env} };
     push @what, 'env ' . env_names(@k) if @k;
@@ -215,10 +230,23 @@ sub main {
   my ($in, $in_err) = Hook::read_input();
   my $top = ref $in eq 'HASH' && defined $in->{cwd} && !ref $in->{cwd} && -d $in->{cwd} ? $in->{cwd} : ($ENV{CLAUDE_PROJECT_DIR} // '.');
   chdir $top;
-  my @lines = eval { (status_lines($top), warnings_for($in, $top, $in_err)) };
-  if ($@) {
-    (my $e = $@) =~ s/\n.*//s;
-    @lines = (look("session-status could not finish: $e; run bash scripts/method/status.sh"));
+  # (within 20 s in all, so the hook ends well inside its 30 s and
+  # METHOD-ACTIVE always reaches Claude; a nested run skips status only)
+  my @lines;
+  my $ok = eval {
+    local $SIG{ALRM} = sub { die "out of time\n" };
+    alarm $DEADLINE;
+    push @lines, status_lines($top) unless ($ENV{METHOD_NESTED} // '') eq '1';
+    push @lines, warnings_for($in, $top, $in_err);
+    alarm 0;
+    1;
+  };
+  alarm 0;
+  if (!$ok) {
+    (my $e = $@ || 'it stopped') =~ s/\n.*//s;
+    push @lines, $e eq 'out of time'
+      ? look("session-status ran out of time ($DEADLINE s), so part of its checks is missing; run bash scripts/method/status.sh")
+      : look("session-status could not finish: $e; run bash scripts/method/status.sh");
   }
   Hook::context(capped(@lines)) if @lines;
   return 0;

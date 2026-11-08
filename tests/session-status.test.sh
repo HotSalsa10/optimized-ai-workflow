@@ -127,13 +127,39 @@ has "with CLAUDE_CONFIG_DIR set, the user settings there are read, as Claude Cod
 lacks "and ~/.claude/settings.json is not" "~/.claude/settings.json"
 if mkfifo "$p/.claude/settings.local.json" 2>/dev/null; then
   start=$(perl -e 'print time')
-  hook "$p"
+  # (under a 20 s bound: a hook that waits on the FIFO is ended and the
+  # case goes red, instead of the test file waiting forever)
+  hook "$p" "" perl "$root/tests/harness/bound.pl" 20
   took=$(($(perl -e 'print time') - start))
-  if [ "$took" -le 10 ]; then has "a settings file that is a FIFO is a LOOK, and the hook does not wait on it (${took} s)" ".claude/settings.local.json is not a regular file"; else fail "a settings file that is a FIFO does not hold the hook" "took $took s"; fi
+  if [ "$code" -ne 124 ] && [ "$took" -le 10 ]; then has "a settings file that is a FIFO is a LOOK, and the hook does not wait on it (${took} s)" ".claude/settings.local.json is not a regular file"; else fail "a settings file that is a FIFO does not hold the hook" "exit $code after $took s"; fi
   rm -f "$p/.claude/settings.local.json"
 else
   skip "a settings file that is a FIFO: FIFOs cannot be made here"
 fi
+printf '{"modelSettings":{"claude-opus-5-5":{"effortLevel":"low"}}}\n' >"$p/.claude/settings.local.json"
+hook "$p"
+has "an effortLevel below xhigh for one model in local settings is a LOOK" "an effortLevel below xhigh for 1 model (modelSettings)"
+rm -f "$p/.claude/settings.local.json"
+printf '{"availableModels":["claude-sonnet-5-5"]}\n' >"$HOME/.claude/settings.json"
+hook "$p"
+has "availableModels in user settings is a LOOK, as lists add up across settings files" "availableModels (lists add up across settings files)"
+rm -f "$HOME/.claude/settings.json"
+printf '{"env":{"METHOD_NESTED":"1"}}\n' >"$p/.claude/settings.local.json"
+hook "$p" "" METHOD_NESTED=1
+has "a nested run still checks the settings, so METHOD_NESTED set in them is named" "METHOD-ACTIVE vunreleased (nested: status skipped)" "env METHOD_NESTED"
+rm -f "$p/.claude/settings.local.json"
+perl -e 'print "{\"env\":{\"A\":\"" . ("x" x (1024 * 1024)) . "\"}}\n"' >"$p/.claude/settings.local.json"
+hook "$p"
+has "a settings file over 1 MB is named, not read, so reading it cannot take the hook past its time" ".claude/settings.local.json is over 1 MB"
+rm -f "$p/.claude/settings.local.json"
+printf '\357\273\277{"env":{"BOM_ONLY":"1"}}\n' >"$p/.claude/settings.local.json"
+hook "$p"
+has "a settings file that starts with a byte-order mark is read, as Claude Code reads it" "env BOM_ONLY"
+printf '{"disableSkillShellExecution":false}\n' >"$p/.claude/settings.local.json"
+hook "$p"
+n=$(printf '%s\n' "$out" | grep -o 'disableSkillShellExecution' | wc -l | tr -d ' ')
+if [ "$n" = 1 ]; then pass "skill shell lines switched on in local settings are named once"; else fail "skill shell lines switched on in local settings are named once" "$out"; fi
+rm -f "$p/.claude/settings.local.json"
 mkdir -p "$p/sub"
 printf '{"maxEffortLevel":"low"}\n' >"$p/.claude/settings.local.json"
 hook "$p" "$(printf '{"hook_event_name":"SessionStart","source":"compact","cwd":"%s/sub"}' "$p")"
@@ -183,10 +209,6 @@ case "$cut_line" in
 esac
 rm -f "$HOME/.claude/settings.json" "$p/.claude/settings.local.json"
 # more than 1,200 bytes in fewer than 10 lines: the byte cap ends it
-name=$(perl -e 'print "W" x 100')
-printf '{"env":{"%s_1":"1","%s_2":"1","%s_3":"1"}}\n' "$name" "$name" "$name" >"$p/.claude/settings.local.json"
-printf '{"env":{"%s_4":"1","%s_5":"1","%s_6":"1"}}\n' "$name" "$name" "$name" >"$HOME/.claude/settings.json"
-rm -f "$HOME/.claude/settings.json" "$p/.claude/settings.local.json"
 # (session.pl's own lines, through capped(): the hook's other lines can no
 # longer be made long enough, as a model id is shown only in its own shape)
 out=$(LIBDIR="$root/method/scripts/method/lib" perl -e 'require "$ENV{LIBDIR}/session.pl"; print "$_\n" for Session::capped(map { "line $_: " . ("b" x 200) } 1 .. 8)')
@@ -197,6 +219,16 @@ case "$last" in
   "... "*" more: run bash scripts/method/status.sh") if [ "$bytes" -le 1160 ] && [ "$lines" -lt 9 ]; then pass "over its 1,160 bytes in fewer than 9 lines, the byte cap ends session.pl's output and counts the rest ($lines lines, $bytes bytes)"; else fail "the byte cap ends the output" "$lines lines, $bytes bytes: $out"; fi ;;
   *) fail "over its 1,160 bytes in fewer than 9 lines, the byte cap ends session.pl's output and counts the rest" "$lines lines, $bytes bytes: $out" ;;
 esac
+# the PowerShell warning, on the systems where the tool exists (perl's $^O
+# set as Git Bash's perl sets it)
+out=$(LIBDIR="$root/method/scripts/method/lib" CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1 perl -e 'require "$ENV{LIBDIR}/session.pl"; delete $ENV{CLAUDE_CODE_USE_POWERSHELL_TOOL}; my @w; { local $^O = "msys"; @w = Session::warnings_for({ model => "claude-opus-5-5" }, $ARGV[0]) } my @l = Session::warnings_for({ model => "claude-opus-5-5" }, $ARGV[0]); $ENV{CLAUDE_CODE_USE_POWERSHELL_TOOL} = "0"; my @o; { local $^O = "msys"; @o = Session::warnings_for({ model => "claude-opus-5-5" }, $ARGV[0]) } print join("|", scalar(grep { /PowerShell tool is not switched off/ } @w), scalar(grep { /PowerShell/ } @l), scalar(grep { /PowerShell/ } @o))' "$p")
+if [ "$out" = "1|0|0" ]; then pass "on Git Bash the PowerShell tool not switched off is a LOOK, and not elsewhere or when it is off"; else fail "the PowerShell warning on Git Bash only" "$out"; fi
+# run_limited stops what a timed-out command left behind that ignores TERM
+# (a grandchild that would write a mark after 2 s)
+rm -f "$work/left-behind"
+LIBDIR="$root/method/scripts/method/lib" MARK="$work/left-behind" perl -e 'require "$ENV{LIBDIR}/status.pl"; Status::run_limited(Time::HiRes::time() + 0.5, undef, "sh", "-c", "(trap \"\" TERM; sleep 2; touch \"\$MARK\") & sleep 30")' >/dev/null 2>&1
+perl -e 'select undef, undef, undef, 3'
+if [ ! -e "$work/left-behind" ]; then pass "a command run under a time limit leaves nothing running that ignored TERM"; else fail "a command run under a time limit leaves nothing running that ignored TERM" "the grandchild wrote its mark"; fi
 # another repository status reports on (REPOS), named with capitals and an
 # underscore, and not clean: its LOOK line is kept
 git init -q "$work/Site_B" && printf 'x\n' >"$work/Site_B/new.txt"
@@ -246,7 +278,14 @@ hook "$p3"
 if [ "$code" -eq 0 ] && [ "$out" = "$(printf 'METHOD-ACTIVE vunreleased\nsession-status: LOOK - its perl part failed (exit 255), so status and the settings checks are missing; run bash scripts/method/status.sh')" ]; then pass "a session.pl that crashes still leaves METHOD-ACTIVE and says it failed, and the hook exits 0"; else fail "a session.pl that crashes still leaves METHOD-ACTIVE and says it failed" "exit $code: $out"; fi
 rm -f "$p3/scripts/method/lib/session.pl"
 hook "$p3"
-has "missing scripts still leave METHOD-ACTIVE and say so" "METHOD-ACTIVE vunreleased" "the method's scripts are missing"
+# a status that takes too long is cut off at the deadline, with a line
+# saying so (the deadline lowered to 1 s, status made to take 5 s)
+dl=$(cd "$p" && printf '{"hook_event_name":"SessionStart","source":"startup"}' | LIBDIR="$root/method/scripts/method/lib" CLAUDE_PROJECT_DIR="$p" perl -e 'require "$ENV{LIBDIR}/session.pl"; no warnings "redefine"; *Session::status_lines = sub { sleep 5; () }; $Session::DEADLINE = 1; my $t = time; Session::main(); print STDERR "took ", time - $t, "\n"' 2>&1)
+case "$dl" in
+  *"ran out of time (1 s)"*) case "$dl" in *"took "[12]*) pass "the perl part ends at its deadline, with a line saying part of its checks is missing" ;; *) fail "the perl part ends at its deadline" "$dl" ;; esac ;;
+  *) fail "the perl part ends at its deadline" "$dl" ;;
+esac
+has "missing scripts still leave METHOD-ACTIVE and say so, in a line that holds no path" "METHOD-ACTIVE vunreleased" "the method's scripts are missing (scripts/method/lib); run the method's sync"
 mkdir -p "$work/noperl"
 for t in bash sh env sed cat git dirname; do
   w=$(command -v "$t") && ln -s "$w" "$work/noperl/$t"

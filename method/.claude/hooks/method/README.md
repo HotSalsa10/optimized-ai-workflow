@@ -34,7 +34,11 @@ In each of these, the session's first message has no `METHOD-ACTIVE` line. That 
    - hook input it cannot read (then the model is not checked);
    - in the project's `.claude/settings.local.json`, which ranks above the project's settings: a key the method sets, `disableAllHooks`, skill shell lines switched on;
    - in it and in your user settings (`~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR/settings.json` when that is set), what adds to every session: an env variable, a PreToolUse or PermissionRequest hook (the method's own are only in the project's settings, so a copy there counts too), an enabled plugin, an effort cap below xhigh (`maxEffortLevel`, also per model in `modelSettings`);
-   - a settings file that is not a regular file, is over 4 MB, or is not JSON.
+   - a settings file that is not a regular file, is over 1 MB, or is not JSON;
+   - in user settings, `availableModels` (lists add up across settings files, so a model listed there can be chosen);
+   - a per-model `effortLevel` below xhigh (`modelSettings`).
+
+   The perl part ends within 20 s, so METHOD-ACTIVE always arrives; a cut-off run says so. A nested run (`METHOD_NESTED=1`, set by the method for `claude -p` inside a session) skips status but still checks the settings, so `METHOD_NESTED` set in a settings file is named.
    Names are shown, never a settings value; a model id only in the shape Anthropic's ids have, and an effort cap by its level.
 4. When more does not fit: `... N more: run bash scripts/method/status.sh`.
 5. If its perl part fails, METHOD-ACTIVE is still there, with a LOOK line saying the rest is missing.
