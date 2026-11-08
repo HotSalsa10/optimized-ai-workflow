@@ -370,10 +370,14 @@ if h_fake "$H_DIR/script.json"; then
   # shellcheck disable=SC2086
   h_client 60 -- $D
   h_stop
-  if h_reached && ! h_req_has '"effort" : "xhigh"' && [ ! -e "$H_PROJ/.harness/env.txt" ]; then
+  why=""
+  h_reached || why="$why no request reached the fake;"
+  ! h_req_has '"effort" : "xhigh"' || why="$why effort xhigh still applied;"
+  [ ! -e "$H_PROJ/.harness/env.txt" ] || why="$why the file's hook ran;"
+  if [ -z "$why" ]; then
     pass "rejected-shape: one value of the wrong type makes the client skip the whole file, hooks included (effort is not xhigh; the hook did not run), so settings.test.sh checks every value's type"
   else
-    fail "rejected-shape: one value of the wrong type makes the client skip the whole file: effort xhigh still applied, so the client now keeps the rest; settings.test.sh's note is out of date"
+    fail "rejected-shape: one value of the wrong type makes the client skip the whole file:$why if the client now keeps the rest, settings.test.sh's note is out of date"
   fi
   h_safe rejected-shape
 else

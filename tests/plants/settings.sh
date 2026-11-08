@@ -88,7 +88,7 @@ plant "onFailure on SubagentStop" "$frag" "onFailure on SubagentStop" '$d->{hook
 plant "onFailure on SessionStart" "$frag" "onFailure on SessionStart" '$d->{hooks}{SessionStart}[0]{hooks}[0]{onFailure} = "block"'
 plant "session-status with a 1 s time limit" "$frag" "its timeout is 1" '$d->{hooks}{SessionStart}[0]{hooks}[0]{timeout} = 1'
 plant "session-status with no time limit" "$frag" "its timeout is not set" 'delete $d->{hooks}{SessionStart}[0]{hooks}[0]{timeout}'
-plant "session-status's time limit written as a string (the client skips the file)" "$frag" 'its timeout is "30"' '$d->{hooks}{SessionStart}[0]{hooks}[0]{timeout} = "30"'
+plant "session-status's time limit written as a string (the client drops the hook: METHOD-ACTIVE never arrives)" "$frag" 'its timeout is "30"' '$d->{hooks}{SessionStart}[0]{hooks}[0]{timeout} = "30"'
 plant "the guard on outside tools with a 600 s time limit" "$frag" "FAIL  guard.sh on PreToolUse for ^mcp__ has a 30 s time limit" '$d->{hooks}{PreToolUse}[1]{hooks}[0]{timeout} = 600'
 plant "the guard on the built-in tools with no time limit" "$frag" "Task has a 30 s time limit" 'delete $d->{hooks}{PreToolUse}[0]{hooks}[0]{timeout}'
 plant "the guard without onFailure block" "$frag" 'no onFailure "block" on PreToolUse' '$d->{hooks}{PreToolUse} = [{matcher => "Bash", hooks => [{type => "command", command => $ENV{OK_HOOK}}]}]'
@@ -107,6 +107,25 @@ printf '{"model":"claude-opus-5-5"}\n' >"$sb/.claude/settings.local.json"
 out=$(cd "$sb" && bash tests/settings.test.sh 2>&1)
 case "$out" in *"committed: .claude/settings.local.json"*) pass "a committed settings.local.json" ;; *) fail "a committed settings.local.json: the settings test did not go red for it" "$(printf '%s\n' "$out" | grep FAIL | head -3)" ;; esac
 drop_sandbox "$sb" || true
+# four more outside a JSON file (review round 2): settings behind a
+# committed link, in another letter case, in a nested folder, and an env
+# name in lower case
+# file_plant NAME REASON SETUP: SETUP (sh, in a fresh copy) commits
+# something; the settings test must then go red with REASON
+file_plant() {
+  sb=$(make_sandbox) || abort_sandbox
+  if ! (cd "$sb" && sh -c "$3" >/dev/null 2>&1); then
+    fail "$1: the plant did not apply"
+  else
+    out=$(cd "$sb" && bash tests/settings.test.sh 2>&1)
+    case "$out" in *"$2"*) pass "$1" ;; *) fail "$1: the settings test did not go red for it" "$(printf '%s\n' "$out" | grep FAIL | head -3)" ;; esac
+  fi
+  drop_sandbox "$sb" || true
+}
+file_plant "a committed link named .claude" "committed links: sub/.claude" 'mkdir -p sub conf && printf "{}\n" >conf/settings.json && ln -s ../conf sub/.claude && git add conf sub/.claude'
+file_plant "a committed settings.local.json in another letter case" "committed: .Claude/Settings.Local.JSON" 'mkdir -p .Claude && printf "{}\n" >.Claude/Settings.Local.JSON && git add -f .Claude/Settings.Local.JSON'
+file_plant "a never-set key in a nested folder's committed settings" "sub/.claude/settings.json sets nothing on the never-set list" 'mkdir -p sub/.claude && printf "{\"autoContinueAtUsageLimit\":true}\n" >sub/.claude/settings.json && git add -f sub/.claude/settings.json'
+file_plant "a never-set env variable in lower case in this repo's settings" "it sets env.claude_code_effort_level" 'perl -MJSON::PP -i -0pe "my \$d = decode_json(\$_); \$d->{env}{claude_code_effort_level} = q(low); \$_ = JSON::PP->new->canonical->pretty->encode(\$d)" .claude/settings.json && git add .claude/settings.json'
 
 echo "plants: settings: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]

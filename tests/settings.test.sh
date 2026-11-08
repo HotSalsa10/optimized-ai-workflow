@@ -109,14 +109,23 @@ check("the fragment sets no key the plan does not name", @unknown ? "unknown key
 my @tracked = split /\0/, `git ls-files -z`;
 my @files = grep { m{(?:^|/)\.claude/settings(?:\.local)?\.json\z}i || m{(?:^|/)settings\.fragment\.json\z} } @tracked;
 push @files, $frag unless grep { $_ eq $frag } @files;
+# (this repo's own settings are always read, so their check cannot vanish)
+push @files, '.claude/settings.json' if -e '.claude/settings.json' && !grep { lc $_ eq '.claude/settings.json' } @files;
 my @local = grep { m{(?:^|/)\.claude/settings\.local\.json\z}i } @tracked;
 check("no settings.local.json is committed (it belongs to one machine)", @local ? "committed: @local" : undef);
+# a committed link named .claude, or one inside a .claude folder: the
+# client follows it to settings no check here reads
+my @links = map { /\A120000 \S+ \S+\t(.*)\z/s ? $1 : () } split /\0/, `git ls-files -s -z`;
+my @claude_links = grep { m{(?:^|/)\.claude(?:/|\z)}i } @links;
+check("no committed link is named .claude or lies in a .claude folder", @claude_links ? "committed links: @claude_links" : undef);
 for my $file (@files) {
   my ($s, $e) = read_json($file);
   if (!$s) { bad("$file is one JSON object", $e); next }
   my @found;
   my $env = ref $s->{env} eq 'HASH' ? $s->{env} : {};
-  for my $v (qw(CLAUDE_CODE_EFFORT_LEVEL CLAUDE_CODE_SUBPROCESS_ENV_SCRUB CLAUDE_CODE_REMOTE)) { push @found, "env.$v" if exists $env->{$v} }
+  # (env names in any letter case: Windows reads them so)
+  my %env_uc = map { (uc($_) => $_) } keys %$env;
+  for my $v (qw(CLAUDE_CODE_EFFORT_LEVEL CLAUDE_CODE_SUBPROCESS_ENV_SCRUB CLAUDE_CODE_REMOTE)) { push @found, "env.$env_uc{$v}" if exists $env_uc{$v} }
   for my $k (qw(autoContinueAtUsageLimit enableWorkflows disableWorkflows)) { push @found, $k if exists $s->{$k} }
   my $mode = ref $s->{permissions} eq 'HASH' ? $s->{permissions}{defaultMode} : undef;
   push @found, "permissions.defaultMode $mode" if defined $mode && !ref $mode && ($mode eq 'auto' || $mode eq 'bypassPermissions');
