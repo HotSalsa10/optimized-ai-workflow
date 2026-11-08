@@ -51,6 +51,8 @@ Nothing yet. Release 1 is being built.
 
 - The $0 harness (step 5.2): the real Claude Code client runs against a local fake Claude, so the hooks are seen to fire at no cost, in its own CI job at the floor and at the tested version. The minimum Claude Code version is now 2.1.316 (A45).
 - Tests: 1 new test file (harness) and 1 new plant file.
+- The settings file every method project will get (step 5.3): Opus 5.5 only at effort xhigh, the advisor, auto memory and commit attribution off, skills' shell lines off, /code-review left to you, hooks on, the minimum version 2.1.316. Its test checks every value and its type, because the client was seen to skip a whole settings file over one value of the wrong type.
+- Tests: 1 new test file (settings) and 1 new plant file.
 
 ### Changed (step 4b)
 

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "model": "claude-opus-5-5",
+  "availableModels": ["claude-opus-5-5"],
+  "enforceAvailableModels": true,
+  "effortLevel": "xhigh",
+  "attribution": {
+    "commit": "",
+    "pr": "",
+    "sessionUrl": false
+  },
+  "autoMemoryEnabled": false,
+  "disableSkillShellExecution": true,
+  "skillOverrides": {
+    "code-review": "user-invocable-only"
+  },
+  "disableAllHooks": false,
+  "minimumVersion": "2.1.316",
+  "env": {
+    "CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "1",
+    "CLAUDE_CODE_USE_POWERSHELL_TOOL": "0"
+  }
+}

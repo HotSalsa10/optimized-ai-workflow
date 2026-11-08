@@ -81,7 +81,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M073 | Few hooks, each documented with what it prevents, what it costs and how it was seen to fire | incident | method/.claude/hooks/method/README.md | step 5 |
 | M074 | Keep every hedge and every number exactly, with currency, sign and period | research: writing test | method/.claude/rules/method/owner.md | step 6 |
 | M075 | Never use /code-review, /goal or the advisor as a gate (the settings fragment's skillOverrides keeps /code-review to the owner; this rule's home stays method.md) | research: Claude Code internals | method/.claude/rules/method/method.md | step 6 |
-| M076 | The server-side advisor is off | research: advisor docs; decision A5 | method/settings.fragment.json | step 5 |
+| M076 | The server-side advisor is off | research: advisor docs; decision A5 | method/settings.fragment.json @CLAUDE_CODE_DISABLE_ADVISOR_TOOL | done |
 | M077 | Never set CLAUDE_CODE_EFFORT_LEVEL | research: measured; decision A4 | method/scripts/method/status.sh | done |
 | M078 | A refusal or a missing verdict means "not checked" | research: model fallback docs | method/.claude/hooks/method/gate-receipt.sh | step 5b |
 | M079 | One repo per code-changing cloud session | research: cloud docs | method/.claude/rules/method/method.md | step 6 |
@@ -109,7 +109,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M101 | Each project has a REVIEW.md: what failure looks like, a nit cap, paths to skip, file-and-line evidence, a count-first summary | research: Claude Code team | templates/REVIEW.md | step 7 |
 | M102 | The reviewer flags changes that leave CLAUDE.md, AGENTS.md or the architecture document out of date | research: Claude Code team | method/.claude/agents/method/reviewer.md | step 6 |
 | M103 | A change to the reviewer is kept only if its score on past incidents rises; re-score on any prompt, tool or model change | research: Claude Code team | bench/README.md | R2 |
-| M104 | Auto memory is off in method projects; lessons go into the repo through /lesson | research: docs; decision A1 | method/settings.fragment.json | step 5 |
+| M104 | Auto memory is off in method projects; lessons go into the repo through /lesson | research: docs; decision A1 | method/settings.fragment.json @autoMemoryEnabled | done |
 | M105 | No Claude Code mods during method work | research: mods docs | method/.claude/rules/method/owner.md | step 6 |
 | M106 | An approval covers one exact version of the files; any change to them voids it | research: Claude Code team | method/.claude/hooks/method/gate-receipt.sh | step 5b |
 | M107 | An agent's approval never counts as a person's | research: Claude Code team | method/.claude/rules/method/method.md | step 6 |
@@ -143,5 +143,5 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M135 | Secrets, personal data and Claude attribution are stopped before they leave the machine: a push, gh text and MCP writes are scanned | incident | method/.claude/hooks/method/guard.sh | step 5 |
 | M136 | A settings change that switches off or weakens the hooks is refused mid-session | research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | step 5 |
 | M137 | A skill or agent that declares its own hooks is refused unless it is a method file | research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | step 5 |
-| M138 | Skills run no inline shell lines in method projects | research: measured, step 5 plan | method/settings.fragment.json | step 5 |
+| M138 | Skills run no inline shell lines in method projects | research: measured, step 5 plan | method/settings.fragment.json @disableSkillShellExecution | done |
 | M139 | Merge tools, and tools that start, message or schedule other sessions, are denied in settings, so the deny holds with hooks off | research: measured, step 5 plan | method/settings.fragment.json | step 5 |
