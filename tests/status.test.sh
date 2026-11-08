@@ -321,6 +321,10 @@ st "$vw"
 expect "a commit after the first verdict without one is a LOOK naming it and the reason" 1 \
   "verdicts: LOOK - 1 commits on refs/remotes/origin/main since " "lack a valid Review-Verdict line: $bad1; the oldest, \"No trailer here\": no line starts with Review-Verdict:" \
   "accept them by moving VERDICTS_FROM in .claude/method.conf through a reviewed change; never rewrite main"
+out=$(cd "$vw" && unset CLAUDE_CODE_EXECPATH CLAUDE_CODE_EFFORT_LEVEL CLAUDE_CODE_REMOTE GH_REPO && bash "$status" --quick 2>&1)
+code=$?
+expect "with --quick (session start) the oldest is named by its id, as its subject is free text that would reach Claude" 1 "lack a valid Review-Verdict line: $bad1; the oldest, $bad1: no line starts with Review-Verdict:"
+case "$out" in *"No trailer here"*) fail "with --quick no commit subject is shown" "$out" ;; *) pass "with --quick no commit subject is shown" ;; esac
 st "$vw" PERLIO=:crlf
 expect "PERLIO=:crlf from the caller adds no CR to what status reads back" 1 "\"No trailer here\": no line starts"
 printf 'VERDICTS_FROM=%s\n' "$(cd "$vw" && git rev-parse HEAD)" >"$vw/.claude-method.conf.tmp"

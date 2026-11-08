@@ -86,6 +86,9 @@ plant "a hook path not in quotes" "$frag" 'PreToolUse: BASH_ENV= ENV= bash $CLAU
 plant "a hook without the BASH_ENV= ENV= prefix" "$frag" 'PreToolUse: bash "$CLAUDE_PROJECT_DIR' '$d->{hooks}{PreToolUse} = [{matcher => "Bash", hooks => [{type => "command", command => q{bash "$CLAUDE_PROJECT_DIR/.claude/hooks/method/guard.sh"}, onFailure => "block"}]}]'
 plant "onFailure on SubagentStop" "$frag" "onFailure on SubagentStop" '$d->{hooks}{SubagentStop} = [{matcher => "reviewer", hooks => [{type => "command", command => $ENV{OK_HOOK}, onFailure => "block"}]}]'
 plant "onFailure on SessionStart" "$frag" "onFailure on SessionStart" '$d->{hooks}{SessionStart}[0]{hooks}[0]{onFailure} = "block"'
+plant "session-status with a 1 s time limit" "$frag" "its timeout is 1" '$d->{hooks}{SessionStart}[0]{hooks}[0]{timeout} = 1'
+plant "session-status with no time limit" "$frag" "its timeout is not set" 'delete $d->{hooks}{SessionStart}[0]{hooks}[0]{timeout}'
+plant "session-status's time limit written as a string (the client skips the file)" "$frag" 'its timeout is "30"' '$d->{hooks}{SessionStart}[0]{hooks}[0]{timeout} = "30"'
 plant "the guard without onFailure block" "$frag" 'no onFailure "block" on PreToolUse' '$d->{hooks}{PreToolUse} = [{matcher => "Bash", hooks => [{type => "command", command => $ENV{OK_HOOK}}]}]'
 plant "a stray .sh in the hooks folder" method/settings.fragment.json "also extra.sh" 'open my $x, ">", "method/.claude/hooks/method/extra.sh" or die'
 

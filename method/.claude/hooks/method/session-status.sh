@@ -8,8 +8,9 @@
 # with any other exit code does not reach Claude (measured).
 #
 # The first line, METHOD-ACTIVE, is printed here, before perl starts, so it
-# is there even when perl or the method's libraries are missing; a session
-# without it is a session where the method is off. The rest comes from
+# is there even when perl or the method's libraries are missing (with a
+# LOOK line saying so, also when perl fails); a session without it is a
+# session where the method is off. The rest comes from
 # lib/session.pl: status.sh --quick's LOOK lines and summary, and warnings
 # about settings that weaken the method.
 #
@@ -27,7 +28,7 @@ if [ "${METHOD_NESTED:-}" = 1 ]; then
   exit 0
 fi
 echo "METHOD-ACTIVE v$version"
-for name in $(env | sed -n 's/^\(PERL[A-Za-z0-9_]*\)=.*/\1/p'); do
+for name in $(env | LC_ALL=C sed -n 's/^\(PERL[A-Za-z0-9_]*\)=.*/\1/p'); do
   unset "$name"
 done
 if ! command perl -MJSON::PP -e 1 >/dev/null 2>&1; then
@@ -39,4 +40,10 @@ if [ ! -f "$lib/session.pl" ]; then
   exit 0
 fi
 command perl "$lib/session.pl" 2>/dev/null
+code=$?
+# a crash leaves METHOD-ACTIVE, and says so (session.pl prints only at its
+# end, so nothing of it came out)
+if [ "$code" -ne 0 ]; then
+  echo "session-status: LOOK - its perl part failed (exit $code), so status and the settings checks are missing; run bash scripts/method/status.sh"
+fi
 exit 0

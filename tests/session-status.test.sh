@@ -97,7 +97,9 @@ cat >"$p/.claude/settings.local.json" <<EOF
  "enabledPlugins":{"a@b":true,"c@d":false}}
 EOF
 hook "$p"
-has "local settings that weaken the method are named, key by key" ".claude/settings.local.json sets effortLevel; disableAllHooks; env MY_TOKEN; 1 PreToolUse or PermissionRequest hook that are not the method's; 1 enabled plugin (their hooks were not read)"
+# (the second hook is a copy of the method's own command: in local settings
+# it would replace the project's entry with its own fields, so it counts)
+has "local settings that weaken the method are named, key by key, a copy of the method's hook included" ".claude/settings.local.json sets effortLevel; disableAllHooks; env MY_TOKEN; 2 PreToolUse or PermissionRequest hooks (the method's are in the project's settings only); 1 enabled plugin (their hooks were not read)"
 lacks "a value from the settings is never printed, only names" "$key"
 printf '{"effortLevel":' >"$p/.claude/settings.local.json"
 hook "$p"
@@ -107,18 +109,56 @@ mkdir -p "$HOME/.claude"
 printf '{"maxEffortLevel":"high","disableSkillShellExecution":false}\n' >"$HOME/.claude/settings.json"
 hook "$p"
 # shellcheck disable=SC2088 # the ~ is the text the hook prints, not a path
-has "user settings that cap effort below xhigh or turn skill shell lines on are named" "~/.claude/settings.json sets disableSkillShellExecution; disableSkillShellExecution false; maxEffortLevel high, below xhigh"
+has "user settings that cap effort below xhigh are named; what the project's settings override is not" "~/.claude/settings.json adds to every session: maxEffortLevel high, below xhigh"
+lacks "user settings' skill shell setting is not named (the project's wins)" "disableSkillShellExecution"
+printf '{"modelSettings":{"claude-opus-5-5":{"maxEffortLevel":"low"}}}\n' >"$HOME/.claude/settings.json"
+hook "$p"
+# shellcheck disable=SC2088 # the ~ is the text the hook prints, not a path
+has "a per-model effort cap in user settings is named" "~/.claude/settings.json adds to every session: a maxEffortLevel below xhigh for 1 model (modelSettings)"
+printf '{"maxEffortLevel":"high"}\n' >"$p/.claude/settings.local.json"
+hook "$p"
+has "an effort cap in local settings is named too" ".claude/settings.local.json sets maxEffortLevel high, below xhigh; it ranks above the method's settings"
+rm -f "$p/.claude/settings.local.json"
+mkdir -p "$work/cfg"
+printf '{"env":{"CFG_ONLY":"1"}}\n' >"$work/cfg/settings.json"
+hook "$p" "" CLAUDE_CONFIG_DIR="$work/cfg"
+has "with CLAUDE_CONFIG_DIR set, the user settings there are read, as Claude Code reads them" "\$CLAUDE_CONFIG_DIR/settings.json adds to every session: env CFG_ONLY"
+# shellcheck disable=SC2088 # the ~ is the text the hook prints, not a path
+lacks "and ~/.claude/settings.json is not" "~/.claude/settings.json"
+if mkfifo "$p/.claude/settings.local.json" 2>/dev/null; then
+  start=$(perl -e 'print time')
+  hook "$p"
+  took=$(($(perl -e 'print time') - start))
+  if [ "$took" -le 10 ]; then has "a settings file that is a FIFO is a LOOK, and the hook does not wait on it (${took} s)" ".claude/settings.local.json is not a regular file"; else fail "a settings file that is a FIFO does not hold the hook" "took $took s"; fi
+  rm -f "$p/.claude/settings.local.json"
+else
+  skip "a settings file that is a FIFO: FIFOs cannot be made here"
+fi
+mkdir -p "$p/sub"
+printf '{"maxEffortLevel":"low"}\n' >"$p/.claude/settings.local.json"
+hook "$p" "$(printf '{"hook_event_name":"SessionStart","source":"compact","cwd":"%s/sub"}' "$p")"
+has "local settings are read from the project, also when the input's folder is a subfolder" ".claude/settings.local.json sets maxEffortLevel low, below xhigh"
+rm -f "$p/.claude/settings.local.json"
+hook "$p" "$(printf '{"hook_event_name":"SessionStart","source":"startup","cwd":"%s","model":"us.custom.arn:aws:bedrock:eu:123456789012:x"}' "$p")"
+has "a model id not in Anthropic's own shape is not shown, only that it differs" "this session runs a model, not claude-opus-5-5"
+lacks "and the id itself is not printed" "123456789012"
+hook "$p" "not json"
+has "input that cannot be read is a LOOK" "the hook's input could not be read (not valid JSON"
 rm -f "$HOME/.claude/settings.json"
 
 hook "$p" "" METHOD_NESTED=1
 if [ "$out" = "METHOD-ACTIVE vunreleased (nested: status skipped)" ] && [ "$code" -eq 0 ]; then pass "a nested run gets one line"; else fail "a nested run gets one line" "$out"; fi
 
-# a fake gh on PATH: the ci area must not run it
+# a fake gh on PATH: the ci area must not run it (origin on github.com, so
+# the ci area would call gh if it ran)
 mkdir -p "$work/bin"
 printf '#!/bin/sh\ntouch "%s/gh-ran"\nexit 1\n' "$work" >"$work/bin/gh"
 chmod +x "$work/bin/gh"
+real_origin=$(git -C "$p" remote get-url origin)
+git -C "$p" remote set-url origin https://github.com/example/example.git
 hook "$p" "" PATH="$work/bin:$PATH"
-if [ ! -e "$work/gh-ran" ]; then pass "the ci area is not run at session start (a gh on PATH is not called)"; else fail "the ci area is not run at session start (a gh on PATH is not called)"; fi
+git -C "$p" remote set-url origin "$real_origin"
+if [ ! -e "$work/gh-ran" ]; then pass "the ci area is not run at session start (a gh on PATH is not called, with origin on github.com)"; else fail "the ci area is not run at session start (a gh on PATH is not called)"; fi
 
 # many LOOK lines: the caps
 # long lines: a local settings file naming many long variables
@@ -130,7 +170,7 @@ lines=$(printf '%s\n' "$out" | wc -l | tr -d ' ')
 bytes=$(printf '%s\n' "$out" | wc -c | tr -d ' ')
 long_line=$(printf '%s\n' "$out" | awk 'length($0) > 240' | wc -l | tr -d ' ')
 if [ "$lines" -le 10 ] && [ "$bytes" -le 1200 ] && [ "$long_line" -eq 0 ]; then pass "the output keeps to 10 lines, 1,200 bytes and 240 bytes a line ($lines lines, $bytes bytes)"; else fail "the output keeps to 10 lines, 1,200 bytes and 240 bytes a line" "$lines lines, $bytes bytes, $long_line long: $out"; fi
-cut_line=$(printf '%s\n' "$out" | grep '^session-status: LOOK - ~/.claude/settings.json sets env Vxxx' || true)
+cut_line=$(printf '%s\n' "$out" | grep '^session-status: LOOK - ~/.claude/settings.json adds to every session: env Vxxx' || true)
 case "$cut_line" in
   *' ...') if [ "$(printf '%s' "$cut_line" | wc -c | tr -d ' ')" -le 240 ]; then pass "a line that is too long is cut to 240 bytes and marked, not dropped"; else fail "a line that is too long is cut to 240 bytes" "$cut_line"; fi ;;
   *) fail "a line that is too long is cut to 240 bytes and marked, not dropped" "$out" ;;
@@ -140,16 +180,24 @@ rm -f "$HOME/.claude/settings.json" "$p/.claude/settings.local.json"
 name=$(perl -e 'print "W" x 100')
 printf '{"env":{"%s_1":"1","%s_2":"1","%s_3":"1"}}\n' "$name" "$name" "$name" >"$p/.claude/settings.local.json"
 printf '{"env":{"%s_4":"1","%s_5":"1","%s_6":"1"}}\n' "$name" "$name" "$name" >"$HOME/.claude/settings.json"
-printf 'x\n' >"$p/dirty-$(perl -e 'print "d" x 120')"
-hook "$p" "$(printf '{"source":"startup","cwd":"%s","model":"%s"}' "$p" "$(perl -e 'print "m" x 180')")" CLAUDE_CODE_DISABLE_ADVISOR_TOOL=0 CLAUDE_CODE_DISABLE_AUTO_MEMORY=0 CLAUDE_CODE_EFFORT_LEVEL=low
+rm -f "$HOME/.claude/settings.json" "$p/.claude/settings.local.json"
+# (session.pl's own lines, through capped(): the hook's other lines can no
+# longer be made long enough, as a model id is shown only in its own shape)
+out=$(LIBDIR="$root/method/scripts/method/lib" perl -e 'require "$ENV{LIBDIR}/session.pl"; print "$_\n" for Session::capped(map { "line $_: " . ("b" x 200) } 1 .. 8)')
 lines=$(printf '%s\n' "$out" | wc -l | tr -d ' ')
 bytes=$(printf '%s\n' "$out" | wc -c | tr -d ' ')
 last=$(printf '%s\n' "$out" | tail -1)
 case "$last" in
-  "... "*" more: run bash scripts/method/status.sh") if [ "$bytes" -le 1200 ] && [ "$lines" -lt 10 ]; then pass "over 1,200 bytes in fewer than 10 lines, the byte cap ends the output and counts the rest ($lines lines, $bytes bytes)"; else fail "the byte cap ends the output" "$lines lines, $bytes bytes: $out"; fi ;;
-  *) fail "over 1,200 bytes in fewer than 10 lines, the byte cap ends the output and counts the rest" "$lines lines, $bytes bytes: $out" ;;
+  "... "*" more: run bash scripts/method/status.sh") if [ "$bytes" -le 1160 ] && [ "$lines" -lt 9 ]; then pass "over its 1,160 bytes in fewer than 9 lines, the byte cap ends session.pl's output and counts the rest ($lines lines, $bytes bytes)"; else fail "the byte cap ends the output" "$lines lines, $bytes bytes: $out"; fi ;;
+  *) fail "over its 1,160 bytes in fewer than 9 lines, the byte cap ends session.pl's output and counts the rest" "$lines lines, $bytes bytes: $out" ;;
 esac
-rm -f "$HOME/.claude/settings.json" "$p/.claude/settings.local.json" "$p"/dirty-*
+# another repository status reports on (REPOS), named with capitals and an
+# underscore, and not clean: its LOOK line is kept
+git init -q "$work/Site_B" && printf 'x\n' >"$work/Site_B/new.txt"
+printf 'REPOS=../Site_B\n' >"$p/.claude/method.conf"
+hook "$p"
+has "a LOOK line of another repository status reports on is kept, whatever its name's letters" "repo ../Site_B: LOOK"
+rm -rf "$p/.claude/method.conf" "$work/Site_B"
 # more lines than fit: the last line says how many more
 cat >"$p/.claude/settings.local.json" <<'EOF'
 {"model":"m","env":{"A":"1"}}
@@ -180,9 +228,16 @@ start=$(perl -e 'print time')
 hook "$p3"
 took=$(($(perl -e 'print time') - start))
 if [ "$took" -le 12 ]; then has "status that does not finish within 5 s is a LOOK, and the hook ends (in ${took} s)" "status did not finish within 5 s"; else fail "status that does not finish within 5 s ends the wait" "took $took s: $out"; fi
+cp "$p3/scripts/method/lib/status.pl" "$work/status.pl.keep"
+printf 'die "planted\\n";\n' >"$p3/scripts/method/lib/status.pl"
+mkdir -p "$p3/.claude" && printf '{"maxEffortLevel":"low"}\n' >"$p3/.claude/settings.local.json"
+hook "$p3"
+has "when status cannot be loaded, the settings checks still come, with a LOOK saying so" "status could not be loaded" ".claude/settings.local.json sets maxEffortLevel low"
+cp "$work/status.pl.keep" "$p3/scripts/method/lib/status.pl"
+rm -f "$p3/.claude/settings.local.json"
 printf 'die "planted\\n";\n' >"$p3/scripts/method/lib/session.pl"
 hook "$p3"
-if [ "$code" -eq 0 ] && [ "$out" = "METHOD-ACTIVE vunreleased" ]; then pass "a session.pl that crashes still leaves METHOD-ACTIVE, and the hook exits 0"; else fail "a session.pl that crashes still leaves METHOD-ACTIVE, and the hook exits 0" "exit $code: $out"; fi
+if [ "$code" -eq 0 ] && [ "$out" = "$(printf 'METHOD-ACTIVE vunreleased\nsession-status: LOOK - its perl part failed (exit 255), so status and the settings checks are missing; run bash scripts/method/status.sh')" ]; then pass "a session.pl that crashes still leaves METHOD-ACTIVE and says it failed, and the hook exits 0"; else fail "a session.pl that crashes still leaves METHOD-ACTIVE and says it failed" "exit $code: $out"; fi
 rm -f "$p3/scripts/method/lib/session.pl"
 hook "$p3"
 has "missing scripts still leave METHOD-ACTIVE and say so" "METHOD-ACTIVE vunreleased" "the method's scripts are missing"

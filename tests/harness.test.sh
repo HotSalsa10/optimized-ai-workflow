@@ -353,10 +353,14 @@ if h_fake "$H_WORK/ss.json"; then
   sid=$(h_init session_id)
   if h_req_has 'METHOD-ACTIVE vunreleased' && { h_req_has 'status: nothing needs a look' || h_req_has ' areas need a look ('; }; then pass "session-status: METHOD-ACTIVE and status's summary reach the first request"; else fail "session-status: METHOD-ACTIVE and status's summary reach the first request" "$(LC_ALL=C grep -h -o 'METHOD-ACTIVE[^"]*' "$H_DIR"/fake/req-*.json | head -3)"; fi
   rm -f "$H_DIR"/fake/req-*.json
+  # the resumed request also holds the first session's text, and the client
+  # does not add output identical to what it already has: so the tree is
+  # changed first, and the resume's own tag and new line are required
+  printf 'x\n' >"$H_PROJ/changed-before-resume.txt"
   # shellcheck disable=SC2086
   H_PROMPT=again h_client 60 -- $D --resume "$sid"
   h_stop
-  if h_req_has 'METHOD-ACTIVE vunreleased'; then pass "session-status: a resumed session gets METHOD-ACTIVE again"; else fail "session-status: a resumed session gets METHOD-ACTIVE again"; fi
+  if h_req_has 'SessionStart:resume hook success: METHOD-ACTIVE vunreleased' && h_req_has 'work: LOOK - 1 uncommitted'; then pass "session-status: a resumed session gets METHOD-ACTIVE and its own status again"; else fail "session-status: a resumed session gets METHOD-ACTIVE and its own status again" "$(LC_ALL=C grep -h -o 'SessionStart:[a-z]* hook success: [^"]\{0,80\}' "$H_DIR"/fake/req-*.json | sort -u | head -4)"; fi
   h_safe session-status
 else
   fail "session-status: the fake did not answer; the client was not started"

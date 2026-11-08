@@ -11,6 +11,7 @@ use File::Spec;
 use IPC::Open2 ();
 use POSIX ();
 use Time::HiRes ();
+our $QUICK = 0;    # status.sh --quick (set in main)
 
 my $lib = dirname(File::Spec->rel2abs(__FILE__));
 require File::Spec->catfile($lib, $_) for qw(git.pl esc.pl conf.pl verdicts.pl checks.pl runstate.pl);
@@ -100,6 +101,7 @@ sub run_limited {
     if (Time::HiRes::time() > $until) { kill 'KILL', -$pid or kill 'KILL', $pid; waitpid $pid, 0; last }
     Time::HiRes::sleep(0.05);
   }
+  kill 'KILL', -$pid;    # a child that ignored TERM, left in the group
   return;
 }
 
@@ -294,7 +296,7 @@ sub verdicts_lines {
     my $old = $bad[-1];
     my @show = map { short($_) } @bad[0 .. ($#bad < 4 ? $#bad : 4)];
     return ['verdicts', 'LOOK', scalar(@bad) . " commits on $ref $since lack a valid $key line: @show"
-      . (@bad > 5 ? ' ...' : '') . '; the oldest, "' . subject(Git::message($old)) . '": '
+      . (@bad > 5 ? ' ...' : '') . '; the oldest, ' . ($QUICK ? short($old) : '"' . subject(Git::message($old)) . '"') . ': '
       . Verdicts::trailer_problem(Git::message($old))
       . '; accept them by moving VERDICTS_FROM in .claude/method.conf through a reviewed change; never rewrite main'
       . $shallow];
@@ -476,8 +478,10 @@ sub main {
   binmode STDERR, ':raw';
   $| = 1;
   my $quick = 0;
+  $QUICK = 0;
   if (@ARGV == 1 && $ARGV[0] eq '--quick') {
     $quick = 1;
+    $QUICK = 1;    # (session start: no commit subject, which is free text)
   } elsif (@ARGV) {
     print "status: usage: status.sh [--quick]\n";
     exit 2;
