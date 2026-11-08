@@ -11,7 +11,8 @@
 # exits 2 sends the agent back to work, so 2 must never mean "block" by
 # accident. perl can also exit 3 on its own (a die after a failed kill, or
 # after a child that exited 3), so an END block turns any exit 3 that
-# Hook::block did not ask for into 70, a crash.
+# Hook::block did not ask for into 70, a crash; and an exit 0 after
+# Hook::block into 3, so a refusal whose code was dropped still refuses.
 #
 # The sh wrapper (step 5.4) must start perl without the variables that
 # change what perl runs or reads (every PERL* variable, among them
@@ -28,22 +29,28 @@
 #     taken from the input cannot split a line, move the cursor or reach a
 #     terminal as a control code, even after a JSON reader decodes it again.
 #     The words a Stop-type hook's stderr must not hold are broken up
-#     wherever they stand ("No such file" as "No-such file", "can't open" as
-#     "can-t open"): Claude Code 2.1.319 treats an exit 2 from such a hook
-#     as not blocking when its stderr matches /no such file|can't open/i.
-#   Hook::block(TEXT) prints TEXT as one clean line on stderr (the reason
-#     Claude Code shows) and returns $Hook::BLOCK.
+#     wherever they stand ("No such file" as "No- such file", "can't open"
+#     as "can-t open"): Claude Code 2.1.319 treats an exit 2 from such a
+#     hook as not blocking when its stderr matches /no such file|can't open/i.
+#   Hook::block(TEXT...) prints its texts, joined by a space, as one clean
+#     line on stderr (the reason Claude Code shows) and returns
+#     $Hook::BLOCK.
 #   A hook answers on stdout once per run, with one of these (a second one
 #     dies, as two JSON objects would be read as neither):
 #   Hook::warning(TEXT...) prints {"systemMessage": TEXT} (shown to the
 #     owner), several texts joined by "; ", and returns 0.
-#   Hook::context(LINE...) prints each LINE, clean, as plain text (added to
-#     Claude's context on exit 0) and returns 0. A first line that opens
-#     with "{" has it written as \x7B, so it is never read as the hook's
-#     JSON answer.
+#   Hook::context(LINE...) prints each LINE, clean, as plain text and
+#     returns 0. Claude Code adds plain stdout to Claude's context on exit 0
+#     for SessionStart, UserPromptSubmit, UserPromptExpansion and
+#     PostModelSwitch only; SubagentStart takes it through Hook::json, as
+#     hookSpecificOutput's additionalContext. Claude Code trims the whole
+#     output (JavaScript's trim) and reads it as the hook's JSON answer when
+#     it then opens with "{", so that first "{" is written as \x7B, also
+#     after blank lines.
 #   Hook::json(HASH) prints HASH as JSON (a hook's decision object) and
 #     returns 0. Its keys and strings are cleaned first; its numbers and
-#     JSON true and false keep their type.
+#     JSON true and false keep their type (a number perl has ever used as
+#     text, by printing or comparing it with eq, is a string: pass 0+$n).
 package Hook;
 use strict;
 use warnings;
@@ -51,17 +58,23 @@ use B ();
 use File::Basename qw(dirname);
 use File::Spec;
 
+# set before the helpers load, so the END block has them when a load fails
+our ($BLOCK, $BLOCKED);
+BEGIN { $BLOCK = 3; $BLOCKED = 0 }    # $BLOCKED: Hook::block was called in this run
+
 my $here = dirname(File::Spec->rel2abs(__FILE__));
 require File::Spec->catfile($here, 'esc.pl') unless defined &Esc::line;
 require File::Spec->catfile($here, 'json.pl') unless defined &Json::decode;
 
-our $BLOCK = 3;
 our $MAX = 4 * 1024 * 1024;
-our $BLOCKED = 0;    # Hook::block was called in this run
 our $SAID = 0;       # an answer went to stdout in this run
 
-# an exit 3 that Hook::block did not ask for is a crash
-END { $? = 70 if $? == $BLOCK && !$BLOCKED }
+# an exit 3 that Hook::block did not ask for is a crash; an exit 0 after a
+# refusal still refuses
+END {
+  $? = 70 if $? == $BLOCK && !$BLOCKED;
+  $? = $BLOCK if $? == 0 && $BLOCKED;
+}
 
 sub read_input {
   my ($fh, $max) = @_;
@@ -102,7 +115,7 @@ sub bytes {
 sub block {
   $BLOCKED = 1;
   binmode STDERR, ':raw';
-  print STDERR bytes(clean($_[0])), "\n";
+  print STDERR bytes(clean(join ' ', map { defined $_ ? $_ : '' } @_)), "\n";
   return $BLOCK;
 }
 
@@ -118,8 +131,11 @@ sub warning {
 sub context {
   say_once();
   my @l = map { clean($_) } @_;
-  $l[0] =~ s/\A(\s*)\{/$1\\x7B/ if @l;
-  print STDOUT bytes($_), "\n" for @l;
+  return 0 unless @l;
+  my $out = join "\n", @l;
+  # JavaScript's trim: white space (Unicode's Zs among it) and line ends
+  $out =~ s/\A([\t\n\r \x{A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}\x{FEFF}]*)\{/$1\\x7B/;
+  print STDOUT bytes($out), "\n";
   return 0;
 }
 

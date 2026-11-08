@@ -17,7 +17,11 @@
 #   Log::lines(ROOT, NAME) gives ([TIME, RULE, TOOL, HASH]...) for the
 #     well-formed lines among the newest 4 times CAP, oldest first, and the
 #     number of other lines (an older part, not read, counts as one); an
-#     absent log gives none.
+#     absent log gives none. It writes nothing and takes no lock: a log
+#     replaced by a trim while it is opened is opened again. It dies with a
+#     reason, as append does, on a name or a folder append would refuse, and
+#     on a log that is a link or has a second name, so its caller wraps it
+#     in eval.
 #
 # Safety:
 # - NAME is a relative path whose parts are letters, digits and . _ -
@@ -29,9 +33,12 @@
 #   would let a write reach a file elsewhere. They are opened without
 #   following a link where the system allows, and the opened file must be
 #   the one that was checked.
+# - Files are opened without waiting (O_NONBLOCK), so a FIFO put in a
+#   file's place is refused at once instead of holding the lock.
 # - The trimmed log is written to a new temporary file (made with O_EXCL,
-#   after any old file of that name is removed) and renamed over the log; it
-#   is removed again when the write fails, as on a full disk.
+#   after any old file of that name is removed; another name is tried when
+#   one cannot be removed) and renamed over the log; it is removed again
+#   when the write fails, as on a full disk.
 # - Only the end of a large log is read (the newest CAP lines take at most
 #   CAP times 512 bytes), so a huge or sparse file cannot fill the memory.
 # Known limit: a process that swaps a folder for a link between the checks
@@ -45,6 +52,7 @@ use File::Spec;
 use Time::HiRes ();
 
 my $NOFOLLOW = eval { Fcntl::O_NOFOLLOW() } || 0;
+my $NONBLOCK = eval { Fcntl::O_NONBLOCK() } || 0;
 our $CAP = 1000;
 our $WAIT = 5;    # seconds to wait for the lock
 our $LINE_MAX = 512;    # the longest line a log keeps, in bytes
@@ -56,9 +64,12 @@ my %SHAPE = (
 );
 my @FIELDS = qw(rule tool hash);
 
-# the log's full path, after checking (and making) each folder below ROOT
+# the log's full path, after checking (and making, unless READ) each folder
+# below ROOT; with READ, undef when a folder is missing
 sub place {
-  my ($root, $name) = @_;
+  my ($root, $name, $read) = @_;
+  # a trailing / or /. would make -l follow the link it checks for
+  $root =~ s{(?:/+\.?)+\z}{} if defined $root && $root =~ m{[^/]};
   die "log: the folder $root is missing or a link\n" unless defined $root && -d $root && !-l $root;
   my @parts = defined $name ? split(m{/}, $name, -1) : ();
   die "log: the log name must be a relative path of letters, digits and . _ -\n"
@@ -68,9 +79,10 @@ sub place {
   for my $p (@parts) {
     $dir = File::Spec->catdir($dir, $p);
     if (!-e $dir && !-l $dir) {
+      return undef if $read;
       mkdir $dir or do { my $e = $!; -d $dir or die "log: cannot make $dir ($e)\n" };
     }
-    die "log: $dir is a link; the log is not written through it\n" if -l $dir;
+    die "log: $dir is a link; the log is not used through it\n" if -l $dir;
     die "log: $dir is not a folder\n" unless -d $dir;
   }
   return File::Spec->catfile($dir, $file);
@@ -81,12 +93,15 @@ sub place {
 sub open_plain {
   my ($path, $flags) = @_;
   die "log: $path is a link or not a regular file\n" if -l $path || (-e $path && !-f $path);
-  sysopen my $fh, $path, $flags | $NOFOLLOW, 0644 or die "log: cannot open $path ($!)\n";
+  sysopen my $fh, $path, $flags | $NOFOLLOW | $NONBLOCK, 0644 or die "log: cannot open $path ($!)\n";
   my @fs = stat $fh;
   my @ps = lstat $path;
   die "log: $path is not a regular file\n" unless -f $fh;
-  die "log: $path has another name (a hard link); the log is not written through it\n" if $fs[3] != 1;
+  # replaced (a trim renamed a new log over it) since it was opened: the
+  # name now holds another file (the opened one, kept open, keeps its inode
+  # number, so no new file can have it)
   die "log: $path changed while it was opened\n" unless @ps && $ps[0] == $fs[0] && $ps[1] == $fs[1];
+  die "log: $path has another name (a hard link); the log is not used through it\n" if $fs[3] != 1;
   return $fh;
 }
 
@@ -127,7 +142,14 @@ sub append {
 # dropped); and whether there were more
 sub tail {
   my ($path, $cap) = @_;
-  my $fh = open_plain($path, O_RDONLY);
+  my $fh;
+  # a reader takes no lock: a trim may replace the log as it opens it
+  for my $try (1 .. 5) {
+    $fh = eval { open_plain($path, O_RDONLY) };
+    last if $fh;
+    die $@ unless $@ =~ /changed while it was opened/ && $try < 5;
+    Time::HiRes::sleep(0.01 * $try);
+  }
   binmode $fh;
   my $size = -s $fh;
   my $want = $cap * $LINE_MAX;
@@ -152,9 +174,13 @@ sub trim {
   my ($path, $cap) = @_;
   my ($lines, $more) = tail($path, $cap);
   return unless $more;
-  my $tmp = "$path.tmp.$$";
-  unlink $tmp if -e $tmp || -l $tmp;
-  sysopen my $out, $tmp, O_WRONLY | O_CREAT | O_EXCL | $NOFOLLOW, 0644 or die "log: cannot make $tmp ($!)\n";
+  my ($out, $tmp);
+  for my $n ('', 1 .. 9) {
+    $tmp = "$path.tmp.$$" . ($n eq '' ? '' : ".$n");
+    unlink $tmp if -e $tmp || -l $tmp;
+    last if sysopen $out, $tmp, O_WRONLY | O_CREAT | O_EXCL | $NOFOLLOW | $NONBLOCK, 0644;
+    die "log: cannot make $tmp ($!)\n" unless $!{EEXIST} && $n ne '9';
+  }
   binmode $out;
   my $ok = print {$out} @$lines;
   $ok = close($out) && $ok;
@@ -168,8 +194,8 @@ sub trim {
 
 sub lines {
   my ($root, $name) = @_;
-  my $path = File::Spec->catfile($root, split m{/}, $name);
-  return ([], 0) unless -e $path || -l $path;
+  my $path = place($root, $name, 1);
+  return ([], 0) unless defined $path && (-e $path || -l $path);
   my ($all, $more) = tail($path, $CAP * 4);
   my (@ok, $bad);
   $bad = $more ? 1 : 0;

@@ -42,13 +42,22 @@
 #     numbers, which the hooks use, as loading Math::BigFloat costs more
 #     than a hook's time allows and a million of them fill the memory.
 #     Before JSON::PP reads them, the non-ASCII characters in strings are
-#     written as \uXXXX escapes, which mean the same and are read many
-#     times faster (JSON::PP's time on UTF-8 grows with the square of the
-#     length; 2 MB of Chinese text took 49 s).
+#     written as \uXXXX escapes, which JSON::PP reads many times faster
+#     (its time on UTF-8 grows with the square of the length; 2 MB of
+#     Chinese text took 49 s). Where that could change the meaning (after
+#     an odd run of backslashes, or anywhere the text holds an escaped
+#     surrogate) the text is read as it is, so the result and the reason
+#     are those JSON::PP gives on the text itself. In 'plain' mode, the
+#     reason for text that is not JSON comes from the escaped copy, with
+#     its character offset counted in the text itself, so a large invalid
+#     input is not read twice.
 #   Json::encode(DATA) gives compact JSON with sorted keys, in ASCII only
 #     (every other character as \uXXXX), as bytes: the method's one JSON
-#     writer. Its strings are characters, as Json::decode gives them, and
-#     it writes every number Json::decode gives.
+#     writer. Its strings are characters, as Json::decode gives them. It
+#     writes every number Json::decode gives, and dies on a number JSON
+#     cannot hold (infinite or not a number, as 'plain' mode reads 1e400)
+#     and on one with an exponent beyond 10000 either way (as "get"
+#     refuses), which would take minutes and gigabytes to write.
 #   A library caller cleans its own environment (PERL5OPT and the rest)
 #   before perl starts: only "get" starts perl again without them.
 package Json;
@@ -79,21 +88,50 @@ sub decode {
   # after an odd run of backslashes, where it would turn a bad escape into
   # a valid one: there the text is read as it is.
   my $data;
-  if ($chars =~ /[^\x00-\x7F]/ && $chars !~ /(?<!\\)(?:\\\\)*\\[^\x00-\x7F]/) {
+  # (an escaped high surrogate with no escaped low one right after it would
+  # pair with the first half of a character written as two escapes, where
+  # the text itself is not JSON)
+  my $plain = defined $mode && $mode eq 'plain';
+  if ($chars =~ /[^\x00-\x7F]/ && $chars !~ /(?<!\\)(?:\\\\)*\\[^\x00-\x7F]/ && $chars !~ /\\u[dD][89abAB][0-9a-fA-F]{2}(?!\\u[dD][c-fC-F][0-9a-fA-F]{2})/) {
     (my $ascii = $chars) =~ s/([^\x00-\x7F])/esc_char(ord $1)/ge;
     $data = eval { $r->decode($ascii) };
     return ($data, undef) if defined $data || !$@;
+    return (undef, reason(offset_back($@, $chars))) if $plain;
     # invalid: read the text as it is, for the error JSON::PP gives on it
   }
   $data = eval { $r->decode($text) };
-  if (!defined $data && $@) {
-    my $err = $@;
-    $err =~ s/,? \(before .*//s;    # it quotes the input, which may hold a secret
-    $err =~ s/ at \S+ line \d+\.?\n?\z//;
-    $err =~ s/[\x00-\x1F\x7F]/ /g;
-    return (undef, 'not valid JSON: ' . substr($err, 0, 200));
-  }
+  return (undef, reason($@)) if !defined $data && $@;
   return ($data, undef);
+}
+
+sub reason {
+  my ($err) = @_;
+  $err =~ s/,? \(before .*//s;    # it quotes the input, which may hold a secret
+  $err =~ s/ at \S+ line \d+\.?\n?\z//;
+  $err =~ s/[\x00-\x1F\x7F]/ /g;
+  return 'not valid JSON: ' . substr($err, 0, 200);
+}
+
+# ERR's character offset, counted in the escaped copy, counted again in
+# CHARS (each escape there stands for one character of CHARS)
+sub offset_back {
+  my ($err, $chars) = @_;
+  my ($n) = $err =~ /character offset ([0-9]+)/ or return $err;
+  my ($at, $i) = (0, 0);
+  while ($at < $n && $chars =~ /\G(?:([\x00-\x7F]+)|([^\x00-\x7F]))/gc) {
+    if (defined $1) {
+      my $take = length $1 < $n - $at ? length $1 : $n - $at;
+      $at += $take;
+      $i += $take;
+    } else {
+      my $w = ord($2) < 0x10000 ? 6 : 12;
+      last if $at + $w > $n;
+      $at += $w;
+      $i++;
+    }
+  }
+  $err =~ s/character offset [0-9]+/character offset $i/;
+  return $err;
 }
 
 sub esc_char {
@@ -105,7 +143,30 @@ sub esc_char {
 
 sub encode {
   require JSON::PP;
+  finite($_[0], 0);
   return JSON::PP->new->ascii->canonical->allow_nonref->allow_bignum->encode($_[0]);
+}
+
+# dies on a number in DATA that JSON cannot hold, or that is too long to
+# write; a string is never read as a number here
+sub finite {
+  my ($d, $depth) = @_;
+  die "Json::encode: nested too deep\n" if $depth > 512;
+  if (ref $d eq 'HASH') { finite($_, $depth + 1) for values %$d; return }
+  if (ref $d eq 'ARRAY') { finite($_, $depth + 1) for @$d; return }
+  if (ref $d eq 'Math::BigFloat' || ref $d eq 'Math::BigInt') {
+    die "Json::encode: a number that is not finite\n" if $d->is_nan || $d->is_inf;
+    my $e = ref $d eq 'Math::BigFloat' ? $d->exponent->babs : $d->copy->babs->length;
+    die "Json::encode: a number with an exponent beyond 10000\n" if $e > 10000;
+    return;
+  }
+  return if ref $d || !defined $d;
+  require B;
+  my $f = B::svref_2object(\$d)->FLAGS;
+  return unless $f & B::SVp_NOK() && !($f & B::SVp_POK());
+  # (infinite or not a number: times 0 is not 0; no 9**9**9, which -Mbigint
+  # would compute)
+  die "Json::encode: a number that is not finite\n" if $d * 0 != 0;
 }
 
 sub fail {

@@ -48,7 +48,7 @@ sub line {
   my ($bytes) = @_;
   my $s = '';
   # runs of such UTF-8 are decoded; any other byte is shown on its own
-  while ($bytes =~ /\G(?:((?:$UTF8_CHAR)+)|(.))/gs) {
+  while ($bytes =~ /\G(?:((?:$UTF8_CHAR){1,4096})|(.))/gs) {    # (a bounded run: older perls warn on a longer one)
     if (defined $1) {
       my $run = $1;
       utf8::decode($run);
