@@ -81,6 +81,11 @@ echo y||'
 reads "an open quote is said, not guessed" "echo 'open" '||the reader could not split it (an open single quote)
 echo||'
 
+# scopes (step 5.6): a subshell, a carrier that starts a new process and a
+# pipe each run apart, so a cd there moves only what runs there
+got=$(CMD='(cd /x && git a); git b; bash -c "cd /y; git c"; eval "cd /w"; git d; cd /z | cat; env git e' perl -e 'require "$ENV{LIBDIR}/shell.pl"; my %s; for my $c (Shell::commands($ENV{CMD})) { my $w = join " ", @{ $c->{words} }; $s{$w} = $c->{scope}; $s{"$w to_pipe"} = $c->{to_pipe} // 0 } my @ok = ($s{"cd /x"} eq $s{"git a"}, $s{"git a"} ne $s{"git b"}, $s{"cd /y"} eq $s{"git c"}, $s{"git c"} ne $s{"git b"}, $s{"cd /w"} eq $s{"git d"}, $s{"git d"} eq $s{"git b"}, $s{"cd /z to_pipe"} == 1, $s{"git e"} ne $s{"git b"}); print join(",", map { $_ ? 1 : 0 } @ok)')
+if [ "$got" = "1,1,1,1,1,1,1,1" ]; then pass "reader: a subshell, bash -c, a pipe and env each have a scope of their own; eval shares its parent's"; else fail "reader: scopes" "$got"; fi
+
 # --- the rules ---
 # judge NAME JSON WANT: runs guard.sh on JSON in the project; WANT is
 # "allow" or a rule ID (the refusal must start "guard RULE:" and exit 2)
@@ -145,6 +150,7 @@ for c in '{git,push,origin,main}' '/usr/bin/gi? push origin main' 'env -S "git p
 done
 judge "a test with [ is not a glob in the command word" "$(bash_call '[ -f .claude/hooks/method/guard.sh ] && git status')" allow
 judge "ANSI-C quoting is decoded for the whole call too, also where the reader stopped early" "$(bash_call "echo \"\$(echo \$'\\x67it' push origin main\"")" G0
+judge "git's dashed names (git-push) are watched like git: piped into a shell, refused" "$(bash_call "echo git-push origin main | sh")" G0
 # data piped into a program file or module is data
 for c in 'curl -s https://api.github.com/repos/o/r | python3 -m json.tool' 'git diff | python3 scripts/count_changes.py' 'gh pr view 42 --json files | node scripts/files.js'; do
   judge "data piped into a program file or module is let through: $c" "$(bash_call "$c")" allow

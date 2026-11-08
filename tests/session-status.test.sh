@@ -146,6 +146,12 @@ hook "$p" "not json"
 has "input that cannot be read is a LOOK" "the hook's input could not be read (not valid JSON"
 rm -f "$HOME/.claude/settings.json"
 
+mkdir -p "$p/.claude/method-local"
+printf '# the owner keeps work aside\nstash :: kept aside\n\nstash pop :: back\n' >"$p/.claude/method-local/git-shapes.txt"
+hook "$p"
+has "git shapes the owner added in .claude/method-local are counted (comments and blank lines are not)" "2 git shapes added in .claude/method-local/git-shapes.txt; the guard lets them through (G3)"
+rm -rf "$p/.claude/method-local"
+
 hook "$p" "" METHOD_NESTED=1
 if [ "$out" = "METHOD-ACTIVE vunreleased (nested: status skipped)" ] && [ "$code" -eq 0 ]; then pass "a nested run gets one line"; else fail "a nested run gets one line" "$out"; fi
 

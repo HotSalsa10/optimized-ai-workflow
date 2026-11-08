@@ -57,6 +57,8 @@ Nothing yet. Release 1 is being built.
 - Tests: 1 new test file (session-status) and new status and harness cases.
 - The guard's frame (step 5.5): before each command, edit and outside tool, the guard reads the call. It refuses what it cannot read when that could touch git, gh, claude, curl, wget or the method's files (G0), every call when perl is missing (G1), and every PowerShell call (G2), with one line saying why and what to do instead. Refusals are logged without the command's text, and status shows them. The hooks README says how to switch the guard off for a session when it is wrong.
 - Tests: 1 new test file (guard) and new harness, status and settings cases.
+- The git list (step 5.6): in this project's repository, Claude's git commands must match a short list of allowed shapes (reading, staging, committing, new branches, fetching, bringing main into a task branch); a push may go only to a task branch, never to main; nothing may point git at other settings or hooks; no commit while a mutate run is in progress (G3, G8). Your own project can add a shape in `.claude/method-local/git-shapes.txt`, and session-status counts them.
+- Tests: 1 new test file (git rules) and 1 new plant file.
 
 ### Changed (step 4b)
 

@@ -1,0 +1,121 @@
+# The method's git list (G3, M130; docs/plans/step5.md, section 6.2;
+# DECISIONS A50). The guard lets a git command aimed at this project's
+# repository through only when it matches a shape here, or in the project's
+# own .claude/method-local/git-shapes.txt (same form). A push is judged by
+# the guard itself, never by a shape, and so are git's global options:
+# -C, --no-pager, --no-optional-locks, and -c with core.quotepath,
+# color.*, user.name, user.email or commit.gpgsign. `git --version`,
+# `git <command> -h` and `git <command> --help` always pass.
+#
+# Each line: SHAPE :: REASON. After the subcommand's words, a shape lists:
+#   -x --long     a flag it allows; -x= --long= one that takes a value (the
+#                 next word, or -xVALUE, --long=VALUE); -x: one whose value
+#                 can only be attached (-uno); -x=TYPE checks the value
+#   +-x           an option that must be there
+#   -*            any other option, except those marked with ! (!-n,
+#                 !--output: a long one is also refused when abbreviated,
+#                 as git accepts a prefix of a long option)
+#   NAME          one word that is not an option; NAME? at most one
+#   ARG...        any number of words (paths, patterns, revisions)
+#   REMOTE        the name of a remote this repository has
+#   BRANCH        a local branch that exists; NEWBRANCH, a name that is
+#                 free and valid for a new branch
+#   COMMIT        one commit (no range)
+#   MAIN          <remote>/<main>: the main branch the method knows
+#   REFNAME       a branch or tag name alone (no :, *, + or folder)
+#   @clean        only when no tracked file has uncommitted changes
+#   @off-main     only when the current branch is not main
+# -q and --quiet are allowed on every shape; short flags may be combined
+# (-qb); words may come in any order; after "--" every word is an ARG.
+
+version :: prints git's version
+help ARG... :: prints help
+
+# Reading: these change nothing in the repository. An option that writes a
+# file (--output) or runs a program (-O, --upload-pack) is refused.
+status -* ARG... :: reads the working tree
+diff -* !--output ARG... :: reads changes
+log -* !--output ARG... :: reads history
+show -* !--output ARG... :: reads objects
+blame -* ARG... :: reads history
+grep -* !-O !--open-files-in-pager ARG... :: reads files
+ls-files -* ARG... :: lists files
+ls-tree -* ARG... :: lists a tree
+rev-parse -* ARG... :: names objects and folders
+rev-list -* !--output ARG... :: lists commits
+merge-base -* ARG... :: finds a common commit
+cat-file -* ARG... :: reads objects
+describe -* ARG... :: names a commit
+shortlog -* ARG... :: sums up history
+for-each-ref -* ARG... :: lists refs
+show-ref -* ARG... :: lists refs
+check-ignore -* ARG... :: reads ignore rules
+check-attr -* ARG... :: reads attributes
+check-ref-format -* ARG... :: checks a name
+ls-remote -* !--upload-pack !-u ARG... :: reads a remote's refs
+diff-tree -* !--output ARG... :: reads changes
+diff-index -* !--output ARG... :: reads changes
+diff-files -* !--output ARG... :: reads changes
+name-rev -* ARG... :: names a commit
+count-objects -* :: counts objects
+symbolic-ref -q --quiet --short NAME :: reads where a symbolic ref points (with one name nothing is changed)
+reflog -* -n= --date= --format= --pretty= :: reads the reflog
+reflog show -* ARG... :: reads the reflog
+stash list -* ARG... :: reads the stash list
+stash show -* ARG... :: reads a stash
+submodule status -* ARG... :: reads the submodules
+worktree list -* :: lists worktrees
+remote -v --verbose :: lists remotes
+remote get-url -* REMOTE :: reads a remote's address
+remote show -* REMOTE? :: reads a remote
+config +-l --show-origin --show-scope --name-only -z --null --includes --no-includes --global --local --system --worktree --file= -f= :: reads settings
+config +--list --show-origin --show-scope --name-only -z --null --includes --no-includes --global --local --system --worktree --file= -f= :: reads settings
+config +--get --show-origin --show-scope -z --null --includes --no-includes --global --local --system --worktree --file= -f= --type= --bool --int --bool-or-int --path --default= NAME NAME? :: reads a setting
+config +--get-all --show-origin --show-scope -z --null --includes --no-includes --global --local --system --worktree --file= -f= --type= --bool --int --bool-or-int --path --default= NAME NAME? :: reads a setting
+config +--get-regexp --show-origin --show-scope --name-only -z --null --includes --no-includes --global --local --system --worktree --file= -f= --type= --bool --int --bool-or-int --path NAME NAME? :: reads settings
+config --show-origin --show-scope -z --null --includes --no-includes --global --local --system --worktree --file= -f= --type= --bool --int --bool-or-int --path --default= NAME :: reads a setting (one name, no value)
+config get -* ARG... :: reads a setting (git 2.46 and later); "git config list" passes as a one-name read
+branch -a -r -v -vv --all --remotes --verbose --show-current --contains= --no-contains= --merged= --no-merged= --sort= --format= --points-at= --color= --no-color --column --no-column --abbrev= --no-abbrev -i --ignore-case :: lists branches
+branch +--list -a -r -v -vv --all --remotes --verbose --contains= --no-contains= --merged= --no-merged= --sort= --format= --points-at= --color= --no-color --column --no-column --abbrev= --no-abbrev -i --ignore-case ARG... :: lists branches (with --list nothing is created)
+branch +-l -a -r -v -vv --all --remotes --verbose --contains= --no-contains= --merged= --no-merged= --sort= --format= --points-at= --color= --no-color --column --no-column --abbrev= --no-abbrev -i --ignore-case ARG... :: lists branches (with -l nothing is created)
+tag :: lists tags
+tag +-l -n -n: --contains= --no-contains= --merged= --no-merged= --points-at= --sort= --format= --column --no-column -i --ignore-case ARG... :: lists tags (with -l nothing is created)
+tag +--list -n -n: --contains= --no-contains= --merged= --no-merged= --points-at= --sort= --format= --column --no-column -i --ignore-case ARG... :: lists tags (with --list nothing is created)
+
+# Starting a repository elsewhere: nothing in this one changes.
+archive -* !--remote !--exec ARG... :: packs files from a commit; the repository is unchanged
+init -* ARG... :: makes a new repository
+clone -* !--upload-pack !-u ARG... :: copies a repository into a new folder
+
+# The index and commits. Which paths may be changed is G6's (from 5.7).
+add -* ARG... :: stages files
+rm -* ARG... :: removes files and stages that
+mv -* ARG... :: moves files and stages that
+restore +--staged ARG... :: unstages files; the working tree is kept
+restore +-S ARG... :: unstages files; the working tree is kept
+commit -* -m= -F= -c= -C= -t= --author= --date= --fixup= --squash= --cleanup= --trailer= -u: -S: !-n !--no-verify ARG... :: makes a commit, with the commit hooks run
+reset --soft --mixed ARG... :: moves the branch back or unstages files; every change is kept
+
+# Branches.
+switch BRANCH @clean :: switches to a branch while no tracked file has uncommitted changes
+checkout BRANCH @clean :: switches to a branch while no tracked file has uncommitted changes
+switch +-c=NEWBRANCH --track -t --no-track COMMIT? :: makes a new branch and switches to it
+switch +--create=NEWBRANCH --track -t --no-track COMMIT? :: makes a new branch and switches to it
+checkout +-b=NEWBRANCH --track -t --no-track COMMIT? :: makes a new branch and switches to it
+branch NEWBRANCH COMMIT? :: makes a branch; nothing is switched
+branch +-d BRANCH :: deletes a branch that is merged (git refuses otherwise)
+branch +--delete BRANCH :: deletes a branch that is merged (git refuses otherwise)
+worktree add +-b=NEWBRANCH NAME :: makes a new branch in a new worktree, from HEAD
+
+# Bringing in work.
+fetch --prune -p --tags -t REMOTE? :: fetches the remote's branches by its own settings: no refspec, not from a folder
+fetch --prune -p --tags -t REMOTE REFNAME... :: fetches named branches of a remote into its own remote-tracking refs: no refspec, so nothing else moves (K4)
+merge --no-edit --ff-only MAIN @off-main :: brings the remote's main into a task branch
+merge +--abort :: stops a merge and puts back what was there before it
+merge +--continue :: finishes a merge once its conflicts are resolved
+cherry-pick -x COMMIT :: copies one commit onto this branch
+cherry-pick +--abort :: stops a cherry-pick
+cherry-pick +--continue :: finishes a cherry-pick
+revert --no-edit COMMIT :: undoes one commit with a new one
+revert +--abort :: stops a revert
+revert +--continue :: finishes a revert

@@ -15,8 +15,10 @@
 #   variable, a PreToolUse or PermissionRequest hook (the method's are in
 #   the project's settings only), an enabled plugin, an effort cap below
 #   xhigh (also per model); a settings file that is not a regular file, is
-#   over 4 MB or is not JSON. Names only, never a settings value: a model
-#   id only in the shape Anthropic's ids have, the effort level by name.
+#   over 4 MB or is not JSON; git shapes added in
+#   .claude/method-local/git-shapes.txt (step 5.6), counted. Names only,
+#   never a settings value: a model id only in the shape Anthropic's ids
+#   have, the effort level by name.
 # Over the caps, the last line says how many more and to run status.sh.
 # Every line is one clean line (Hook::clean); anything that goes wrong
 # becomes a LOOK line, never a crash that hides the rest.
@@ -153,6 +155,12 @@ sub warnings_for {
     my @what = weakens($s, $user);
     next unless @what;
     push @w, look($user ? "$name adds to every session: " . join('; ', @what) : "$name sets " . join('; ', @what) . "; it ranks above the method's settings");
+  }
+  # the project's own git shapes: the guard lets each through (G3)
+  if (open my $g, '<', File::Spec->catfile($top, '.claude', 'method-local', 'git-shapes.txt')) {
+    my $n = grep { /\S/ && !/\A\s*#/ } <$g>;
+    close $g;
+    push @w, look("$n git shape" . ($n == 1 ? '' : 's') . " added in .claude/method-local/git-shapes.txt; the guard lets them through (G3)") if $n;
   }
   return @w;
 }

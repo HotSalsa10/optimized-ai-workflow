@@ -23,6 +23,12 @@
 #     bg       1 when it runs in the background (&)
 #     via      the carriers it was found inside ("bash -c", "eval",
 #              "xargs", "find -exec", "env", ...), outermost first
+#     scope    which shell it runs in, as a path ("t", "t/s2", "t/c5"):
+#              a subshell ( ) or a carrier that starts a new process
+#              (bash -c, env, xargs, find -exec, nohup ...) gets a scope
+#              of its own below its parent's, so a cd there changes only
+#              the commands in that scope (eval, trap, builtin, command and time run in their parent's)
+#     to_pipe  1 when its output goes into a pipe (it runs in a subshell)
 #     unread   the reasons it cannot be read with confidence (the "cannot
 #              read" list): command substitution or backticks; a variable,
 #              arithmetic or a process substitution where a word is built;
@@ -350,16 +356,21 @@ sub tokens {
   return @t;
 }
 
-# the simple commands of S; DEPTH guards against endless nesting
+my $SEQ = 0;    # numbers the scopes
+
+# the simple commands of S; DEPTH guards against endless nesting; SCOPE is
+# the shell they run in
 sub commands {
-  my ($s, $via, $depth) = @_;
+  my ($s, $via, $depth, $scope) = @_;
   $via ||= [];
   $depth ||= 0;
-  return ({ words => [], assigns => [], redirs => [], via => $via, unread => ['commands nested too deep'] }) if $depth > 8;
+  $scope = 't' unless defined $scope;
+  return ({ words => [], assigns => [], redirs => [], via => $via, scope => $scope, unread => ['commands nested too deep'] }) if $depth > 8;
   my @t = tokens($s);
   my @cmds;
   my $cur;
-  my $new = sub { $cur = { words => [], wflags => [], raw => [], hbody => '', assigns => [], redirs => [], piped => 0, heredoc => 0, bg => 0, via => [@$via], unread => [] } };
+  my @scopes = ($scope);
+  my $new = sub { $cur = { words => [], wflags => [], raw => [], hbody => '', assigns => [], redirs => [], piped => 0, heredoc => 0, bg => 0, via => [@$via], scope => $scopes[-1], unread => [] } };
   $new->();
   my $pending_redir;
   my $prev_op = '';
@@ -369,11 +380,12 @@ sub commands {
   my @errors;
   my $finish = sub {
     my ($op) = @_;
+    my $piped = ($op eq '|' || $op eq '|&') ? 1 : 0;
     if (@{ $cur->{words} } || @{ $cur->{assigns} } || @{ $cur->{redirs} }) {
       $cur->{bg} = 1 if $op eq '&';
+      $cur->{to_pipe} = 1 if $piped;
       push @cmds, $cur;
     }
-    my $piped = ($op eq '|' || $op eq '|&') ? 1 : 0;
     # what feeds a command's input: every earlier stage of its pipeline
     my $from = $piped ? join(' ', grep { $_ ne '' } $cur->{pipe_from} // '', @{ $cur->{assigns_raw} || [] }, @{ $cur->{raw} }, $cur->{hbody}) : '';
     $new->();
@@ -393,6 +405,8 @@ sub commands {
         next;
       }
       $finish->($tok->{op});
+      if ($tok->{op} eq '(') { push @scopes, "$scopes[-1]/s" . ++$SEQ; $cur->{scope} = $scopes[-1] }
+      elsif ($tok->{op} eq ')' && @scopes > 1) { pop @scopes; $cur->{scope} = $scopes[-1] }
       $prev_op = $tok->{op};
       next;
     }
@@ -476,8 +490,11 @@ sub expand {
   my $sub = sub {
     my ($start, $carrier) = @_;
     return if $start > $#words;
+    # builtin, command and time run what follows in this same shell (a cd
+    # through them moves this shell); the other carriers start a process
+    my $same = $carrier eq 'builtin' || $carrier eq 'command' || $carrier eq 'time';
     my $inner = { %$c, words => [@words[$start .. $#words]], wflags => [@flags[$start .. $#flags]], raw => [@{ $c->{raw} }[$start .. $#{ $c->{raw} }]], assigns => [], redirs => [], unread => [],
-      via => [@{ $c->{via} }, $carrier], body_subst => 0 };
+      via => [@{ $c->{via} }, $carrier], body_subst => 0, scope => $same ? $c->{scope} : "$c->{scope}/c" . ++$SEQ };
     push @out, expand($inner, $depth + 1);
   };
   # a versioned interpreter (python3.12, perl5.38) is that interpreter
@@ -495,7 +512,7 @@ sub expand {
       my $script = $words[ $ci + 1 ];
       if (!defined $script) { push @{ $c->{unread} }, "$name -c with no command" }
       elsif ($flags[ $ci + 1 ]{subst} || $flags[ $ci + 1 ]{var}) { push @{ $c->{unread} }, "$name -c with an expansion" }
-      else { push @out, commands($script, [@{ $c->{via} }, "$name -c"], $depth + 1) }
+      else { push @out, commands($script, [@{ $c->{via} }, "$name -c"], $depth + 1, "$c->{scope}/c" . ++$SEQ) }
     } elsif (($c->{piped} || $c->{heredoc}) && !$runs_file) {
       push @{ $c->{unread} }, "a pipe, here-document or here-string into $name";
     }
@@ -513,12 +530,13 @@ sub expand {
   } elsif ($name eq 'trap' && @words > 1 && $words[1] !~ /\A-/) {
     # trap's first argument is code bash runs later
     if ($flags[1]{subst} || $flags[1]{var}) { push @{ $c->{unread} }, 'trap of anything but a literal' }
-    else { push @out, commands($words[1], [@{ $c->{via} }, 'trap'], $depth + 1) }
+    # (it runs later in this same shell, so in this command's scope)
+    else { push @out, commands($words[1], [@{ $c->{via} }, 'trap'], $depth + 1, $c->{scope}) }
   } elsif ($name eq 'coproc') {
     push @{ $c->{unread} }, 'a coprocess';
   } elsif ($name eq 'eval') {
     if (grep { $_->{subst} || $_->{var} } @flags[1 .. $#flags]) { push @{ $c->{unread} }, 'eval of anything but a literal' }
-    else { push @out, commands(join(' ', @words[1 .. $#words]), [@{ $c->{via} }, 'eval'], $depth + 1) }
+    else { push @out, commands(join(' ', @words[1 .. $#words]), [@{ $c->{via} }, 'eval'], $depth + 1, $c->{scope}) }
   } elsif ($name eq 'env') {
     my $i = 1;
     while ($i <= $#words) {
@@ -543,7 +561,7 @@ sub expand {
       $k++ while $k <= $#words && $words[$k] ne ';' && $words[$k] ne '+';
       if ($k > $j) {
         my $inner = { %$c, words => [@words[$j .. $k - 1]], wflags => [@flags[$j .. $k - 1]], raw => [@{ $c->{raw} }[$j .. $k - 1]], assigns => [], redirs => [], unread => [],
-          via => [@{ $c->{via} }, 'find -exec'], body_subst => 0 };
+          via => [@{ $c->{via} }, 'find -exec'], body_subst => 0, scope => "$c->{scope}/c" . ++$SEQ };
         push @out, expand($inner, $depth + 1);
       }
     }

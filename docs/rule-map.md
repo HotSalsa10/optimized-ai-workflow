@@ -135,10 +135,10 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M127 | Session start says how much finished work waits for the owner's merge approval (steps, commits, files) and makes that approval the one next thing, unless the owner says to keep building | incident: 117 commits waited unmerged | method/.claude/skills/start/SKILL.md | step 6 |
 | M128 | The guard refuses what it cannot check: a command it cannot read that names something it watches, input it cannot parse, or a missing perl | research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | done |
 | M129 | No PowerShell tool in method projects: the guard and the method's scripts read bash | research: docs | method/.claude/hooks/method/guard.sh | done |
-| M130 | Claude's git commands at the session's repository match a short list of allowed shapes; anything else is refused with what to do instead | research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | step 5 |
+| M130 | Claude's git commands at the session's repository match a short list of allowed shapes; anything else is refused with what to do instead | research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | done |
 | M131 | Claude never lands a change; gh, HTTP calls to GitHub, MCP tools and other Claude runs pass only from a list | incident; research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | step 5 |
 | M132 | Claude only reads the method's installed files, its settings and git's own config and hooks; it never writes them | research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | step 5 |
-| M133 | No commit while a mutation run or its journal exists | research: decision A41 | method/.claude/hooks/method/guard.sh | step 5 |
+| M133 | No commit while a mutation run or its journal exists | research: decision A41 | method/.claude/hooks/method/guard.sh | done |
 | M134 | Effort below xhigh is announced at a session's first tool call | research: decision A3 | method/.claude/hooks/method/guard.sh | step 5 |
 | M135 | Secrets, personal data and Claude attribution are stopped before they leave the machine: a push, gh text and MCP writes are scanned | incident | method/.claude/hooks/method/guard.sh | step 5 |
 | M136 | A settings change that switches off or weakens the hooks is refused mid-session | research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | step 5 |

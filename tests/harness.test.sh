@@ -502,6 +502,29 @@ if h_fake "$H_DIR/script.json"; then
 else
   fail "guard-noperl: the fake did not answer; the client was not started"
 fi
+# --- 13. the git list (step 5.6): a push to main is refused with its
+# reason, and a task branch's push runs ---
+h_case git-list
+h_method "$root"
+git init -q --bare "$H_DIR/origin.git"
+hg() { HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git -C "$H_PROJ" "$@"; }
+{ hg remote add origin "$H_DIR/origin.git" && hg push -q origin main && hg switch -q -c task; } || fail "git-list: the case's origin could not be made"
+main_before=$(git -C "$H_DIR/origin.git" rev-parse refs/heads/main)
+GIT_LIST_SCRIPT=$(perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({convs => [{name => "main", match => "^go\$", turns => [{tool => "Bash", input => {command => "git push origin HEAD:main", description => "a push to main"}}, {tool => "Bash", input => {command => "git push -q -u origin HEAD", description => "a push of the task branch"}}, {text => "MAIN-DONE"}]}]})')
+printf '%s\n' "$GIT_LIST_SCRIPT" >"$H_DIR/git-list.json"
+if h_fake "$H_DIR/git-list.json"; then
+  h_client 60 -- --permission-mode default --allowedTools Bash
+  h_stop
+  if h_tsv_has "guard G3: pushing to main is refused" && [ "$(git -C "$H_DIR/origin.git" rev-parse refs/heads/main)" = "$main_before" ] && git -C "$H_DIR/origin.git" rev-parse -q --verify refs/heads/task >/dev/null; then
+    pass "git list: a push to main is refused with its reason, and the task branch's push runs"
+  else
+    fail "git list: a push to main is refused with its reason, and the task branch's push runs" "$(cut -f7- "$H_DIR/fake/requests.tsv")"
+  fi
+  h_safe git-list
+else
+  fail "git-list: the fake did not answer; the client was not started"
+fi
+
 # the owner's way out (README, "When the guard blocks something it should not")
 for way in local flag; do
   h_case "way-out-$way"
