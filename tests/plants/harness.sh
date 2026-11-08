@@ -32,7 +32,8 @@ H_WORK=$(new_sandbox_dir) || abort_sandbox
 # shellcheck source=tests/harness/lib.sh
 . "$HARNESS/lib.sh"
 # the case folders, the fake's logs among them, go on any exit (a TERM too)
-trap 'h_stop; drop_sandbox "$H_WORK" || true' EXIT
+# (and the repo copy plant 12 makes, if a stop comes while it runs)
+trap 'h_stop; [ -z "${sb:-}" ] || [ ! -d "$sb" ] || drop_sandbox "$sb" || true; drop_sandbox "$H_WORK" || true' EXIT
 # shellcheck disable=SC2329 # called through expect_landed
 lacks_line() {
   ! grep -q -- "$1" "$2"
@@ -75,6 +76,37 @@ else
   fail "dead-port: the fake did not answer"
 fi
 
+# 2b. a second fake in the same case: a run that reaches nothing after one
+# that reached the first fake reads as reaching nothing (the second fake
+# starts with empty logs)
+h_case two-fakes
+printf '%s\n' "$two" >"$H_DIR/script.json"
+if h_fake "$H_DIR/script.json"; then
+  # shellcheck disable=SC2086
+  h_client 60 -- $D
+  if h_reached && h_fake "$H_DIR/script.json"; then
+    real_port=$H_PORT
+    H_PORT=$(perl -MIO::Socket::INET -e 'my $s = IO::Socket::INET->new(LocalAddr => "127.0.0.1", LocalPort => 0, Listen => 1) or die; print $s->sockport')
+    # shellcheck disable=SC2086
+    h_client 60 -- $D
+    H_PORT=$real_port
+    h_stop
+    if h_reached || h_tsv_has 'conv=main'; then fail "a second fake in one case: the reach check answered from the first fake's logs"; else pass "a second fake in one case starts with empty logs, so a run that reached nothing reads as such"; fi
+  else
+    h_stop
+    fail "two-fakes: the first run did not reach the fake, or the second fake did not answer"
+  fi
+else
+  fail "two-fakes: the fake did not answer"
+fi
+
+# 2c. settings that are not one JSON object fail the case (the client
+# would skip the file, and a "no hook ran" case would pass for that)
+h_case bad-settings
+out=$( (printf '{"model": "claude-opus-5-5",}\n' | h_settings) 2>&1)
+rc=$?
+if [ "$rc" -ne 0 ] && printf '%s\n' "$out" | grep -q "FAIL  h_settings: the case's settings are not one JSON object"; then pass "settings that are not one JSON object fail the case"; else fail "settings that are not one JSON object fail the case" "rc $rc: $out"; fi
+
 # 3. a request cap of 1: the cap check goes red
 h_case cap-one
 printf '%s\n' "$two" >"$H_DIR/script.json"
@@ -115,7 +147,7 @@ fi
 # 6. an extra variable that would replace one of the case's own settings,
 # or carry a key, is refused, and nothing runs
 h_case extras
-for extra in HOME=/elsewhere NODE_OPTIONS=--require=x DISABLE_AUTOUPDATER=0 GIT_CONFIG_GLOBAL=/x LD_PRELOAD=/x MY_TOKEN=x DB_PASSWORD=x; do
+for extra in HOME=/elsewhere NODE_OPTIONS=--require=x BUN_OPTIONS=--preload=x CLAUDE_CODE_TMPDIR=/x BASH_ENV=/x DISABLE_AUTOUPDATER=0 GIT_CONFIG_GLOBAL=/x LD_PRELOAD=/x MY_TOKEN=x DB_PASSWORD=x MY_KEY_FILE=x GITHUB_PAT=x; do
   rm -f "$H_DIR/out.jsonl"
   if h_client 5 "$extra" -- --version 2>"$H_DIR/refused.txt"; then fail "an extra $extra for the client was let through"
   elif [ "${H_RC:-}" = 2 ] && [ ! -e "$H_DIR/out.jsonl" ] && LC_ALL=C grep -q "refusing to pass ${extra%%=*}=" "$H_DIR/refused.txt"; then pass "an extra $extra for the client is refused by name, and the client is not started"

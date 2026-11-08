@@ -28,19 +28,31 @@
 #                        inside the case, no retries) and SendMessage
 #                        switched off (H_SEND_MESSAGE=1 keeps it, for a case
 #                        that addresses a stand-in inside the case);
-#                        VAR=VALUE adds to it, and may not replace HOME,
-#                        TMPDIR, a proxy, CLAUDE_CONFIG_DIR or ANTHROPIC_*
+#                        every run is given --strict-mcp-config, so a case
+#                        that wants an MCP server passes --mcp-config.
+#                        VAR=VALUE adds to it; a name that could replace
+#                        one of the case's own settings (HOME, TMPDIR, a
+#                        proxy, CLAUDE_CONFIG_DIR, ANTHROPIC_*, a program
+#                        the client or its shell loads) or carry a key
+#                        (KEY, TOKEN, SECRET, PASSWORD, CREDENTIAL anywhere
+#                        in the name) is refused
 #   h_stop               stops the fake
+# A case may start more than one fake: h_fake stops the one before and
+# empties the fake's logs, so every question below is about the fake that
+# ran last.
 # Questions about the case's results, each 0 (yes) or 1 (no), printing
-# nothing: h_reached, h_no_connect, h_no_overcap, h_tmp_clean, h_req_has
-# TEXT (any request), h_req_in CONV TEXT (the requests of the fake's
-# conversation CONV only, in what the client sent: system text and
-# non-assistant messages), h_tsv_has TEXT, h_ran FILE. h_safe NAME passes
-# or fails the four safety questions as one line. h_init FIELD prints a
-# field of the client's init event. req-001 is h_fake's own alive probe.
+# nothing: h_reached, h_no_connect, h_no_overcap, h_tmp_clean, h_tmp_used,
+# h_keys_ok, h_req_has TEXT (any request, in the JSON as sent, escapes
+# and all), h_req_in CONV TEXT (the requests of the fake's conversation
+# CONV only, in the decoded text the client sent: system text and
+# non-assistant messages), h_tsv_has TEXT (the fake's one-line summary of
+# each request, which holds the last message's results only), h_ran FILE.
+# h_safe NAME passes or fails the six safety questions (the first six) as
+# one line. h_init FIELD prints a field of the client's init event.
+# req-001 is h_fake's own alive probe.
 
 # settings a caller's environment must not carry into every case
-unset H_CWD H_PROMPT H_TMPDIR H_TMP_ROOT H_FAKE_API H_SEND_MESSAGE
+unset H_CWD H_PROMPT H_TMPDIR H_TMP_ROOT H_FAKE_API H_SEND_MESSAGE H_FAKE_PID H_PORT H_RUNS H_TOTAL_SECS
 
 h_case() {
   H_DIR="$H_WORK/it's a case ü/$1"
@@ -65,8 +77,14 @@ h_case() {
   ) || return 1
 }
 
+# (one JSON object, or the case fails: the client would skip a file it
+# cannot read, and a "no hook ran" case would pass for the wrong reason)
 h_settings() {
-  cat >"$H_PROJ/.claude/settings.json"
+  cat >"$H_PROJ/.claude/settings.json" || return 1
+  if ! perl -MJSON::PP -e 'local $/; my $d = eval { JSON::PP->new->decode(<STDIN>) }; exit(ref $d eq "HASH" ? 0 : 1)' <"$H_PROJ/.claude/settings.json"; then
+    fail "h_settings: the case's settings are not one JSON object"
+    return 1
+  fi
 }
 
 # h_method ROOT: lays the method out in the project as sync will (scripts/
@@ -89,7 +107,8 @@ h_fixtures() {
 }
 
 h_fake() {
-  rm -f "$H_DIR/fake/port"
+  h_stop
+  rm -rf "$H_DIR/fake" && mkdir -p "$H_DIR/fake" || return 1
   perl "${H_FAKE_API:-$HARNESS/fake-api.pl}" --script "$1" --log-dir "$H_DIR/fake" --port-file "$H_DIR/fake/port" \
     --max-requests "${2:-40}" --max-seconds 300 >"$H_DIR/fake/stdout" 2>&1 &
   H_FAKE_PID=$!
@@ -128,7 +147,8 @@ h_client() {
     # settings, or that can carry a key, is refused; PATH may be given)
     case "${1%%=*}=" in
       *OAUTH*= | *AUTH_TOKEN*= | *BEDROCK*= | *VERTEX*= | ANTHROPIC_*= | CLAUDE_CODE_USE_*= | HOME= | TMPDIR= | *_PROXY= | *_proxy= | CLAUDE_CONFIG_DIR= | CLAUDE_CODE_MAX_RETRIES= | \
-        DISABLE_AUTOUPDATER= | CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC= | GIT_CONFIG*= | LD_*= | DYLD_*= | NODE_OPTIONS= | XDG_*= | *TOKEN*= | *SECRET*= | *KEY= | *PASSWORD*=)
+        DISABLE_AUTOUPDATER= | CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC= | GIT_CONFIG*= | LD_*= | DYLD_*= | NODE_OPTIONS= | BUN_OPTIONS= | XDG_*= | \
+        CLAUDE_CODE_TMPDIR= | CLAUDE_ENV_FILE= | CLAUDE_CODE_SHELL_PREFIX= | BASH_ENV= | ENV= | *TOKEN*= | *SECRET*= | *KEY*= | *PASSWORD*= | *CREDENTIAL*= | *CREDS*= | *_PAT=)
         echo "harness: refusing to pass $1 to the client: only the dummy key, the case's own folders and the fake may reach it" >&2
         rm -f "$H_DIR/out.jsonl" "$H_DIR/err.txt"
         H_RC=2
@@ -141,6 +161,8 @@ h_client() {
   [ "${1:-}" = "--" ] && shift
   h_no_send=(--disallowedTools SendMessage)
   [ "${H_SEND_MESSAGE:-0}" = 1 ] && h_no_send=()
+  # (so h_tmp_used asks about this run, not an earlier one in the case)
+  [ -n "${H_TMPDIR:-}" ] || rm -rf "$H_DIR/tmp/claude-$(id -u)"
   start=$(perl -MTime::HiRes=time -e 'printf "%.3f", time')
   # (H_TMPDIR is for the plant that shows the /tmp check going red)
   perl "$HARNESS/bound.pl" "$secs" env -i \
@@ -227,7 +249,7 @@ h_safe() {
   h_tmp_used || why="$why the client did not use the case's TMPDIR;"
   h_keys_ok || why="$why a request carried a key or token other than the dummy one;"
   if [ -z "$why" ]; then
-    pass "$1: reached the fake, no outside connection, under the cap, no files outside the case"
+    pass "$1: reached the fake, no outside connection, under the cap, no files outside the case, the case's TMPDIR used, no key but the dummy one"
   else
     fail "$1: unsafe or empty run:$why" "client exit ${H_RC:-?}; $(tail -5 "$H_DIR/err.txt" 2>/dev/null)"
   fi

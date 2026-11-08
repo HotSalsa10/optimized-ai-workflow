@@ -60,7 +60,9 @@ else
 fi
 # Ctrl-C during a bounded run (INT to the shell's whole process group, as a
 # terminal sends it) stops the shell too, not just the run
-sig=$(perl -e 'my $pid = fork; if (!$pid) { setpgrp(0, 0); exec "bash", "-c", q{perl "$0" 60 sleep 30; echo HARNESS-WENT-ON}, $ARGV[0] } sleep 1; kill "INT", -$pid; waitpid $pid, 0; print $? & 127' "$HARNESS/bound.pl")
+# (the child takes INT's default action even when the harness was started
+# as a background job, which ignores INT)
+sig=$(perl -e 'my $pid = fork; if (!$pid) { $SIG{INT} = "DEFAULT"; setpgrp(0, 0); exec "bash", "-c", q{perl "$0" 60 sleep 30; echo HARNESS-WENT-ON}, $ARGV[0] } sleep 1; kill "INT", -$pid; waitpid $pid, 0; print $? & 127' "$HARNESS/bound.pl")
 if [ "$sig" = 2 ]; then pass "Ctrl-C during a bounded run stops the harness shell too (bound.pl dies by the same signal)"; else fail "Ctrl-C during a bounded run stops the harness shell too" "the shell ended by signal '$sig'"; fi
 
 # --- 1. startup: version, tools, SessionStart context, a PreToolUse refusal ---
