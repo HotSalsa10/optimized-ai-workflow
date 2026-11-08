@@ -13,7 +13,10 @@
 #     raw      the same words as written, before quote removal
 #     hbody    the text of its here-documents and here-strings
 #     pipe_from the text of the command that feeds its input, when piped
-#     assigns  the leading NAME=VALUE assignments, as written
+#     assigns  the leading NAME=VALUE assignments (after quote removal);
+#              assigns_raw the same as written
+#     header   a for or select header's words as written (on its "for"
+#              command, kept when they cannot be read)
 #     redirs   [OP, TARGET] for each redirection (TARGET after quote removal)
 #     piped    1 when the command's input comes from a pipe
 #     heredoc  1 when it reads a here-document or here-string
@@ -43,19 +46,48 @@ our @INTERP = qw(sh bash zsh dash ksh mksh fish csh tcsh perl python python2 pyt
 my %INTERP = map { $_ => 1 } @INTERP;
 my %SHELL = map { $_ => 1 } qw(sh bash zsh dash ksh mksh);
 my %KEYWORD = map { $_ => 1 } qw(if then elif else fi while until do done for in select function ! time { } [[ ]]);
+# an interpreter's inline-program options, where they differ from -c and -e
+my $NODE_INLINE = qr/\A-[A-Za-z]*[ep][A-Za-z]*\z|\A--(?:eval|print)\b|\A-[ep]\S/;
+my %INLINE = (node => $NODE_INLINE, nodejs => $NODE_INLINE, bun => $NODE_INLINE, deno => $NODE_INLINE,
+  php => qr/\A-[A-Za-z]*r[A-Za-z]*\z|\A-r\S/,
+  pwsh => qr/\A-(?:c|command|encodedcommand|ec|e)\z/i, powershell => qr/\A-(?:c|command|encodedcommand|ec|e)\z/i);
 # prefix commands that run the rest of their words as a command
-my %PREFIX = map { $_ => 1 } qw(nohup time command exec nice ionice sudo doas stdbuf setsid chronic caffeinate);
+my %PREFIX = map { $_ => 1 } qw(nohup time command builtin exec nice ionice sudo doas stdbuf setsid chronic caffeinate);
 
 # the end of a $( ... ) or ` ... ` starting at POS in S (after the opener);
 # undef when it is not closed
 sub close_paren {
-  my ($s, $pos) = @_;
+  my ($s, $pos, $arith) = @_;
   my $depth = 1;
   my $i = $pos;
   my $n = length $s;
+  my @pending;    # here-documents named on this line: [DELIM, STRIP]
   while ($i < $n) {
     my $c = substr($s, $i, 1);
     if ($c eq '\\') { $i += 2; next }
+    # a here-document's body is text, whatever quotes it holds (not in
+    # arithmetic, where << shifts)
+    if (!$arith && $c eq '<' && substr($s, $i, 3) =~ /\A<<[^<]/ && substr($s, $i + 2, 200) =~ /\A(-?)[ \t]*(['"]?)([A-Za-z0-9_.-]+)\2/) {
+      push @pending, [$3, $1 eq '-'];
+      $i += 2 + length $&;
+      next;
+    }
+    if ($c eq "\n" && @pending) {
+      $i++;
+      for my $h (@pending) {
+        while ($i < $n) {
+          my $e = index($s, "\n", $i);
+          $e = $n if $e < 0;
+          my $line = substr($s, $i, $e - $i);
+          $i = $e + 1;
+          $line =~ s/\r\z//;
+          $line =~ s/\A\t+// if $h->[1];
+          last if $line eq $h->[0];
+        }
+      }
+      @pending = ();
+      next;
+    }
     if ($c eq "'") { my $j = index($s, "'", $i + 1); return undef if $j < 0; $i = $j + 1; next }
     if ($c eq '"') {
       my $j = $i + 1;
@@ -69,6 +101,29 @@ sub close_paren {
     $i++;
   }
   return undef;
+}
+
+# the text of $( INNER ) when INNER is only cat reading a here-document that
+# expands nothing (a quoted delimiter, or a body with no $, backtick or
+# backslash): bash gives exactly that text, so it is read as quoted text.
+# Claude Code writes commit messages and PR bodies this way.
+sub literal_cat {
+  my ($inner) = @_;
+  return undef unless $inner =~ /\A[ \t]*cat[ \t]*<<(-?)[ \t]*(['"]?)([A-Za-z0-9_.-]+)\2[ \t]*\r?\n(.*?)\r?\n(\t*)\3\r?\n?[ \t\r\n]*\z/s;
+  my ($strip, $q, $body, $tabs) = ($1, $2, $4, $5);
+  return undef if $tabs ne '' && !$strip;
+  return undef if !$q && $body =~ /[\$`\\]/;
+  $body =~ s/^\t+//mg if $strip;
+  return $body;
+}
+
+# the text of an ANSI-C quoted string ($'...'), its escapes read
+sub ansi_c {
+  my ($inner) = @_;
+  my %e = (a => "\a", b => "\b", e => "\e", E => "\e", f => "\f", n => "\n", r => "\r", t => "\t", v => "\x0B", '\\' => '\\', "'" => "'", '"' => '"', '?' => '?');
+  $inner =~ s/\\(?:x([0-9A-Fa-f]{1,2})|u([0-9A-Fa-f]{1,4})|U([0-9A-Fa-f]{1,8})|([0-7]{1,3})|c(.)|(.))/
+    defined $1 ? chr(hex $1) : defined $2 ? chr(hex $2) : defined $3 ? chr(hex $3) : defined $4 ? chr(oct $4) : defined $5 ? chr(ord(uc $5) ^ 64) : exists $e{$6} ? $e{$6} : "\\$6"/ge;
+  return $inner;
 }
 
 # tokens of S: words (text after quote removal, with flags) and operators
@@ -105,13 +160,14 @@ sub tokens {
           $e = $n if $e < 0;
           my $line = substr($s, $i, $e - $i);
           $i = $e + 1;
-          (my $cmp = $line) =~ s/^\t+// if $h->{strip};
-          $cmp = $line unless $h->{strip};
+          (my $cmp = $line) =~ s/\r\z//;    # a CRLF line ends at its CR
+          $cmp =~ s/^\t+// if $h->{strip};
           if ($cmp eq $h->{delim}) { $found = 1; last }
           $h->{body} .= "$line\n";
           $h->{body_subst} = 1 if !$h->{quoted} && $line =~ /\$\(|`/;
         }
-        push @t, { error => "a here-document with no end line ($h->{delim})" } unless $found;
+        # (the delimiter is the command's text, so it is not repeated)
+        push @t, { error => 'a here-document with no end line' } unless $found;
       }
       @heredocs = ();
       next;
@@ -148,15 +204,14 @@ sub tokens {
       my $inner = substr($s, $i + 2, $j - $i - 2);
       $start_word->();
       # the escapes are read, so $'\x67it' is the word git
-      my %e = (a => "\a", b => "\b", e => "\e", E => "\e", f => "\f", n => "\n", r => "\r", t => "\t", v => "\x0B", '\\' => '\\', "'" => "'", '"' => '"', '?' => '?');
-      $inner =~ s/\\(?:x([0-9A-Fa-f]{1,2})|u([0-9A-Fa-f]{1,4})|U([0-9A-Fa-f]{1,8})|([0-7]{1,3})|c(.)|(.))/
-        defined $1 ? chr(hex $1) : defined $2 ? chr(hex $2) : defined $3 ? chr(hex $3) : defined $4 ? chr(oct $4) : defined $5 ? chr(ord(uc $5) ^ 64) : exists $e{$6} ? $e{$6} : "\\$6"/ge;
-      $word->{text} .= $inner;
+      $word->{text} .= ansi_c($inner);
       $word->{raw} .= substr($s, $i, $j - $i + 1);
       $word->{flags}{quoted} = 1;
       $i = $j + 1;
       next;
     }
+    # $"..." (a string for the locale) is read as "..."
+    if ($c eq '$' && substr($s, $i + 1, 1) eq '"') { $i++; next }
     if ($c eq '"') {
       my $j = $i + 1;
       my $text = '';
@@ -170,8 +225,10 @@ sub tokens {
           next;
         }
         if ($d eq '$' && substr($s, $j + 1, 1) eq '(') {
-          my $e = close_paren($s, $j + 2);
+          my $e = close_paren($s, $j + 2, substr($s, $j + 2, 1) eq '(');
           if (!defined $e) { push @t, { error => 'an unclosed $(' }; return @t }
+          my $lit = literal_cat(substr($s, $j + 2, $e - $j - 2));
+          if (defined $lit) { $text .= $lit; $j = $e + 1; next }
           $word->{flags}{subst} = 1;
           $text .= substr($s, $j, $e - $j + 1);
           $j = $e + 1;
@@ -197,9 +254,17 @@ sub tokens {
       next;
     }
     if ($c eq '$' && substr($s, $i + 1, 1) eq '(') {
-      my $e = close_paren($s, $i + 2);
+      my $e = close_paren($s, $i + 2, substr($s, $i + 2, 1) eq '(');
       if (!defined $e) { push @t, { error => 'an unclosed $(' }; last }
       $start_word->();
+      my $lit = literal_cat(substr($s, $i + 2, $e - $i - 2));
+      if (defined $lit) {
+        $word->{text} .= $lit;
+        $word->{raw} .= substr($s, $i, $e - $i + 1);
+        $word->{flags}{quoted} = 1;
+        $i = $e + 1;
+        next;
+      }
       $word->{flags}{subst} = 1;
       $word->{text} .= substr($s, $i, $e - $i + 1);
       $word->{raw} .= substr($s, $i, $e - $i + 1);
@@ -233,9 +298,26 @@ sub tokens {
       $i = $e + 1;
       next;
     }
+    # an arithmetic command (( ... )): one unit, read by its own text (a <<
+    # in it shifts, it starts no here-document)
+    if ($c eq '(' && substr($s, $i + 1, 1) eq '(' && !defined $word && (!@t || $t[-1]{op})) {
+      my $e = close_paren($s, $i + 2, 1);
+      if (!defined $e || substr($s, $e + 1, 1) ne ')') { push @t, { error => 'an unclosed ((' }; last }
+      $e++;
+      $start_word->();
+      my $text = substr($s, $i, $e - $i + 1);
+      $word->{text} .= $text;
+      $word->{raw} .= $text;
+      $word->{flags}{arith} = 1;
+      $word->{flags}{subst} = 1 if $text =~ /\$\(|`/;
+      $i = $e + 1;
+      next;
+    }
     # redirections: [n]> [n]>> >| < <> &> &>> [n]>&m <<< << <<-
-    if ($c =~ /[<>&]/ || ($c =~ /[0-9]/ && !defined $word && substr($s, $i) =~ /\A[0-9]+[<>]/)) {
-      if (substr($s, $i) =~ /\A([0-9]*)(<<-|<<<|<<|<>|>>|>\||>&|<&|&>>|&>|>|<)/) {
+    # (the look-ahead reads a short window, so a long command is not copied
+    # for every character)
+    if ($c =~ /[<>&]/ || ($c =~ /[0-9]/ && !defined $word && substr($s, $i, 24) =~ /\A[0-9]+[<>]/)) {
+      if (substr($s, $i, 24) =~ /\A([0-9]*)(<<-|<<<|<<|<>|>>|>\||>&|<&|&>>|&>|>|<)/) {
         my ($fd, $op) = ($1, $2);
         if ($op eq '&>' || $op eq '&>>' || $fd ne '' || $c ne '&') {
           $end_word->();
@@ -249,7 +331,7 @@ sub tokens {
         }
       }
     }
-    if (substr($s, $i) =~ /\A(&&|\|\||;;|\|&|[;&|()])/) {
+    if ($c =~ /[;&|()]/ && substr($s, $i, 2) =~ /\A(&&|\|\||;;|\|&|[;&|()])/) {
       $end_word->();
       push @t, { op => $1 };
       $i += length $1;
@@ -259,12 +341,12 @@ sub tokens {
     $word->{text} .= $c;
     $word->{raw} .= $c;
     $word->{flags}{glob} = 1 if $c =~ /[*?\[]/;
-    $word->{flags}{brace} = 1 if $c eq '{' && substr($s, $i) =~ /\A\{[^}\s]*[,.][^}\s]*\}/;
+    $word->{flags}{brace} = 1 if $c eq '{' && substr($s, $i, 512) =~ /\A\{[^}\s]*[,.][^}\s]*\}/;
     $i++;
   }
   $end_word->();
   if (@t && exists $t[-1]{heredoc_start}) { pop @t; push @t, { error => 'a here-document with no delimiter' } }
-  for my $h (@heredocs) { push @t, { error => "a here-document with no end line ($h->{delim})" } }
+  for my $h (@heredocs) { push @t, { error => 'a here-document with no end line' } }
   return @t;
 }
 
@@ -282,6 +364,7 @@ sub commands {
   my $pending_redir;
   my $prev_op = '';
   my $header = 0;    # in a for or select header, up to its ; or do
+  my ($after_time, $function) = (0, 0);
   my $in_case = 0;
   my @errors;
   my $finish = sub {
@@ -291,7 +374,8 @@ sub commands {
       push @cmds, $cur;
     }
     my $piped = ($op eq '|' || $op eq '|&') ? 1 : 0;
-    my $from = $piped ? join(' ', @{ $cur->{raw} }, $cur->{hbody}) : '';
+    # what feeds a command's input: every earlier stage of its pipeline
+    my $from = $piped ? join(' ', grep { $_ ne '' } $cur->{pipe_from} // '', @{ $cur->{assigns_raw} || [] }, @{ $cur->{raw} }, $cur->{hbody}) : '';
     $new->();
     $cur->{piped} = $piped;
     $cur->{pipe_from} = $from;
@@ -303,7 +387,8 @@ sub commands {
       $in_case = 0 if $tok->{op} eq ';;';
       if ($header) {
         $header = 0;
-        if (@{ $cur->{unread} }) { $cur->{words} = ['for']; push @cmds, $cur }
+        # (its words are kept as written, so what they run is judged)
+        if (@{ $cur->{unread} }) { $cur->{words} = ['for']; $cur->{raw} = ['for', @{ $cur->{header} || [] }]; push @cmds, $cur }
         $new->();
         next;
       }
@@ -325,15 +410,25 @@ sub commands {
     }
     if ($header) {
       if ($w->{text} eq 'do' && !$w->{flags}{quoted}) { $header = 0 }
-      else { push @{ $cur->{unread} }, 'command substitution or backticks' if $w->{flags}{subst}; next }
+      else { push @{ $cur->{unread} }, 'command substitution or backticks' if $w->{flags}{subst}; push @{ $cur->{header} }, $w->{raw}; next }
     }
     # leading keywords and assignments
     if (!@{ $cur->{words} }) {
       if (($w->{text} eq 'for' || $w->{text} eq 'select') && !$w->{flags}{quoted}) { $header = 1; next }
       if ($w->{text} eq 'case' && !$w->{flags}{quoted}) { $in_case = 1; push @{ $cur->{unread} }, 'a case statement'; push @{ $cur->{words} }, 'case'; push @{ $cur->{wflags} }, $w->{flags}; next }
+      # time -p: the option is time's, not a command word
+      if ($w->{text} eq 'time' && !$w->{flags}{quoted}) { $after_time = 1; next }
+      if ($after_time && $w->{text} eq '-p') { $after_time = 0; next }
+      $after_time = 0;
+      # function NAME { ...; }: the name ends the command, so the body's
+      # commands are read as commands
+      if ($w->{text} eq 'function' && !$w->{flags}{quoted}) { $function = 1; next }
+      if ($function) { $function = 0; push @{ $cur->{words} }, 'function', $w->{text}; push @{ $cur->{wflags} }, {}, $w->{flags}; push @{ $cur->{raw} }, 'function', $w->{raw}; $finish->(';'); next }
       next if $KEYWORD{ $w->{text} } && !$w->{flags}{quoted};
       if ($w->{raw} =~ /\A[A-Za-z_][A-Za-z0-9_]*\+?=/) {
         push @{ $cur->{assigns} }, $w->{text};
+        # (kept as written too: what an assignment runs is judged)
+        push @{ $cur->{assigns_raw} }, $w->{raw};
         push @{ $cur->{unread} }, 'command substitution or backticks' if $w->{flags}{subst};
         next;
       }
@@ -364,6 +459,7 @@ sub expand {
     push @u, 'command substitution or backticks' if $flags[$i]{subst};
   }
   push @u, 'a variable as the command word' if @flags && ($flags[0]{var} || $flags[0]{subst});
+  push @u, 'a glob or a brace in the command word' if @flags && ($flags[0]{glob} || $flags[0]{brace}) && !$flags[0]{arith} && $words[0] !~ /\A\[\[?\z/;
   push @u, 'here-document text that is expanded with command substitution' if $c->{body_subst};
   for my $r (@{ $c->{redirs} }) {
     my ($op, $target, $f) = @$r;
@@ -384,33 +480,53 @@ sub expand {
       via => [@{ $c->{via} }, $carrier], body_subst => 0 };
     push @out, expand($inner, $depth + 1);
   };
+  # a versioned interpreter (python3.12, perl5.38) is that interpreter
+  (my $base = $name) =~ s/[0-9][0-9.]*\z//;
+  $base = $name unless $INTERP{$base};
+  # a program file or module as the first operand: what comes in on stdin
+  # is that program's data, not code
+  my ($first) = grep { $words[$_] !~ /\A-/ } 1 .. $#words;
+  my $runs_file = (defined $first && $words[$first] ne '-') || grep { $_ eq '-m' } @words[1 .. $#words];
   if ($name eq 'source' || $name eq '.') {
     push @{ $c->{unread} }, 'source or .';
-  } elsif ($SHELL{$name}) {
+  } elsif ($SHELL{$base}) {
     my ($ci) = grep { $words[$_] =~ /\A-[A-Za-z]*c[A-Za-z]*\z/ } 1 .. $#words;
     if (defined $ci) {
       my $script = $words[ $ci + 1 ];
       if (!defined $script) { push @{ $c->{unread} }, "$name -c with no command" }
       elsif ($flags[ $ci + 1 ]{subst} || $flags[ $ci + 1 ]{var}) { push @{ $c->{unread} }, "$name -c with an expansion" }
       else { push @out, commands($script, [@{ $c->{via} }, "$name -c"], $depth + 1) }
-    } elsif ($c->{piped} || $c->{heredoc}) {
+    } elsif (($c->{piped} || $c->{heredoc}) && !$runs_file) {
       push @{ $c->{unread} }, "a pipe, here-document or here-string into $name";
     }
-  } elsif ($INTERP{$name}) {
-    if (grep { /\A-[A-Za-z]*[ceE][A-Za-z]*\z/ || /\A--(?:eval|command)\b/ || /\A-e\S/ } @words[1 .. $#words]) {
+  } elsif ($INTERP{$base}) {
+    my $inline = $INLINE{$base} || qr/\A-[A-Za-z]*[ceE][A-Za-z]*\z|\A--(?:eval|command)\b|\A-e\S/;
+    if (grep { $_ =~ $inline } @words[1 .. $#words]) {
       push @{ $c->{unread} }, "an inline program for $name";
-    } elsif ($name =~ /awk\z/ && @words > 1) {
+    } elsif ($base =~ /awk\z/ && @words > 1) {
       push @{ $c->{unread} }, "an inline program for $name";
-    } elsif ($c->{piped} || $c->{heredoc}) {
+    } elsif (($base eq 'deno' || $base eq 'bun') && @words > 1 && $words[1] eq 'eval') {
+      push @{ $c->{unread} }, "an inline program for $name";
+    } elsif (($c->{piped} || $c->{heredoc}) && !$runs_file) {
       push @{ $c->{unread} }, "a pipe, here-document or here-string into $name";
     }
+  } elsif ($name eq 'trap' && @words > 1 && $words[1] !~ /\A-/) {
+    # trap's first argument is code bash runs later
+    if ($flags[1]{subst} || $flags[1]{var}) { push @{ $c->{unread} }, 'trap of anything but a literal' }
+    else { push @out, commands($words[1], [@{ $c->{via} }, 'trap'], $depth + 1) }
+  } elsif ($name eq 'coproc') {
+    push @{ $c->{unread} }, 'a coprocess';
   } elsif ($name eq 'eval') {
     if (grep { $_->{subst} || $_->{var} } @flags[1 .. $#flags]) { push @{ $c->{unread} }, 'eval of anything but a literal' }
     else { push @out, commands(join(' ', @words[1 .. $#words]), [@{ $c->{via} }, 'eval'], $depth + 1) }
   } elsif ($name eq 'env') {
     my $i = 1;
     while ($i <= $#words) {
-      if ($words[$i] =~ /\A-[iu0]\z/ || $words[$i] =~ /\A--(?:ignore-environment|unset|null)/) { $i += $words[$i] =~ /\A-u\z|\A--unset\z/ ? 2 : 1; next }
+      # -S splits a string into the command: that string is not read here
+      if ($words[$i] =~ /\A-[A-Za-z0-9]*S|\A--split-string/) { push @{ $c->{unread} }, 'env -S'; return @out }
+      if ($words[$i] =~ /\A-[iv0]+\z/ || $words[$i] =~ /\A--(?:ignore-environment|null|debug)\z/) { $i++; next }
+      if ($words[$i] =~ /\A-[uC]\z|\A--(?:unset|chdir)\z/) { $i += 2; next }
+      if ($words[$i] =~ /\A-[uC].|\A--(?:unset|chdir)=/) { $i++; next }
       if ($words[$i] =~ /\A[A-Za-z_][A-Za-z0-9_]*=/) { $i++; next }
       last;
     }
@@ -433,12 +549,16 @@ sub expand {
     }
   } elsif ($name eq 'timeout') {
     my $i = 1;
-    while ($i <= $#words && $words[$i] =~ /\A-/) { $i += $words[$i] =~ /\A-[sk]\z/ ? 2 : 1 }
+    while ($i <= $#words && $words[$i] =~ /\A-/) { $i += $words[$i] =~ /\A-[sk]\z|\A--(?:signal|kill-after)\z/ ? 2 : 1 }
     $sub->($i + 1, 'timeout');
   } elsif ($PREFIX{$name}) {
     my $i = 1;
     if ($name eq 'command' && @words > 1 && $words[1] =~ /\A-[vV]\z/) { return @out }
-    while ($i <= $#words && $words[$i] =~ /\A-/) { $i += ($name eq 'nice' && $words[$i] eq '-n') ? 2 : 1 }
+    # the options of each prefix that take the next word as their value
+    my %takes = (nice => qr/\A(?:-n|--adjustment)\z/, exec => qr/\A-a\z/, ionice => qr/\A-[cnp]\z/,
+      sudo => qr/\A(?:-[ugCDhprtUT]|--(?:user|group|chdir|host|prompt|role|type|other-user|command-timeout))\z/,
+      doas => qr/\A-[uC]\z/, stdbuf => qr/\A-[ioe]\z/);
+    while ($i <= $#words && $words[$i] =~ /\A-/) { $i += ($takes{$name} && $words[$i] =~ $takes{$name}) ? 2 : 1 }
     $sub->($i, $name);
   }
   return @out;

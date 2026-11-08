@@ -68,9 +68,9 @@ sub refuse {
 
 # the shapes whose meaning can come from elsewhere in the call: judged
 # against the whole call, not their own text
-my $WIDE = qr{variable as the command word|eval of anything|-c with an expansion|could not split|case statement};
+my $WIDE = qr{variable as the command word|eval of anything|-c with an expansion|could not split|case statement|nested too deep|trap of anything};
 # what lets an inline program start another program
-our $STARTS = qr{\b(?:system|exec[lv]?p?e?|qx|popen|spawn(?:Sync)?|execSync|execFile|subprocess|child_process|Popen|Runtime|ProcessBuilder|IPC::\w+)\b|`|open\s*\(?[^;]*["']\s*\||\|\s*["']\s*\)};
+our $STARTS = qr{\b(?:system|exec\w*|qx|popen\w*|spawn\w*|execSync|execFile\w*|subprocess|child_process|Popen|Runtime|ProcessBuilder|IPC::\w+|open[23]|shell_exec|passthru|proc_open|Start-Process|Invoke-Expression|iex|Process)\b|\bDeno\.(?:Command|run)\b|`|%x[\[(\x7B<]|\bos\.(?:system|popen|exec\w*|spawn\w*)|open\s*\(?[^;]*["']\s*\||\|\s*["']\s*\)|["']-\|["']|\|-|-\|};
 
 # judge_command TEXT: () to let it through, or (RULE, TEXT) to refuse. A
 # simple command the reader cannot read is refused (G0) when it runs git,
@@ -81,52 +81,74 @@ our $STARTS = qr{\b(?:system|exec[lv]?p?e?|qx|popen|spawn(?:Sync)?|execSync|exec
 sub judge_command {
   my ($cmd) = @_;
   my @cmds = Shell::commands($cmd);
-  my $call_watched = join("\n", $cmd, map { join(' ', @{ $_->{words} }, $_->{hbody} // '') } @cmds) =~ $WATCHED;
+  # (with ANSI-C quoting decoded, also where the reader stopped early)
+  (my $decoded = $cmd) =~ s/\$'((?:[^'\\]|\\.)*)'/Shell::ansi_c($1)/ge;
+  my $call_watched = join("\n", $cmd, $decoded, map { join(' ', @{ $_->{words} }, $_->{hbody} // '') } @cmds) =~ $WATCHED;
   for my $c (@cmds) {
     next unless @{ $c->{unread} };
-    my $words = join(' ', @{ $c->{raw} || [] }, @{ $c->{words} }, map { $_->[1] } @{ $c->{redirs} });
+    # (its assignments and a for header's words, as written, are its own
+    # text too: what they run is judged)
+    my $words = join(' ', @{ $c->{assigns_raw} || [] }, @{ $c->{raw} || [] }, @{ $c->{words} }, map { $_->[1] } @{ $c->{redirs} });
     my $own = join(' ', $words, $c->{hbody} // '', $c->{pipe_from} // '');
     my $wide = grep { $_ =~ $WIDE } @{ $c->{unread} };
+    # code from a variable or a substitution, piped or written into a shell
+    # or an interpreter, is not this command's own text
+    $wide ||= (grep { /\Aa pipe, here-document or here-string into / } @{ $c->{unread} })
+      && (($c->{pipe_from} // '') =~ /[\$`]/ || ($c->{hbody} // '') =~ /[\$`]/) ? 1 : 0;
     my $inline_only = !grep { $_ !~ /\Aan inline program for / } @{ $c->{unread} };
     my $glob_only = !grep { $_ ne 'a glob or a brace in a write target' } @{ $c->{unread} };
     # (a command that runs git, gh, claude, curl or wget names it in its
     # own text, so it is caught below)
-    my $hit = $wide ? $call_watched
+    # (PowerShell's inline program is shell commands: a watched word runs)
+    my $shell_like = @{ $c->{words} } && $c->{words}[0] =~ m{(?:\A|[/\\])(?:pwsh|powershell)(?:\.exe)?\z}i;
+    # a glob or brace in the command word hides which program runs at all
+    my $hit = (grep { $_ eq 'a glob or a brace in the command word' } @{ $c->{unread} }) ? 1
+      : $wide ? $call_watched
       # an inline program: what is piped into it is data, not code; it
       # touches a watched command only by starting a program
-      : $inline_only ? ($words =~ $WATCHED_PATH || ($words =~ $WATCHED_WORD && $words =~ $STARTS))
+      : $inline_only ? ($words =~ $WATCHED_PATH || ($words =~ $WATCHED_WORD && ($shell_like || $words =~ $STARTS)))
       # a glob can hide which file is written: any write near the method's
       # folders or git's own
       : $glob_only ? (join(' ', map { $_->[1] } grep { $_->[0] =~ />/ } @{ $c->{redirs} }) =~ m{\.claude|scripts/method|\.git\b|gitconfig}i || $own =~ $WATCHED)
       : $own =~ $WATCHED;
     next unless $hit;
     my $why = $c->{unread}[0];
+    if (grep { $_ eq 'a glob or a brace in the command word' } @{ $c->{unread} }) {
+      return ('G0', "this command's name holds a glob or a brace, so which program runs cannot be told; write the program's name out ($WAY_OUT)");
+    }
     return ('G0', "this command holds $why, which the guard cannot read with confidence, in a call that names git, gh, claude, curl, wget or a method file;"
-      . " write it as plain commands, one per line, with every word written out, and do not try another form of the same command ($WAY_OUT)");
+      . " write it as plain commands, one per line, with every word written out (a commit message or PR body can go on stdin: git commit -F - with a here-document);"
+      . " if that is refused too, stop and tell the owner what you needed ($WAY_OUT)");
   }
   return ();
 }
 
 sub main {
   binmode STDIN, ':raw';
-  my $raw = do { local $/; <STDIN> };
-  $raw = '' unless defined $raw;
+  # at most one byte over the limit is read, so a huge input is refused
+  # without being held whole
+  my $raw = '';
+  my $max = defined $Hook::MAX ? $Hook::MAX : 4 * 1024 * 1024;
+  while (length $raw <= $max) {
+    my $n = read STDIN, $raw, 65536, length $raw;
+    last unless $n;
+  }
   open my $fh, '<', \$raw or die;
   my ($in, $err) = Hook::read_input($fh);
   if (!$in) {
     my $rule = $err =~ /JSON::PP/ ? 'G1' : 'G0';
-    return refuse($rule, "the guard could not read this call ($err), so it is refused ($WAY_OUT)", undef, $raw, undef);
+    return refuse($rule, "the guard could not read this call ($err), so it is refused; try the call again, and if it is refused again tell the owner ($WAY_OUT)", undef, $raw, undef);
   }
   my $tool = $in->{tool_name};
   $tool = '' unless defined $tool && !ref $tool;
   my $input = $in->{tool_input};
   if ($tool eq 'PowerShell') {
-    return refuse('G2', "the PowerShell tool is refused in method projects: the method's checks read bash; use the Bash tool", $tool, $raw, $in);
+    return refuse('G2', "the PowerShell tool is refused in method projects: the method's checks read bash; use the Bash tool ($WAY_OUT)", $tool, $raw, $in);
   }
   if ($tool eq 'Bash' || $tool eq 'Monitor') {
     my $cmd = ref $input eq 'HASH' ? $input->{command} : undef;
     if (!defined $cmd || ref $cmd) {
-      return refuse('G0', "this $tool call has no command text the guard can read, so it is refused ($WAY_OUT)", $tool, $raw, $in);
+      return refuse('G0', "this $tool call has no command text the guard can read, so it is refused; give the command as plain text ($WAY_OUT)", $tool, $raw, $in);
     }
     my ($rule, $text) = judge_command($cmd);
     return refuse($rule, $text, $tool, $raw, $in) if $rule;

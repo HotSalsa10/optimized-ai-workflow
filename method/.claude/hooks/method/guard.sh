@@ -34,8 +34,13 @@ fi
 case $code in
   0) exit 0 ;;
   3)
-    # the refusal is perl's last line; a warning before it is dropped
-    printf '%s\n' "$err" | sed -n '$p' >&2
+    # (the last line that is a refusal; perl's warnings never stand in for it)
+    # shellcheck disable=SC2016 # a sed program, not a shell expression
+    line=$(printf '%s\n' "$err" | sed -n '/^guard G[0-9]/h; ${x;p;}')
+    case $line in
+      "guard G"*) printf '%s\n' "$line" >&2 ;;
+      *) echo "guard G0: the guard gave no reason (code 3), so this call is refused ($way_out)" >&2 ;;
+    esac
     exit 2
     ;;
 esac

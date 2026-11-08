@@ -62,7 +62,7 @@ It reads command words; it is not a shell. It is a seatbelt, not a lock (DECISIO
 
 | Rule | Refuses | Why |
 |---|---|---|
-| G0 cannot-tell | A call it cannot read, when it also names git, gh, claude, curl, wget or one of the method's files. "Cannot read": command substitution or backticks; eval of anything but plain text; a variable as the command word; a pipe, here-document or here-string into a shell or another interpreter; an interpreter's inline program (`-c`, `-e`); `source`; a glob, brace or variable in a write target; ANSI-C quoting with escapes; a case statement; text it cannot split. Also input that is not one JSON object. | A guard that reads words is safer refusing than guessing (A57). |
+| G0 cannot-tell | A command it cannot read, when that command could touch git, gh, claude, curl, wget or one of the method's files (each command is judged by its own text; shapes whose meaning can come from elsewhere in the call by the whole call, A57). "Cannot read": command substitution or backticks (also in an assignment or a `for` header); eval of anything but plain text (also behind `builtin`, `time` or `trap`); a variable as the command word; a glob or brace in the command word (refused whatever it names); code piped or written into a shell or another interpreter (a program file or module reading data is fine); an interpreter's inline program that can start a program; `source`; a glob or brace in a write target near the method's or git's folders; a case statement; a coprocess; text it cannot split. ANSI-C and locale quoting are decoded, and `$(cat <<'EOF' ... EOF)` (Claude Code's own way of writing a commit message) is read as the plain text it is. A variable in a write target is G6's (step 5.7). Also input that is not one JSON object. | A guard that reads words is safer refusing than guessing (A57). |
 | G1 perl-missing | Every call, when perl or its JSON::PP module is missing. | Without perl nothing can be checked. |
 | G2 powershell | Every PowerShell call. | The method's checks read bash. |
 
@@ -76,12 +76,16 @@ A refused call can almost always be written plainly: one command per line, with 
 
 ## When the guard blocks something it should not
 
-The guard refuses rather than guesses, so now and then it will refuse something harmless. First, split the command as the refusal says; that is almost always enough. If the guard itself is wrong:
+The guard refuses rather than guesses, so now and then it will refuse something harmless. What to do, in this order:
 
-**On your own computer:**
-1. Start Claude Code with the hooks switched off for that session only: `claude --settings '{"disableAllHooks": true}'`.
-2. Or put `{"disableAllHooks": true}` in `.claude/settings.local.json` before you start the session (it is not committed). Remove it afterwards.
-3. Either way, the session's first message has no `METHOD-ACTIVE` line: the method is off for that session. Do only the repair in it.
+0. Ask Claude to write the command plainly: one command per line, every word written out. That is almost always enough. Or run that one command yourself, in a terminal in the project folder: the guard checks only what Claude runs.
+1. If the guard itself is wrong, switch the hooks off for one session on your own computer: start Claude Code with `claude --settings '{"disableAllHooks": true}'`.
+2. Or, before you start the session, make a file named `settings.local.json` in the project's `.claude` folder holding exactly this line, and delete the file afterwards (it is not committed):
+
+   ```json
+   {"disableAllHooks": true}
+   ```
+3. Either way, the session's first message has no `METHOD-ACTIVE` line: the method is off for that session. Do only the repair in it, and tell Claude what the guard got wrong, so the guard can be fixed.
 
 Claude cannot do either for itself: the guard refuses a change to the settings files during a session (from step 5.9), and the change only applies to a new session anyway.
 

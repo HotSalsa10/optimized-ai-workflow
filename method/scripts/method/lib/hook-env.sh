@@ -11,3 +11,17 @@ for _hook_env_name in $(compgen -e); do
   esac
 done
 unset _hook_env_name
+# PATH keeps only absolute folders: an empty or relative entry (".", "bin")
+# would let a perl written into the project stand in for the real one
+_hook_env_path=
+_hook_env_rest=$PATH:
+while [ -n "$_hook_env_rest" ]; do
+  _hook_env_dir=${_hook_env_rest%%:*}
+  _hook_env_rest=${_hook_env_rest#*:}
+  case $_hook_env_dir in
+    /*) _hook_env_path=${_hook_env_path:+$_hook_env_path:}$_hook_env_dir ;;
+  esac
+done
+PATH=$_hook_env_path
+export PATH
+unset _hook_env_path _hook_env_rest _hook_env_dir
