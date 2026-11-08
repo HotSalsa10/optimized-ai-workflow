@@ -30,7 +30,7 @@ mkdir -p "$proj"
 # rule ID (the refusal must start "guard RULE:" and exit 2)
 run_case() {
   printf '%s' "$4" >"$work/in.json"
-  err=$(cd "$proj" && env -u CLAUDE_CODE_EXECPATH CLAUDE_PROJECT_DIR="$proj" bash "$guard" <"$work/in.json" 2>&1 >/dev/null)
+  err=$(cd "$proj" && env -u CLAUDE_CODE_EXECPATH CLAUDE_PROJECT_DIR="$proj" perl -e 'alarm 60; exec @ARGV' bash "$guard" <"$work/in.json" 2>&1 >/dev/null)
   code=$?
   case "$1" in
     allow) if [ "$code" -eq 0 ] && [ -z "$err" ]; then pass "$2"; else fail "$2: wanted it let through" "exit $code: $err"; fi ;;

@@ -58,9 +58,59 @@ our $WAY_OUT = 'if the guard is wrong, see .claude/hooks/method/README.md, "When
 # (in any letter case, as a file system that ignores case runs GIT as git,
 # and with .exe; a backslash, brace, comma, < or > around it counts as a
 # word's edge, as bash ends or splits words there)
-our $WATCHED_WORD = qr{(?:\A|[\s;&|(`'"=\\{},<>])(?:[\w./\\-]*[/\\])?(?i:git(?:-[a-z][a-z0-9-]*)?|gh|claude|curl|wget)(?i:\.exe)?(?=\z|[\s;&|)`'"\\{},<>])};
+# (watched_word reads in one pass: the regex it replaces looked back over a
+# path from every edge, which took the square of the length on a run of
+# backslashes, past the hook's time limit; 5.5's round 3)
+our $WATCHED_NAME = qr{(?i:git(?:-[a-z][a-z0-9-]*)?|gh|claude|curl|wget)(?i:\.exe)?(?=\z|[\s;&|)`'"\\{},<>])};
+my $EDGE = qr{[\s;&|(`'"=\\{},<>]};
 our $WATCHED_PATH = qr{\.claude/(?:hooks/method|agents/method|rules/method|method-local|settings(?:\.local)?\.json)|(?:\A|[\s/'"=])scripts/method\b|\.git/(?:hooks|config)\b|\.gitconfig\b|\.config/git\b|managed-settings}i;
-our $WATCHED = qr{$WATCHED_WORD|$WATCHED_PATH};
+
+# does TEXT name a watched command: the name at the start, after an edge,
+# or as the last part of a path (letters, digits, _ . / -) that starts at
+# the start or after an edge
+sub watched_word {
+  my ($t) = @_;
+  return 0 unless defined $t;
+  while ($t =~ /$WATCHED_NAME/g) {
+    my $s = $-[0];
+    next if $s > 0 && substr($t, $s - 1, 1) =~ /[\w.-]/;
+    return 1 if $s == 0 || substr($t, $s - 1, 1) =~ $EDGE;
+    next unless substr($t, $s - 1, 1) eq '/';
+    my $i = $s - 1;
+    $i-- while $i > 0 && substr($t, $i - 1, 1) =~ m{[\w./-]};
+    return 1 if $i == 0 || substr($t, $i - 1, 1) =~ $EDGE;
+  }
+  return 0;
+}
+sub watched { my ($t) = @_; return defined $t && (watched_word($t) || $t =~ $WATCHED_PATH) }
+
+# xargs's WORDS: (its replace string, or undef; the word that names the
+# program it runs, or undef)
+sub xargs_parts {
+  my (undef, @w) = @_;
+  my $rep;
+  for (my $i = 0; $i <= $#w; $i++) {
+    my $x = $w[$i];
+    return ($rep, $w[ $i + 1 ]) if $x eq '--';
+    if ($x =~ /\A--([a-z-]+)(?:=(.*))?\z/s) {
+      my ($o, $v) = ($1, $2);
+      if ($o eq 'replace') { $rep = defined $v ? $v : '{}' }
+      elsif (!defined $v && $o =~ /\A(?:arg-file|delimiter|eof|max-lines|max-args|max-procs|max-chars|process-slot-var)\z/) { $i++ }
+      next;
+    }
+    return ($rep, $x) unless $x =~ /\A-./s;
+    my @l = split //, substr($x, 1);
+    while (@l) {
+      my $o = shift @l;
+      my $rest = join '', @l;
+      if ($o =~ /[IJ]/) { $rep = $rest ne '' ? $rest : $w[ ++$i ]; last }
+      if ($o eq 'i') { $rep = $rest ne '' ? $rest : '{}'; last }
+      if ($o =~ /[adELnPs]/) { $i++ if $rest eq ''; last }
+      last if $o =~ /[el]/;
+    }
+  }
+  return ($rep, undef);
+}
 
 # TEXT as bash would mostly read it: ANSI-C quoting decoded, line
 # continuations, quotes and backslashes removed, // and /./ made one /.
@@ -70,9 +120,43 @@ sub norm_text {
   my ($t) = @_;
   $t =~ s/\$'((?:[^'\\]|\\.)*)'/Shell::ansi_c($1)/ge;
   $t =~ s/\\\r?\n//g;
+  # ($"..." is the text inside it; the words in ${x:-word}, ${x/a/word}
+  # and the like stand as words of their own)
+  $t =~ s/\$(?=")//g;
+  $t =~ s/\$\{([^{}]*)\}/' ' . join(' ', split m{[:\/=+?#%^,*\-]+}, $1) . ' '/ge;
   $t =~ s/['"\\]//g;
   1 while $t =~ s{/\.?/}{/}g;
-  return $t;
+  # each word with a brace expansion, also as each of its expansions
+  my @more;
+  while ($t =~ /(\S*\{[^{}\s]*(?:,|\.\.)[^{}\s]*\}\S*)/g) {
+    push @more, brace_words($1);
+    last if @more > 256;
+  }
+  return @more ? join("\n", $t, @more) : $t;
+}
+
+# WORD's brace expansions ({a,b} and {a..c}), at most 64
+sub brace_words {
+  my ($w) = @_;
+  my @out = ($w);
+  for (1 .. 4) {
+    my @next;
+    for my $x (@out) {
+      if ($x =~ /\A(.*?)\{([^{}]*)\}(.*)\z/s) {
+        my ($pre, $in, $post) = ($1, $2, $3);
+        my @alt;
+        if ($in =~ /\A([A-Za-z0-9])\.\.([A-Za-z0-9])\z/) { my ($a, $b) = ($1, $2); @alt = $a le $b ? ($a .. $b) : reverse($b .. $a); @alt = @alt[0 .. 25] if @alt > 26 }
+        elsif ($in =~ /,/) { @alt = split /,/, $in, -1 }
+        else { @alt = ("{$in}") }
+        push @next, map { "$pre$_$post" } @alt;
+      } else {
+        push @next, $x;
+      }
+      last if @next > 64;
+    }
+    @out = @next[0 .. ($#next < 63 ? $#next : 63)];
+  }
+  return @out;
 }
 
 sub sha256_hex {
@@ -108,6 +192,9 @@ sub refuse {
 
 # the shapes whose meaning can come from elsewhere in the call: judged
 # against the whole call, not their own text
+# programs that run another program given in their words, which the reader
+# does not follow (the ones it does follow are Shell's carriers)
+our %OPAQUE = map { $_ => 1 } qw(flock taskset unshare script strace ltrace chroot watch systemd-run firejail nsenter chrt numactl cgexec faketime valgrind xvfb-run unbuffer rlwrap parallel entr su runuser pkexec busybox tmux screen at batch dbus-launch ssh-agent proot fakeroot);
 my $WIDE = qr{variable as the command word|eval of anything|-c with an expansion|could not split|case statement|nested too deep|trap of anything|a coprocess|from a process substitution|source of a process substitution};
 # what lets an inline program start another program
 # (a name joined to another by _ counts too: create_subprocess_shell,
@@ -120,13 +207,43 @@ our $STARTS = qr{(?<![A-Za-z0-9])(?:system\w*|exec\w*|qx|popen\w*|spawn\w*|execS
 # gh, claude, curl or wget itself, or when its own text (its words, its
 # here-document, what is piped into it) names something watched; for the
 # shapes whose meaning can come from elsewhere ($WIDE), when the whole call
-# does.
+# does. A call that names something watched and holds a shape the reader
+# may read differently from bash (Shell::doubts; a line continuation it did
+# not join, JOINED false) is refused whole (step 5.5, repair loop 3).
 sub judge_command {
-  my ($cmd, $read) = @_;
+  my ($cmd, $read, $joined) = @_;
   my @cmds = $read ? @$read : Shell::commands($cmd);
   # (with ANSI-C quoting decoded, also where the reader stopped early)
   (my $decoded = $cmd) =~ s/\$'((?:[^'\\]|\\.)*)'/Shell::ansi_c($1)/ge;
-  my $call_watched = join("\n", $cmd, $decoded, norm_text($cmd), map { join(' ', @{ $_->{words} }, $_->{hbody} // '') } @cmds) =~ $WATCHED;
+  my $call_watched = watched(join("\n", $cmd, $decoded, norm_text($cmd), map { join(' ', @{ $_->{words} }, $_->{hbody} // '') } @cmds));
+  if ($call_watched) {
+    my @doubt = Shell::doubts($cmd);
+    unshift @doubt, 'a line continuation beside a here-document, a substitution or ANSI-C quoting' if defined $joined && !$joined;
+    return ('G0', "this call holds $doubt[0], which the guard may read differently from bash, in a call that names git, gh, claude, curl, wget or a method file;"
+      . " write it as plain commands, one per line, with every word written out; if that is refused too, stop and tell the owner what you needed ($WAY_OUT)") if @doubt;
+  }
+  for my $c (@cmds) {
+    my @w = @{ $c->{words} };
+    next unless @w;
+    (my $n = $w[0]) =~ s{.*[/\\]}{};
+    $n =~ s/\.exe\z//i;
+    # xargs adds words from its input to what it runs: a shell, or a
+    # watched command, is then run with words the guard never sees
+    if ((grep { $_ eq 'xargs' } @{ $c->{via} || [] }) && ($n =~ /\A(?:sh|bash|zsh|dash|ksh|mksh|fish|csh|tcsh)\z/ || watched_word($n))) {
+      return ('G0', "xargs here runs " . ($n =~ /\A[a-z]+\z/ ? $n : 'a watched command') . " with words from its input, which the guard cannot see; write each command out ($WAY_OUT)");
+    }
+    if ($n eq 'xargs') {
+      my ($rep, $word) = xargs_parts(@w);
+      if (defined $rep && defined $word && $rep ne '' && index($word, $rep) >= 0) {
+        return ('G0', "xargs here builds the name of the program it runs from its input, which the guard cannot see; write each command out ($WAY_OUT)");
+      }
+    }
+    # a program that runs another one, whose words the reader does not
+    # follow
+    if ($OPAQUE{$n} && @w > 1 && watched(join ' ', @w[1 .. $#w])) {
+      return ('G0', "$n runs another program, which the guard does not read through; run that program directly, or tell the owner what you needed ($WAY_OUT)");
+    }
+  }
   for my $c (@cmds) {
     next unless @{ $c->{unread} };
     # (its assignments and a for header's words, as written, are its own
@@ -142,24 +259,27 @@ sub judge_command {
     $wide ||= (grep { /\Aa pipe, here-document or here-string into / } @{ $c->{unread} })
       && (($c->{pipe_from} // '') =~ /[\$`]/ || ($c->{hbody} // '') =~ /[\$`]/) ? 1 : 0;
     my $inline_only = !grep { $_ !~ /\Aan inline program for / } @{ $c->{unread} };
+    # (the program: its words, and a here-document that is its code)
+    my $code = $c->{piped} ? $words : join("\n", $words, $c->{hbody} // '', norm_text($c->{hbody} // ''));
     my $glob_only = !grep { $_ ne 'a glob or a brace in a write target' } @{ $c->{unread} };
     # (a command that runs git, gh, claude, curl or wget names it in its
     # own text, so it is caught below)
     # (PowerShell's inline program is shell commands: a watched word runs)
     my $shell_like = @{ $c->{words} } && $c->{words}[0] =~ m{(?:\A|[/\\])(?:pwsh|powershell)(?:\.exe)?\z}i;
     # a glob or brace in the command word hides which program runs at all
-    my $hit = (grep { $_ eq 'a glob or a brace in the command word' || $_ eq 'an alias definition' } @{ $c->{unread} }) ? 1
+    # (and nesting deeper than the reader reads hides which program runs)
+    my $hit = (grep { $_ eq 'a glob or a brace in the command word' || $_ eq 'an alias definition' || $_ eq 'commands nested too deep' } @{ $c->{unread} }) ? 1
       : $wide ? $call_watched
       # an inline program: what is piped into it is data, not code; it
       # touches a watched command only by starting a program
-      : $inline_only ? ($words =~ $WATCHED_PATH || ($words =~ $WATCHED_WORD && ($shell_like || $words =~ $STARTS)))
+      : $inline_only ? ($code =~ $WATCHED_PATH || (watched_word($code) && ($shell_like || $code =~ $STARTS)))
       # a glob can hide which file is written: any write near the method's
       # folders or git's own
       # (a glob in a folder's name can hide .claude or scripts/method, so a
       # glob target with a folder in it, or one that starts with a dot or a
       # glob, counts as near them)
-      : $glob_only ? ((grep { $_->[0] =~ />/ && ($_->[1] =~ m{/|\A[.*?\[\x7B]} || $_->[1] =~ m{\.claude|scripts/method|\.git\b|gitconfig}i) } @{ $c->{redirs} }) || $own =~ $WATCHED)
-      : $own =~ $WATCHED;
+      : $glob_only ? ((grep { $_->[0] =~ />/ && ($_->[1] =~ m{/|\A[.*?\[\x7B]} || $_->[1] =~ m{\.claude|scripts/method|\.git\b|gitconfig}i) } @{ $c->{redirs} }) || watched($own))
+      : watched($own);
     next unless $hit;
     my $why = $c->{unread}[0];
     if (grep { $_ eq 'a glob or a brace in the command word' } @{ $c->{unread} }) {
@@ -590,8 +710,10 @@ sub main {
     if (!defined $cmd || ref $cmd) {
       return refuse('G0', "this $tool call has no command text the guard can read, so it is refused; give the command as plain text ($WAY_OUT)", $tool, $raw, $in);
     }
-    my @cmds = Shell::commands($cmd);
-    my ($rule, $text) = judge_command($cmd, \@cmds);
+    # (line continuations joined first, as bash joins them)
+    my ($text0, $joined) = Shell::join_lines($cmd);
+    my @cmds = Shell::commands($text0);
+    my ($rule, $text) = judge_command($text0, \@cmds, $joined);
     ($rule, $text) = judge_git(\@cmds, $in) unless $rule;
     ($rule, $text) = Outside::judge_bash(\@cmds, $project, [cmd_dirs(\@cmds, defined $start ? $start : '.')]) unless $rule;
     ($rule, $text) = Protect::judge_bash(\@cmds, [cmd_dirs(\@cmds, defined $start ? $start : '.')], $project) unless $rule;

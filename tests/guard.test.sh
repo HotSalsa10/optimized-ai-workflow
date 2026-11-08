@@ -66,9 +66,9 @@ echo $(git rev-parse HEAD)||command substitution or backticks
 date|substitution|
 echo `date`||command substitution or backticks'
 reads "a variable as the command word cannot be read" '$CMD push' '$CMD push||a variable as the command word'
-reads "a pipe or here-string into a shell or an interpreter cannot be read" 'printf x | sh; python3 <<< "print(1)"' 'printf x||
+reads "a pipe into a shell cannot be read; a plain here-string into an interpreter is its program, judged as an inline one (5.5 repair loop 3)" 'printf x | sh; python3 <<< "print(1)"' 'printf x||
 sh||a pipe, here-document or here-string into sh
-python3||a pipe, here-document or here-string into python3'
+python3||an inline program for python3'
 reads "an interpreter's inline program cannot be read" 'perl -e 1; node -e 1; awk "{print}" f' 'perl -e 1||an inline program for perl
 node -e 1||an inline program for node
 awk {print} f||an inline program for awk'
@@ -96,7 +96,7 @@ if [ "$got" = "1,1,1,1,1,1,1,1" ]; then pass "reader: a subshell, bash -c, a pip
 judge() {
   name=$1
   printf '%s' "$2" >"$work/in.json"
-  err=$(cd "$proj" && env -u CLAUDE_CODE_EXECPATH CLAUDE_PROJECT_DIR="$proj" bash "$guard" <"$work/in.json" 2>&1 >"$work/out")
+  err=$(cd "$proj" && env -u CLAUDE_CODE_EXECPATH CLAUDE_PROJECT_DIR="$proj" perl -e 'alarm 60; exec @ARGV' bash "$guard" <"$work/in.json" 2>&1 >"$work/out")
   code=$?
   case "$3" in
     allow) if [ "$code" -eq 0 ] && [ -z "$err" ]; then pass "$name"; else fail "$name: wanted it let through" "exit $code: $err"; fi ;;
@@ -174,8 +174,44 @@ printf '%s\n' "$round2_ok" | sed -n 's/^@@ \(allow .*\)$/\1/p' >"$work/round2-ok
 while IFS= read -r head; do
   judge "${head#* }" "$(round2_cases=$round2_ok round2_input "$head")" allow
 done <"$work/round2-ok.txt"
+# --- review round 3 of 5.5: every shape the round showed misread, now
+# refused whole (the reader fails closed on what it may read differently
+# from bash) or read right, and the common commands that must still pass;
+# the must-pass cases the round named that stay refused are kept as known
+# false refusals, marked so (tests/guard-cases/round3.txt and
+# round3-allow.txt) ---
+round3_cases=$(cat "$here/guard-cases/round3.txt")
+printf '%s\n' "$round3_cases" | sed -n 's/^@@ \(G[0-9]* .*\)$/\1/p' >"$work/round3.txt"
+while IFS= read -r head; do
+  judge "${head#* }" "$(round2_cases=$round3_cases round2_input "$head")" "${head%% *}"
+done <"$work/round3.txt"
+round3_ok=$(cat "$here/guard-cases/round3-allow.txt")
+printf '%s\n' "$round3_ok" | sed -n 's/^@@ \(allow .*\)$/\1/p' >"$work/round3-ok.txt"
+while IFS= read -r head; do
+  judge "${head#* }" "$(round2_cases=$round3_ok round2_input "$head")" allow
+done <"$work/round3-ok.txt"
+# (carriage returns cannot be written in a tracked text file, so these are
+# built here)
+# shellcheck disable=SC2016 # the commands are data for the guard, never run
+{
+  judge "a CR on a decoy end line ends the reader's here-document early [R3-F2]" "$(bash_call "$(printf 'cat <<EOF\nEOF\r\n: <<X\nEOF\ngit push --force origin main\nX')")" G0
+  judge "a CRLF delimiter line with an LF decoy end line [R3-F2]" "$(bash_call "$(printf 'cat <<EOF\r\nEOF\n: <<X\nEOF\r\ngit push --force origin main\nX')")" G0
+  judge "a CR on an end line, then a here-document that hides git [R3-S4]" "$(bash_call "$(printf 'cat <<EOF\nEOF\r\nx <<EOF2\nEOF\ngit push --force origin main\nEOF2')")" G0
+  judge "a CRLF delimiter, then an LF end line, then a here-document that hides git [R3-S4]" "$(bash_call "$(printf 'cat <<EOF\r\nEOF\nx <<EOF2\nEOF\r\ngit push --force origin main\nEOF2')")" G0
+  judge "Claude Code's commit form with CRLF line endings, a known false refusal [R3-FR10]" "$(bash_call "$(printf 'git commit -m "$(cat <<'"'"'EOF'"'"'\r\nFix the parser\r\n\r\nIt reads more now.\r\nEOF\r\n)"')")" G0
+}
+# more substitutions than the guard reads in its time, next to git
+judge "more substitutions than the guard reads, next to git, are refused whole" "$(bash_call "$(perl -e 'print "echo ", "\$(true) " x 70, "; git status"')")" G0
+reads "for (( )) is arithmetic, and the loop's body is read" 'for ((i=0; i<2; i++)); do git status; done' 'git status||'
+# the reader reads what a substitution inside arithmetic, and a backtick
+# inside backticks, runs (so a hidden command word there is judged)
+reads "a substitution inside arithmetic is read as a command" 'echo $(( $(wc -l < f) + 1 ))' 'wc -l|substitution|
+echo $(( $(wc -l < f) + 1 ))||command substitution or backticks'
+reads "a backtick inside backticks is read as a command" 'echo `echo \`date\``' 'date|substitution substitution|
+echo `date`|substitution|command substitution or backticks
+echo `echo \`date\``||command substitution or backticks'
 # a CR inside a word, and in a here-document's delimiter
-judge "a carriage return is part of a word, so a # after it starts no comment" "$(bash_call "$(printf 'echo x\r# ; git push --force origin main')")" G3
+judge "a carriage return next to git is refused (5.5 repair loop 3: the reader read carriage returns differently from bash)" "$(bash_call "$(printf 'echo x\r# ; git push --force origin main')")" G0
 judge "a here-document delimiter with a carriage return in it is not read" "$(bash_call "$(printf 'cat <<EOF\rX\nsafe\nEOF\rX\ngit push --force origin main\nEOF\n')")" G0
 judge "git's dashed names (git-push) are watched like git: piped into a shell, refused" "$(bash_call "echo git-push origin main | sh")" G0
 # data piped into a program file or module is data
@@ -189,7 +225,7 @@ judge "Claude Code's commit form (a quoted here-document read by cat) is let thr
 # one is refused until the branch is pushed, G4, step 5.8)
 judge "and its PR form" "$(bash_call "$(printf 'gh pr create --head task --title "x" --body "$(cat <<'"'"'EOF'"'"'\n## Summary\n- one\nEOF\n)"')")" allow
 judge "a here-document read by cat that would expand something is still not read" "$(bash_call "$(printf 'git commit -m "$(cat <<EOF\n$(git push origin main)\nEOF\n)"')")" G0
-judge "a carriage return ends a here-document's end line, so a CRLF commit message passes" "$(bash_call "$(printf 'git commit -F - <<EOF\r\nmsg\r\nEOF\r\ngit log -1\r\n')")" allow
+judge "a CRLF commit message is refused too, a known false refusal: write it with plain line ends" "$(bash_call "$(printf 'git commit -F - <<EOF\r\nmsg\r\nEOF\r\ngit log -1\r\n')")" G0
 err=$(cd "$proj" && printf '%s' "$(bash_call "$(printf 'git commit -F - <<SECRETDELIM42\nmsg')")" | CLAUDE_PROJECT_DIR="$proj" bash "$guard" 2>&1)
 case "$err" in *SECRETDELIM42*) fail "a refusal never repeats a here-document's delimiter (command text)" "$err" ;; "guard G0: "*) pass "a refusal never repeats a here-document's delimiter (command text)" ;; *) fail "a here-document with no end line next to git is refused" "$err" ;; esac
 deep='git status'

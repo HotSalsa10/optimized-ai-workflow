@@ -1,0 +1,113 @@
+@@ allow [[ with a variable first, then git status [R3-FR5]
+if [[ "$branch" == main ]]; then echo on main; fi; git status
+@@ allow [[ in a loop that adds files [R3-FR5]
+for f in src/*.py; do [[ "$f" == *_test.py ]] && continue; git add "$f"; done
+@@ allow [[ $? -ne 0 ]], then git status [R3-FR5]
+npm test; if [[ $? -ne 0 ]]; then echo failed; fi; git status --short
+@@ allow arithmetic with numbers only in a git option [R3-FR6]
+git log -n $((2 * 5)) --oneline
+@@ allow a python here-document that prints the word git [R3-FR9]
+python3 <<'EOF'
+print("git hooks:", 1)
+EOF
+@@ allow a program under $HOME, then git diff [R3-FR11]
+$HOME/.local/bin/uv run pytest; git diff
+@@ allow an arithmetic for loop with no watched word [R3-F1]
+for ((i=0; i<3; i++)); do echo "$i"; done
+@@ allow a plain for loop [R3-F1]
+for i in 1 2; do echo $i; done
+@@ allow an arithmetic retry loop around git fetch [R3-F1]
+for ((i=1; i<=3; i++)); do git fetch && break; sleep 2; done
+@@ allow while(( with no blank and no watched word [R3-F1]
+n=0; while((n<3)); do n=$((n+1)); done; echo "$n"
+@@ allow a here-document commit message after an arithmetic loop [R3-F1]
+for ((i=0; i<2; i++)); do echo "$i"; done
+git commit -F - <<'EOF'
+Fix the loop
+EOF
+@@ allow if (( )) around git status [R3-F1]
+if ((1 > 0)); then git status; fi
+@@ allow an arithmetic counter with no watched word [R3-F3]
+n=0; n=$((n + 1)); echo "$n"
+@@ allow let and declare -i with no watched word [R3-F3]
+declare -i total=0; let total=total+5; echo "$total"
+@@ allow [[ $# -eq 0 ]] with no watched word [R3-F3]
+[[ $# -eq 0 ]] && echo "no arguments"
+@@ allow two process substitutions with no watched word [R3-F4]
+diff <(sort a.txt) <(sort b.txt)
+@@ allow a default value in ${ }, then git status [R3-F4]
+cat ${f:-notes.txt}; git status
+@@ allow echo ${HOME} [R3-F5]
+echo ${HOME}
+@@ allow a double-quoted default value, then git status [R3-F5]
+echo "${name:-unknown}"; git status
+@@ allow single quotes in double quotes outside ${ }, then git status [R3-F5]
+echo "it's ${USER}'s turn"; git status
+@@ allow a quoted default inside a double-quoted ${ } with no watched word [R3-F5]
+echo "${x:-'default'}"
+@@ allow xargs -I@ with a plain command after git ls-files [R3-F6]
+git ls-files '*.sh' | xargs -I@ echo checking @
+@@ allow xargs -I X with no watched word [R3-F6]
+find . -name '*.log' | xargs -I X rm X
+@@ allow xargs -0 wc after git ls-files -z [R3-F6]
+git ls-files -z | xargs -0 wc -l
+@@ allow perl -I with a program file [R3-F7]
+perl -I lib script.pl
+@@ allow git log piped into perl -I with an inline program [R3-F7]
+git log --oneline | perl -I lib -ne 'print if /fix/'
+@@ allow git log piped into awk with a program file [R3-F7]
+git log --oneline | awk -f count.awk
+@@ allow a line continuation in a plain git status [R3-F8]
+git status \
+  --short
+@@ allow a line continuation in git log [R3-F8]
+git log --oneline \
+  -n 5
+@@ allow a line continuation in a curl call [R3-F8]
+curl -s \
+  -H "Accept: x" https://example.com
+@@ allow curl with a header [R3-F8]
+curl -s -H "Accept: x" https://example.com
+@@ allow a backslash at a line end inside a quoted here-document commit message [R3-S3]
+git commit -F - <<'EOF'
+Fix the path ending in \
+and keep going
+EOF
+@@ allow a here-document commit message [R3-S3]
+git commit -F - <<'EOF'
+Fix the reader
+
+It reads more now.
+EOF
+@@ allow an arithmetic expansion around a substitution with no watched word [R3-F9]
+echo $(( $(wc -l < notes.txt) + 1 ))
+@@ allow nested escaped backticks with no watched word [R3-F9]
+x=`echo \`date\``; echo "$x"
+@@ allow a default value as the command word with no watched word [R3-F10]
+${EDITOR:-vi} notes.txt
+@@ allow a quoted default value as the command word with no watched word [R3-F10]
+"${PYTHON:-python3}" -m pytest
+@@ allow ${ } words that are no bash 5.3 command substitution, then git status [R3-S10]
+echo "${HOME}/x" ${#PATH} ${PATH%%:*}; git status
+@@ allow a comment right after ) inside $( ) with no watched word [R3-S2]
+x=$( (cd /tmp && ls)# list it
+); echo "$x"
+@@ allow code piped into bash with a brace and no watched word [R3-S7]
+printf 'echo {1..3}\n' | bash
+@@ allow curl output piped into a python module [R3-S7]
+curl -s https://example.com/data.json | python3 -m json.tool
+@@ allow a function definition, then git status [R3-S8]
+f() { echo hi; }; f; git status
+@@ allow an array append, then git status [R3-S8]
+args=(-n 5); args+=(--oneline); git log "${args[@]}"
+@@ allow flock before a plain command [R3-S11]
+flock /tmp/build.lock make
+@@ allow taskset and script -qc with no watched word [R3-S11]
+taskset 1 npm test; script -qc 'npm test' /dev/null
+@@ allow a comment with a quote after a substitution, then git status [R3-S2]
+n=$(ls | wc -l) # it's a count
+git status
+@@ allow a commit message whose body holds (( )) and @( ) text
+git commit -F - <<'EOF2'
+Use ((a)) and @(b) in the docs
+EOF2

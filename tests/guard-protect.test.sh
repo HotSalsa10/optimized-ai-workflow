@@ -53,7 +53,7 @@ appc=$(git -C "$proj" rev-parse app)
 # judge NAME CWD COMMAND WANT: guard.sh on a Bash call run in CWD; WANT is
 # "allow" or a rule ID (the refusal must start "guard RULE:" and exit 2)
 run_guard() {
-  err=$(cd "$1" && env -u CLAUDE_CODE_EXECPATH CLAUDE_PROJECT_DIR="$proj" bash "$guard" <"$work/in.json" 2>&1 >"$work/out.txt")
+  err=$(cd "$1" && env -u CLAUDE_CODE_EXECPATH CLAUDE_PROJECT_DIR="$proj" perl -e 'alarm 60; exec @ARGV' bash "$guard" <"$work/in.json" 2>&1 >"$work/out.txt")
   code=$?
 }
 want() {

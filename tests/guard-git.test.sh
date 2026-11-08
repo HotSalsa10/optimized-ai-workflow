@@ -41,7 +41,7 @@ git clone -q "$proj" "$work/clone" 2>/dev/null
 judge() {
   name=$1
   CMD="$3" CWD="$2" perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({tool_name => "Bash", tool_input => {command => $ENV{CMD}}, cwd => $ENV{CWD}, hook_event_name => "PreToolUse"})' >"$work/in.json"
-  err=$(cd "$2" && env -u CLAUDE_CODE_EXECPATH CLAUDE_PROJECT_DIR="$proj" bash "$guard" <"$work/in.json" 2>&1 >/dev/null)
+  err=$(cd "$2" && env -u CLAUDE_CODE_EXECPATH CLAUDE_PROJECT_DIR="$proj" perl -e 'alarm 60; exec @ARGV' bash "$guard" <"$work/in.json" 2>&1 >/dev/null)
   code=$?
   case "$4" in
     allow) if [ "$code" -eq 0 ] && [ -z "$err" ]; then pass "$name"; else fail "$name: wanted it let through" "exit $code: $err"; fi ;;

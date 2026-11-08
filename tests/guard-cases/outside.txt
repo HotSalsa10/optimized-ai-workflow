@@ -154,7 +154,7 @@ gh repo view
 {"owner":"example-owner","repo":"example-repo","pullNumber":1}
 @@ G4 SendMessage SendMessage is refused
 {"to":"x","message":"y"}
-@@ G4 Bash another Claude is refused: under xargs
+@@ G0 Bash another Claude under xargs is refused by G0 first (xargs adds words from its input)
 xargs claude -p < prompts.txt
 @@ G4 Bash another Claude is refused: after command
 command claude -p hello

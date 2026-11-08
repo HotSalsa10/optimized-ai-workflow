@@ -51,10 +51,17 @@ use warnings;
 our @INTERP = qw(sh bash zsh dash ksh mksh fish csh tcsh perl python python2 python3 node nodejs deno bun ruby php lua awk gawk mawk nawk tclsh Rscript pwsh powershell osascript);
 my %INTERP = map { $_ => 1 } @INTERP;
 my %SHELL = map { $_ => 1 } qw(sh bash zsh dash ksh mksh csh tcsh fish);
-my %KEYWORD = map { $_ => 1 } qw(if then elif else fi while until do done for in select function ! time { } [[ ]]);
+# ([[ is the command word of its test, as [ is, so a variable first in it
+# is no command word)
+my %KEYWORD = map { $_ => 1 } qw(if then elif else fi while until do done for in select function ! time { } ]]);
 # an interpreter's inline-program options, where they differ from -c and -e
 my $NODE_INLINE = qr/\A-[A-Za-z]*[ep][A-Za-z]*\z|\A--(?:eval|print)\b|\A-[ep]\S/;
+# (perl: -e or -E, alone or after its flags; -Mstrict or -Ilib is no
+# program)
 my %INLINE = (node => $NODE_INLINE, nodejs => $NODE_INLINE, bun => $NODE_INLINE, deno => $NODE_INLINE,
+  perl => qr/\A-[nplawsStTWXUu0-9]*[eE]/,
+  # (tclsh has no inline program: its code comes from a file or stdin)
+  tclsh => qr/(?!)/,
   php => qr/\A-[A-Za-z]*r[A-Za-z]*\z|\A-r\S/,
   pwsh => qr/\A-(?:c|command|encodedcommand|ec|e)\z/i, powershell => qr/\A-(?:c|command|encodedcommand|ec|e)\z/i);
 # prefix commands that run the rest of their words as a command
@@ -66,8 +73,168 @@ my $SHELL_VALUE = qr/\A[-+][oO]\z|\A--(?:rcfile|init-file)\z/;
 my %VALUE = (python => qr/\A-[WXQ]\z/, node => qr/\A(?:-r|--require|--import|--loader|--experimental-loader|--env-file|--conditions|-C|--input-type|--title)\z/,
   ruby => qr/\A-[rIEC]\z/, php => qr/\A-[cdz]\z/);
 $VALUE{$_} = $VALUE{node} for qw(nodejs bun deno);
+# (perl -I and -M can take their value as the next word; lua -l, tclsh
+# -encoding and osascript -l and -s do; step 5.5 repair loop 3)
+$VALUE{perl} = qr/\A-[IM]\z/;
+$VALUE{lua} = qr/\A-[lW]\z/;
+$VALUE{tclsh} = qr/\A-encoding\z/;
+$VALUE{osascript} = qr/\A-[ls]\z/;
 # python modules that read their code from stdin
 my %STDIN_MODULE = map { $_ => 1 } qw(code pdb asyncio idlelib);
+
+# --- shapes the reader may read differently from bash (step 5.5, repair
+# loop 3; A57): rather than read each exactly, the guard refuses a call
+# that holds one and names a watched word (G0) ---
+
+# TEXT with its single-quoted parts blanked (they are plain text in bash),
+# and a second copy with its double-quoted parts blanked too, unless they
+# hold a substitution (which runs)
+sub blank_quotes {
+  my ($t) = @_;
+  my ($s, $q) = ('', '');
+  my $i = 0;
+  my $n = length $t;
+  while ($i < $n) {
+    my $ch = substr($t, $i, 1);
+    if ($ch eq '\\') { my $two = substr($t, $i, 2); $s .= $two; $q .= $two; $i += 2; next }
+    # (a here-document's quoted delimiter stays, so its body can be found)
+    if (($ch eq "'" || $ch eq '"') && $s =~ /<<-?[ \t]*\z/) {
+      my $j = index($t, $ch, $i + 1);
+      my $len = ($j < 0 ? $n : $j + 1) - $i;
+      my $part = substr($t, $i, $len);
+      $s .= $part; $q .= $part; $i += $len;
+      next;
+    }
+    if ($ch eq "'") {
+      my $ansi = $i > 0 && substr($t, $i - 1, 1) eq '$';
+      my $j = $i + 1;
+      while ($j < $n && substr($t, $j, 1) ne "'") { $j += ($ansi && substr($t, $j, 1) eq '\\') ? 2 : 1 }
+      my $len = ($j < $n ? $j + 1 : $n) - $i;
+      $s .= ' ' x $len; $q .= ' ' x $len; $i += $len;
+      next;
+    }
+    if ($ch eq '"') {
+      my $j = $i + 1;
+      while ($j < $n && substr($t, $j, 1) ne '"') { $j += substr($t, $j, 1) eq '\\' ? 2 : 1 }
+      my $len = ($j < $n ? $j + 1 : $n) - $i;
+      my $part = substr($t, $i, $len);
+      $s .= $part;
+      $q .= $part =~ /\$\(|`/ ? $part : ' ' x $len;
+      $i += $len;
+      next;
+    }
+    $s .= $ch; $q .= $ch; $i++;
+  }
+  return ($s, $q);
+}
+
+# TEXT (its single quotes blanked, as blank_quotes gives it) with the
+# bodies of its here-documents blanked: all of a body whose delimiter is
+# quoted (plain text), and with ALL true also one whose delimiter is not
+# (where only $ and backticks expand)
+sub blank_bodies {
+  my ($t, $all) = @_;
+  my @lines = split /(?<=\n)/, $t;
+  my @pending;
+  my $out = '';
+  for my $l (@lines) {
+    if (@pending) {
+      my ($word, $quoted, $tabs) = @{ $pending[0] };
+      (my $bare = $l) =~ s/\r?\n\z//;
+      $bare =~ s/\A\t+// if $tabs;
+      shift @pending if $bare eq $word;
+      $out .= ($quoted || $all) ? ($l =~ s/[^\n]/ /gr) : $l;
+      next;
+    }
+    $out .= $l;
+    while ($l =~ /(?<!<)<<(-?)[ \t]*(?:'([^'\n]+)'|"([^"\n]+)"|\\?([A-Za-z0-9_.-]+))/g) {
+      push @pending, [defined $2 ? $2 : defined $3 ? $3 : $4, (defined $2 || defined $3 || substr($l, $-[0], length($&)) =~ /\\/) ? 1 : 0, $1 eq '-'];
+    }
+  }
+  return $out;
+}
+
+# the reasons TEXT holds a shape the reader may read differently from
+# bash; an empty list when it holds none
+sub doubts {
+  my ($t) = @_;
+  my @why;
+  my ($s, $q) = blank_quotes($t);
+  # (a here-document's body is text, apart from what expands in it)
+  $s = blank_bodies($s, 0);
+  $q = blank_bodies($q, 1);
+  # a lone carriage return, or one on a here-document's end line
+  push @why, 'a carriage return' if $t =~ /\r/;
+  # arithmetic: an (( )) command where the reader may take it for a
+  # subshell (after for, function, time -p, with no blank after a keyword),
+  # or one holding <<, a substitution or a backtick; $[ ] and let. ($(( ))
+  # is read as one unit, its substitutions as commands; code kept in a
+  # variable it names is the next check.)
+  my $arith = 0;
+  while ($q =~ /\(\(/g) {
+    my $at = $-[0];
+    next if $at > 0 && substr($q, $at - 1, 1) eq '$';
+    my $before = substr($q, 0, $at);
+    my $close = index($q, '))', $at + 2);
+    my $in = $close < 0 ? substr($q, $at + 2) : substr($q, $at + 2, $close - $at - 2);
+    if ($close < 0 || $in =~ /<<|\$\(|`/ || $before !~ /(?:\A|[;&|(\n]|(?:\A|[\s;&|(])(?:if|elif|while|until|!|then|do|else|for|\{)[ \t])[ \t]*\z/) { $arith = 1; last }
+  }
+  push @why, 'arithmetic' if $arith || $s =~ /\$\[/ || $q =~ /(?:\A|[\s;&|(])let\s/;
+  # code kept in a variable (arithmetic or an indirection can run it)
+  push @why, 'code held in a variable' if $t =~ /(?:\A|[\s;&|(])[A-Za-z_]\w*(?:\[[^\]\n]*\])?\+?=(?:'[^']*(?:\$\(|`)|\$'(?:[^'\\]|\\.)*?(?:\$\(|`)|"[^"]*\\(?:\$\(|`))/;
+  # ${ } holding a quote, a space, a substitution or a process
+  # substitution (bash 5.3's ${ cmd; } runs a command)
+  while ($s =~ /\$\{/g) {
+    my $from = pos $s;
+    my $end = index($s, '}', $from);
+    my $in = $end < 0 ? substr($s, $from) : substr($s, $from, $end - $from);
+    if ($end < 0 || $in =~ /['"`\s;|&<>(]/) { push @why, 'a ${ } the guard cannot read'; last }
+  }
+  # an extended glob, a zsh glob qualifier or = expansion
+  push @why, 'an extended glob or a zsh form' if $q =~ /[@+!*?]\(/ || $q =~ /(?:\A|[\s;&|(])=[A-Za-z\/]/ || $q =~ /\$[=~^][A-Za-z{]/;
+  # a comment right after ( or ), where the reader does not see one start
+  # (a comment after a blank is read as bash reads it)
+  push @why, 'a comment right after a parenthesis' if $q =~ /[()]#/;
+  # more substitutions than the guard reads in its time
+  my $subs = () = $s =~ /\$\(|(?<!\\)`/g;
+  push @why, 'more substitutions than the guard reads' if $subs > 64;
+  return @why;
+}
+
+# TEXT with its line continuations (a backslash before a newline, outside
+# single quotes and comments) removed, as bash removes them: (TEXT, 1); or
+# (TEXT, 0) when it holds one beside a here-document, a substitution, ${
+# } or ANSI-C quoting, where the guard does not remove them itself
+sub join_lines {
+  my ($t) = @_;
+  return ($t, 1) unless $t =~ /\\\r?\n/;
+  if ($t =~ /(?<!<)<<(?!<)|\$\(|`|\$\{|\$'/) {
+    # (a backslash at a line's end inside quotes or a quoted here-document's
+    # body joins nothing that matters to the reader)
+    my ($s) = blank_quotes($t);
+    return ($t, blank_bodies($s, 0) =~ /\\\r?\n/ ? 0 : 1);
+  }
+  my $out = '';
+  my $state = '';
+  my $n = length $t;
+  for (my $i = 0; $i < $n; $i++) {
+    my $ch = substr($t, $i, 1);
+    if ($state eq "'") { $out .= $ch; $state = '' if $ch eq "'"; next }
+    if ($state eq '#') { $out .= $ch; $state = '' if $ch eq "\n"; next }
+    if ($ch eq '\\') {
+      my $next = substr($t, $i + 1, 1);
+      if ($next eq "\n") { $i++; next }
+      $out .= $ch . $next;
+      $i++;
+      next;
+    }
+    if ($state eq '"') { $out .= $ch; $state = '' if $ch eq '"'; next }
+    if ($ch eq "'" || $ch eq '"') { $state = $ch }
+    elsif ($ch eq '#' && ($i == 0 || substr($t, $i - 1, 1) =~ /[\s;&|()]/)) { $state = '#' }
+    $out .= $ch;
+  }
+  return ($out, 1);
+}
 
 # the position after any backslash-newline pairs (line continuations) at
 # POS in S
@@ -246,12 +413,24 @@ sub subs_in {
       }
     }
     if ($c eq '`') {
-      my $e = index($t, '`', $i + 1);
+      my $e = close_tick($t, $i + 1);
       if ($e > 0) { push @subs, unbacktick(substr($t, $i + 1, $e - $i - 1)); $i = $e + 1; next }
     }
     $i++;
   }
   return @subs;
+}
+
+# the position of the backtick that closes one opened before POS in S: the
+# next one not escaped by a backslash (an escaped one nests), or -1
+sub close_tick {
+  my ($s, $pos) = @_;
+  for (my $i = $pos; $i < length $s; $i++) {
+    my $c = substr($s, $i, 1);
+    if ($c eq '\\') { $i++; next }
+    return $i if $c eq '`';
+  }
+  return -1;
 }
 
 # the command inside backticks, as bash reads it (\\, \` and \$ unescaped)
@@ -373,16 +552,20 @@ sub tokens {
           my $arith = substr($s, $k + 1, 1) eq '(';
           my $e = close_paren($s, $k + 1, $arith);
           if (!defined $e) { push @t, { error => 'an unclosed $(' }; return @t }
+          # ($((cmd) ) is a substitution of a subshell, not arithmetic)
+          $arith = 0 if $arith && substr($s, $e - 1, 1) ne ')';
           my $lit = $arith ? undef : literal_cat(substr($s, $k + 1, $e - $k - 1));
           if (defined $lit) { $text .= $lit; $j = $e + 1; next }
-          $word->{flags}{subst} = 1;
-          push @{ $word->{subs} }, substr($s, $k + 1, $e - $k - 1) unless $arith;
+          # (arithmetic with no substitution in it builds a word, it runs nothing)
+          $word->{flags}{($arith && substr($s, $k + 1, $e - $k - 1) !~ /\$\(|`/) ? 'var' : 'subst'} = 1;
+          # (inside arithmetic, its own substitutions are what runs)
+          push @{ $word->{subs} }, $arith ? subs_in(substr($s, $k + 1, $e - $k - 1)) : substr($s, $k + 1, $e - $k - 1);
           $text .= substr($s, $j, $e - $j + 1);
           $j = $e + 1;
           next;
         }
         if ($d eq '`') {
-          my $e = index($s, '`', $j + 1);
+          my $e = close_tick($s, $j + 1);
           if ($e < 0) { push @t, { error => 'an unclosed backtick' }; return @t }
           $word->{flags}{subst} = 1;
           push @{ $word->{subs} }, unbacktick(substr($s, $j + 1, $e - $j - 1));
@@ -406,6 +589,7 @@ sub tokens {
       my $arith = substr($s, $k + 1, 1) eq '(';
       my $e = close_paren($s, $k + 1, $arith);
       if (!defined $e) { push @t, { error => 'an unclosed $(' }; last }
+      $arith = 0 if $arith && substr($s, $e - 1, 1) ne ')';
       $start_word->();
       my $lit = $arith ? undef : literal_cat(substr($s, $k + 1, $e - $k - 1));
       if (defined $lit) {
@@ -415,15 +599,15 @@ sub tokens {
         $i = $e + 1;
         next;
       }
-      $word->{flags}{subst} = 1;
-      push @{ $word->{subs} }, substr($s, $k + 1, $e - $k - 1) unless $arith;
+      $word->{flags}{($arith && substr($s, $k + 1, $e - $k - 1) !~ /\$\(|`/) ? 'var' : 'subst'} = 1;
+      push @{ $word->{subs} }, $arith ? subs_in(substr($s, $k + 1, $e - $k - 1)) : substr($s, $k + 1, $e - $k - 1);
       $word->{text} .= substr($s, $i, $e - $i + 1);
       $word->{raw} .= substr($s, $i, $e - $i + 1);
       $i = $e + 1;
       next;
     }
     if ($c eq '`') {
-      my $e = index($s, '`', $i + 1);
+      my $e = close_tick($s, $i + 1);
       if ($e < 0) { push @t, { error => 'an unclosed backtick' }; last }
       $start_word->();
       $word->{flags}{subst} = 1;
@@ -470,7 +654,7 @@ sub tokens {
     # an arithmetic command (( ... )): one unit, read by its own text (a <<
     # in it shifts, it starts no here-document)
     if ($c eq '(' && substr($s, $i + 1, 1) eq '(' && !defined $word
-      && (!@t || $t[-1]{op} || ($t[-1]{word} && !$t[-1]{word}{flags}{quoted} && $t[-1]{word}{text} =~ /\A(?:if|elif|while|until|!|time|\{|then|do|else)\z/))) {
+      && (!@t || $t[-1]{op} || ($t[-1]{word} && !$t[-1]{word}{flags}{quoted} && $t[-1]{word}{text} =~ /\A(?:if|elif|while|until|!|time|\{|then|do|else|for)\z/))) {
       my $e = close_paren($s, $i + 2, 1);
       if (!defined $e || substr($s, $e + 1, 1) ne ')') { push @t, { error => 'an unclosed ((' }; last }
       $e++;
@@ -480,6 +664,7 @@ sub tokens {
       $word->{raw} .= $text;
       $word->{flags}{arith} = 1;
       $word->{flags}{subst} = 1 if $text =~ /\$\(|`/;
+      push @{ $word->{subs} }, subs_in(substr($text, 2, -2));
       $i = $e + 1;
       next;
     }
@@ -511,6 +696,8 @@ sub tokens {
     $word->{text} .= $c;
     $word->{raw} .= $c;
     $word->{flags}{glob} = 1 if $c =~ /[*?\[]/;
+    # (an extended glob: @( ), +( ), !( ) in bash with extglob on)
+    $word->{flags}{glob} = 1 if $c =~ /[@+!]/ && substr($s, $i + 1, 1) eq '(';
     $word->{flags}{brace} = 1 if $c eq '{' && substr($s, $i, 512) =~ /\A\{[^}\s]*[,.][^}\s]*\}/;
     $i++;
   }
@@ -647,7 +834,10 @@ sub expand {
   for my $i (0 .. $#flags) {
     push @u, 'command substitution or backticks' if $flags[$i]{subst};
   }
-  push @u, 'a variable as the command word' if @flags && ($flags[0]{var} || $flags[0]{subst});
+  # (a program under a variable folder, its name written out, is that
+  # program: $HOME/bin/tool, ${VENV}/bin/python)
+  push @u, 'a variable as the command word' if @flags && ($flags[0]{var} || $flags[0]{subst})
+    && ($flags[0]{subst} || ($c->{raw}[0] // '') !~ m{\A(?:\$[A-Za-z_]\w*|\$\{[A-Za-z_]\w*\}|~[A-Za-z0-9_.-]*)(?:/[A-Za-z0-9_.+-]+)+\z});
   # {} is what find -exec and xargs -I put there: a word from elsewhere
   push @u, 'a variable as the command word' if @words && $words[0] =~ /\{\}/;
   push @u, 'a glob or a brace in the command word' if @flags && ($flags[0]{glob} || $flags[0]{brace}) && !$flags[0]{arith} && $words[0] !~ /\A\[\[?\z/;
@@ -721,7 +911,12 @@ sub expand {
     }
   } elsif ($INTERP{$base}) {
     my $inline = $INLINE{$base} || qr/\A-[A-Za-z]*[ceE][A-Za-z]*\z|\A--(?:eval|command)\b|\A-e\S/;
-    if (grep { $_ =~ $inline } @words[1 .. $#words]) {
+    # awk -f with stdin as its program file reads its code from its input
+    my $awk_stdin = $base =~ /awk\z/ && grep { ($words[$_] eq '-f' && defined $words[ $_ + 1 ] && $words[ $_ + 1 ] =~ $STDIN_FILE) || $words[$_] =~ m{\A-f(?:-|/dev/stdin|/dev/fd/[0-9]+)\z} } 1 .. $#words;
+    if ($awk_stdin) {
+      push @{ $c->{unread} }, "a pipe, here-document or here-string into $name" if $c->{piped} || $c->{heredoc};
+      push @{ $c->{unread} }, "a program for $name from a process substitution" if $stdin_from;
+    } elsif (grep { $_ =~ $inline } @words[1 .. $#words]) {
       push @{ $c->{unread} }, "an inline program for $name";
     } elsif ($base =~ /awk\z/ && @words > 1) {
       push @{ $c->{unread} }, "an inline program for $name";
@@ -729,6 +924,10 @@ sub expand {
       push @{ $c->{unread} }, "an inline program for $name";
     } elsif ($program_from || $stdin_from) {
       push @{ $c->{unread} }, "a program for $name from a process substitution";
+    } elsif (!$c->{piped} && $c->{heredoc} && !$runs_file && ($c->{hbody} // '') !~ /[\$`]/) {
+      # a here-document of plain text is the program, judged as -c or -e
+      # would be (step 5.5)
+      push @{ $c->{unread} }, "an inline program for $name";
     } elsif (($c->{piped} || $c->{heredoc}) && !$runs_file) {
       push @{ $c->{unread} }, "a pipe, here-document or here-string into $name";
     }

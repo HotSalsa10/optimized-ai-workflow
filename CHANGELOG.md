@@ -63,6 +63,7 @@ Nothing yet. Release 1 is being built.
 - Tests: 1 new test file (protected files) and 1 new plant file.
 - The outside (step 5.8): Claude can open a pull request from its task branch, comment, open issues and read GitHub, but cannot merge, approve, run workflows, change settings, release, or write through GitHub's API, by gh, curl, wget or an MCP tool (`gh-shapes.txt` and `mcp-tools.txt` list what passes; your project can add lines). It cannot start another Claude, another session or a scheduled task, or message one. The settings also take the merge, auto-merge, session and trigger tools away on every MCP server, which holds with the hooks off.
 - Tests: 1 new test file (the outside, its cases in a file of their own) and 1 new plant file; the settings test checks the deny list.
+- The guard's command reader (step 5.5, last repair): shapes it might read differently from bash are now refused whole when the call names git, gh, claude, curl or wget, instead of being guessed at; some honest commands with such shapes are refused too, each with the shape named and a plain way to write it. Fewer ordinary commands are refused than before (9.1% of recorded commands, from 10.3%).
 
 ### Changed (step 4b)
 
