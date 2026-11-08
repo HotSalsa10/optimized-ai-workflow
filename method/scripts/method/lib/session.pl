@@ -15,8 +15,8 @@
 #   variable, a PreToolUse or PermissionRequest hook (the method's are in
 #   the project's settings only), an enabled plugin, an effort cap below
 #   xhigh (also per model); a settings file that is not a regular file, is
-#   over 4 MB or is not JSON; git shapes added in
-#   .claude/method-local/git-shapes.txt (step 5.6), counted. Names only,
+#   over 1 MB or is not JSON; the lines a project adds to the guard's lists
+#   in .claude/method-local/ (git, gh and MCP), counted. Names only,
 #   never a settings value: a model id only in the shape Anthropic's ids
 #   have, the effort level by name.
 # Over the caps, the last line says how many more and to run status.sh.
@@ -49,8 +49,12 @@ my %FRAGMENT_ENV = map { $_ => 1 } qw(CLAUDE_CODE_DISABLE_ADVISOR_TOOL CLAUDE_CO
 # (a settings file is small; a larger one is named, not read, so reading
 # it cannot take the hook past its time)
 our $SETTINGS_MAX = 1024 * 1024;
-# the whole hook's perl part ends within this many seconds
+# the whole hook's perl part ends within this many seconds; $OUT is set
+# when the time is up, and checked after each step whose own eval could
+# have caught the alarm (Json::decode, status's areas)
 our $DEADLINE = 20;
+our $OUT = 0;
+sub in_time { die "out of time\n" if $OUT }
 
 sub look { return "session-status: LOOK - $_[0]" }
 
@@ -68,6 +72,7 @@ sub read_settings {
   # Code reads such a file, so it is read here too)
   $text =~ s/\A\xEF\xBB\xBF//;
   my ($d, $e) = Json::decode($text, 'plain');
+  in_time();
   return (undef, 'is not JSON') if defined $e || ref $d ne 'HASH';
   return ($d, undef);
 }
@@ -171,11 +176,21 @@ sub warnings_for {
     next unless @what;
     push @w, look($user ? "$name adds to every session: " . join('; ', @what) : "$name sets " . join('; ', @what) . "; it ranks above the method's settings");
   }
-  # the project's own git shapes: the guard lets each through (G3)
-  if (open my $g, '<', File::Spec->catfile($top, '.claude', 'method-local', 'git-shapes.txt')) {
+  # the project's own lines in the guard's lists: the guard lets each
+  # through (only a regular file, under the settings' size cap, is read)
+  for my $l (['git-shapes.txt', 'git shape', 'G3'], ['gh-shapes.txt', 'gh shape', 'G4'], ['mcp-tools.txt', 'MCP tool line', 'G4']) {
+    my ($file, $what, $rule) = @$l;
+    my $path = File::Spec->catfile($top, '.claude', 'method-local', $file);
+    next unless -e $path || -l $path;
+    my $name = ".claude/method-local/$file";
+    if (!-f $path) { push @w, look("$name is not a regular file, so what it adds is not known"); next }
+    if (-s _ > $SETTINGS_MAX) { push @w, look("$name is over 1 MB, so what it adds is not known"); next }
+    my $g;
+    if (!open $g, '<', $path) { push @w, look("$name cannot be read, so what it adds is not known"); next }
     my $n = grep { /\S/ && !/\A\s*#/ } <$g>;
     close $g;
-    push @w, look("$n git shape" . ($n == 1 ? '' : 's') . " added in .claude/method-local/git-shapes.txt; the guard lets them through (G3)") if $n;
+    in_time();
+    push @w, look("$n $what" . ($n == 1 ? '' : 's') . " added in $name; the guard lets them through ($rule)") if $n;
   }
   return @w;
 }
@@ -234,14 +249,17 @@ sub main {
   # METHOD-ACTIVE always reaches Claude; a nested run skips status only)
   my @lines;
   my $ok = eval {
-    local $SIG{ALRM} = sub { die "out of time\n" };
+    local $SIG{ALRM} = sub { $OUT = 1; die "out of time\n" };
     alarm $DEADLINE;
     push @lines, status_lines($top) unless ($ENV{METHOD_NESTED} // '') eq '1';
+    in_time();
     push @lines, warnings_for($in, $top, $in_err);
+    in_time();
     alarm 0;
     1;
   };
   alarm 0;
+  $ok = 0, $@ = "out of time\n" if $OUT;
   if (!$ok) {
     (my $e = $@ || 'it stopped') =~ s/\n.*//s;
     push @lines, $e eq 'out of time'

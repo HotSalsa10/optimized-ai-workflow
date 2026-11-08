@@ -441,7 +441,7 @@ if h_fake "$H_WORK/ss.json"; then
   # shellcheck disable=SC2086
   h_client 60 METHOD_NESTED=1 -- $D
   h_stop
-  if h_req_has 'METHOD-ACTIVE vunreleased (nested: status skipped)'; then pass "session-status: a nested run (METHOD_NESTED=1) gets the one short line"; else fail "session-status: a nested run gets the one short line"; fi
+  if h_req_has 'METHOD-ACTIVE vunreleased (nested: status skipped)'; then pass "session-status: a nested run (METHOD_NESTED=1) gets METHOD-ACTIVE without status"; else fail "session-status: a nested run gets the one short line"; fi
   h_safe session-status-nested
 else
   fail "session-status-nested: the fake did not answer; the client was not started"

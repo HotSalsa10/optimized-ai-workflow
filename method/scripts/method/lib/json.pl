@@ -95,6 +95,15 @@ sub decode {
   # the text itself is not JSON; an escape is a \ after an even run of
   # backslashes, so an escaped backslash before "uD800" is not one)
   my $plain = defined $mode && $mode eq 'plain';
+  if ($plain) {
+    # a lone surrogate escape (a high one with no low one after it, or a
+    # low one with no high one before it): JavaScript's JSON.parse, and so
+    # Claude Code, reads it; JSON::PP refuses it, and only after a slow
+    # read. The hooks need names only, so it is read as U+FFFD.
+    my $n = ($chars =~ s/((?<!\\)(?:\\\\)*)\\u[dD][89abAB][0-9a-fA-F]{2}(?!\\u[dD][c-fC-F][0-9a-fA-F]{2})/$1\\ufffd/g)
+      + ($chars =~ s/((?<!\\)(?:\\\\)*)(?<![dD][89abAB][0-9a-fA-F]{2})\\u[dD][c-fC-F][0-9a-fA-F]{2}/$1\\ufffd/g);
+    if ($n) { $text = $chars; utf8::encode($text) }
+  }
   if ($chars =~ /[^\x00-\x7F]/ && $chars !~ /(?<!\\)(?:\\\\)*\\[^\x00-\x7F]/ && $chars !~ /(?<!\\)(?:\\\\)*\\u[dD][89abAB][0-9a-fA-F]{2}(?!\\u[dD][c-fC-F][0-9a-fA-F]{2})/) {
     (my $ascii = $chars) =~ s/([^\x00-\x7F])/esc_char(ord $1)/ge;
     $data = eval { $r->decode($ascii) };

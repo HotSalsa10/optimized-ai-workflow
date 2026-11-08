@@ -269,16 +269,20 @@ pl "scan_bytes reads ASCII text after a UTF-16 part as text too" 'my $k = "ghp_"
 
 # --- review round 2 of 5.1 ---
 # A lone escaped high surrogate before a character above U+FFFF is not JSON
-# (JSON::PP on the text itself says so); the fast reading must not make it
-# one. Client-shaped: JSON.stringify writes a lone surrogate as \udXXX.
+# to JSON::PP (on the text itself), and `get` refuses it; the fast reading
+# must never pair it with the first half of the character after it. The
+# hooks' plain reading reads it as Claude Code does (JavaScript's
+# JSON.parse takes a lone surrogate): U+FFFD in its place, and the
+# character after it unchanged (step 5.4, repair loop 3). Client-shaped:
+# JSON.stringify writes a lone surrogate as \udXXX.
 for t in "$(printf '{"a":"x\\ud83d\360\237\230\200y"}')" "$(printf '{"a":"\\uD800 x \360\220\200\200"}')"; do
   base=$(printf '%s' "$t" | perl -MJSON::PP -e 'local $/; my $r = eval { JSON::PP->new->utf8->allow_nonref->decode(<STDIN>) }; print defined $r ? "read" : ($@ =~ /(missing low surrogate)/ ? $1 : "other")')
   got=$(printf '%s' "$t" | perl "$lib/json.pl" get a 2>&1)
   code=$?
-  lib_got=$(printf '%s' "$t" | perl -e 'require "$ENV{LIBDIR}/json.pl"; local $/; my ($d, $e) = Json::decode(<STDIN>, "plain"); print defined $e ? $e : "read"')
+  lib_got=$(printf '%s' "$t" | perl -e 'require "$ENV{LIBDIR}/json.pl"; local $/; my ($d, $e) = Json::decode(<STDIN>, "plain"); print defined $e ? $e : join(" ", map { sprintf "%X", ord } split //, $d->{a})')
   case "$base|$code|$got|$lib_got" in
-    "missing low surrogate|2|json: not valid JSON: missing low surrogate"*"|not valid JSON: missing low surrogate"*) pass "a lone escaped high surrogate before a character above U+FFFF is refused, as JSON::PP refuses the text itself" ;;
-    *) fail "a lone escaped high surrogate before a character above U+FFFF is refused" "base $base; get exit $code: $got; library: $lib_got" ;;
+    "missing low surrogate|2|json: not valid JSON: missing low surrogate"*"|78 FFFD 1F600 79" | "missing low surrogate|2|json: not valid JSON: missing low surrogate"*"|FFFD 20 78 20 10000") pass "a lone escaped high surrogate before a character above U+FFFF: get refuses it, as JSON::PP does; the plain reading reads U+FFFD for it and the character after it unchanged" ;;
+    *) fail "a lone escaped high surrogate before a character above U+FFFF: get refuses it, the plain reading reads U+FFFD" "base $base; get exit $code: $got; library: $lib_got" ;;
   esac
 done
 pl "escaped pairs next to characters above U+FFFF still read right" 'my $t = "{\"a\":\"\\ud83d\\ude00 \x{1F600} \x{4e2d}\"}"; utf8::encode($t); my ($d) = Json::decode($t, "plain"); print($d->{a} eq "\x{1F600} \x{1F600} \x{4e2d}" ? "ok" : "bad")'

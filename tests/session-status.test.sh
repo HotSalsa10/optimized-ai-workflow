@@ -176,6 +176,19 @@ mkdir -p "$p/.claude/method-local"
 printf '# the owner keeps work aside\nstash :: kept aside\n\nstash pop :: back\n' >"$p/.claude/method-local/git-shapes.txt"
 hook "$p"
 has "git shapes the owner added in .claude/method-local are counted (comments and blank lines are not)" "2 git shapes added in .claude/method-local/git-shapes.txt; the guard lets them through (G3)"
+printf 'pr merge -* ARG... :: I merge here\n' >"$p/.claude/method-local/gh-shapes.txt"
+printf 'request_copilot_review :: I want it\nrun_secret_scanning :: and this\n' >"$p/.claude/method-local/mcp-tools.txt"
+hook "$p"
+has "gh shapes and MCP tool lines the owner added are counted too" "1 gh shape added in .claude/method-local/gh-shapes.txt; the guard lets them through (G4)" "2 MCP tool lines added in .claude/method-local/mcp-tools.txt; the guard lets them through (G4)"
+rm -f "$p/.claude/method-local/git-shapes.txt" "$p/.claude/method-local/gh-shapes.txt" "$p/.claude/method-local/mcp-tools.txt"
+# a list that is a link to /dev/zero is never read (it would never end),
+# and one over 1 MB is not read either; the hook ends at once
+ln -s /dev/zero "$p/.claude/method-local/git-shapes.txt"
+perl -e 'print "x :: y\n" x 200000' >"$p/.claude/method-local/gh-shapes.txt"
+start=$(perl -e 'print time')
+hook "$p"
+took=$(($(perl -e 'print time') - start))
+if [ "$took" -le 5 ]; then has "a list that is not a regular file, or is over 1 MB, is a LOOK and is not read (in ${took} s)" ".claude/method-local/git-shapes.txt is not a regular file, so what it adds is not known" ".claude/method-local/gh-shapes.txt is over 1 MB, so what it adds is not known"; else fail "a list that is not a regular file is not read" "took $took s: $out"; fi
 rm -rf "$p/.claude/method-local"
 
 hook "$p" "" METHOD_NESTED=1
@@ -285,7 +298,23 @@ case "$dl" in
   *"ran out of time (1 s)"*) case "$dl" in *"took "[12]*) pass "the perl part ends at its deadline, with a line saying part of its checks is missing" ;; *) fail "the perl part ends at its deadline" "$dl" ;; esac ;;
   *) fail "the perl part ends at its deadline" "$dl" ;;
 esac
+# the deadline holds when it fires inside a step whose own eval catches it
+# (a settings read: Json::decode, here made to take 3 s inside its eval)
+mkdir -p "$p/.claude" && printf '{"maxEffortLevel":"low"}\n' >"$p/.claude/settings.local.json"
+dl=$(cd "$p" && printf '{"hook_event_name":"SessionStart","source":"startup"}' | LIBDIR="$root/method/scripts/method/lib" CLAUDE_PROJECT_DIR="$p" perl -e 'require "$ENV{LIBDIR}/session.pl"; no warnings "redefine"; *Session::status_lines = sub { () }; my $real = \&Json::decode; *Json::decode = sub { return $real->(@_) if $_[0] =~ /hook_event_name/; my $ok = eval { sleep 3; 1 }; return (undef, "stopped") }; $Session::DEADLINE = 1; my $t = time; Session::main(); print STDERR "took ", time - $t, "\n"' 2>&1)
+case "$dl" in
+  *"is not JSON"*) fail "a deadline caught inside a settings read still ends the perl part, and says so" "$dl" ;;
+  *"ran out of time (1 s)"*) case "$dl" in *"took "[12]*) pass "a deadline caught inside a settings read still ends the perl part, and says so (the file is not called not JSON)" ;; *) fail "a deadline caught inside a settings read ends the perl part in time" "$dl" ;; esac ;;
+  *) fail "a deadline caught inside a settings read still ends the perl part, and says so" "$dl" ;;
+esac
+rm -f "$p/.claude/settings.local.json"
 has "missing scripts still leave METHOD-ACTIVE and say so, in a line that holds no path" "METHOD-ACTIVE vunreleased" "the method's scripts are missing (scripts/method/lib); run the method's sync"
+# a lone surrogate escape, which Claude Code reads, is read too: the env
+# name is shown, not "is not JSON"
+mkdir -p "$p/.claude" && printf '{"env":{"SOME_SETTING":"\\ud800"}}\n' >"$p/.claude/settings.local.json"
+hook "$p"
+has "a settings file with a lone surrogate escape is read, as Claude Code reads it" ".claude/settings.local.json sets env SOME_SETTING"
+rm -f "$p/.claude/settings.local.json"
 mkdir -p "$work/noperl"
 for t in bash sh env sed cat git dirname; do
   w=$(command -v "$t") && ln -s "$w" "$work/noperl/$t"

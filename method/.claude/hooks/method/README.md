@@ -47,7 +47,7 @@ In each of these, the session's first message has no `METHOD-ACTIVE` line. That 
 
 **What it costs.** About 0.2 to 0.3 s (two perl starts and status without the network) and at most 1,200 bytes of context per session start. Status gets 5 s; past that, a LOOK line says so.
 
-**How it was seen to fire.** In the real Claude Code client against a local fake Claude (`tests/harness.test.sh`, at 2.1.316 and 2.1.319): the line and status's summary reach the first request; also with a dirty tree, after a resume (with its own status: the client does not add output identical to what the conversation already holds, so a resume with nothing new adds nothing; after a compaction this is not measured), without perl on PATH, and in a nested run. Its own tests: `tests/session-status.test.sh`.
+**How it was seen to fire.** In the real Claude Code client against a local fake Claude (`tests/harness.test.sh`, at 2.1.316 and 2.1.319): the line and status's summary reach the first request; also with a dirty tree, after a resume (with its own status: the client does not add output identical to what the conversation already holds, so a resume with nothing new adds nothing; a compaction, /clear and a forked session each brought METHOD-ACTIVE with their own tag when 5.4's last review ran them at both versions, though no harness case runs them yet), without perl on PATH, and in a nested run. Its own tests: `tests/session-status.test.sh`.
 
 **What it cannot do.**
 - It cannot block anything: SessionStart cannot.

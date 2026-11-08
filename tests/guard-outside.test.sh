@@ -104,6 +104,7 @@ run_case G4 "an MCP push to the branch origin's HEAD names (trunk) is refused" x
 
 # gh pr create without --head: through only when the branch is pushed and
 # up to date (Claude Code's own form, with its body in a here-document)
+# shellcheck disable=SC2016 # the command is data for the guard, never run
 printf '%s\n' 'gh pr create --title "x" --body "$(cat <<'"'"'EOF'"'"'' '## Summary' '- one' 'EOF' ')"' >"$work/pr-form.txt"
 pr_form=$(cat "$work/pr-form.txt")
 (cd "$proj" && git update-ref refs/remotes/origin/task HEAD && git config branch.task.remote origin && git config branch.task.merge refs/heads/task) || fail "the task branch's upstream can be set"
