@@ -207,6 +207,9 @@ Plan: docs/plans/step5.md (version 3). Decisions A45 to A62. Rules M072 (moved t
 - [x] Plan. Six agents drafted it: a docs check, a probe that ran the real client 2.1.319 against a local fake at $0 (26 checks pass, 8 s), a requirements inventory, an architect and two critics. Version 1 drew REQUEST CHANGES from both critics: a feasibility critic (14 findings) and a bypass critic, whose 16 attacks at $0 got past the v1 guard 6 times. Version 2 drew REQUEST CHANGES from a fresh checker (10 findings, more ways past). Version 3 turns the guard's git, gh and MCP rules into allowed lists (A50), measured against the 16,014 Bash calls recorded on this machine (shapes only): about 4 in 100 of the git commands typed in this repo's main sessions would be refused. Its consistency check found 15 issues, all fixed in the plan. Its red-team pass stopped before measuring anything (a safety check stopped the agent's response) and was not re-run in another form; each guard increment's review includes a security reviewer instead (A50).
 - [x] The owner approved version 3 with every recommendation ("choose whatever is best", 8 November). The owner left the four predictions (plan section 1, M125) to be compared after the build.
 - [ ] 5.1 Shared helpers: lib/hook.pl, lib/log.pl, lib/json.pl split into a library and its command line, a text function in lib/secrets.pl.
+  - [x] Built, with tests/hook-lib.test.sh (54 cases). The secret scan's output is byte for byte the same as before on this repo, a corpus of fake secrets (text, binary, UTF-16, a staged copy, a link, an allow list) and --mask; json.pl's own 69 cases pass unchanged. M072 done (lib/log.pl).
+  - [x] Planted breaks: 30 of 30 caught (TESTS.md).
+  - [ ] Review round 1 (three reviewers, A62).
 - [ ] 5.2 Harness skeleton, the floor at 2.1.316 (A45), the CI harness job.
 - [ ] 5.3 Settings fragment and settings test.
 - [ ] 5.4 session-status.sh and status.sh --quick.

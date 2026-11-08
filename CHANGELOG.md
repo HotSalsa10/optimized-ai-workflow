@@ -44,6 +44,11 @@ Nothing yet. Release 1 is being built.
 - `Tree::added_lines`: the lines a file adds, from the same fixed diff the review packet uses; `Esc::utf8_ok`: the escaper's UTF-8 rule, shared.
 - Tests: 1 new test file (mutate plan), 3 config cases and 1 packet case; in 4b.3a 1 new test file (runner) and new run-checks and status cases; in 4b.3b 1 new test file (mutate run) and new runner cases; in 4b.4 new mutate-run cases; 1415 test cases in all.
 
+### Added (step 5)
+
+- The hooks' shared helpers (step 5.1): `lib/hook.pl` reads a hook's input and writes its answers as single clean lines; `lib/log.pl` is the one capped log writer, with fixed fields only (M072); `json.pl` can also be loaded as a library and has the method's one JSON writer; the secret scan can be run on a piece of text. Nothing a user runs changes: `json.pl get` and the secret scan print exactly what they did.
+- Tests: 1 new test file (hook helpers).
+
 ### Changed (step 4b)
 
 - `mutate-changed.sh` runs mutants (step 4b.3b): run A, then one mutant at a time in the working tree, each written through one write function with a journal in git's own folder, each check under the limited runner with a time limit; survivors are named (exit 1); all killed is SKIPPED kills-unchecked until step 4b.4. `--recover` puts back what a cut-off run left; the next run does it first. `--minutes` (default 8) bounds a run.

@@ -24,6 +24,10 @@
 #       personal email addresses masked, control characters escaped and every
 #       line indented by two spaces. validate.sh sends other tools' output
 #       through it, so a key a tool quotes is not printed in full either.
+#   As a library (load it with require; nothing runs when it is loaded):
+#       Secrets::scan_text(TEXT) and Secrets::scan_bytes(BYTES) give the
+#       finds in a piece of text, masked, by the same rules (see scan_bytes
+#       below). The hooks use them on text that leaves the machine.
 #
 # ALLOW_FILE lines are PATH<TAB>ID<TAB>REASON. The ID is the first 12
 # characters of git's object ID for "PATH", a NUL byte and the matched text,
@@ -35,6 +39,7 @@
 # of printable bytes are also searched: for keys and tokens in binary files,
 # and for everything in files decoded as UTF-16 (text added after the UTF-16
 # part, for example).
+package Secrets;
 use strict;
 use warnings;
 use File::Basename qw(dirname);
@@ -64,13 +69,6 @@ sub say_line {
 }
 
 my ($show_ids, $mask_mode, $repo_mode) = (0, 0, 0);
-while (@ARGV && $ARGV[0] =~ /^--/) {
-  my $opt = shift @ARGV;
-  if ($opt eq '--ids') { $show_ids = 1 }
-  elsif ($opt eq '--mask') { $mask_mode = 1 }
-  elsif ($opt eq '--repo') { $repo_mode = 1 }
-  else { die "secrets: unknown option " . esc($opt) . "\n" }
-}
 
 # Keys and tokens with a recognisable shape. A shape marked 1 counts only
 # where no letter or digit comes right before it in a file; one marked 2
@@ -277,13 +275,7 @@ sub mask_text {
   return mask_text(mask_found($q, @found));
 }
 
-# --mask: a filter for other tools' output. A private key's body lines hold
-# nothing a rule can see, so every line from a BEGIN ... PRIVATE KEY line to
-# its END line is masked. Lines that look like key body (base64) are held
-# back until the next other line: when that is an END ... PRIVATE KEY line,
-# they were the end of a key whose BEGIN line came before this input (a
-# window of a longer output), and they are masked too.
-if ($mask_mode) {
+sub mask_filter {
   # (any length: a key's last body line, and a PGP key's =XXXX checksum
   # line, are short; + also covers the added lines of a diff of a key file)
   my $body = qr/\A[ \t]*[A-Za-z0-9+\/=]+[ \t]*\z/;
@@ -311,8 +303,14 @@ if ($mask_mode) {
     }
   }
   $out->(mask_text($_)) for @held;
-  exit 0;
 }
+
+# (mask_filter above) --mask: a filter for other tools' output. A private key's body lines hold
+# nothing a rule can see, so every line from a BEGIN ... PRIVATE KEY line to
+# its END line is masked. Lines that look like key body (base64) are held
+# back until the next other line: when that is an END ... PRIVATE KEY line,
+# they were the end of a key whose BEGIN line came before this input (a
+# window of a longer output), and they are masked too.
 
 # git runs through lib/git.pl's fixed options and cleaned environment, so
 # GIT_INDEX_FILE or a file-system monitor cannot change what is scanned.
@@ -330,39 +328,11 @@ sub git_pipe {
   return $p;
 }
 
-my $allow_file = shift @ARGV;
-die "secrets: usage: secrets.pl --repo [--ids] ALLOW_FILE, or secrets.pl [--ids] ALLOW_FILE FILE...\n"
-  unless defined $allow_file && !($repo_mode && @ARGV);
-if ($repo_mode) {
-  local $/ = "\0";
-  my $l = git_pipe('ls-files', '-z');
-  while (my $p = <$l>) {
-    chomp $p;
-    push @ARGV, $p if -f $p;
-  }
-  close $l or die "secrets: git ls-files failed\n";
-}
-
-# The allowlist: PATH<TAB>ID<TAB>REASON. Errors name the line, never its text.
-# A link could point at a file a clone does not have, accepting findings
-# here that CI reports.
-die "secrets: $allow_file is a link or not a regular file; it must be a file in the repository itself\n"
-  if -l $allow_file || (-e _ && !-f _);
+# The allowlist: PATH<TAB>ID<TAB>REASON (read in main). Errors name the
+# line, never its text. A link could point at a file a clone does not
+# have, accepting findings here that CI reports.
+my $allow_file;
 my (%allow, @allow_lines);
-if (-f $allow_file) {
-  open my $a, '<', $allow_file or die "secrets: cannot read $allow_file\n";
-  my $ln = 0;
-  while (my $l = <$a>) {
-    $ln++;
-    $l =~ s/\r?\n\z//;
-    next if $l =~ /^\s*(?:#|$)/;
-    my ($path, $id, $reason) = split /\t/, $l, 3;
-    die "secrets: $allow_file line $ln is not PATH<TAB>ID<TAB>REASON with a 12-character ID and a reason\n"
-      unless defined $reason && $reason =~ /\S/ && $id =~ /^[0-9a-f]{12}$/ && length $path;
-    $allow{$path}{$id} = $ln;
-    push @allow_lines, [$ln, $path, $id];
-  }
-}
 my %allow_used;
 
 # The ID of TEXT found in PATH: the start of git's object ID for
@@ -433,24 +403,29 @@ sub rules_on {
   $hit->('bank account number (IBAN)', $_, 0) for iban_hits($line);
 }
 
-# Every rule on one line of text. A key right after an escape written as
+# line_hits LINE HIT: every rule on one line of text, HIT called as rules_on
+# calls it; scan_line reports each find. A key right after an escape written as
 # text (print("\x1b[1mAKIA...")) has a letter before it, so the pieces
 # between such escapes are searched too, for what the whole line did not
 # show: a piece's find that is part of a find on the whole line (an email
 # address that took in the n of \n) is reported already. (Past 100 finds
 # on one line, only equal ones are left out, so a long line stays fast.)
-sub scan_line {
-  my ($path, $where, $line, $seen, $skip_seen) = @_;
+sub line_hits {
+  my ($line, $hit) = @_;
   my %here;
-  rules_on($line, sub { $here{ $_[1] } = 1; report($path, $where, @_, $seen, $skip_seen) });
+  rules_on($line, sub { $here{ $_[1] } = 1; $hit->(@_) });
   return unless $line =~ $text_code;
   my @whole = keys %here;
   for my $piece (split /$text_code/, $line) {
     rules_on($piece, sub {
       my $t = $_[1];
-      report($path, $where, @_, $seen, $skip_seen) unless $here{$t} || (@whole <= 100 && grep { index($_, $t) >= 0 } @whole);
+      $hit->(@_) unless $here{$t} || (@whole <= 100 && grep { index($_, $t) >= 0 } @whole);
     }, 1);
   }
+}
+sub scan_line {
+  my ($path, $where, $line, $seen, $skip_seen) = @_;
+  line_hits($line, sub { report($path, $where, @_, $seen, $skip_seen) });
 }
 
 # The runs of printable bytes in raw content, with every rule or keys only.
@@ -542,59 +517,134 @@ sub scan_name {
 # used: it trusts its stat cache, so a staged secret could hide behind a
 # restored time stamp, and git diff writes the index and runs its hook.
 my (@index, %like, %disk_id);    # index entries [path, mode, id]; path => an id; path => its bytes' id
-if ($repo_mode) {
-  local $/ = "\0";
-  my $l = git_pipe('ls-files', '-s', '-z');
-  while (my $e = <$l>) {
-    chomp $e;
-    my ($meta, $path) = split /\t/, $e, 2;
-    my ($mode, $oid) = split / /, $meta;
-    push @index, [$path, $mode, $oid];
-    $like{$path} = $oid;
+# scan_bytes BYTES: the finds in BYTES, one [KIND, MASKED] per distinct
+# text, by the same rules as the file scan (line by line, with the pieces
+# between escapes written as text). For the hooks, which scan text that
+# leaves the machine (M135). Nothing is printed.
+# scan_text TEXT: the same for a string of characters (as Json::decode
+# gives them), read as its UTF-8 bytes, as the file scan reads a file. A
+# string whose characters are all below U+0100 looks the same as bytes to
+# perl, so the caller says which it holds by the function it calls.
+sub scan_text {
+  my ($text) = @_;
+  return () unless defined $text;
+  utf8::encode($text);
+  return scan_bytes($text);
+}
+sub scan_bytes {
+  my ($text) = @_;
+  return () unless defined $text;
+  die "secrets: scan_bytes was given characters, not bytes\n" if $text =~ /[^\x00-\xFF]/;
+  my (@found, %seen);
+  for my $line (split /\r\n|\r|\n/, $text) {
+    line_hits($line, sub {
+      my ($kind, $t, $is_token) = @_;
+      push @found, [$kind, mask($t, $is_token)] unless $seen{"$kind\0$t"}++;
+    });
   }
-  close $l or die "secrets: git ls-files failed\n";
+  return @found;
 }
 
-for my $file (@ARGV) {
-  my $bytes = read_raw($file);
-  if (!defined $bytes) { say_line('secrets: cannot read ' . mask_text($file)); $bad++; next; }
-  $disk_id{$file} = Git::object_id('blob', $bytes, $like{$file}) if defined $like{$file};
-  scan_content($file, mask_text($file), $bytes);
-}
-
-if ($repo_mode) {
-  my @blobs;
-  for my $x (@index) {
-    my ($path, $mode, $oid) = @$x;
-    scan_name($path);
-    # a symlink's stored target is text too, whatever it points at
-    push @blobs, [$path, $oid, ' (link target)'] if $mode eq '120000';
-    next if $mode eq '160000' || $mode eq '120000';
-    push @blobs, [$path, $oid, ' (staged)'] unless defined $disk_id{$path} && $disk_id{$path} eq $oid;
+# The command line (see the top of this file).
+sub main {
+  while (@ARGV && $ARGV[0] =~ /^--/) {
+    my $opt = shift @ARGV;
+    if ($opt eq '--ids') { $show_ids = 1 }
+    elsif ($opt eq '--mask') { $mask_mode = 1 }
+    elsif ($opt eq '--repo') { $repo_mode = 1 }
+    else { die "secrets: unknown option " . esc($opt) . "\n" }
   }
-  $in_staged = 1;
-  for my $b (@blobs) {
-    my ($path, $oid, $kind) = @$b;
-    my $before = $examined;
-    # one git process for every stored file, each checked against its id
-    scan_content($path, mask_text($path) . $kind, Git::cat('blob', $oid, 1));
-    $staged_examined += $examined - $before;
+  if ($mask_mode) {
+    mask_filter();
+    exit 0;
+  }
+  $allow_file = shift @ARGV;
+  die "secrets: usage: secrets.pl --repo [--ids] ALLOW_FILE, or secrets.pl [--ids] ALLOW_FILE FILE...\n"
+    unless defined $allow_file && !($repo_mode && @ARGV);
+  if ($repo_mode) {
+    local $/ = "\0";
+    my $l = git_pipe('ls-files', '-z');
+    while (my $p = <$l>) {
+      chomp $p;
+      push @ARGV, $p if -f $p;
+    }
+    close $l or die "secrets: git ls-files failed\n";
+  }
+
+  die "secrets: $allow_file is a link or not a regular file; it must be a file in the repository itself\n"
+    if -l $allow_file || (-e _ && !-f _);
+  if (-f $allow_file) {
+    open my $a, '<', $allow_file or die "secrets: cannot read $allow_file\n";
+    my $ln = 0;
+    while (my $l = <$a>) {
+      $ln++;
+      $l =~ s/\r?\n\z//;
+      next if $l =~ /^\s*(?:#|$)/;
+      my ($path, $id, $reason) = split /\t/, $l, 3;
+      die "secrets: $allow_file line $ln is not PATH<TAB>ID<TAB>REASON with a 12-character ID and a reason\n"
+        unless defined $reason && $reason =~ /\S/ && $id =~ /^[0-9a-f]{12}$/ && length $path;
+      $allow{$path}{$id} = $ln;
+      push @allow_lines, [$ln, $path, $id];
+    }
+  }
+  if ($repo_mode) {
+    local $/ = "\0";
+    my $l = git_pipe('ls-files', '-s', '-z');
+    while (my $e = <$l>) {
+      chomp $e;
+      my ($meta, $path) = split /\t/, $e, 2;
+      my ($mode, $oid) = split / /, $meta;
+      push @index, [$path, $mode, $oid];
+      $like{$path} = $oid;
+    }
+    close $l or die "secrets: git ls-files failed\n";
+  }
+
+  for my $file (@ARGV) {
+    my $bytes = read_raw($file);
+    if (!defined $bytes) { say_line('secrets: cannot read ' . mask_text($file)); $bad++; next; }
+    $disk_id{$file} = Git::object_id('blob', $bytes, $like{$file}) if defined $like{$file};
+    scan_content($file, mask_text($file), $bytes);
+  }
+
+  if ($repo_mode) {
+    my @blobs;
+    for my $x (@index) {
+      my ($path, $mode, $oid) = @$x;
+      scan_name($path);
+      # a symlink's stored target is text too, whatever it points at
+      push @blobs, [$path, $oid, ' (link target)'] if $mode eq '120000';
+      next if $mode eq '160000' || $mode eq '120000';
+      push @blobs, [$path, $oid, ' (staged)'] unless defined $disk_id{$path} && $disk_id{$path} eq $oid;
+    }
+    $in_staged = 1;
+    for my $b (@blobs) {
+      my ($path, $oid, $kind) = @$b;
+      my $before = $examined;
+      # one git process for every stored file, each checked against its id
+      scan_content($path, mask_text($path) . $kind, Git::cat('blob', $oid, 1));
+      $staged_examined += $examined - $before;
+    }
+  }
+
+  for my $e (@allow_lines) {
+    my ($ln, $path, $id) = @$e;
+    say_line("NOTE $allow_file line $ln matched nothing; remove it if the text is gone") unless $allow_used{"$path\t$id"};
+  }
+
+  my @shown = map { esc($_) } @skipped_names[0 .. ($#skipped_names < 4 ? $#skipped_names : 4)];
+  $examined -= $staged_examined;
+  print "EXAMINED $examined\nSTAGED $staged_examined\nBAD $bad\nALLOWED $allowed_hits\nSKIPPED $skipped\nSKIPPED_NAMES "
+    . join(', ', @shown) . ($skipped > 5 ? ', ...' : '') . "\n";
+  if ($repo_mode) {
+    my $extra = ($staged_examined ? " and $staged_examined staged copies and link targets" : '')
+      . ($skipped ? "; $skipped binary files searched for keys only" : '') . ($allowed_hits ? "; $allowed_hits allowed" : '');
+    if ($bad) { print "RESULT FAIL $bad finding(s) in $examined tracked text files\n" }
+    elsif (!$examined) { print "RESULT SKIPPED examined no tracked text file\n" }
+    else { print "RESULT PASS examined $examined tracked text files$extra\n" }
   }
 }
 
-for my $e (@allow_lines) {
-  my ($ln, $path, $id) = @$e;
-  say_line("NOTE $allow_file line $ln matched nothing; remove it if the text is gone") unless $allow_used{"$path\t$id"};
-}
-
-my @shown = map { esc($_) } @skipped_names[0 .. ($#skipped_names < 4 ? $#skipped_names : 4)];
-$examined -= $staged_examined;
-print "EXAMINED $examined\nSTAGED $staged_examined\nBAD $bad\nALLOWED $allowed_hits\nSKIPPED $skipped\nSKIPPED_NAMES "
-  . join(', ', @shown) . ($skipped > 5 ? ', ...' : '') . "\n";
-if ($repo_mode) {
-  my $extra = ($staged_examined ? " and $staged_examined staged copies and link targets" : '')
-    . ($skipped ? "; $skipped binary files searched for keys only" : '') . ($allowed_hits ? "; $allowed_hits allowed" : '');
-  if ($bad) { print "RESULT FAIL $bad finding(s) in $examined tracked text files\n" }
-  elsif (!$examined) { print "RESULT SKIPPED examined no tracked text file\n" }
-  else { print "RESULT PASS examined $examined tracked text files$extra\n" }
-}
+# Loaded with require: nothing runs.
+return 1 if caller;
+main();

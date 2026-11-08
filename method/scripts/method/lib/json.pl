@@ -31,29 +31,52 @@
 # JSON.parse does. A string that reads like another value ("true", "null",
 # "12") prints the same as that value, and $( ) drops a string's trailing
 # newlines.
+#
+# As a library (load it with require; nothing runs when it is loaded):
+#   Json::decode(BYTES) gives (DATA, undef), or (undef, REASON) when BYTES
+#     are not UTF-8 as RFC 3629 defines it, hold a NUL byte, are not JSON,
+#     or JSON::PP is missing. DATA is undef for the JSON null. "get" reads
+#     its input the same way, with the same reasons.
+#   Json::encode(DATA) gives compact JSON with sorted keys, in ASCII only
+#     (every other character as \uXXXX), as bytes: the method's one JSON
+#     writer. Its strings are characters, as Json::decode gives them.
+#   A library caller cleans its own environment (PERL5OPT and the rest)
+#   before perl starts: only "get" starts perl again without them.
+package Json;
 use strict;
 use warnings;
 
-# PERL5OPT and PERL_UNICODE change how perl reads and computes (-C, -Mbigint,
-# -Minteger), and PERL5LIB and PERLLIB could put another JSON::PP in place,
-# so the helper starts again without them.
-if (grep { defined $ENV{$_} } qw(PERL5OPT PERL_UNICODE PERL5LIB PERLLIB)) {
-  if (${^TAINT} == 1) {    # taint mode (-T) forbids starting perl again
-    print STDERR "json: perl's taint mode (-T) is on through PERL5OPT; run json.pl without it\n";
-    exit 2;
-  }
-  delete @ENV{qw(PERL5OPT PERL_UNICODE PERL5LIB PERLLIB)};
-  exec { $^X } $^X, $0, @ARGV or do {
-    print STDERR "json: cannot start perl again\n";
-    exit 2;
-  };
+# the one JSON::PP setup for reading
+sub reader {
+  return JSON::PP->new->utf8->allow_nonref->canonical->allow_bignum;
 }
 
-# Raw handles, whatever PERL_UNICODE or PERL5OPT asked for, so the bytes in
-# are the bytes JSON::PP sees and the bytes out are UTF-8.
-binmode STDIN, ':raw';
-binmode STDOUT, ':raw';
-binmode STDERR, ':raw';
+sub decode {
+  my ($text) = @_;
+  return (undef, "perl's JSON::PP module is missing; install it (on Linux, for example, the perl-JSON-PP or libjson-pp-perl package)")
+    unless eval { require JSON::PP; 1 };
+  $text = '' unless defined $text;
+  # UTF-8 as RFC 3629 defines it, checked before JSON::PP sees the input:
+  # JSON::PP's own check differs between versions, and a NUL byte would
+  # make it guess UTF-16.
+  my $chars = $text;
+  return (undef, 'the input is not valid UTF-8 (or holds a NUL byte)')
+    if index($text, "\0") >= 0 || !utf8::decode($chars) || $chars =~ /[\x{D800}-\x{DFFF}]|[^\x{0}-\x{10FFFF}]/;
+  my $data = eval { reader()->decode($text) };
+  if (!defined $data && $@) {
+    my $err = $@;
+    $err =~ s/,? \(before .*//s;    # it quotes the input, which may hold a secret
+    $err =~ s/ at \S+ line \d+\.?\n?\z//;
+    $err =~ s/[\x00-\x1F\x7F]/ /g;
+    return (undef, 'not valid JSON: ' . substr($err, 0, 200));
+  }
+  return ($data, undef);
+}
+
+sub encode {
+  require JSON::PP;
+  return JSON::PP->new->ascii->canonical->allow_nonref->encode($_[0]);
+}
 
 sub fail {
   my ($code, $msg) = @_;
@@ -61,84 +84,98 @@ sub fail {
   exit $code;
 }
 
-eval { require JSON::PP; 1 }
-  or fail(2, "perl's JSON::PP module is missing; install it (on Linux, for example, the perl-JSON-PP or libjson-pp-perl package)");
+# The command line: "perl json.pl get [KEY...]".
+sub main {
+  # PERL5OPT and PERL_UNICODE change how perl reads and computes (-C,
+  # -Mbigint, -Minteger), and PERL5LIB and PERLLIB could put another
+  # JSON::PP in place, so the helper starts again without them.
+  if (grep { defined $ENV{$_} } qw(PERL5OPT PERL_UNICODE PERL5LIB PERLLIB)) {
+    if (${^TAINT} == 1) {    # taint mode (-T) forbids starting perl again
+      print STDERR "json: perl's taint mode (-T) is on through PERL5OPT; run json.pl without it\n";
+      exit 2;
+    }
+    delete @ENV{qw(PERL5OPT PERL_UNICODE PERL5LIB PERLLIB)};
+    exec { $^X } $^X, $0, @ARGV or do {
+      print STDERR "json: cannot start perl again\n";
+      exit 2;
+    };
+  }
 
-my $cmd = shift @ARGV;
-fail(2, 'usage: json.pl get [KEY...]') unless defined $cmd && $cmd eq 'get';
+  # Raw handles, whatever PERL_UNICODE or PERL5OPT asked for, so the bytes
+  # in are the bytes JSON::PP sees and the bytes out are UTF-8.
+  binmode STDIN, ':raw';
+  binmode STDOUT, ':raw';
+  binmode STDERR, ':raw';
 
-# KEYs as characters, to match the decoded keys. They arrive as bytes, or
-# already as characters when PERL_UNICODE includes A.
-my @keys = @ARGV;
-for (@keys) {
-  next if utf8::is_utf8($_);
-  utf8::decode($_) or fail(2, 'a KEY is not valid UTF-8');
-}
+  eval { require JSON::PP; 1 }
+    or fail(2, "perl's JSON::PP module is missing; install it (on Linux, for example, the perl-JSON-PP or libjson-pp-perl package)");
 
-my $text = do { local $/; <STDIN> };
-$text = '' unless defined $text;
+  my $cmd = shift @ARGV;
+  fail(2, 'usage: json.pl get [KEY...]') unless defined $cmd && $cmd eq 'get';
 
-# UTF-8 as RFC 3629 defines it, checked before JSON::PP sees the input:
-# JSON::PP's own check differs between versions, and a NUL byte would make
-# it guess UTF-16.
-my $chars = $text;
-fail(2, 'the input is not valid UTF-8 (or holds a NUL byte)')
-  if index($text, "\0") >= 0 || !utf8::decode($chars) || $chars =~ /[\x{D800}-\x{DFFF}]|[^\x{0}-\x{10FFFF}]/;
+  # KEYs as characters, to match the decoded keys. They arrive as bytes, or
+  # already as characters when PERL_UNICODE includes A.
+  my @keys = @ARGV;
+  for (@keys) {
+    next if utf8::is_utf8($_);
+    utf8::decode($_) or fail(2, 'a KEY is not valid UTF-8');
+  }
 
-my $json = JSON::PP->new->utf8->allow_nonref->canonical->allow_bignum;
-my $data = eval { $json->decode($text) };
-if (!defined $data && $@) {
-  my $err = $@;
-  $err =~ s/,? \(before .*//s;    # it quotes the input, which may hold a secret
-  $err =~ s/ at \S+ line \d+\.?\n?\z//;
-  $err =~ s/[\x00-\x1F\x7F]/ /g;
-  fail(2, 'not valid JSON: ' . substr($err, 0, 200));
-}
+  my $text = do { local $/; <STDIN> };
+  my ($data, $err) = decode($text);
+  fail(2, $err) if defined $err;
 
-my $node = $data;
-for my $key (@keys) {
-  if (ref $node eq 'HASH') {
-    exit 1 unless exists $node->{$key};
-    $node = $node->{$key};
-  } elsif (ref $node eq 'ARRAY') {
-    exit 1 unless $key =~ /\A(?:0|[1-9][0-9]*)\z/ && $key < @$node;
-    $node = $node->[$key];
+  my $node = $data;
+  for my $key (@keys) {
+    if (ref $node eq 'HASH') {
+      exit 1 unless exists $node->{$key};
+      $node = $node->{$key};
+    } elsif (ref $node eq 'ARRAY') {
+      exit 1 unless $key =~ /\A(?:0|[1-9][0-9]*)\z/ && $key < @$node;
+      $node = $node->[$key];
+    } else {
+      exit 1;    # a KEY on a string, number, true, false or null
+    }
+  }
+
+  # Every number in the printed value prints exactly and in full: JSON::PP
+  # reads a short integer outside the 64-bit range as a floating-point
+  # number, which prints rounded in exponent form, and a large exponent
+  # would print as millions of digits.
+  my $json = reader();
+  my @todo = ($node);
+  while (@todo) {
+    my $v = shift @todo;
+    if (ref $v eq 'HASH') {
+      push @todo, values %$v;
+    } elsif (ref $v eq 'ARRAY') {
+      push @todo, @$v;
+    } elsif (ref $v eq 'Math::BigFloat') {
+      fail(2, 'a number has an exponent beyond 10000, too long to print in full') if abs($v->exponent) > 10000;
+    } elsif (defined $v && !ref $v && $v =~ /[eE]/ && $json->encode($v) =~ /\A-?[0-9]/) {
+      fail(2, 'an integer outside the 64-bit range cannot be printed exactly');
+    }
+  }
+
+  my $out;
+  if (ref $node || !defined $node) {
+    $out = $json->encode($node);    # object, array, true, false, null, exact number
   } else {
-    exit 1;    # a KEY on a string, number, true, false or null
+    my $enc = $json->encode($node);
+    if ($enc =~ /\A"/) {
+      $out = $node;
+      utf8::encode($out);    # characters back to UTF-8 bytes
+      fail(2, 'the value holds a NUL byte, which a shell variable cannot hold') if index($out, "\0") >= 0;
+    } else {
+      $out = $enc;           # a number
+    }
   }
+  print $out, "\n";
+  close STDOUT or fail(2, 'cannot write the output');    # also catches a failed print
+  exit 0;
 }
 
-# Every number in the printed value prints exactly and in full: JSON::PP
-# reads a short integer outside the 64-bit range as a floating-point
-# number, which prints rounded in exponent form, and a large exponent would
-# print as millions of digits.
-my @todo = ($node);
-while (@todo) {
-  my $v = shift @todo;
-  if (ref $v eq 'HASH') {
-    push @todo, values %$v;
-  } elsif (ref $v eq 'ARRAY') {
-    push @todo, @$v;
-  } elsif (ref $v eq 'Math::BigFloat') {
-    fail(2, 'a number has an exponent beyond 10000, too long to print in full') if abs($v->exponent) > 10000;
-  } elsif (defined $v && !ref $v && $v =~ /[eE]/ && $json->encode($v) =~ /\A-?[0-9]/) {
-    fail(2, 'an integer outside the 64-bit range cannot be printed exactly');
-  }
-}
-
-my $out;
-if (ref $node || !defined $node) {
-  $out = $json->encode($node);    # object, array, true, false, null, exact number
-} else {
-  my $enc = $json->encode($node);
-  if ($enc =~ /\A"/) {
-    $out = $node;
-    utf8::encode($out);    # characters back to UTF-8 bytes
-    fail(2, 'the value holds a NUL byte, which a shell variable cannot hold') if index($out, "\0") >= 0;
-  } else {
-    $out = $enc;           # a number
-  }
-}
-print $out, "\n";
-close STDOUT or fail(2, 'cannot write the output');    # also catches a failed print
-exit 0;
+# Loaded with require: nothing runs (a bare 1; would warn under -Mbigint,
+# which makes every constant an object).
+return 1 if caller;
+main();
