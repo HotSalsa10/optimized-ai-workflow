@@ -54,10 +54,12 @@
 #   Json::encode(DATA) gives compact JSON with sorted keys, in ASCII only
 #     (every other character as \uXXXX), as bytes: the method's one JSON
 #     writer. Its strings are characters, as Json::decode gives them. It
-#     writes every number Json::decode gives, and dies on a number JSON
-#     cannot hold (infinite or not a number, as 'plain' mode reads 1e400)
-#     and on one with an exponent beyond 10000 either way (as "get"
-#     refuses), which would take minutes and gigabytes to write.
+#     writes every number Json::decode gives but one too long to write, and
+#     dies on a number JSON cannot hold (infinite or not a number, as
+#     'plain' mode reads 1e400), on one with an exponent beyond 10000
+#     either way or an integer of more than 10000 digits (as "get"
+#     refuses), which would take minutes and gigabytes to write, and on
+#     data nested more than 512 deep (a structure that holds itself too).
 #   A library caller cleans its own environment (PERL5OPT and the rest)
 #   before perl starts: only "get" starts perl again without them.
 package Json;
@@ -90,9 +92,10 @@ sub decode {
   my $data;
   # (an escaped high surrogate with no escaped low one right after it would
   # pair with the first half of a character written as two escapes, where
-  # the text itself is not JSON)
+  # the text itself is not JSON; an escape is a \ after an even run of
+  # backslashes, so an escaped backslash before "uD800" is not one)
   my $plain = defined $mode && $mode eq 'plain';
-  if ($chars =~ /[^\x00-\x7F]/ && $chars !~ /(?<!\\)(?:\\\\)*\\[^\x00-\x7F]/ && $chars !~ /\\u[dD][89abAB][0-9a-fA-F]{2}(?!\\u[dD][c-fC-F][0-9a-fA-F]{2})/) {
+  if ($chars =~ /[^\x00-\x7F]/ && $chars !~ /(?<!\\)(?:\\\\)*\\[^\x00-\x7F]/ && $chars !~ /(?<!\\)(?:\\\\)*\\u[dD][89abAB][0-9a-fA-F]{2}(?!\\u[dD][c-fC-F][0-9a-fA-F]{2})/) {
     (my $ascii = $chars) =~ s/([^\x00-\x7F])/esc_char(ord $1)/ge;
     $data = eval { $r->decode($ascii) };
     return ($data, undef) if defined $data || !$@;
@@ -151,6 +154,7 @@ sub encode {
 # write; a string is never read as a number here
 sub finite {
   my ($d, $depth) = @_;
+  no warnings 'recursion';    # (deep data is refused below, at 512, not warned about at 100)
   die "Json::encode: nested too deep\n" if $depth > 512;
   if (ref $d eq 'HASH') { finite($_, $depth + 1) for values %$d; return }
   if (ref $d eq 'ARRAY') { finite($_, $depth + 1) for @$d; return }

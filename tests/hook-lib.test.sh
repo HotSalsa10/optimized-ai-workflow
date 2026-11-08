@@ -47,7 +47,8 @@ pl "Json::encode writes every number Json::decode gives (fractions, exponents, l
 pl "Json::decode's error after non-ASCII text names the place in the text as given, not in its escaped copy" 'require JSON::PP; my $in = qq({"a":"\xc3\xa9\xc3\xa9", x}); eval { JSON::PP->new->utf8->decode($in) }; my ($want) = $@ =~ /(at character offset \d+)/; my (undef, $e) = Json::decode($in); print(defined $e && defined $want && index($e, $want) >= 0 ? "ok" : "got: " . ($e // "no error") . "; JSON::PP: " . ($want // "?"))'
 pl "Json::decode with plain gives perl's own numbers, not objects" 'my ($d) = Json::decode(q({"a":1.5,"b":30}), "plain"); print(!ref $d->{a} && !ref $d->{b} && $d->{a} == 1.5 && Json::encode($d) eq q({"a":1.5,"b":30}) ? "ok" : Json::encode($d))'
 pl "Json::decode reads non-ASCII text as get does, also around backslashes" 'my @c = ([qq({"a":"caf\xc3\xa9 \xf0\x9f\x98\x80","b":"\\\\\xc3\xa9"}), "caf\x{e9} \x{1F600}|\\\x{e9}"], [qq({"a":"\\\xc3\xa9"}), "ERR illegal backslash escape"], [qq({"a":1} \xc3\xa9), "ERR garbage after JSON"], [qq(\xc3\xa9), "ERR malformed JSON string"]); my $bad = ""; for (@c) { my ($in, $want) = @$_; my ($d, $e) = Json::decode($in); my $got = defined $e ? "ERR $e" : "$d->{a}|$d->{b}"; (my $w = $want) =~ s{\AERR }{}; $bad .= " [$got]" unless $want =~ /\AERR / ? $got =~ /\AERR .*\Q$w\E/ : $got eq $want } print($bad eq "" ? "ok" : $bad)'
-pl "Json::decode reads 2 MB of non-ASCII text within 10 s (JSON::PP alone takes the square of its length)" 'my $s = "\x{4e2d}" x 700000; my $j = qq({"c":"$s"}); utf8::encode($j); my $t = time; my ($d, $e) = Json::decode($j); my $took = time - $t; print(!defined $e && length($d->{c}) == 700000 && $took <= 10 ? "ok" : "took $took s, " . ($e // "read"))'
+pl "Json::decode reads 2 MB of non-ASCII text in time that grows with its length (JSON::PP alone takes the square of it): within 6 times the same text sent as escapes" 'use Time::HiRes qw(time); alarm 120; my $s = "\x{4e2d}" x 700000; my $j = qq({"c":"$s"}); utf8::encode($j); my $base = q({"c":") . (q(中) x 700000) . q("}); my $t0 = time; Json::decode($base); my $b = time - $t0; my $t = time; my ($d, $e) = Json::decode($j); my $took = time - $t; print(!defined $e && length($d->{c}) == 700000 && $took <= 6 * $b + 0.5 ? "ok" : sprintf("took %.1f s against %.1f s, %s", $took, $b, $e // "read"))'
+pl "an escaped backslash before uD800 keeps the fast reading (it is not an escaped surrogate)" 'use Time::HiRes qw(time); alarm 120; my $s = "\x{4e2d}" x 700000; my $j = qq({"c":"\\\\uD800 $s"}); utf8::encode($j); my $base = q({"c":"\\uD800 ) . (q(中) x 700000) . q("}); my $t0 = time; Json::decode($base); my $b = time - $t0; my $t = time; my ($d, $e) = Json::decode($j); my $took = time - $t; print(!defined $e && $d->{c} eq "\\uD800 $s" && $took <= 6 * $b + 0.5 ? "ok" : sprintf("took %.1f s against %.1f s, %s", $took, $b, $e // "read"))'
 
 # --- hook.pl: input ---
 # read FILE: runs Hook::read_input on FILE as standard input and prints
@@ -129,7 +130,7 @@ got=$(perl -e 'require "$ENV{LIBDIR}/hook.pl"; exit Hook::warning("a", "b")' 2>&
 if [ "$got" = '{"systemMessage":"a; b"}' ]; then pass "warning joins several texts into one systemMessage"; else fail "warning joins several texts into one systemMessage" "$got"; fi
 got=$(perl -e 'require "$ENV{LIBDIR}/hook.pl"; exit Hook::context("  {\"decision\":\"block\"}", "{second}")' 2>&1)
 if [ "$got" = "$(printf '  \\x7B"decision":"block"}\n{second}')" ]; then pass "context writes a first line that opens with { so it cannot be read as the hook's JSON"; else fail "context writes a first line that opens with { so it cannot be read as the hook's JSON" "$got"; fi
-for how in "die after a failed kill (errno 3)|\$! = 3; die \"crash\\n\"" "die after a child that exited 3|system(\"sh\", \"-c\", \"exit 3\"); \$! = 0; die \"crash\\n\"" "exit 3 without block|exit 3"; do
+for how in "die after a failed kill (errno 3)|\$! = 3; die \"crash\\n\"" "die after a child that exited 3|system(\"sh\", \"-c\", \"exit 3\"); \$! = 0; die \"crash\\n\"" "exit 3 without block|exit 3" "exit 259 without block (3 to the shell)|exit 259"; do
   what=${how%%|*}
   code_text=${how#*|}
   perl -e "require \"\$ENV{LIBDIR}/hook.pl\"; $code_text" >/dev/null 2>&1
@@ -139,6 +140,9 @@ done
 got=$(perl -e 'require "$ENV{LIBDIR}/hook.pl"; Hook::block("refused:", "push your branch"); exit 0' 2>&1)
 code=$?
 if [ "$code" -eq 3 ] && [ "$got" = "refused: push your branch" ]; then pass "block joins its texts into one line, and a hook that refused but exits 0 still refuses (3)"; else fail "block joins its texts, and an exit 0 after a block is 3" "exit $code: $got"; fi
+perl -e 'require "$ENV{LIBDIR}/hook.pl"; Hook::block("refused"); exit 256' >/dev/null 2>&1
+code=$?
+if [ "$code" -eq 3 ]; then pass "a hook that refused but exits 256 (0 to the shell) still refuses (3)"; else fail "a hook that refused but exits 256 still refuses" "exit $code"; fi
 mkdir -p "$work/noesc"
 cp "$lib/hook.pl" "$lib/json.pl" "$work/noesc/"
 got=$(perl -e 'eval { require "$ENV{WORK}/noesc/hook.pl"; 1 } or print STDOUT "load failed\n"; exit 0' 2>&1)
@@ -224,6 +228,7 @@ else
   rm -f "$root/probe.log"
   skip "the huge sparse log: this file system does not make sparse files"
 fi
+pl "a half line left by a write that failed stays a line of its own, and the next line is whole" 'Log::append($ENV{ROOT}, "half.log", undef, rule => "G1", tool => "Bash", hash => $ENV{H}); open my $f, ">>", "$ENV{ROOT}/half.log" or die; print $f "2026-11-08T00:00:00Z\tG2\tBa"; close $f; Log::append($ENV{ROOT}, "half.log", undef, rule => "G3", tool => "Bash", hash => $ENV{H}); my ($ok, $bad) = Log::lines($ENV{ROOT}, "half.log"); print(@$ok == 2 && $bad == 1 && $ok->[-1][1] eq "G3" ? "ok" : scalar(@$ok) . " whole lines, $bad bad")'
 pl "the time is UTC whatever the time zone" 'local $ENV{TZ} = "Asia/Riyadh"; my $st = sub { my @t = gmtime $_[0]; sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ", $t[5] + 1900, $t[4] + 1, @t[3, 2, 1, 0] }; my $a = $st->(time); Log::append($ENV{ROOT}, "tz.log", undef, rule => "G1", tool => "Bash", hash => $ENV{H}); my $b = $st->(time); my ($ok) = Log::lines($ENV{ROOT}, "tz.log"); my $t = $ok->[0][0]; print($t ge $a && $t le $b ? "ok" : "$t not between $a and $b")'
 for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
   perl -e 'require "$ENV{LIBDIR}/log.pl"; Log::append($ENV{ROOT}, "many.log", undef, rule => "G$ARGV[0]", tool => "Bash", hash => $ENV{H})' "$i" &
@@ -277,9 +282,11 @@ for t in "$(printf '{"a":"x\\ud83d\360\237\230\200y"}')" "$(printf '{"a":"\\uD80
   esac
 done
 pl "escaped pairs next to characters above U+FFFF still read right" 'my $t = "{\"a\":\"\\ud83d\\ude00 \x{1F600} \x{4e2d}\"}"; utf8::encode($t); my ($d) = Json::decode($t, "plain"); print($d->{a} eq "\x{1F600} \x{1F600} \x{4e2d}" ? "ok" : "bad")'
-pl "plain reading of 2 MB of non-ASCII text that is not JSON takes seconds, and its reason counts the text's own characters" 'alarm 20; my $t = "{\"a\":\"" . ("\x{4e2d}" x 700000) . "\"} x"; utf8::encode($t); my $s = time; my ($d, $e) = Json::decode($t, "plain"); print(defined $e && $e =~ /garbage after JSON object, at character offset 700010\b/ && time - $s < 15 ? "ok" : ($e // "read") . " in " . (time - $s) . " s")'
+pl "plain reading of 2 MB of non-ASCII text that is not JSON takes about as long as reading it as escapes, and its reason counts the text's own characters" 'use Time::HiRes qw(time); alarm 120; my $t = "{\"a\":\"" . ("\x{4e2d}" x 700000) . "\"} x"; utf8::encode($t); my $base = q({"a":") . (q(中) x 700000) . q("} x); my $s0 = time; Json::decode($base, "plain"); my $b = time - $s0; my $s = time; my ($d, $e) = Json::decode($t, "plain"); my $took = time - $s; print(defined $e && $e =~ /garbage after JSON object, at character offset 700010\b/ && $took <= 6 * $b + 0.5 ? "ok" : sprintf("%s in %.1f s against %.1f s", $e // "read", $took, $b))'
 pl "the plain reason counts a character above U+FFFF (two escapes in the fast copy) as one" 'my $t = "{\"a\":\"\x{1F600}\x{1F600}\" x \"\x{4e2d}\x{4e2d}\"}"; utf8::encode($t); my ($d, $e) = Json::decode($t, "plain"); print(defined $e && $e =~ /character offset 10\b/ ? "ok" : $e // "read")'
 pl "encode dies on a number JSON cannot hold (plain 1e400, its minus, not a number)" 'my ($d) = Json::decode("[1e400,-1e400]", "plain"); my $n = 0; for my $v (@$d, $d->[0] - $d->[0]) { eval { Json::encode({ x => $v }) }; $n++ if $@ =~ /not finite/ } print($n == 3 ? "ok" : "$n of 3 refused")'
+pl "encode dies on data nested more than 512 deep, and on a structure that holds itself, instead of running on" 'alarm 10; my $deep = 1; $deep = [$deep] for 1 .. 600; my $self = {}; $self->{me} = $self; my $n = 0; for my $v ($deep, $self) { eval { Json::encode($v) }; $n++ if $@ =~ /nested too deep/ } my $ok = eval { Json::encode([[[[1]]]]) }; print($n == 2 && $ok eq "[[[[1]]]]" ? "ok" : "$n of 2 refused")'
+pl "encode dies at once on an integer of more than 10000 digits, which decode gives" 'alarm 10; my ($d) = Json::decode("[" . ("9" x 10001) . "]"); eval { Json::encode($d) }; print($@ =~ /exponent beyond 10000/ ? "ok" : "not refused: $@")'
 pl "encode dies at once on an exact number with an exponent beyond 10000, as get refuses it" 'alarm 10; my ($d) = Json::decode("[1e1000000000,1e-1000000000]"); my $n = 0; for my $v (@$d) { eval { Json::encode([$v]) }; $n++ if $@ =~ /exponent beyond 10000/ } print($n == 2 ? "ok" : "$n of 2 refused")'
 pl "a hook that answers with a number JSON cannot hold crashes; it never prints a broken answer" 'my ($d) = Json::decode("{\"t\":1e400}", "plain"); my $r = eval { Hook::json({ t => $d->{t} }); 1 }; print(!$r && $@ =~ /not finite/ ? "ok" : "printed")'
 pl "lines refuses a name that climbs out, as append does" 'eval { Log::lines($ENV{ROOT}, "../x.log") }; print($@ =~ /relative path/ ? "ok" : "bad: $@")'

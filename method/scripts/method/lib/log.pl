@@ -128,10 +128,22 @@ sub append {
     Time::HiRes::sleep(0.05);
   }
   my $line = join("\t", stamp(), @f{@FIELDS}) . "\n";
-  my $fh = open_plain($path, O_WRONLY | O_CREAT | O_APPEND);
+  my $fh = open_plain($path, O_RDWR | O_CREAT | O_APPEND);
   binmode $fh;
-  print {$fh} $line or die "log: cannot write $path ($!)\n";
-  close $fh or die "log: cannot write $path ($!)\n";
+  # a half line left by a write that failed (a full disk) or was cut off
+  # stays a line of its own, and this one starts on a fresh line; a write
+  # that fails takes its own half line back out
+  my $size = -s $fh;
+  if ($size) {
+    my $last = '';
+    sysseek($fh, $size - 1, 0) && sysread($fh, $last, 1);
+    $line = "\n$line" if $last ne "\n";
+  }
+  if (!(print {$fh} $line) || !close $fh) {
+    my $err = $!;
+    truncate $path, $size if defined $size && -f $path && !-l $path;
+    die "log: cannot write $path ($err)\n";
+  }
   trim($path, $cap);
   close $lock;
   return 1;

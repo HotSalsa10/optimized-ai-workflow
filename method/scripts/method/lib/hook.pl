@@ -70,10 +70,11 @@ our $MAX = 4 * 1024 * 1024;
 our $SAID = 0;       # an answer went to stdout in this run
 
 # an exit 3 that Hook::block did not ask for is a crash; an exit 0 after a
-# refusal still refuses
+# refusal still refuses (judged by the code the shell will see: the low
+# eight bits, so exit 259 is an exit 3 and exit 256 an exit 0)
 END {
-  $? = 70 if $? == $BLOCK && !$BLOCKED;
-  $? = $BLOCK if $? == 0 && $BLOCKED;
+  $? = 70 if ($? & 255) == $BLOCK && !$BLOCKED;
+  $? = $BLOCK if ($? & 255) == 0 && $BLOCKED;
 }
 
 sub read_input {
