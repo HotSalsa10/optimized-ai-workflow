@@ -38,6 +38,9 @@
 # tracked file on disk differs from the commit, or while git's working copy
 # is not the folder it is built from. Stored files, folders and the commits
 # after the merge base are checked against their ids as they are read.
+# The header names the commit (a line "HEAD: <id>") and, on the next line,
+# its top folder ("Tree: <id>", the id git rev-parse HEAD^{tree} gives), so a
+# packet can be matched to the files it was built for.
 set -u
 # perl reads bytes; these settings would change how it reads and writes
 # them, and the library paths would let modules from elsewhere run inside

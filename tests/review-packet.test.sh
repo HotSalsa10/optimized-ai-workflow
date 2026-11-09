@@ -95,6 +95,24 @@ lacks() {
   if [ -z "$found" ]; then pass "$name"; else fail "$name: found$found"; fi
 }
 
+# tree_follows_head NAME DIR: the last build gave a packet whose header has
+# the line "Tree: <id>" right after "HEAD: <id>", with the ids git rev-parse
+# gives for HEAD and HEAD^{tree} in DIR, and no other line starting "Tree: "
+tree_follows_head() {
+  tf_head=$(cd "$2" && git rev-parse HEAD)
+  tf_tree=$(cd "$2" && git rev-parse 'HEAD^{tree}')
+  # the header's HEAD line, the line after it, and any other Tree line
+  # shellcheck disable=SC2016 # perl code, expanded by perl
+  tf_prog='last if /^=== PACKET CRITERIA /; if ($n) { print; $n = 0 } elsif (/^Tree: /) { print "another Tree line: $_" } if (/^HEAD: /) { print; $n = 1 }'
+  tf_got=$(printf '%s\n' "$out" | perl -ne "$tf_prog")
+  tf_want=$(printf 'HEAD: %s\nTree: %s' "$tf_head" "$tf_tree")
+  if [ "$code" -eq 0 ] && [ -n "$tf_head" ] && [ -n "$tf_tree" ] && [ "$tf_got" = "$tf_want" ]; then
+    pass "$1"
+  else
+    fail "$1: exit $code; wanted 'Tree: $tf_tree' right after 'HEAD: $tf_head'" "$tf_got"
+  fi
+}
+
 long_line=$(perl -e 'print "x" x 600')
 # can_link: symlinks can be made here (Git Bash may not allow them)
 can_link=0
@@ -187,6 +205,7 @@ perl -e 'print "=== PACKET DIFF ===\n"; print "line $_\n" for 2 .. 299; print "S
 
 build "$std" --base main --criteria "$work/crit.txt" --checks "$work/checks.txt"
 expect "the packet is built, with exactly the 8 markers in order" 0 "=== PACKET END "
+tree_follows_head "the header names HEAD's tree on the line after HEAD, so the packet can be matched to its files" "$std"
 lacks "commit messages, the author's account, are left out (M038)" MSG-BASE-1234 MSG-TASK-5678
 expect "criteria lines that look like markers get an extra backslash (M113)" 0 '\=== PACKET ANSWER ===' '\\=== y'
 expect "a marker after a no-break space, a combining mark, a blank braille sign or blanks gets a backslash too" 0 \
@@ -815,6 +834,7 @@ if (cd "$sha" && git init -q --object-format=sha256) 2>/dev/null; then
     git checkout -q -b task && printf 'changed\n' >src/a.txt && git commit -qam change)
   build "$sha" --base main
   expect "a repository with SHA-256 ids gives a packet" 0 "FILE M src/a.txt" "+changed"
+  tree_follows_head "a repository with SHA-256 ids: the header names HEAD's whole 64-digit tree id" "$sha"
 else
   skip "SHA-256 ids: this git cannot make such a repository"
 fi

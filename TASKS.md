@@ -308,6 +308,14 @@ Plan: docs/plans/step5.md (version 3). Decisions A45 to A62. Rules M072 (moved t
   - [x] Review (a reviewer and a security and CI check, each medium finding re-run by a refuter): APPROVE from the security and CI check, REQUEST CHANGES from the reviewer; no false "caught" was found. Fixed, each with a case and a plant: the helpers that keep the scheme honest had no plants (plant_data's control, the second pass, plant_judge's pass branch, wanted in a whole run); a TEST_ONLY left in the environment made the guard tests pass with no cases run (run.sh now drops it and PLANT_SHARD; a filtered run prints a SKIP line); one plants job could not fit 30 minutes (two halves now); the outside log check tested less when filtered; plant_judge matched a FAIL text in a detail line, and set TEST_ONLY without "only"; plant_data read a plain APPLY from the environment (now PD_APPLY); git's speed check ran in every filtered run; Windows and macOS ran everything in one 30-minute job (now split, 60 minutes each); A70's wording and a blank line.
   - [x] CI run 130 (b256476), the first of this layout, green: the repo checks and tests 11.9 minutes, the plants' halves 21.5 and 9.1, the harness 5.3 (TESTS.md, "Where CI runs"). The last green run before it was 123, at step 5.2.
 
+## Step 5b: gate-receipt
+
+Plan: docs/plans/step5b.md (version 2). Process: A66 (one review and one repair loop).
+
+- [ ] 5b.1 The gate's life: gate-receipt.sh and lib/receipt.pl (start, handback, stop; the states; block once, deny once; the store), the new verdict kinds, the packet's Tree line, log.pl's keep-N writer, the fragment's three entries, tests, plants and harness cases at both versions.
+- [ ] 5b.2 The evidence: clean and tree, write marks from the guard, effort and models, the instructions check, other agents, folders, background tasks, packet trees, the record's wait; a case and a plant for each; the cost on a large repository and record.
+- [ ] 5b.3 Close: one review and one repair loop; the hooks README, DECISIONS (B1 to B12; A48 corrected), the rule map, RISKS, TESTS, CHANGELOG.
+
 ## Next
 
 5.11: step 5 is ready; the owner says "merge". Then step 5b (gate-receipt), whose plan was drafted and critiqued during the review. 5.1 and 5.4 closed with step 5 after their three rounds (A66).
