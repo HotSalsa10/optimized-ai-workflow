@@ -27,6 +27,7 @@ use strict;
 use warnings;
 my $root = shift;
 require "$root/method/scripts/method/lib/json.pl";
+require "$root/method/scripts/method/lib/verdicts.pl";
 binmode STDOUT, ':utf8';
 my @out;
 sub ok   { push @out, "PASS\t$_[0]" }
@@ -168,7 +169,7 @@ if (!defined $hooks) {
 } elsif (ref $hooks ne 'HASH') {
   bad("the fragment's hooks are an object of events", "hooks is not an object");
 } else {
-  my (@form, @onfail, @missing_block);
+  my (@form, @onfail, @missing_block, @gate_onfail);
   for my $event (sort keys %$hooks) {
     my $groups = $hooks->{$event};
     if (ref $groups ne 'ARRAY') { push @form, "$event is not a list"; next }
@@ -182,6 +183,10 @@ if (!defined $hooks) {
           push @form, "$event: " . (defined $cmd && !ref $cmd ? $cmd : '(no command)');
           next;
         }
+        # gate-receipt has no onFailure on any event, PreToolUse included
+        # (step 5b, B11): there, one that cannot start would refuse every
+        # handback, and the client sets no limit on refusals (the gate loops)
+        push @gate_onfail, $event if $name eq 'gate-receipt' && exists $h->{onFailure};
         if ($no_onfailure{$event}) {
           push @onfail, $event if exists $h->{onFailure};
         } elsif ($name eq 'guard' && ($event eq 'PreToolUse' || $event eq 'ConfigChange')) {
@@ -193,22 +198,33 @@ if (!defined $hooks) {
   check("every hook command is one of the three method scripts, as BASH_ENV= ENV= bash -p \"\$CLAUDE_PROJECT_DIR/.claude/hooks/method/NAME.sh\"", @form ? join('; ', @form) : undef);
   check("no onFailure where it has no effect (RISKS #16)", @onfail ? "onFailure on @onfail" : undef);
   check("the guard's PreToolUse and ConfigChange entries block on failure", @missing_block ? "no onFailure \"block\" on @missing_block" : undef);
-  # the entries the plan registers so far (section 6.4): EVENT, MATCHER
-  # (undef: none, every source), SCRIPT, TIMEOUT (seconds)
+  check("gate-receipt's entries have no onFailure, the handback's included (one that cannot start would refuse every handback, with no limit on refusals)", @gate_onfail ? "onFailure on gate-receipt.sh at @gate_onfail" : undef);
+  # the entries the plan registers so far (section 6.4; step 5b): EVENT,
+  # MATCHER (undef: none, every source), SCRIPT, TIMEOUT (seconds). The
+  # gates' matcher is anchored, so a longer agent name that holds a gate's
+  # (my-method-reviewer) is not taken; it names exactly the gates in
+  # verdicts.txt (DECISIONS A71), so a gate added there must be added here
+  my $gates = '^(' . join('|', map { $_->[0] } Verdicts::gates(Verdicts::rows())) . ')$';
   my @registered = (['SessionStart', undef, 'session-status', 30],
     ['PreToolUse', 'Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|ExitWorktree|SendMessage|Skill|Agent|Task|RemoteTrigger', 'guard', 30],
     ['PreToolUse', '^mcp__', 'guard', 30],
-    ['ConfigChange', 'user_settings|project_settings|local_settings', 'guard', 30]);
+    ['ConfigChange', 'user_settings|project_settings|local_settings', 'guard', 30],
+    ['SubagentStart', $gates, 'gate-receipt', 30],
+    ['SubagentStop', $gates, 'gate-receipt', 60],
+    ['PreToolUse', 'SubagentHandback', 'gate-receipt', 30]);
   for my $r (@registered) {
     my ($event, $matcher, $name, $timeout) = @$r;
     my $want = qq{BASH_ENV= ENV= bash -p "\$CLAUDE_PROJECT_DIR/.claude/hooks/method/$name.sh"};
+    my $runs = sub { my $g = shift; ref $g eq 'HASH' && ref $g->{hooks} eq 'ARRAY' && grep { ref $_ eq 'HASH' && ($_->{command} // '') eq $want } @{ $g->{hooks} } };
+    my @groups = @{ ref $hooks->{$event} eq 'ARRAY' ? $hooks->{$event} : [] };
     my @hit = grep {
       my $g = $_;
-      ref $g eq 'HASH' && (defined $matcher ? defined $g->{matcher} && $g->{matcher} eq $matcher : !exists $g->{matcher})
-        && ref $g->{hooks} eq 'ARRAY' && grep { ref $_ eq 'HASH' && ($_->{command} // '') eq $want } @{ $g->{hooks} }
-    } @{ ref $hooks->{$event} eq 'ARRAY' ? $hooks->{$event} : [] };
+      $runs->($g) && (defined $matcher ? defined $g->{matcher} && $g->{matcher} eq $matcher : !exists $g->{matcher})
+    } @groups;
+    # (not registered so: the matchers it runs for instead, if any)
+    my @else = map { !exists $_->{matcher} ? '(no matcher)' : Json::encode($_->{matcher}) } grep { $runs->($_) } @groups;
     check("the fragment runs $name.sh on $event" . (defined $matcher ? " for $matcher" : ', for every source (no matcher)'),
-      @hit == 1 ? undef : (@hit ? "it is registered " . scalar(@hit) . " times" : 'it is not registered so'));
+      @hit == 1 ? undef : (@hit ? "it is registered " . scalar(@hit) . " times" : 'it is not registered so' . (@else ? "; on $event it runs for " . join(', ', @else) : '')));
     my @t = map { my $g = $_; map { $_->{'timeout'} } grep { ref $_ eq 'HASH' && ($_->{command} // '') eq $want } @{ $g->{hooks} } } @hit;
     check("$name.sh on $event" . (defined $matcher ? " for $matcher" : "") . " has a $timeout s time limit, written as a number", (@t && !grep { !defined $_ || ref $_ || Json::encode($_) ne $timeout } @t) ? undef : 'its timeout is ' . join(', ', map { defined $_ ? Json::encode($_) : 'not set' } @t));
   }
@@ -220,6 +236,10 @@ if (-d $hd) {
   my @sh = grep { /\.sh\z/ } readdir $d;
   my @other = grep { my $n = $_; $n =~ s/\.sh\z//; !$script{$n} } sort @sh;
   check("the hooks folder holds no .sh but the three scripts", @other ? "also @other" : undef);
+  # a registered script that is not there would fail at every event it is
+  # registered for, and without onFailure nobody would see it
+  my @missing = grep { !-f "$hd/$_.sh" } @scripts;
+  check("each of the three scripts the fragment registers is in the hooks folder", @missing ? "missing: @missing" : undef);
 } else {
   bad("the hooks folder holds no .sh but the three scripts", "$hd is missing");
 }

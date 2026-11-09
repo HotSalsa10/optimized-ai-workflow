@@ -132,6 +132,11 @@ sub snapshot_path {
   my ($c) = split /\n/, $out;
   return undef unless defined $c && $c ne '';
   $c = File::Spec->rel2abs($c, $project);
+  # (where the folder is a link, as when .git links to a store elsewhere,
+  # the folder it names: the writer refuses to write through a link)
+  require Cwd;
+  my $real = Cwd::realpath($c);
+  $c = $real if defined $real;
   require Digest::SHA;
   return File::Spec->catfile($c, 'method-settings-' . substr(Digest::SHA::sha256_hex(bytes("settings\0$sid")), 0, 16) . '.json');
 }
@@ -149,18 +154,11 @@ sub snapshot {
     my ($d, $e) = read_settings($f->{$k});
     $snap{$k} = defined $e ? { unreadable => 1 } : watched($d);
   }
-  # (a new file, never an existing one or a link: O_EXCL)
-  my $tmp = "$path.$$.tmp";
-  unlink $tmp;
-  require Fcntl;
-  sysopen(my $o, $tmp, Fcntl::O_WRONLY() | Fcntl::O_CREAT() | Fcntl::O_EXCL(), 0600) or return;
-  binmode $o;
-  print $o $CANON->encode(\%snap);
-  close $o or do { unlink $tmp; return };
-  rename $tmp, $path or do { unlink $tmp; return };
-  # (the last $KEEP sessions' snapshots are kept)
-  my @all = sort { (stat $b)[9] <=> (stat $a)[9] } bsd_glob(glob_quote(dirname($path)) . '/method-settings-*.json', GLOB_QUOTE | GLOB_NOSORT);
-  unlink @all[$KEEP .. $#all] if @all > $KEEP;
+  # (written whole, as ASCII JSON, so a non-ASCII value reads back; the
+  # last $KEEP sessions' snapshots are kept, always the one just written)
+  my ($dir, $name) = (dirname($path), basename($path));
+  eval { Log::write_whole($dir, $name, Json::encode(\%snap), 0600) } or return;
+  eval { Log::keep_newest($dir, 'method-settings-', '.json', $KEEP, $name) };
   return 1;
 }
 

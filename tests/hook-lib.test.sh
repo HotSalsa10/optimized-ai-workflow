@@ -17,9 +17,11 @@ work=$(new_sandbox_dir) || abort_sandbox
 export LIBDIR="$lib" WORK="$work"
 
 # pl NAME CODE: runs CODE in perl with the helpers loaded; it must print
-# exactly "ok" (anything else is shown as the failure).
+# exactly "ok" (anything else is shown as the failure). A plant's run
+# keeps only its own cases (wanted, tests/lib.sh).
 pl() {
   name=$1
+  wanted "$name" || return 0
   got=$(perl -e 'require "$ENV{LIBDIR}/hook.pl"; require "$ENV{LIBDIR}/log.pl"; require "$ENV{LIBDIR}/secrets.pl";' -e "$2" 2>&1)
   if [ "$got" = "ok" ]; then pass "$name"; else fail "$name" "$got"; fi
 }
@@ -78,9 +80,11 @@ case "$got" in
   "reason: the input is over 4194304 bytes") pass "read_input refuses input over 4 MB" ;;
   *) fail "read_input refuses input over 4 MB" "$(printf '%s' "$got" | head -c 200)" ;;
 esac
-perl -e 'print "{\"a\":\"", "x" x (4 * 1024 * 1024 - 8), "\"}"' >"$work/edge.json"
-got=$(read_as "$work/edge.json")
-if [ "$got" = "ok a" ]; then pass "read_input reads input of exactly 4 MB"; else fail "read_input reads input of exactly 4 MB" "$(printf '%s' "$got" | head -c 200)"; fi
+if wanted "read_input reads input of exactly 4 MB"; then
+  perl -e 'print "{\"a\":\"", "x" x (4 * 1024 * 1024 - 8), "\"}"' >"$work/edge.json"
+  got=$(read_as "$work/edge.json")
+  if [ "$got" = "ok a" ]; then pass "read_input reads input of exactly 4 MB"; else fail "read_input reads input of exactly 4 MB" "$(printf '%s' "$got" | head -c 200)"; fi
+fi
 printf '{"c":"a\\u0000b\\u001b[2J\\nc"}' >"$work/ctl.json"
 got=$(read_as "$work/ctl.json")
 if [ "$got" = "ok c" ]; then pass "read_input reads control characters written as JSON escapes"; else fail "read_input reads control characters written as JSON escapes" "$got"; fi
@@ -230,25 +234,29 @@ else
 fi
 pl "a half line left by a write that failed stays a line of its own, and the next line is whole" 'Log::append($ENV{ROOT}, "half.log", undef, rule => "G1", tool => "Bash", hash => $ENV{H}); open my $f, ">>", "$ENV{ROOT}/half.log" or die; print $f "2026-11-08T00:00:00Z\tG2\tBa"; close $f; Log::append($ENV{ROOT}, "half.log", undef, rule => "G3", tool => "Bash", hash => $ENV{H}); my ($ok, $bad) = Log::lines($ENV{ROOT}, "half.log"); print(@$ok == 2 && $bad == 1 && $ok->[-1][1] eq "G3" ? "ok" : scalar(@$ok) . " whole lines, $bad bad")'
 pl "the time is UTC whatever the time zone" 'local $ENV{TZ} = "Asia/Riyadh"; my $st = sub { my @t = gmtime $_[0]; sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ", $t[5] + 1900, $t[4] + 1, @t[3, 2, 1, 0] }; my $a = $st->(time); Log::append($ENV{ROOT}, "tz.log", undef, rule => "G1", tool => "Bash", hash => $ENV{H}); my $b = $st->(time); my ($ok) = Log::lines($ENV{ROOT}, "tz.log"); my $t = $ok->[0][0]; print($t ge $a && $t le $b ? "ok" : "$t not between $a and $b")'
-for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-  perl -e 'require "$ENV{LIBDIR}/log.pl"; Log::append($ENV{ROOT}, "many.log", undef, rule => "G$ARGV[0]", tool => "Bash", hash => $ENV{H})' "$i" &
-done
-wait
-pl "20 hooks logging at the same time lose no line and break none" 'my ($ok, $bad) = Log::lines($ENV{ROOT}, "many.log"); my %r = map { ($_->[1] => 1) } @$ok; print(@$ok == 20 && !$bad && keys(%r) == 20 ? "ok" : scalar(@$ok) . " lines, $bad bad")'
+if wanted "20 hooks logging at the same time lose no line and break none"; then
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    perl -e 'require "$ENV{LIBDIR}/log.pl"; Log::append($ENV{ROOT}, "many.log", undef, rule => "G$ARGV[0]", tool => "Bash", hash => $ENV{H})' "$i" &
+  done
+  wait
+  pl "20 hooks logging at the same time lose no line and break none" 'my ($ok, $bad) = Log::lines($ENV{ROOT}, "many.log"); my %r = map { ($_->[1] => 1) } @$ok; print(@$ok == 20 && !$bad && keys(%r) == 20 ? "ok" : scalar(@$ok) . " lines, $bad bad")'
+fi
 # A full log is trimmed on every line added, so hooks that log at the same
 # time race between one's trim (read, write, rename) and another's line;
 # the lock must keep every new line. Done 3 times, as one race can miss.
-lost=""
-for round in 1 2 3; do
-  perl -e 'open my $f, ">", "$ENV{ROOT}/full.log"; printf $f "2026-01-01T00:00:00Z\tG0\tBash\t%064x\n", $_ for 1 .. 1000'
-  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
-    perl -e 'require "$ENV{LIBDIR}/log.pl"; Log::append($ENV{ROOT}, "full.log", undef, rule => "G$ARGV[0]", tool => "Bash", hash => $ENV{H})' "$i" &
+if wanted "30 hooks logging at the same time into a full log keep every new line and the cap"; then
+  lost=""
+  for round in 1 2 3; do
+    perl -e 'open my $f, ">", "$ENV{ROOT}/full.log"; printf $f "2026-01-01T00:00:00Z\tG0\tBash\t%064x\n", $_ for 1 .. 1000'
+    for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
+      perl -e 'require "$ENV{LIBDIR}/log.pl"; Log::append($ENV{ROOT}, "full.log", undef, rule => "G$ARGV[0]", tool => "Bash", hash => $ENV{H})' "$i" &
+    done
+    wait
+    r=$(perl -e 'require "$ENV{LIBDIR}/log.pl"; my ($ok, $bad) = Log::lines($ENV{ROOT}, "full.log"); my %r = map { ($_->[1] => 1) } grep { $_->[1] ne "G0" } @$ok; print scalar(@$ok), " lines, ", scalar(keys %r), " new"')
+    [ "$r" = "1000 lines, 30 new" ] || lost="$lost round $round: $r;"
   done
-  wait
-  r=$(perl -e 'require "$ENV{LIBDIR}/log.pl"; my ($ok, $bad) = Log::lines($ENV{ROOT}, "full.log"); my %r = map { ($_->[1] => 1) } grep { $_->[1] ne "G0" } @$ok; print scalar(@$ok), " lines, ", scalar(keys %r), " new"')
-  [ "$r" = "1000 lines, 30 new" ] || lost="$lost round $round: $r;"
-done
-if [ -z "$lost" ]; then pass "30 hooks logging at the same time into a full log keep every new line and the cap"; else fail "30 hooks logging at the same time into a full log keep every new line and the cap" "$lost"; fi
+  if [ -z "$lost" ]; then pass "30 hooks logging at the same time into a full log keep every new line and the cap"; else fail "30 hooks logging at the same time into a full log keep every new line and the cap" "$lost"; fi
+fi
 
 # --- Secrets::scan_text ---
 got=$(printf 'input that must not be read' | perl -e 'require "$ENV{LIBDIR}/secrets.pl"; my $rest = <STDIN>; print "after require: $rest @ARGV"' a b 2>&1)
@@ -308,16 +316,69 @@ if [ "$can_link" -eq 1 ]; then
 fi
 # A reader takes no lock, so it may open the log just as a trim renames a
 # new log over it; it must open the new one, not die with a false alarm.
-perl -e 'open my $f, ">", "$ENV{ROOT}/busy.log"; printf $f "2026-01-01T00:00:00Z\tG0\tBash\t%064x\n", $_ for 1 .. 1000'
-for i in 1 2 3 4 5 6 7 8; do
-  perl -e 'require "$ENV{LIBDIR}/log.pl"; Log::append($ENV{ROOT}, "busy.log", undef, rule => "G$ARGV[0]", tool => "Bash", hash => $ENV{H}) for 1 .. 40' "$i" &
+if wanted "readers of a log that hooks are trimming never die with a false alarm"; then
+  perl -e 'open my $f, ">", "$ENV{ROOT}/busy.log"; printf $f "2026-01-01T00:00:00Z\tG0\tBash\t%064x\n", $_ for 1 .. 1000'
+  for i in 1 2 3 4 5 6 7 8; do
+    perl -e 'require "$ENV{LIBDIR}/log.pl"; Log::append($ENV{ROOT}, "busy.log", undef, rule => "G$ARGV[0]", tool => "Bash", hash => $ENV{H}) for 1 .. 40' "$i" &
+  done
+  for i in 1 2 3 4; do
+    perl -e 'require "$ENV{LIBDIR}/log.pl"; my $died = 0; for (1 .. 150) { eval { Log::lines($ENV{ROOT}, "busy.log"); 1 } or do { $died++; print STDERR $@ } } open my $o, ">", "$ENV{WORK}/reader.$ARGV[0]"; print $o "$died\n"' "$i" 2>"$work/reader-err.$i" &
+  done
+  wait
+  died=$(cat "$work"/reader.[1-4] 2>/dev/null | perl -ne '$n += $_; END { print $n + 0 }')
+  if [ "$died" = "0" ] && [ "$(cat "$work"/reader.[1-4] | wc -l | tr -d ' ')" = "4" ]; then pass "readers of a log that hooks are trimming never die with a false alarm"; else fail "readers of a log that hooks are trimming never die with a false alarm" "$died died: $(head -c 300 "$work/reader-err.1")"; fi
+fi
+
+# --- log.pl, step 5b: gates.log's fields; a file written whole; the
+# newest files kept (receipts and settings snapshots in git's folder) ---
+export T40=0123456789abcdef0123456789abcdef01234567
+export T64=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+pl "append writes a gates.log line: the time, then the word, gate, tree, model, effort and reason, tab-separated" 'Log::append($ENV{ROOT}, ".method/local/gates.log", 1000, word => "VALID", gate => "method-reviewer", tree => $ENV{T40}, model => "claude-opus-5-5[1m]", effort => "xhigh", why => "none"); Log::append($ENV{ROOT}, ".method/local/gates.log", 1000, word => "INCOMPLETE", gate => "method-tester", tree => "none", model => "none", effort => "none", why => "lines-missing-after-retry"); open my $f, "<", "$ENV{ROOT}/.method/local/gates.log" or die; my @l = <$f>; my $s = qr/\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ/; print(@l == 2 && $l[0] =~ /\A$s\tVALID\tmethod-reviewer\t$ENV{T40}\tclaude-opus-5-5\[1m\]\txhigh\tnone\n\z/ && $l[1] =~ /\A$s\tINCOMPLETE\tmethod-tester\tnone\tnone\tnone\tlines-missing-after-retry\n\z/ ? "ok" : "@l")'
+pl "lines reads the gates form when given its fields, and a line of the other form as another line" 'my @g = (word => "INVALID", gate => "method-diagnose", tree => $ENV{T64}, model => "claude-opus-5-5", effort => "max", why => "tree-changed"); Log::append($ENV{ROOT}, "gates2.log", undef, @g); Log::append($ENV{ROOT}, "gates2.log", undef, rule => "G4", tool => "Bash", hash => $ENV{H}); Log::append($ENV{ROOT}, "gates2.log", undef, @g, why => "write-mark"); my ($ok, $bad) = Log::lines($ENV{ROOT}, "gates2.log", [qw(word gate tree model effort why)]); my ($gok, $gbad) = Log::lines($ENV{ROOT}, "gates2.log"); my $first = @$ok ? join(" ", @{ $ok->[0] }[1 .. 6]) : ""; print(@$ok == 2 && $bad == 1 && $first eq "INVALID method-diagnose $ENV{T64} claude-opus-5-5 max tree-changed" && $ok->[1][6] eq "write-mark" && @$gok == 1 && $gbad == 2 && $gok->[0][1] eq "G4" ? "ok" : scalar(@$ok) . " gates lines, $bad other; " . scalar(@$gok) . " guard lines, $gbad other; first: $first")'
+for pair in "a receipt word in lower case|word|valid" "a receipt word holding a tab|word|VALID	X" "a gate name in capitals|gate|Method-reviewer" "a gate name holding a space|gate|method reviewer" "a tree of 6 hex digits|tree|abcdef" "a tree in capitals|tree|ABCDEF0" "a model holding a space|model|claude opus" "a model of 65 characters|model|$(printf '%065d' 0)" "an effort that is not a level|effort|extreme" "a reason that is text|why|the tree changed" "a reason of 49 characters|why|a$(printf '%048d' 0)"; do
+  what=${pair%%|*}
+  rest=${pair#*|}
+  key=${rest%%|*}
+  val=${rest#*|}
+  wanted "gates.log refuses $what" || continue
+  got=$(KEY="$key" VAL="$val" perl -e 'require "$ENV{LIBDIR}/log.pl"; my %f = (word => "VALID", gate => "method-reviewer", tree => "none", model => "none", effort => "none", why => "none"); $f{$ENV{KEY}} = $ENV{VAL}; eval { Log::append($ENV{ROOT}, "gates-shape.log", undef, %f); 1 } and print "WRITTEN"; print $@' 2>&1)
+  case "$got" in
+    "log: the field $key is missing or not of its shape"*)
+      if [ -e "$root/gates-shape.log" ]; then fail "gates.log refuses $what" "the log was written"; else pass "gates.log refuses $what"; fi
+      ;;
+    *) fail "gates.log refuses $what" "$got" ;;
+  esac
 done
-for i in 1 2 3 4; do
-  perl -e 'require "$ENV{LIBDIR}/log.pl"; my $died = 0; for (1 .. 150) { eval { Log::lines($ENV{ROOT}, "busy.log"); 1 } or do { $died++; print STDERR $@ } } open my $o, ">", "$ENV{WORK}/reader.$ARGV[0]"; print $o "$died\n"' "$i" 2>"$work/reader-err.$i" &
-done
-wait
-died=$(cat "$work"/reader.[1-4] 2>/dev/null | perl -ne '$n += $_; END { print $n + 0 }')
-if [ "$died" = "0" ] && [ "$(cat "$work"/reader.[1-4] | wc -l | tr -d ' ')" = "4" ]; then pass "readers of a log that hooks are trimming never die with a false alarm"; else fail "readers of a log that hooks are trimming never die with a false alarm" "$died died: $(head -c 300 "$work/reader-err.1")"; fi
+pl "gates.log refuses a line without one of its fields" 'eval { Log::append($ENV{ROOT}, "gates-missing.log", undef, word => "VALID", gate => "method-reviewer", tree => "none", model => "none", effort => "none") }; print($@ =~ /why is missing/ && !-e "$ENV{ROOT}/gates-missing.log" ? "ok" : "bad: $@")'
+pl "fields of both sets on one line are refused, and nothing is written" 'my $n = 0; for my $extra ([word => "VALID"], [why => "none"]) { eval { Log::append($ENV{ROOT}, "gates-mixed.log", undef, rule => "G4", tool => "Bash", hash => $ENV{H}, @$extra) }; $n++ if $@ =~ /not of one field set/ } eval { Log::append($ENV{ROOT}, "gates-mixed.log", undef, word => "VALID", gate => "method-reviewer", tree => "none", model => "none", effort => "none", why => "none", hash => $ENV{H}) }; $n++ if $@ =~ /not of one field set/; print($n == 3 && !-e "$ENV{ROOT}/gates-mixed.log" ? "ok" : "only $n of 3 refused")'
+pl "lines refuses fields to read that are not one set, in its order" 'my $n = 0; for my $f ([qw(word gate)], [qw(rule tool hash word)], [qw(gate word tree model effort why)], "word") { eval { Log::lines($ENV{ROOT}, "gates2.log", $f) }; $n++ if $@ =~ /one field set/ } print($n == 4 ? "ok" : "only $n of 4 refused")'
+
+mkdir -p "$root/ww"
+pl "write_whole writes the whole file over the old one, and leaves no temporary file" 'my $d = "$ENV{ROOT}/ww"; my $big = join("", map { "{\"n\":$_}\n" } 1 .. 20000); Log::write_whole($d, "method-a.json", "old"); my $r = Log::write_whole($d, "method-a.json", $big); open my $f, "<:raw", "$d/method-a.json" or die; my $t = do { local $/; <$f> }; opendir my $h, $d or die; my @tmp = grep { /\.tmp\./ } readdir $h; print($r == 1 && $t eq $big && !@tmp ? "ok" : "bad: " . length($t) . " bytes; temporary files: @tmp")'
+pl "write_whole makes the file with the mode given, 0600 when none is" 'umask 022; my $d = "$ENV{ROOT}/ww"; Log::write_whole($d, "method-m1.json", "{}"); Log::write_whole($d, "method-m2.json", "{}", 0644); my @m = map { (stat "$d/$_")[2] & 0777 } qw(method-m1.json method-m2.json); print(($m[0] == 0600 && $m[1] == 0644) || $^O =~ /\A(?:msys|cygwin|MSWin32)\z/ ? "ok" : sprintf("modes %o and %o", @m))'
+pl "write_whole refuses a relative folder, and a file given as the folder" 'chdir $ENV{ROOT} or die; open my $o, ">", "$ENV{ROOT}/ww/plain" or die; close $o; my $n = 0; for my $d ("ww", "./ww", "", undef, "$ENV{ROOT}/ww/plain") { eval { Log::write_whole($d, "method-r.json", "{}") }; $n++ if $@ =~ /absolute path|missing or a link/ } print($n == 5 && !-e "$ENV{ROOT}/ww/method-r.json" ? "ok" : "only $n of 5 refused")'
+pl "write_whole refuses a file name with a slash, .. or nothing, and writes nothing" 'my $d = "$ENV{ROOT}/ww/sub"; mkdir $d; my $n = 0; for my $name ("../escaped.json", "..", "", "a/b.json", "x\n.json", undef) { eval { Log::write_whole($d, $name, "{}") }; $n++ if $@ =~ /one part/ } print($n == 6 && !-e "$ENV{ROOT}/ww/escaped.json" ? "ok" : "only $n of 6 refused")'
+pl "write_whole refuses characters, and writes bytes as they are" 'my $d = "$ENV{ROOT}/ww"; my $n = 0; my $u = "caf\xe9"; utf8::upgrade($u); for my $c ("caf\x{e9} \x{263a}", "\x{263a}", $u) { eval { Log::write_whole($d, "method-c.json", $c) }; $n++ if $@ =~ /bytes, not characters/ } Log::write_whole($d, "method-b.json", "caf\xc3\xa9"); open my $f, "<:raw", "$d/method-b.json" or die; my $t = <$f>; print($n == 3 && !-e "$d/method-c.json" && $t eq "caf\xc3\xa9" ? "ok" : "only $n of 3 refused")'
+pl "write_whole tries another temporary name when one cannot be removed (a folder there)" 'my $d = "$ENV{ROOT}/ww"; mkdir "$d/method-busy.json.tmp.$$" or die; Log::write_whole($d, "method-busy.json", "{\"a\":1}"); open my $f, "<", "$d/method-busy.json" or die; my $t = <$f>; print($t eq "{\"a\":1}" && -d "$d/method-busy.json.tmp.$$" ? "ok" : "bad: $t")'
+pl "write_whole removes its temporary file when the rename fails (a folder at the name)" 'my $d = "$ENV{ROOT}/ww"; mkdir "$d/method-dir.json" or die; eval { Log::write_whole($d, "method-dir.json", "{}") }; opendir my $h, $d or die; my @tmp = grep { /\Amethod-dir\.json\.tmp\./ } readdir $h; print($@ =~ /cannot replace/ && !@tmp ? "ok" : "bad: $@ @tmp")'
+if [ "$can_link" -eq 1 ]; then
+  mkdir -p "$work/ww-target"
+  ln -s "$work/ww-target" "$work/ww-link"
+  pl "write_whole and keep_newest refuse a folder that is a link, also spelled with a trailing / or /., and write nothing through it" 'my $n = 0; for my $d ("$ENV{WORK}/ww-link", "$ENV{WORK}/ww-link/", "$ENV{WORK}/ww-link/.") { eval { Log::write_whole($d, "method-l.json", "{}") }; $n++ if $@ =~ /missing or a link/; eval { Log::keep_newest($d, "method-l-", ".json", 1) }; $n++ if $@ =~ /missing or a link/ } opendir my $h, "$ENV{WORK}/ww-target" or die; my @in = grep { !/\A\.\.?\z/ } readdir $h; print($n == 6 && !@in ? "ok" : "only $n of 6 refused; written: @in")'
+else
+  skip "write_whole and keep_newest with a folder that is a link: links cannot be made here"
+fi
+# (each file is made with an explicit time to the fraction of a second)
+pl "keep_newest keeps the newest by their time to the fraction of a second, and says how many it removed" 'my $d = "$ENV{ROOT}/kn1"; mkdir $d or die; for my $i (1 .. 6) { my $p = "$d/method-k-0$i.json"; open my $o, ">", $p or die; close $o; Time::HiRes::utime(1000 + $i / 10, 1000 + $i / 10, $p) or die } my $r = Log::keep_newest($d, "method-k-", ".json", 3); opendir my $h, $d or die; my @left = sort grep { /\.json\z/ } readdir $h; print($r == 3 && "@left" eq "method-k-04.json method-k-05.json method-k-06.json" ? "ok" : "removed $r, left: @left")'
+pl "keep_newest never removes the file named, which counts as one of those kept" 'my $d = "$ENV{ROOT}/kn2"; mkdir $d or die; for my $i (1 .. 6) { my $p = "$d/method-k-0$i.json"; open my $o, ">", $p or die; close $o; Time::HiRes::utime(2000 + $i, 2000 + $i, $p) or die } my $r = Log::keep_newest($d, "method-k-", ".json", 3, "method-k-01.json"); opendir my $h, $d or die; my @left = sort grep { /\.json\z/ } readdir $h; print($r == 3 && "@left" eq "method-k-01.json method-k-05.json method-k-06.json" ? "ok" : "removed $r, left: @left")'
+pl "keep_newest leaves other names and temporary files alone" 'my $d = "$ENV{ROOT}/kn3"; mkdir $d or die; my @other = ("method-k-0zz.json", "method-k-01.json.tmp.123", "method-k-02.json.123.tmp", "method-k-03.jsonx", "other-04.json", "method-k-.json", "xmethod-k-05.json"); for my $n ("method-k-0a.json", @other) { my $p = "$d/$n"; open my $o, ">", $p or die; close $o; Time::HiRes::utime(100, 100, $p) or die } open my $o, ">", "$d/method-k-0b.json" or die; close $o; my $r = Log::keep_newest($d, "method-k-", ".json", 1); my @gone = grep { !-e "$d/$_" } @other; print($r == 1 && !@gone && !-e "$d/method-k-0a.json" && -e "$d/method-k-0b.json" ? "ok" : "removed $r; gone: @gone")'
+if [ "$can_link" -eq 1 ]; then
+  pl "keep_newest leaves links and folders alone" 'my $d = "$ENV{ROOT}/kn4"; mkdir $d or die; my $t = "$ENV{ROOT}/kn4-target"; open my $o, ">", $t or die; close $o; Time::HiRes::utime(100, 100, $t) or die; symlink($t, "$d/method-k-0e.json") or die; mkdir "$d/method-k-0f.json" or die; Time::HiRes::utime(100, 100, "$d/method-k-0f.json") or die; open $o, ">", "$d/method-k-0d.json" or die; close $o; my $r = Log::keep_newest($d, "method-k-", ".json", 1); print($r == 0 && -l "$d/method-k-0e.json" && -d "$d/method-k-0f.json" && -f $t ? "ok" : "removed $r")'
+else
+  skip "keep_newest with a link: links cannot be made here"
+fi
+pl "keep_newest refuses a keep of 0 or one that is not a whole number, and removes nothing" 'my $d = "$ENV{ROOT}/kn5"; mkdir $d or die; for my $i (1 .. 3) { open my $o, ">", "$d/method-k-0$i.json" or die; close $o } my $n = 0; for my $k (0, "", "2x", -1, undef) { eval { Log::keep_newest($d, "method-k-", ".json", $k) }; $n++ if $@ =~ /number kept/ } opendir my $h, $d or die; my @left = grep { /\.json\z/ } readdir $h; print($n == 5 && @left == 3 ? "ok" : "only $n of 5 refused, " . scalar(@left) . " left")'
+pl "keep_newest refuses an empty prefix, which would take other files" 'my $d = "$ENV{ROOT}/kn6"; mkdir $d or die; for my $i (1 .. 3) { open my $o, ">", "$d/0$i.json" or die; close $o } eval { Log::keep_newest($d, "", ".json", 1) }; opendir my $h, $d or die; my @left = grep { /\.json\z/ } readdir $h; print($@ =~ /prefix must be/ && @left == 3 ? "ok" : "bad: $@ " . scalar(@left) . " left")'
 
 drop_sandbox "$work" || true
 echo "tests: hook helpers: $tests_pass passed, $tests_fail failed, $tests_skip skipped"

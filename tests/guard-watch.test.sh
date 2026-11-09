@@ -204,6 +204,46 @@ for e in command perl noexec; do
   fi
 done
 
+# --- the snapshot's file (step 5b: written whole by lib/log.pl) ---
+# A non-ASCII value (an e-acute, as UTF-8: a character below U+0100, which
+# a snapshot printed as characters wrote as one Latin-1 byte, not UTF-8)
+# is written as ASCII JSON and read back: with the snapshot read, a theme
+# change passes; a snapshot that cannot be read would leave the stricter
+# judging, which refuses a file that holds env.
+printf '{"theme": "dark", "env": {"FOO": "caf\303\251"}}\n' >"$user"
+start s30 startup
+s30=$(snap s30)
+printf '{"theme": "light", "env": {"FOO": "caf\303\251"}}\n' >"$user"
+change "a non-ASCII settings value round-trips through the snapshot, so a theme change beside it passes" s30 user_settings allow
+if [ -f "$s30" ] && ! LC_ALL=C grep -q '[^ -~]' "$s30"; then pass "the snapshot is written as ASCII JSON"; else fail "the snapshot is written as ASCII JSON" "$(od -c "$s30" 2>&1 | head -3)"; fi
+printf '{"theme": "dark", "env": {"FOO": "cafe"}}\n' >"$user"
+change "a change to a non-ASCII env value is still refused" s30 user_settings G16
+# 25 older snapshots planted, each with its own time, beside a temporary
+# file and a name that is not a snapshot's: a new session's snapshot keeps
+# the newest 20 (its own among them) and leaves the other files alone
+PROJ="$proj" perl -e 'for my $i (1 .. 25) { my $p = sprintf "%s/.git/method-settings-%016x.json", $ENV{PROJ}, $i; open my $o, ">", $p or die; print $o "{}"; close $o; utime 1000 + $i, 1000 + $i, $p or die } for my $n ("method-settings-00000000000000aa.json.123.tmp", "method-settings-x.json") { my $p = "$ENV{PROJ}/.git/$n"; open my $o, ">", $p or die; close $o; utime 1000, 1000, $p or die }'
+start s31 startup
+s31=$(snap s31)
+kept=$(PROJ="$proj" perl -e 'opendir my $d, "$ENV{PROJ}/.git" or die; print scalar grep { /\Amethod-settings-[0-9a-f]+\.json\z/ && -f "$ENV{PROJ}/.git/$_" } readdir $d')
+if [ "$kept" = 20 ] && [ -f "$s31" ] && [ -f "$proj/.git/method-settings-0000000000000019.json" ] && [ ! -e "$proj/.git/method-settings-0000000000000001.json" ] && [ -f "$proj/.git/method-settings-00000000000000aa.json.123.tmp" ] && [ -f "$proj/.git/method-settings-x.json" ]; then
+  pass "the snapshots are pruned to the newest 20, the new one kept, other files left alone"
+else
+  fail "the snapshots are pruned to the newest 20, the new one kept, other files left alone" "$kept snapshots kept; temporary file there: $([ -f "$proj/.git/method-settings-00000000000000aa.json.123.tmp" ] && echo yes || echo no); other name there: $([ -f "$proj/.git/method-settings-x.json" ] && echo yes || echo no)"
+fi
+# the new session's snapshot is kept even when 20 others carry later times
+# (a clock moved back, files restored from a backup)
+PROJ="$proj" perl -e 'my $t = time + 3600; for my $i (100 .. 121) { my $p = sprintf "%s/.git/method-settings-%016x.json", $ENV{PROJ}, $i; open my $o, ">", $p or die; print $o "{}"; close $o; utime $t, $t, $p or die }'
+start s32 startup
+if [ -f "$(snap s32)" ]; then pass "a new session's snapshot is kept even when 20 others carry later times"; else fail "a new session's snapshot is kept even when 20 others carry later times" "it was pruned at once"; fi
+# a checkout whose .git is a link to git's folder elsewhere: the snapshot
+# is written in the folder the link names, and read back
+mkdir -p "$work/store"
+mv "$proj/.git" "$work/store/proj.git" && ln -s "$work/store/proj.git" "$proj/.git"
+printf '{"theme": "dark", "env": {"FOO": "1"}}\n' >"$user"
+start s33 startup
+printf '{"theme": "light", "env": {"FOO": "1"}}\n' >"$user"
+change "with .git a link, the snapshot is written where it points, so a theme change passes" s33 user_settings allow
+
 drop_sandbox "$work" || true
 echo "tests: guard (settings changes and skill hooks): $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]

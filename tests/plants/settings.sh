@@ -92,7 +92,7 @@ plant "a fourth hook script" "$frag" "PreToolUse: BASH_ENV= ENV= bash" '$d->{hoo
 plant "a hook path not in quotes" "$frag" 'PreToolUse: BASH_ENV= ENV= bash -p $CLAUDE_PROJECT_DIR' '$d->{hooks}{PreToolUse} = [{matcher => "Bash", hooks => [{type => "command", command => q{BASH_ENV= ENV= bash -p $CLAUDE_PROJECT_DIR/.claude/hooks/method/guard.sh}, onFailure => "block"}]}]'
 plant "a hook without the BASH_ENV= ENV= prefix" "$frag" 'PreToolUse: bash -p "$CLAUDE_PROJECT_DIR' '$d->{hooks}{PreToolUse} = [{matcher => "Bash", hooks => [{type => "command", command => q{bash -p "$CLAUDE_PROJECT_DIR/.claude/hooks/method/guard.sh"}, onFailure => "block"}]}]'
 plant "a hook without bash -p" "$frag" 'PreToolUse: BASH_ENV= ENV= bash "$CLAUDE_PROJECT_DIR' '$d->{hooks}{PreToolUse} = [{matcher => "Bash", hooks => [{type => "command", command => q{BASH_ENV= ENV= bash "$CLAUDE_PROJECT_DIR/.claude/hooks/method/guard.sh"}, onFailure => "block"}]}]'
-plant "onFailure on SubagentStop" "$frag" "onFailure on SubagentStop" '$d->{hooks}{SubagentStop} = [{matcher => "reviewer", hooks => [{type => "command", command => $ENV{OK_HOOK}, onFailure => "block"}]}]'
+plant "onFailure on SubagentStop" "$frag" "onFailure on SubagentStop" '$d->{hooks}{SubagentStop}[0]{hooks}[0]{command} or die "no entry"; $d->{hooks}{SubagentStop}[0]{hooks}[0]{onFailure} = "block"'
 plant "onFailure on SessionStart" "$frag" "onFailure on SessionStart" '$d->{hooks}{SessionStart}[0]{hooks}[0]{onFailure} = "block"'
 plant "session-status with a 1 s time limit" "$frag" "its timeout is 1" '$d->{hooks}{SessionStart}[0]{hooks}[0]{timeout} = 1'
 plant "session-status with no time limit" "$frag" "its timeout is not set" 'delete $d->{hooks}{SessionStart}[0]{hooks}[0]{timeout}'
@@ -100,6 +100,19 @@ plant "session-status's time limit written as a string (the client drops the hoo
 plant "the guard on outside tools with a 600 s time limit" "$frag" "FAIL  guard.sh on PreToolUse for ^mcp__ has a 30 s time limit" '$d->{hooks}{PreToolUse}[1]{hooks}[0]{timeout} = 600'
 plant "the guard on the built-in tools with no time limit" "$frag" "RemoteTrigger has a 30 s time limit" 'delete $d->{hooks}{PreToolUse}[0]{hooks}[0]{timeout}'
 plant "the guard without onFailure block" "$frag" 'no onFailure "block" on PreToolUse' '$d->{hooks}{PreToolUse} = [{matcher => "Bash", hooks => [{type => "command", command => $ENV{OK_HOOK}}]}]'
+# gate-receipt's three entries (step 5b): each plant dies, so reads as not
+# applied, when what it changes is not there. The handback group is found
+# by its matcher, not by its place in the PreToolUse list
+gates='^(method-reviewer|method-security-checker|method-diagnose|method-tester)$'
+plant "the gates' matcher at their start without ^ and \$ (a longer name holding a gate's is taken too)" "$frag" "on SubagentStart it runs for \"method-reviewer|method-security-checker|method-diagnose|method-tester\"" '$d->{hooks}{SubagentStart}[0]{matcher} =~ s/\A\^\((.*)\)\$\z/$1/ or die "no anchored matcher"'
+plant "a gate dropped from the matcher at the gates' stop" "$frag" "on SubagentStop it runs for \"^(method-reviewer|method-security-checker|method-tester)\$\"" '$d->{hooks}{SubagentStop}[0]{matcher} =~ s/\|method-diagnose// or die "no method-diagnose"'
+plant "the handback matcher changed (Handback)" "$frag" "FAIL  the fragment runs gate-receipt.sh on PreToolUse for SubagentHandback" 'my @g = grep { ($_->{matcher} // "") eq "SubagentHandback" } @{ $d->{hooks}{PreToolUse} }; @g == 1 or die "no handback group"; $g[0]{matcher} = "Handback"'
+plant "onFailure block on the handback entry (a gate-receipt that cannot start would refuse every handback)" "$frag" "onFailure on gate-receipt.sh at PreToolUse" 'my @g = grep { ($_->{matcher} // "") eq "SubagentHandback" } @{ $d->{hooks}{PreToolUse} }; @g == 1 or die "no handback group"; $g[0]{hooks}[0]{onFailure} = "block"'
+plant "onFailure on SubagentStart" "$frag" "onFailure on SubagentStart" '$d->{hooks}{SubagentStart}[0]{hooks}[0]{command} or die "no entry"; $d->{hooks}{SubagentStart}[0]{hooks}[0]{onFailure} = "block"'
+plant "gate-receipt's entry at the gates' start dropped" "$frag" "FAIL  the fragment runs gate-receipt.sh on SubagentStart for $gates" 'exists $d->{hooks}{SubagentStart} or die "no SubagentStart"; delete $d->{hooks}{SubagentStart}'
+plant "gate-receipt registered twice at the gates' stop" "$frag" "it is registered 2 times" '@{ $d->{hooks}{SubagentStop} } == 1 or die "not one group"; push @{ $d->{hooks}{SubagentStop} }, JSON::PP->new->decode(JSON::PP->new->encode($d->{hooks}{SubagentStop}[0]))'
+plant "gate-receipt at the gates' stop with a 30 s time limit (it needs 60)" "$frag" "FAIL  gate-receipt.sh on SubagentStop for $gates has a 60 s time limit" '$d->{hooks}{SubagentStop}[0]{hooks}[0]{timeout} == 60 or die "not 60"; $d->{hooks}{SubagentStop}[0]{hooks}[0]{timeout} = 30'
+plant "gate-receipt at the handback with no time limit" "$frag" "FAIL  gate-receipt.sh on PreToolUse for SubagentHandback has a 30 s time limit" 'my @g = grep { ($_->{matcher} // "") eq "SubagentHandback" } @{ $d->{hooks}{PreToolUse} }; @g == 1 or die "no handback group"; delete $g[0]{hooks}[0]{timeout}'
 plant "a stray .sh in the hooks folder" method/settings.fragment.json "also extra.sh" 'open my $x, ">", "method/.claude/hooks/method/extra.sh" or die'
 
 # two plants outside a JSON file: the floor raised with the fragment left
@@ -133,6 +146,8 @@ file_plant() {
 file_plant "a committed link named .claude" "committed links: sub/.claude" 'mkdir -p sub conf && printf "{}\n" >conf/settings.json && ln -s ../conf sub/.claude && git add conf sub/.claude'
 file_plant "a committed settings.local.json in another letter case" "committed: .Claude/Settings.Local.JSON" 'mkdir -p .Claude && printf "{}\n" >.Claude/Settings.Local.JSON && git add -f .Claude/Settings.Local.JSON'
 file_plant "a never-set key in a nested folder's committed settings" "sub/.claude/settings.json sets nothing on the never-set list" 'mkdir -p sub/.claude && printf "{\"autoContinueAtUsageLimit\":true}\n" >sub/.claude/settings.json && git add -f sub/.claude/settings.json'
+file_plant "a registered script missing from the hooks folder" "missing: gate-receipt" 'rm method/.claude/hooks/method/gate-receipt.sh'
+file_plant "a gate in verdicts.txt that the fragment does not run gate-receipt for" "FAIL  the fragment runs gate-receipt.sh on SubagentStart for ^(method-reviewer|method-security-checker|method-diagnose|method-tester|method-planner)$" 'printf "gate-verdict\tmethod-planner\tthe planner; its report opens with a verdict word\n" >>method/scripts/method/verdicts.txt'
 file_plant "a never-set env variable in lower case in this repo's settings" "it sets env.claude_code_effort_level" 'perl -MJSON::PP -i -0pe "my \$d = decode_json(\$_); \$d->{env}{claude_code_effort_level} = q(low); \$_ = JSON::PP->new->canonical->pretty->encode(\$d)" .claude/settings.json && git add .claude/settings.json'
 
 echo "plants: settings: $tests_pass passed, $tests_fail failed, $tests_skip skipped"

@@ -80,6 +80,40 @@
             "onFailure": "block"
           }
         ]
+      },
+      {
+        "matcher": "SubagentHandback",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "BASH_ENV= ENV= bash -p \"$CLAUDE_PROJECT_DIR/.claude/hooks/method/gate-receipt.sh\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "matcher": "^(method-reviewer|method-security-checker|method-diagnose|method-tester)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "BASH_ENV= ENV= bash -p \"$CLAUDE_PROJECT_DIR/.claude/hooks/method/gate-receipt.sh\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "^(method-reviewer|method-security-checker|method-diagnose|method-tester)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "BASH_ENV= ENV= bash -p \"$CLAUDE_PROJECT_DIR/.claude/hooks/method/gate-receipt.sh\"",
+            "timeout": 60
+          }
+        ]
       }
     ]
   }

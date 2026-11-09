@@ -5,7 +5,7 @@
 #   Log::append(ROOT, NAME, CAP, rule => ID, tool => NAME, hash => HEX)
 #     adds one line to the log at NAME under the folder ROOT (the
 #     repository's top folder): the time (UTC), the rule ID, the tool name
-#     and the SHA-256 of the hook's input, separated by tabs. Those are the
+#     and the SHA-256 of the hook's input, separated by tabs. Those are its
 #     only fields, and each must have its shape (a rule ID such as G4 or
 #     G16; a tool name of at most 128 letters, digits and _ . : -; 64 hex
 #     digits), so no free text reaches a log: no command, no path, no
@@ -14,14 +14,42 @@
 #     CAP lines (1000 when CAP is undef), only its newest CAP lines are kept.
 #     Dies with a reason on any failure: the caller decides what a failed log
 #     means, and a hook's answer never depends on it.
-#   Log::lines(ROOT, NAME) gives ([TIME, RULE, TOOL, HASH]...) for the
+#   Log::append(ROOT, NAME, CAP, word => W, gate => G, tree => T,
+#     model => M, effort => E, why => R) adds a line of the second field
+#     set, the one gates.log holds (step 5b), in the same way and under the
+#     same cap: a receipt word (capital letters, with a space or a dash
+#     inside), a gate's name (lower case, digits, dashes), the files' tree
+#     id (7 to 64 hex digits, or none), the model's id (at most 64 letters,
+#     digits and . _ - [ ]), the effort (low, medium, high, xhigh, max or
+#     none) and a reason code (lower case, digits, dashes; never text). A
+#     line holds all of one set's fields, in that order; fields from both
+#     sets are refused.
+#   Log::lines(ROOT, NAME[, FIELDS]) gives ([TIME, FIELD...]...) for the
 #     well-formed lines among the newest 4 times CAP, oldest first, and the
 #     number of other lines (an older part, not read, counts as one); an
-#     absent log gives none. It writes nothing and takes no lock: a log
+#     absent log gives none. FIELDS names the set to read as a list in its
+#     order ([qw(rule tool hash)] when not given); a line of the other set
+#     counts as another line. It writes nothing and takes no lock: a log
 #     replaced by a trim while it is opened is opened again. It dies with a
 #     reason, as append does, on a name or a folder append would refuse, and
 #     on a log that is a link or has a second name, so its caller wraps it
 #     in eval.
+#   Log::write_whole(DIR, NAME, BYTES[, MODE]) writes the file NAME (one
+#     part: letters, digits and . _ -) in the folder DIR (an absolute path
+#     to a real folder, not a link) whole: BYTES (bytes, as Json::encode
+#     gives them, never characters) go to a new temporary file beside it,
+#     made with MODE (0600 when not given), which is renamed over NAME, so
+#     a reader finds the old file or the new one, never a part of one.
+#     Gives 1, or dies with a reason; the temporary file is removed when
+#     the write or the rename fails.
+#   Log::keep_newest(DIR, PREFIX, SUFFIX, KEEP[, NAME_KEPT]) keeps, among
+#     the regular files in DIR named PREFIX, hex digits, SUFFIX, the newest
+#     KEEP (by their time to the fraction of a second; at the same time,
+#     the first by name) and removes the others; it gives how many it
+#     removed. NAME_KEPT (the file just written) is never removed and
+#     counts as one of KEEP. Links, folders, temporary files and other
+#     names are left alone. Dies with a reason on a folder or an argument
+#     it refuses.
 #
 # Safety:
 # - NAME is a relative path whose parts are letters, digits and . _ -
@@ -35,9 +63,10 @@
 #   the one that was checked.
 # - Files are opened without waiting (O_NONBLOCK), so a FIFO put in a
 #   file's place is refused at once instead of holding the lock.
-# - The trimmed log is written to a new temporary file (made with O_EXCL,
-#   after any old file of that name is removed; another name is tried when
-#   one cannot be removed) and renamed over the log; it is removed again
+# - The trimmed log, and a file written whole, go to a new temporary file
+#   (NAME.tmp.PID, made with O_EXCL and without following a link, after
+#   any old file of that name is removed; another name is tried when one
+#   cannot be removed) that is renamed over the file; it is removed again
 #   when the write fails, as on a full disk.
 # - Only the end of a large log is read (the newest CAP lines take at most
 #   CAP times 512 bytes), so a huge or sparse file cannot fill the memory.
@@ -61,8 +90,17 @@ my %SHAPE = (
   rule => qr/\A[A-Z][A-Z0-9-]{0,15}\z/,
   tool => qr/\A[A-Za-z0-9_.:-]{1,128}\z/,
   hash => qr/\A[0-9a-f]{64}\z/,
+  # gates.log's fields (step 5b)
+  word => qr/\A[A-Z][A-Z -]{0,30}[A-Z]\z/,
+  gate => qr/\A[a-z][a-z0-9-]{0,63}\z/,
+  tree => qr/\A(?:[0-9a-f]{7,64}|none)\z/,
+  model => qr/\A[A-Za-z0-9._\[\]-]{1,64}\z/,    # (none is one of them)
+  effort => qr/\A(?:low|medium|high|xhigh|max|none)\z/,
+  why => qr/\A[a-z][a-z0-9-]{0,47}\z/,
 );
-my @FIELDS = qw(rule tool hash);
+# the field sets: a line holds all of one set's fields, in its order
+my @SETS = ([qw(rule tool hash)], [qw(word gate tree model effort why)]);
+my $STAMP = qr/\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\z/;
 
 # the log's full path, after checking (and making, unless READ) each folder
 # below ROOT; with READ, undef when a folder is missing
@@ -110,14 +148,26 @@ sub stamp {
   return sprintf '%04d-%02d-%02dT%02d:%02d:%02dZ', $t[5] + 1900, $t[4] + 1, @t[3, 2, 1, 0];
 }
 
+# the field set that holds every key given; dies on a key that is no
+# field, and on keys from both sets
+sub field_set {
+  my (@keys) = @_;
+  for my $k (@keys) {
+    die "log: $k is not a log field\n" unless $SHAPE{$k};
+  }
+  for my $set (@SETS) {
+    my %in = map { $_ => 1 } @$set;
+    return $set unless grep { !$in{$_} } @keys;
+  }
+  die "log: the fields " . join(', ', @keys) . " are not of one field set\n";
+}
+
 sub append {
   my ($root, $name, $cap, %f) = @_;
   $cap = $CAP unless defined $cap;
   die "log: the cap must be a whole number above 0\n" unless $cap =~ /\A[1-9][0-9]{0,8}\z/;
-  for my $k (sort keys %f) {
-    die "log: $k is not a log field\n" unless $SHAPE{$k};
-  }
-  for my $k (@FIELDS) {
+  my $set = field_set(sort keys %f);
+  for my $k (@$set) {
     die "log: the field $k is missing or not of its shape\n" unless defined $f{$k} && $f{$k} =~ $SHAPE{$k};
   }
   my $path = place($root, $name);
@@ -127,7 +177,7 @@ sub append {
     die "log: the log is locked by another hook for over $WAIT s\n" if Time::HiRes::time() > $until;
     Time::HiRes::sleep(0.05);
   }
-  my $line = join("\t", stamp(), @f{@FIELDS}) . "\n";
+  my $line = join("\t", stamp(), @f{@$set}) . "\n";
   my $fh = open_plain($path, O_RDWR | O_CREAT | O_APPEND);
   binmode $fh;
   # a half line left by a write that failed (a full disk) or was cut off
@@ -181,20 +231,22 @@ sub tail {
   return (\@lines, $more);
 }
 
-# keep only the newest CAP lines of PATH (the lock is held)
-sub trim {
-  my ($path, $cap) = @_;
-  my ($lines, $more) = tail($path, $cap);
-  return unless $more;
+# PATH replaced whole by BYTES: written to a new temporary file beside it,
+# made with MODE, then renamed over PATH. An old file of the temporary
+# file's name is removed first, and when one cannot be removed (a folder)
+# the next name is tried; the temporary file is removed when the write or
+# the rename fails.
+sub replace_whole {
+  my ($path, $mode, @bytes) = @_;
   my ($out, $tmp);
   for my $n ('', 1 .. 9) {
     $tmp = "$path.tmp.$$" . ($n eq '' ? '' : ".$n");
     unlink $tmp if -e $tmp || -l $tmp;
-    last if sysopen $out, $tmp, O_WRONLY | O_CREAT | O_EXCL | $NOFOLLOW | $NONBLOCK, 0644;
+    last if sysopen $out, $tmp, O_WRONLY | O_CREAT | O_EXCL | $NOFOLLOW | $NONBLOCK, $mode;
     die "log: cannot make $tmp ($!)\n" unless $!{EEXIST} && $n ne '9';
   }
   binmode $out;
-  my $ok = print {$out} @$lines;
+  my $ok = print {$out} @bytes;
   $ok = close($out) && $ok;
   if (!$ok) {
     my $e = $!;
@@ -202,10 +254,25 @@ sub trim {
     die "log: cannot write $tmp ($e)\n";
   }
   rename $tmp, $path or do { my $e = $!; unlink $tmp; die "log: cannot replace $path ($e)\n" };
+  return 1;
+}
+
+# keep only the newest CAP lines of PATH (the lock is held)
+sub trim {
+  my ($path, $cap) = @_;
+  my ($lines, $more) = tail($path, $cap);
+  return unless $more;
+  replace_whole($path, 0644, @$lines);
 }
 
 sub lines {
-  my ($root, $name) = @_;
+  my ($root, $name, $fields) = @_;
+  my $set = $SETS[0];
+  if (defined $fields) {
+    my $want = ref $fields eq 'ARRAY' ? join(' ', map { defined && !ref ? $_ : '' } @$fields) : '';
+    ($set) = grep { join(' ', @$_) eq $want } @SETS;
+    die "log: the fields to read must be one field set, in its order\n" unless $set;
+  }
   my $path = place($root, $name, 1);
   return ([], 0) unless defined $path && (-e $path || -l $path);
   my ($all, $more) = tail($path, $CAP * 4);
@@ -214,14 +281,75 @@ sub lines {
   for my $l (@$all) {
     (my $t = $l) =~ s/\n\z//;
     my @f = split /\t/, $t, -1;
-    if (@f == 4 && $f[0] =~ /\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\z/
-      && $f[1] =~ $SHAPE{rule} && $f[2] =~ $SHAPE{tool} && $f[3] =~ $SHAPE{hash}) {
+    if (@f == 1 + @$set && $f[0] =~ $STAMP && !grep { $f[ $_ + 1 ] !~ $SHAPE{ $set->[$_] } } 0 .. $#$set) {
       push @ok, \@f;
     } else {
       $bad++;
     }
   }
   return (\@ok, $bad);
+}
+
+# --- files written whole, and the newest kept (step 5b) ---
+
+# DIR, checked: an absolute path to a real folder, not a link (a trailing
+# / or /. is taken off first, as -l would follow the link through it)
+sub folder {
+  my ($dir) = @_;
+  die "log: the folder must be an absolute path\n" unless defined $dir && !ref $dir && $dir ne '' && File::Spec->file_name_is_absolute($dir);
+  $dir =~ s{(?:/+\.?)+\z}{} if $dir =~ m{[^/]};
+  die "log: the folder $dir is missing or a link\n" unless -d $dir && !-l $dir;
+  return $dir;
+}
+
+# dies unless S is one part of letters, digits and . _ - (empty with EMPTY)
+sub one_part {
+  my ($what, $s, $empty) = @_;
+  my $ok = defined $s && !ref $s && $s =~ ($empty ? qr/\A[A-Za-z0-9._-]*\z/ : qr/\A[A-Za-z0-9._-]+\z/);
+  die "log: the $what must be one part of letters, digits and . _ -\n" unless $ok && $s ne '.' && $s ne '..';
+  return $s;
+}
+
+sub write_whole {
+  my ($dir, $name, $bytes, $mode) = @_;
+  $dir = folder($dir);
+  one_part('file name', $name);
+  my $data = $bytes;
+  die "log: the content must be bytes, not characters\n" unless defined $data && !ref $data && (!utf8::is_utf8($data) || $data !~ /[^\x00-\x7F]/);
+  utf8::downgrade($data);
+  $mode = 0600 unless defined $mode;
+  die "log: the mode must be a file mode (0 to 0777)\n" unless $mode =~ /\A[0-9]{1,4}\z/ && $mode <= 0777;
+  return replace_whole(File::Spec->catfile($dir, $name), $mode, $data);
+}
+
+sub keep_newest {
+  my ($dir, $prefix, $suffix, $keep, $kept) = @_;
+  $dir = folder($dir);
+  one_part('prefix', $prefix);
+  one_part('suffix', $suffix, 1);
+  die "log: the number kept must be a whole number above 0\n" unless defined $keep && !ref $keep && $keep =~ /\A[1-9][0-9]{0,8}\z/;
+  opendir my $d, $dir or die "log: cannot read the folder $dir ($!)\n";
+  my @names = grep { /\A\Q$prefix\E[0-9a-f]+\Q$suffix\E\z/ } readdir $d;
+  closedir $d;
+  my (@files, $has_kept);
+  for my $n (@names) {
+    my $p = File::Spec->catfile($dir, $n);
+    # a regular file, never a link (lstat), and its time to the fraction
+    # of a second (core stat gives whole seconds, and ties)
+    next unless lstat $p;
+    next unless -f _;
+    my @st = Time::HiRes::stat($p);
+    next unless @st;
+    if (defined $kept && $n eq $kept) { $has_kept = 1; next }
+    push @files, [$n, $st[9]];
+  }
+  my @old = sort { $b->[1] <=> $a->[1] || $a->[0] cmp $b->[0] } @files;
+  splice @old, 0, $keep - ($has_kept ? 1 : 0);
+  my $removed = 0;
+  for my $f (@old) {
+    $removed++ if unlink File::Spec->catfile($dir, $f->[0]);
+  }
+  return $removed;
 }
 
 1;
