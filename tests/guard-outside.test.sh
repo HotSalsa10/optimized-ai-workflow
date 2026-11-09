@@ -29,6 +29,7 @@ mkdir -p "$proj"
 # run_case RULE NAME TOOL INPUT: guard.sh on one call; RULE is allow or a
 # rule ID (the refusal must start "guard RULE:" and exit 2)
 run_case() {
+  wanted "$2" || return 0
   printf '%s' "$4" >"$work/in.json"
   err=$(cd "$proj" && env -u CLAUDE_CODE_EXECPATH CLAUDE_PROJECT_DIR="$proj" perl -e 'alarm 60; exec @ARGV' bash "$guard" <"$work/in.json" 2>&1 >/dev/null)
   code=$?
@@ -66,11 +67,19 @@ while [ -f "$work/case-$n.json" ]; do
 done
 [ "$n" -gt 60 ] || fail "the case file holds the cases" "only $((n - 1))"
 
-# an MCP refusal is logged by its server only
-if LC_ALL=C grep -q '	G4	mcp__github	' "$proj/.method/local/guard.log" && ! LC_ALL=C grep -q 'merge_pull_request' "$proj/.method/local/guard.log"; then
-  pass "an MCP refusal is logged by the tool's server only, never the rest of its name"
-else
-  fail "an MCP refusal is logged by the tool's server only" "$(cut -f2-3 "$proj/.method/local/guard.log" 2>&1 | sort | uniq -c)"
+# an MCP refusal is logged by its server only: one more merge refusal adds
+# its own line, and no line in the log names a tool (so a run that keeps
+# only some cases, TEST_ONLY, checks the same refusal as a whole run)
+if wanted "an MCP refusal is logged by the tool's server only"; then
+  mlog="$proj/.method/local/guard.log"
+  before=0
+  [ -f "$mlog" ] && before=$(wc -l <"$mlog" | tr -d ' ')
+  TEST_ONLY='' run_case G4 "the GitHub MCP merge tool is refused again, for the log" x "$(perl -MJSON::PP -e 'print JSON::PP->new->encode({tool_name => "mcp__github__merge_pull_request", tool_input => {owner => "example-owner", repo => "example-repo", pullNumber => 1}, cwd => $ARGV[0], hook_event_name => "PreToolUse"})' "$proj")"
+  if [ -f "$mlog" ] && sed -n "$((before + 1)),\$p" "$mlog" | LC_ALL=C grep -q '	G4	mcp__github	' && ! LC_ALL=C grep -q 'merge_pull_request' "$mlog"; then
+    pass "an MCP refusal is logged by the tool's server only, never the rest of its name"
+  else
+    fail "an MCP refusal is logged by the tool's server only" "$(cut -f2-3 "$mlog" 2>&1 | sort | uniq -c)"
+  fi
 fi
 
 # a list line that cannot be read refuses what the list judges

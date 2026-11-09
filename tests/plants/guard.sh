@@ -153,7 +153,7 @@ then|do|else|for)\z/
 then|do|else)\z/
 
 PLANTS-END
-plant_data "$work/plants.txt" tests/guard.test.sh
+plant_data "$work/plants.txt" tests/guard.test.sh only
 drop_sandbox "$work" || true
 echo "plants: guard (reader): $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]

@@ -37,10 +37,34 @@ jobs:
         run: |
           echo "::stop-commands::stop-$RANDOM$RANDOM$RANDOM"
           bash scripts/dev/validate.sh
-      - name: Tests and planted defects
+      - name: Tests
         run: |
           echo "::stop-commands::stop-$RANDOM$RANDOM$RANDOM"
-          bash tests/run.sh
+          bash tests/run.sh tests
+
+  # The planted defects run beside the tests, in two halves (every other
+  # plant file), each plant with only the test cases that can show its
+  # stated reason (tests/lib.sh, TEST_ONLY; DECISIONS A70).
+  plants:
+    name: Linux planted defects ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ["0/2", "1/2"]
+    env:
+      REQUIRE_SHELLCHECK: "1"
+      SHARD: ${{ matrix.shard }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Planted defects
+        run: |
+          echo "::stop-commands::stop-$RANDOM$RANDOM$RANDOM"
+          bash tests/run.sh plants "$SHARD"
 
   # The $0 harness (DECISIONS A49): the real Claude Code client, at the floor
   # (REQUIRES) and at the tested version (tests/harness/VERSIONS), each
@@ -70,15 +94,21 @@ jobs:
           METHOD_HARNESS_CLIENT="$RUNNER_TEMP/claude-tested/claude" METHOD_HARNESS_VERSION="$tested" bash tests/harness.test.sh
           METHOD_HARNESS_CLIENT="$RUNNER_TEMP/claude-tested/claude" bash tests/plants/harness.sh
 
+  # Split as on Linux: the tests (with the repo checks) and each half of the
+  # plant files in a job of their own. Their times are not measured yet
+  # (A27 defers these systems), so each has 60 minutes.
   other-systems:
-    name: ${{ matrix.os }}
+    name: ${{ matrix.os }} ${{ matrix.part }}
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         os: [windows-latest, macos-latest]
+        part: ["tests", "plants 0/2", "plants 1/2"]
+    env:
+      PART: ${{ matrix.part }}
     defaults:
       run:
         shell: bash
@@ -88,10 +118,12 @@ jobs:
         with:
           persist-credentials: false
       - name: Repo checks
+        if: matrix.part == 'tests'
         run: |
           echo "::stop-commands::stop-$RANDOM$RANDOM$RANDOM"
           bash scripts/dev/validate.sh
-      - name: Tests and planted defects
+      - name: Tests or planted defects
         run: |
           echo "::stop-commands::stop-$RANDOM$RANDOM$RANDOM"
-          bash tests/run.sh
+          # PART is "tests" or "plants K/N", left unquoted to split in two
+          bash tests/run.sh $PART

@@ -24,6 +24,7 @@ export LIBDIR="$lib"
 # reads NAME COMMAND WANT: Shell::commands on COMMAND, written one command a
 # line as "words|via|unread" (each list joined by spaces), must be WANT
 reads() {
+  wanted "reader: $1" || return 0
   got=$(CMD="$2" perl -e 'require "$ENV{LIBDIR}/shell.pl"; for my $c (Shell::commands($ENV{CMD})) { print join(" ", @{ $c->{words} }), "|", join(" ", @{ $c->{via} }), "|", join("; ", @{ $c->{unread} }), "\n" }' 2>&1)
   if [ "$got" = "$3" ]; then pass "reader: $1"; else fail "reader: $1" "got:
 $got
@@ -95,6 +96,7 @@ if [ "$got" = "1,1,1,1,1,1,1,1" ]; then pass "reader: a subshell, bash -c, a pip
 # judge NAME JSON WANT: runs guard.sh on JSON in the project; WANT is
 # "allow" or a rule ID (the refusal must start "guard RULE:" and exit 2)
 judge() {
+  wanted "$1" || return 0
   name=$1
   printf '%s' "$2" >"$work/in.json"
   err=$(cd "$proj" && env -u CLAUDE_CODE_EXECPATH CLAUDE_PROJECT_DIR="$proj" perl -e 'alarm 60; exec @ARGV' bash "$guard" <"$work/in.json" 2>&1 >"$work/out")
@@ -166,6 +168,7 @@ round2_input() {
 }
 printf '%s\n' "$round2_cases" | sed -n 's/^@@ \(G[0-9]* .*\)$/\1/p' >"$work/round2.txt"
 while IFS= read -r head; do
+  wanted "${head#* }" || continue
   judge "${head#* }" "$(round2_input "$head")" "${head%% *}"
 done <"$work/round2.txt"
 # what reading these right lets through, which a misreading would refuse
@@ -173,6 +176,7 @@ done <"$work/round2.txt"
 round2_ok=$(cat "$here/guard-cases/round2-allow.txt")
 printf '%s\n' "$round2_ok" | sed -n 's/^@@ \(allow .*\)$/\1/p' >"$work/round2-ok.txt"
 while IFS= read -r head; do
+  wanted "${head#* }" || continue
   judge "${head#* }" "$(round2_cases=$round2_ok round2_input "$head")" allow
 done <"$work/round2-ok.txt"
 # --- review round 3 of 5.5: every shape the round showed misread, now
@@ -184,11 +188,13 @@ done <"$work/round2-ok.txt"
 round3_cases=$(cat "$here/guard-cases/round3.txt")
 printf '%s\n' "$round3_cases" | sed -n 's/^@@ \(G[0-9]* .*\)$/\1/p' >"$work/round3.txt"
 while IFS= read -r head; do
+  wanted "${head#* }" || continue
   judge "${head#* }" "$(round2_cases=$round3_cases round2_input "$head")" "${head%% *}"
 done <"$work/round3.txt"
 round3_ok=$(cat "$here/guard-cases/round3-allow.txt")
 printf '%s\n' "$round3_ok" | sed -n 's/^@@ \(allow .*\)$/\1/p' >"$work/round3-ok.txt"
 while IFS= read -r head; do
+  wanted "${head#* }" || continue
   judge "${head#* }" "$(round2_cases=$round3_ok round2_input "$head")" allow
 done <"$work/round3-ok.txt"
 # (carriage returns cannot be written in a tracked text file, so these are
@@ -245,7 +251,9 @@ long_ms() {
   took=$(( $(perl -MTime::HiRes=time -e 'printf "%.0f", time * 1000') - start ))
   [ "$code" -eq 0 ] && [ -z "$err" ]
 }
-if long_ms 10000; then
+if ! wanted_any "a long command is read in time that grows with its length" "a long command is let through"; then
+  : # (a run that keeps only some cases, TEST_ONLY, skips the timing)
+elif long_ms 10000; then
   small=$took
   if long_ms 40000; then
     if [ "$took" -lt $((small * 8)) ] && [ "$took" -lt 30000 ]; then pass "a long command is read in time that grows with its length: 10,000 paths ${small} ms, 40,000 paths (700 KB) ${took} ms"; else fail "a long command is read in time that grows with its length" "10,000 paths ${small} ms, 40,000 paths ${took} ms"; fi
@@ -270,13 +278,18 @@ judge "a tool the rules do not name yet is let through" '{"tool_name":"Read","to
 log="$proj/.method/local/guard.log"
 rm -rf "$proj/.method"
 key="sk-ant""-api03-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef0123456789"
-judge "a refusal of a command holding a key" "$(bash_call "echo \$(git log) $key")" G0
-if [ -f "$log" ] && LC_ALL=C grep -q "^[0-9-]*T[0-9:]*Z	G0	Bash	[0-9a-f]\{64\}\$" "$log"; then pass "each refusal adds one line to .method/local/guard.log: time, rule, tool, hash"; else fail "each refusal adds one line to the guard log" "$(cat "$log" 2>/dev/null)"; fi
-if ! grep -F -q -- "$key" "$log" && ! printf '%s' "$err" | grep -F -q -- "$key" && ! printf '%s' "$err" | grep -F -q -- 'git log'; then pass "the log and the refusal hold neither the key nor the command's text"; else fail "the log and the refusal hold neither the key nor the command's text" "$err"; fi
-perl -e 'open my $f, ">", $ARGV[0] or die; printf $f "2026-01-01T00:00:00Z\tG0\tBash\t%064x\n", $_ for 1 .. 5000' "$log"
-judge "a refusal with a full log" "$(bash_call 'echo $(git log)')" G0
-n=$(wc -l <"$log" | tr -d ' ')
-if [ "$n" -eq 1000 ]; then pass "a planted 5,000-line guard log is trimmed to 1,000 by the next refusal"; else fail "a planted 5,000-line guard log is trimmed to 1,000 by the next refusal" "$n lines"; fi
+if wanted_any "a refusal of a command holding a key" "each refusal adds one line to the guard log" "the log and the refusal hold neither the key nor the command's text"; then
+  TEST_ONLY='' judge "a refusal of a command holding a key" "$(bash_call "echo \$(git log) $key")" G0
+  if [ -f "$log" ] && LC_ALL=C grep -q "^[0-9-]*T[0-9:]*Z	G0	Bash	[0-9a-f]\{64\}\$" "$log"; then pass "each refusal adds one line to .method/local/guard.log: time, rule, tool, hash"; else fail "each refusal adds one line to the guard log" "$(cat "$log" 2>/dev/null)"; fi
+  if ! grep -F -q -- "$key" "$log" && ! printf '%s' "$err" | grep -F -q -- "$key" && ! printf '%s' "$err" | grep -F -q -- 'git log'; then pass "the log and the refusal hold neither the key nor the command's text"; else fail "the log and the refusal hold neither the key nor the command's text" "$err"; fi
+fi
+if wanted_any "a refusal with a full log" "a planted 5,000-line guard log is trimmed to 1,000 by the next refusal"; then
+  mkdir -p "${log%/*}"
+  perl -e 'open my $f, ">", $ARGV[0] or die; printf $f "2026-01-01T00:00:00Z\tG0\tBash\t%064x\n", $_ for 1 .. 5000' "$log"
+  TEST_ONLY='' judge "a refusal with a full log" "$(bash_call 'echo $(git log)')" G0
+  n=$(wc -l <"$log" | tr -d ' ')
+  if [ "$n" -eq 1000 ]; then pass "a planted 5,000-line guard log is trimmed to 1,000 by the next refusal"; else fail "a planted 5,000-line guard log is trimmed to 1,000 by the next refusal" "$n lines"; fi
+fi
 
 # --- the wrapper ---
 mkdir -p "$work/noperl"
@@ -334,11 +347,13 @@ case "$perl_fn" in
 esac
 
 # --- the time a call takes ---
-printf '%s' "$(bash_call 'git status && git log --oneline -5')" >"$work/in.json"
-times=$(cd "$proj" && CLAUDE_PROJECT_DIR="$proj" perl -MTime::HiRes=time -e 'my @t; for (1 .. 30) { my $s = time; system("bash", "-c", "bash \"\$0\" < \"\$1\"", $ARGV[0], $ARGV[1]) == 0 or exit 1; push @t, time - $s } @t = sort { $a <=> $b } @t; printf "%d %d", 1000 * $t[15], 1000 * $t[27]' "$guard" "$work/in.json")
-median=${times% *}
-p90=${times#* }
-if [ "$median" -le 200 ]; then pass "a call takes ${median} ms median, ${p90} ms at the 90th percentile (the plan's targets on Linux: 40 and 60; this test fails only over 200)"; else fail "a call takes ${median} ms median" "p90 $p90"; fi
+if wanted "a call takes"; then
+  printf '%s' "$(bash_call 'git status && git log --oneline -5')" >"$work/in.json"
+  times=$(cd "$proj" && CLAUDE_PROJECT_DIR="$proj" perl -MTime::HiRes=time -e 'my @t; for (1 .. 30) { my $s = time; system("bash", "-c", "bash \"\$0\" < \"\$1\"", $ARGV[0], $ARGV[1]) == 0 or exit 1; push @t, time - $s } @t = sort { $a <=> $b } @t; printf "%d %d", 1000 * $t[15], 1000 * $t[27]' "$guard" "$work/in.json")
+  median=${times% *}
+  p90=${times#* }
+  if [ "$median" -le 200 ]; then pass "a call takes ${median} ms median, ${p90} ms at the 90th percentile (the plan's targets on Linux: 40 and 60; this test fails only over 200)"; else fail "a call takes ${median} ms median" "p90 $p90"; fi
+fi
 
 drop_sandbox "$work" || true
 echo "tests: guard: $tests_pass passed, $tests_fail failed, $tests_skip skipped"

@@ -26,7 +26,7 @@ cat >"$work/plants.txt" <<'PLANTS-END'
 local $SIG{ALRM} = sub { $OUT = 1; die "out of time\n" };
 ---
 local $SIG{ALRM} = sub { die "out of time\n" };
-=== RL3 a list read whatever kind of file it is | method/scripts/method/lib/session.pl | a list that is not a regular file is not read
+=== RL3 a list read whatever kind of file it is | method/scripts/method/lib/session.pl | a list that is not a regular file, or is over 1 MB, is a LOOK and is not read
 if (!-f $path) { push @w, look("$name is not a regular file, so what it adds is not known"); next }
 ---
 if (0) { }

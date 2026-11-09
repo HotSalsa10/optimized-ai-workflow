@@ -88,15 +88,77 @@ make_sandbox() {
   printf '%s\n' "$dir"
 }
 
-# plant_data DATA TEST: the planted breaks in the file DATA, each in a
-# throwaway copy (make_sandbox); each must turn TEST red with a FAIL line
-# that starts with its stated reason. DATA holds blocks: a line
-# "=== NAME | FILE | REASON", the text OLD (FILE must hold it exactly
-# once), a line "---", the text NEW. PLANT_SHARD=K/N runs every Nth block
-# from the Kth (0-based), so copies can run side by side.
+# --- running only the cases a plant needs ---
+# A plant must turn a test file red with a FAIL line that starts with the
+# plant's stated reason. Running the whole file for every plant took CI
+# hours, so a plant sets TEST_ONLY to its reason, and the test file's case
+# helpers skip each case that cannot print that line (wanted). A case's
+# FAIL line is its name and then its detail, so a case is wanted when its
+# name starts with TEST_ONLY or TEST_ONLY starts with its name. Checks
+# outside the case helpers always run. Because a case left out could be one
+# another case needs, the same cases are first run on a clean copy and
+# must pass (plant_control), so a red after the plant is the plant's doing.
+
+# wanted NAME: true when the case NAME runs in this run
+wanted() {
+  [ -n "${TEST_ONLY:-}" ] || return 0
+  case "$1" in "$TEST_ONLY"*) return 0 ;; esac
+  case "$TEST_ONLY" in "$1"*) return 0 ;; esac
+  return 1
+}
+
+# wanted_any NAME...: true when any NAME is wanted. A check that reads what
+# a case left behind (its refusal, the log) is kept together with that
+# case: if wanted_any CASE CHECK; then TEST_ONLY='' case-helper ...; check;
+# fi (the empty TEST_ONLY keeps the case from being skipped)
+wanted_any() {
+  for wa_name in "$@"; do
+    wanted "$wa_name" && return 0
+  done
+  return 1
+}
+
+# plant_control NAME SB TEST REASON: before a plant is applied in the
+# sandbox SB, the test file TEST run with TEST_ONLY=REASON must pass;
+# otherwise the plant fails here (return 1), as a red after it would prove
+# nothing
+plant_control() {
+  if pc_got=$(cd "$2" && TEST_ONLY="$4" bash "$3" 2>&1); then
+    return 0
+  fi
+  fail "$1: the cases kept for its reason fail without the plant too, so a red would prove nothing" "$(printf '%s\n' "$pc_got" | grep FAIL | head -3)"
+  return 1
+}
+
+# plant_judge NAME SB TEST REASON [only]: after a plant was applied in the
+# sandbox SB, the test file TEST must fail with a FAIL line that starts
+# with REASON (a line fail prints, "  FAIL  REASON...", never a detail line
+# under one); with "only" it runs with TEST_ONLY=REASON, otherwise whole
+plant_judge() {
+  pj_only=
+  [ "${5:-}" = only ] && pj_only=$4
+  pj_got=$(cd "$2" && TEST_ONLY="$pj_only" bash "$3" 2>&1)
+  pj_rc=$?
+  if [ "$pj_rc" -eq 0 ]; then
+    fail "$1: the test stayed green" "$(printf '%s\n' "$pj_got" | tail -2)"
+  elif ! printf '%s\n' "$pj_got" | PJ_LINE="  FAIL  $4" perl -ne 'BEGIN { $miss = 1 } $miss = 0 if index($_, $ENV{PJ_LINE}) == 0; END { exit $miss }'; then
+    fail "$1: went red, but not for the stated reason ('$4')" "$(printf '%s\n' "$pj_got" | grep FAIL | head -3)"
+  else
+    pass "$1"
+  fi
+}
+
+# plant_data DATA TEST [only]: the planted breaks in the file DATA, each in
+# a throwaway copy (make_sandbox); each must turn TEST red with a FAIL line
+# that starts with its stated reason (plant_judge). DATA holds blocks: a
+# line "=== NAME | FILE | REASON", the text OLD (FILE must hold it exactly
+# once), a line "---", the text NEW. With "only", TEST's case helpers call
+# wanted, so each plant first runs plant_control. PLANT_SHARD=K/N runs
+# every Nth block from the Kth (0-based), so copies can run side by side.
 plant_data() {
   pd_data=$1
   pd_test=$2
+  pd_only=${3:-}
   # shellcheck disable=SC2016 # perl code, expanded by perl
   pd_n=$(perl -e 'local $/; my $t = <>; my @b = $t =~ /^=== /mg; print scalar @b' "$pd_data") || return 1
   # shellcheck disable=SC2016 # perl code, expanded by perl
@@ -104,6 +166,7 @@ plant_data() {
       local $/; my $t = <>; my @b = grep { length } split /^=== /m, $t;
       my ($name, $file, $reason, $old, $new) = $b[$ENV{K}] =~ /\A(.*?) \| (\S+) \| (.*?)\n(.*?)\n---\n(.*?)\n?\z/s or die "block $ENV{K} cannot be read\n";
       print "$name\n$reason\n";
+      exit 0 unless $ENV{PD_APPLY};
       open my $h, "<", "$ENV{SB}/$file" or die "no $file\n"; my $src = <$h>; close $h;
       my $i = index($src, $old);
       if ($i < 0 || index($src, $old, $i + 1) >= 0) { print "NOT APPLIED\n"; exit 0 }
@@ -116,21 +179,15 @@ plant_data() {
       */*) if [ $((pd_k % ${PLANT_SHARD#*/})) -ne "${PLANT_SHARD%/*}" ]; then pd_k=$((pd_k + 1)); continue; fi ;;
     esac
     pd_sb=$(make_sandbox) || abort_sandbox
-    pd_info=$(K="$pd_k" SB="$pd_sb" perl -e "$pd_prog" "$pd_data") || { fail "plant $pd_k: its data cannot be read"; drop_sandbox "$pd_sb" || true; pd_k=$((pd_k + 1)); continue; }
+    pd_info=$(PD_APPLY='' K="$pd_k" SB="$pd_sb" perl -e "$pd_prog" "$pd_data") || { fail "plant $pd_k: its data cannot be read"; drop_sandbox "$pd_sb" || true; pd_k=$((pd_k + 1)); continue; }
     pd_name=$(printf '%s\n' "$pd_info" | sed -n 1p)
     pd_reason=$(printf '%s\n' "$pd_info" | sed -n 2p)
-    if [ "$(printf '%s\n' "$pd_info" | sed -n 3p)" != APPLIED ]; then
+    if [ "$pd_only" = only ] && ! plant_control "$pd_name" "$pd_sb" "$pd_test" "$pd_reason"; then
+      : # plant_control said why
+    elif [ "$(K="$pd_k" SB="$pd_sb" PD_APPLY=1 perl -e "$pd_prog" "$pd_data" | sed -n 3p)" != APPLIED ]; then
       fail "$pd_name: the plant did not apply, so the check result would mean nothing"
     else
-      pd_got=$(cd "$pd_sb" && bash "$pd_test" 2>&1)
-      pd_rc=$?
-      if [ "$pd_rc" -eq 0 ]; then
-        fail "$pd_name: the test stayed green" "$(printf '%s\n' "$pd_got" | tail -2)"
-      elif ! printf '%s\n' "$pd_got" | grep -F -q -- "FAIL  $pd_reason"; then
-        fail "$pd_name: went red, but not for the stated reason ('$pd_reason')" "$(printf '%s\n' "$pd_got" | grep FAIL | head -3)"
-      else
-        pass "$pd_name"
-      fi
+      plant_judge "$pd_name" "$pd_sb" "$pd_test" "$pd_reason" "$pd_only"
     fi
     drop_sandbox "$pd_sb" || true
     pd_k=$((pd_k + 1))
@@ -265,3 +322,9 @@ lock_state() {
     my $ex = flock($f, LOCK_EX | LOCK_NB) ? "free" : "busy"; flock $f, LOCK_UN;
     my $sh = flock($f, LOCK_SH | LOCK_NB) ? "free" : "busy"; print "ex=$ex sh=$sh\n"' "$1"
 }
+
+# A run that keeps only some cases (TEST_ONLY) says so in a SKIP line, so
+# it never reads as a whole run
+if [ -n "${TEST_ONLY:-}" ]; then
+  skip "every case that cannot show '$TEST_ONLY' (TEST_ONLY keeps only those)"
+fi

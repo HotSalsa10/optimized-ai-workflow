@@ -67,6 +67,7 @@ want() {
   esac
 }
 judge() {
+  wanted "$1" || return 0
   CMD="$3" CWD="$2" perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({tool_name => "Bash", tool_input => {command => $ENV{CMD}}, cwd => $ENV{CWD}, hook_event_name => "PreToolUse", session_id => "s1", effort => {level => "xhigh"}})' >"$work/in.json"
   run_guard "$2"
   want "$1" "$4"
@@ -74,6 +75,7 @@ judge() {
 # tool NAME TOOL JSON-INPUT WANT: guard.sh on another tool's call, from the
 # project's folder
 tool() {
+  wanted "$1" || return 0
   TOOL="$2" INPUT="$3" CWD="$proj" perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({tool_name => $ENV{TOOL}, tool_input => JSON::PP->new->decode($ENV{INPUT}), cwd => $ENV{CWD}, hook_event_name => "PreToolUse", session_id => "s1", effort => {level => "xhigh"}})' >"$work/in.json"
   run_guard "$proj"
   want "$1" "$4"
@@ -283,49 +285,53 @@ out=$(cd "$proj" && perl -e 'require $ARGV[0]; my $re = Protect::text_re(Protect
 if [ "$out" = "yyyyyn" ]; then pass "an interpreter's code naming ~/.claude/skills, agents, .git/method-*, packed-refs or refs/remotes is found"; else fail "the text forms" "$out (wanted yyyyyn)"; fi
 
 # --- G12: one warning per session below xhigh ---
-effort() {
-  SID="$1" LEVEL="$2" AGENT="$3" CWD="$proj" perl -MJSON::PP -e 'my %h = (tool_name => "Bash", tool_input => {command => "ls"}, cwd => $ENV{CWD}, hook_event_name => "PreToolUse", session_id => $ENV{SID}); $h{effort} = {level => $ENV{LEVEL}} if $ENV{LEVEL} ne ""; $h{agent_id} = $ENV{AGENT} if $ENV{AGENT} ne ""; print JSON::PP->new->canonical->encode(\%h)' >"$work/in.json"
-  run_guard "$proj"
-}
-effort e1 high ''
-first=$(cat "$work/out.txt")
-effort e1 high ''
-second=$(cat "$work/out.txt")
-case "$first" in
-  '{"systemMessage":"guard G12: this session runs at effort high, below the method'"'"'s xhigh'*) if [ "$code" -eq 0 ] && [ -z "$second" ]; then pass "G12: the first call below xhigh gets one warning (exit 0), the next call none"; else fail "G12: one warning per session" "second: $second"; fi ;;
-  *) fail "G12: the first call below xhigh gets a warning" "exit $code: $first $err" ;;
-esac
-effort e2 low ''
-case "$(cat "$work/out.txt")" in *"effort low"*) pass "G12: another session below xhigh gets its own warning" ;; *) fail "G12: another session gets its own warning" "$(cat "$work/out.txt")" ;; esac
-effort e3 xhigh ''
-if [ ! -s "$work/out.txt" ] && [ "$code" -eq 0 ]; then pass "G12: xhigh gets no warning"; else fail "G12: xhigh gets no warning" "$(cat "$work/out.txt")"; fi
-effort e4 max ''
-if [ ! -s "$work/out.txt" ]; then pass "G12: max gets no warning"; else fail "G12: max gets no warning" "$(cat "$work/out.txt")"; fi
-effort e5 low agent-1
-if [ ! -s "$work/out.txt" ]; then pass "G12: a call inside a subagent gets no warning"; else fail "G12: a call inside a subagent gets no warning" "$(cat "$work/out.txt")"; fi
-effort e6 '' ''
-if [ ! -s "$work/out.txt" ]; then pass "G12: a call with no effort field gets no warning"; else fail "G12: no effort field" "$(cat "$work/out.txt")"; fi
-effort e7 'low"x' ''
-case "$(cat "$work/out.txt")" in *"not one the method knows"*) pass "G12: an effort word the method does not know is not shown" ;; *) fail "G12: an unknown effort word" "$(cat "$work/out.txt")" ;; esac
-# (sessions run side by side are each warned once: the note keeps the last
-# 20; 5.7 repair loop 1)
-effort e1 high ''
-if [ ! -s "$work/out.txt" ]; then pass "G12: a session warned before another one is not warned again"; else fail "G12: a session warned before another one is not warned again" "$(cat "$work/out.txt")"; fi
-if [ "$(wc -l <"$proj/.method/local/effort-warned")" -eq 3 ]; then pass "G12: its note has one line per warned session"; else fail "G12: its note has one line per warned session" "$(cat "$proj/.method/local/effort-warned")"; fi
-for n in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do effort "f$n" high ''; done
-if [ "$(wc -l <"$proj/.method/local/effort-warned")" -eq 20 ]; then pass "G12: its note keeps the last 20 sessions"; else fail "G12: its note keeps the last 20 sessions" "$(wc -l <"$proj/.method/local/effort-warned") lines"; fi
+if wanted G12; then
+  effort() {
+    SID="$1" LEVEL="$2" AGENT="$3" CWD="$proj" perl -MJSON::PP -e 'my %h = (tool_name => "Bash", tool_input => {command => "ls"}, cwd => $ENV{CWD}, hook_event_name => "PreToolUse", session_id => $ENV{SID}); $h{effort} = {level => $ENV{LEVEL}} if $ENV{LEVEL} ne ""; $h{agent_id} = $ENV{AGENT} if $ENV{AGENT} ne ""; print JSON::PP->new->canonical->encode(\%h)' >"$work/in.json"
+    run_guard "$proj"
+  }
+  effort e1 high ''
+  first=$(cat "$work/out.txt")
+  effort e1 high ''
+  second=$(cat "$work/out.txt")
+  case "$first" in
+    '{"systemMessage":"guard G12: this session runs at effort high, below the method'"'"'s xhigh'*) if [ "$code" -eq 0 ] && [ -z "$second" ]; then pass "G12: the first call below xhigh gets one warning (exit 0), the next call none"; else fail "G12: one warning per session" "second: $second"; fi ;;
+    *) fail "G12: the first call below xhigh gets a warning" "exit $code: $first $err" ;;
+  esac
+  effort e2 low ''
+  case "$(cat "$work/out.txt")" in *"effort low"*) pass "G12: another session below xhigh gets its own warning" ;; *) fail "G12: another session gets its own warning" "$(cat "$work/out.txt")" ;; esac
+  effort e3 xhigh ''
+  if [ ! -s "$work/out.txt" ] && [ "$code" -eq 0 ]; then pass "G12: xhigh gets no warning"; else fail "G12: xhigh gets no warning" "$(cat "$work/out.txt")"; fi
+  effort e4 max ''
+  if [ ! -s "$work/out.txt" ]; then pass "G12: max gets no warning"; else fail "G12: max gets no warning" "$(cat "$work/out.txt")"; fi
+  effort e5 low agent-1
+  if [ ! -s "$work/out.txt" ]; then pass "G12: a call inside a subagent gets no warning"; else fail "G12: a call inside a subagent gets no warning" "$(cat "$work/out.txt")"; fi
+  effort e6 '' ''
+  if [ ! -s "$work/out.txt" ]; then pass "G12: a call with no effort field gets no warning"; else fail "G12: no effort field" "$(cat "$work/out.txt")"; fi
+  effort e7 'low"x' ''
+  case "$(cat "$work/out.txt")" in *"not one the method knows"*) pass "G12: an effort word the method does not know is not shown" ;; *) fail "G12: an unknown effort word" "$(cat "$work/out.txt")" ;; esac
+  # (sessions run side by side are each warned once: the note keeps the last
+  # 20; 5.7 repair loop 1)
+  effort e1 high ''
+  if [ ! -s "$work/out.txt" ]; then pass "G12: a session warned before another one is not warned again"; else fail "G12: a session warned before another one is not warned again" "$(cat "$work/out.txt")"; fi
+  if [ "$(wc -l <"$proj/.method/local/effort-warned")" -eq 3 ]; then pass "G12: its note has one line per warned session"; else fail "G12: its note has one line per warned session" "$(cat "$proj/.method/local/effort-warned")"; fi
+  for n in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do effort "f$n" high ''; done
+  if [ "$(wc -l <"$proj/.method/local/effort-warned")" -eq 20 ]; then pass "G12: its note keeps the last 20 sessions"; else fail "G12: its note keeps the last 20 sessions" "$(wc -l <"$proj/.method/local/effort-warned") lines"; fi
 
+fi
 # --- speed ---
-CMD='cp -r src build/ && npm test' CWD="$proj" perl -MJSON::PP -e 'print JSON::PP->new->encode({tool_name => "Bash", tool_input => {command => $ENV{CMD}}, cwd => $ENV{CWD}})' >"$work/in.json"
-: >"$work/times.txt"
-for _ in 1 2 3 4 5 6 7 8 9 10; do
-  s=$(perl -MTime::HiRes=time -e 'printf "%.0f", time * 1000')
-  (cd "$proj" && CLAUDE_PROJECT_DIR="$proj" bash "$guard" <"$work/in.json" >/dev/null 2>&1)
-  e=$(perl -MTime::HiRes=time -e 'printf "%.0f", time * 1000')
-  echo $((e - s)) >>"$work/times.txt"
-done
-times=$(sort -n "$work/times.txt" | sed -n 5p)
-if [ "$times" -lt 400 ]; then pass "a call that writes takes ${times} ms (median of 10), under 400"; else fail "a call that writes is quick" "median ${times} ms"; fi
+if wanted "a call that writes"; then
+  CMD='cp -r src build/ && npm test' CWD="$proj" perl -MJSON::PP -e 'print JSON::PP->new->encode({tool_name => "Bash", tool_input => {command => $ENV{CMD}}, cwd => $ENV{CWD}})' >"$work/in.json"
+  : >"$work/times.txt"
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    s=$(perl -MTime::HiRes=time -e 'printf "%.0f", time * 1000')
+    (cd "$proj" && CLAUDE_PROJECT_DIR="$proj" bash "$guard" <"$work/in.json" >/dev/null 2>&1)
+    e=$(perl -MTime::HiRes=time -e 'printf "%.0f", time * 1000')
+    echo $((e - s)) >>"$work/times.txt"
+  done
+  times=$(sort -n "$work/times.txt" | sed -n 5p)
+  if [ "$times" -lt 400 ]; then pass "a call that writes takes ${times} ms (median of 10), under 400"; else fail "a call that writes is quick" "median ${times} ms"; fi
+fi
 
 drop_sandbox "$work" || true
 echo "tests: guard (protected files): $tests_pass passed, $tests_fail failed, $tests_skip skipped"

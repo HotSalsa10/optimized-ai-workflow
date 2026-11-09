@@ -43,14 +43,16 @@ project() {
 # hook DIR [JSON] [VAR=VALUE...]: runs the hook in DIR as Claude Code would
 # (CLAUDE_PROJECT_DIR set, no CLAUDE_CODE_EXECPATH), with the input JSON
 # (default: a startup at DIR), the advisor variable set unless a VAR says
-# otherwise; sets out and code
+# otherwise; sets out and code. HOOK_MEM_KB, when set, caps the hook's
+# memory where ulimit -v works (a planted break that reads /dev/zero would
+# otherwise fill the machine's memory before the hook's deadline)
 hook() {
   d=$1
   in=${2:-}
   shift
   [ $# -gt 0 ] && shift
   [ -n "$in" ] || in=$(printf '{"hook_event_name":"SessionStart","source":"startup","cwd":"%s"}' "$d")
-  out=$(cd "$d" && printf '%s' "$in" | env -u CLAUDE_CODE_EXECPATH -u CLAUDE_CODE_EFFORT_LEVEL CLAUDE_PROJECT_DIR="$d" CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1 "$@" bash "$d/.claude/hooks/method/session-status.sh" 2>&1)
+  out=$(cd "$d" && { [ -z "${HOOK_MEM_KB:-}" ] || ulimit -v "$HOOK_MEM_KB" 2>/dev/null || true; } && printf '%s' "$in" | env -u CLAUDE_CODE_EXECPATH -u CLAUDE_CODE_EFFORT_LEVEL CLAUDE_PROJECT_DIR="$d" CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1 "$@" bash "$d/.claude/hooks/method/session-status.sh" 2>&1)
   code=$?
 }
 
@@ -186,7 +188,7 @@ rm -f "$p/.claude/method-local/git-shapes.txt" "$p/.claude/method-local/gh-shape
 ln -s /dev/zero "$p/.claude/method-local/git-shapes.txt"
 perl -e 'print "x :: y\n" x 200000' >"$p/.claude/method-local/gh-shapes.txt"
 start=$(perl -e 'print time')
-hook "$p"
+HOOK_MEM_KB=1048576 hook "$p"
 took=$(($(perl -e 'print time') - start))
 if [ "$took" -le 5 ]; then has "a list that is not a regular file, or is over 1 MB, is a LOOK and is not read (in ${took} s)" ".claude/method-local/git-shapes.txt is not a regular file, so what it adds is not known" ".claude/method-local/gh-shapes.txt is over 1 MB, so what it adds is not known"; else fail "a list that is not a regular file is not read" "took $took s: $out"; fi
 rm -rf "$p/.claude/method-local"

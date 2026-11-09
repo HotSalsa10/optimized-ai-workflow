@@ -39,6 +39,7 @@ git clone -q "$proj" "$work/clone" 2>/dev/null
 # judge NAME CWD COMMAND WANT: guard.sh on a Bash call run in CWD; WANT is
 # "allow" or a rule ID (the refusal must start "guard RULE:" and exit 2)
 judge() {
+  wanted "$1" || return 0
   name=$1
   CMD="$3" CWD="$2" perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({tool_name => "Bash", tool_input => {command => $ENV{CMD}}, cwd => $ENV{CWD}, hook_event_name => "PreToolUse"})' >"$work/in.json"
   err=$(cd "$2" && env -u CLAUDE_CODE_EXECPATH CLAUDE_PROJECT_DIR="$proj" perl -e 'alarm 60; exec @ARGV' bash "$guard" <"$work/in.json" 2>&1 >/dev/null)
@@ -111,8 +112,10 @@ judge "a push of a branch that is a symbolic ref is refused (K3a)" "$proj" 'git 
 judge "a symbolic ref is refused also with its destination written out" "$proj" 'git push origin alias:task' G3
 (cd "$proj" && git symbolic-ref --delete refs/heads/alias)
 (cd "$proj" && git config remote.origin.push refs/heads/task:refs/heads/main)
-judge "a remote.*.push setting refuses every push (it could change where it goes)" "$proj" 'git push origin HEAD' G3
-case "$err" in *"a remote.*.push or remote.*.mirror setting would change where this push goes"*) pass "the refusal names the setting that could redirect the push" ;; *) fail "the refusal names the setting that could redirect the push" "$err" ;; esac
+if wanted_any "a remote.*.push setting refuses every push (it could change where it goes)" "the refusal names the setting that could redirect the push"; then
+  TEST_ONLY='' judge "a remote.*.push setting refuses every push (it could change where it goes)" "$proj" 'git push origin HEAD' G3
+  case "$err" in *"a remote.*.push or remote.*.mirror setting would change where this push goes"*) pass "the refusal names the setting that could redirect the push" ;; *) fail "the refusal names the setting that could redirect the push" "$err" ;; esac
+fi
 (cd "$proj" && git config --unset remote.origin.push)
 git config --global remote.origin.mirror true
 judge "a remote.*.mirror setting in the global settings refuses the push" "$proj" 'git push origin HEAD' G3
@@ -274,8 +277,10 @@ got=$(perl -e 'require "$ARGV[0]/gitlist.pl"; open my $h, "<", $ARGV[1] or die; 
 case "$got" in *" shapes; 0 errors; 0 without a reason") pass "the method's git list reads, every shape with its reason ($got)" ;; *) fail "the method's git list reads, every shape with its reason" "$got" ;; esac
 
 # speed: a call with git commands in this repository
-median=$(CLAUDE_PROJECT_DIR="$proj" CMD='git add -A && git commit -qm x && git push -u origin HEAD' CWD="$proj" perl -MJSON::PP -MTime::HiRes=time -e 'my $j = JSON::PP->new->encode({tool_name => "Bash", tool_input => {command => $ENV{CMD}}, cwd => $ENV{CWD}}); my @t; for (1 .. 10) { my $s = time; open my $p, "|-", "bash", $ARGV[0] or die; print $p $j; close $p; push @t, (time - $s) * 1000 } @t = sort { $a <=> $b } @t; printf "%d", $t[4]' "$guard" 2>/dev/null)
-if [ -n "$median" ] && [ "$median" -lt 400 ]; then pass "a commit-and-push call takes $median ms median (fails only over 400)"; else fail "a commit-and-push call is quick" "median $median ms"; fi
+if wanted "a commit-and-push call"; then
+  median=$(CLAUDE_PROJECT_DIR="$proj" CMD='git add -A && git commit -qm x && git push -u origin HEAD' CWD="$proj" perl -MJSON::PP -MTime::HiRes=time -e 'my $j = JSON::PP->new->encode({tool_name => "Bash", tool_input => {command => $ENV{CMD}}, cwd => $ENV{CWD}}); my @t; for (1 .. 10) { my $s = time; open my $p, "|-", "bash", $ARGV[0] or die; print $p $j; close $p; push @t, (time - $s) * 1000 } @t = sort { $a <=> $b } @t; printf "%d", $t[4]' "$guard" 2>/dev/null)
+  if [ -n "$median" ] && [ "$median" -lt 400 ]; then pass "a commit-and-push call takes $median ms median (fails only over 400)"; else fail "a commit-and-push call is quick" "median $median ms"; fi
+fi
 
 drop_sandbox "$work" || true
 echo "tests: guard (git): $tests_pass passed, $tests_fail failed, $tests_skip skipped"

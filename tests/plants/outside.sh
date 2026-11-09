@@ -25,18 +25,12 @@ plant() {
   name=$1
   reason=$2
   sb=$(make_sandbox) || abort_sandbox
-  if ! (cd "$sb" && OLD="$4" NEW="$5" perl -0pi -e 'my ($o, $n) = ($ENV{OLD}, $ENV{NEW}); my $i = index($_, $o); die "missing\n" if $i < 0; die "twice\n" if index($_, $o, $i + 1) >= 0; substr($_, $i, length $o) = $n' "$3"); then
+  if ! plant_control "$name" "$sb" tests/guard-outside.test.sh "$reason"; then
+    : # plant_control said why
+  elif ! (cd "$sb" && OLD="$4" NEW="$5" perl -0pi -e 'my ($o, $n) = ($ENV{OLD}, $ENV{NEW}); my $i = index($_, $o); die "missing\n" if $i < 0; die "twice\n" if index($_, $o, $i + 1) >= 0; substr($_, $i, length $o) = $n' "$3"); then
     fail "$name: the plant did not apply, so the check result would mean nothing"
   else
-    got=$(cd "$sb" && bash tests/guard-outside.test.sh 2>&1)
-    rc=$?
-    if [ "$rc" -eq 0 ]; then
-      fail "$name: the outside test stayed green" "$(printf '%s\n' "$got" | tail -2)"
-    elif ! printf '%s\n' "$got" | grep -F -q -- "FAIL  $reason"; then
-      fail "$name: went red, but not for the stated reason ('$reason')" "$(printf '%s\n' "$got" | grep FAIL | head -3)"
-    else
-      pass "$name"
-    fi
+    plant_judge "$name" "$sb" tests/guard-outside.test.sh "$reason" only
   fi
   drop_sandbox "$sb" || true
 }

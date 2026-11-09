@@ -71,6 +71,9 @@ Nothing yet. Release 1 is being built.
 
 - Step 5's final review: a push to a branch held in a variable, a write right after a `cd` that is not followed by `&&`, a loop that writes over the method's files, and a bulk `grep -rl | xargs sed -i` edit across the project are now refused, as is Claude Code's own tool for scheduling remote agents. `git pull --ff-only` now pulls only your branch's own upstream and is checked like a merge.
 
+- CI (step 5.11): the tests and the planted defects run side by side in Linux jobs (the plants in two halves), and each planted defect runs only the test cases that can show it, after those cases pass without it. CI had been stopping at its time limit since step 5.7; each part should now finish within its limit (to be confirmed by the first run). For you: `bash tests/run.sh tests` or `bash tests/run.sh plants` runs one half.
+- Tests: new cases for the test helpers, 1 new test file (the test runner) and 1 new plant file.
+
 ### Changed (step 4b)
 
 - `mutate-changed.sh` runs mutants (step 4b.3b): run A, then one mutant at a time in the working tree, each written through one write function with a journal in git's own folder, each check under the limited runner with a time limit; survivors are named (exit 1); all killed is SKIPPED kills-unchecked until step 4b.4. `--recover` puts back what a cut-off run left; the next run does it first. `--minutes` (default 8) bounds a run.
