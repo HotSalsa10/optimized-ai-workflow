@@ -44,7 +44,10 @@
 #   G17 skill-and-agent-hooks (M137, step 5.9): a Skill, Agent or Task call
 #      whose skill or agent declares hooks in its frontmatter
 #      (lib/watch.pl).
-# A call the rules say nothing about is let through.
+# A call the rules say nothing about is let through. A call let through
+# that writes (as G6 counts it), made by the main session or an agent that
+# is not a gate while a gate runs in its repository, leaves a write mark
+# for that gate's receipt (lib/receipt.pl; step 5b.2, B8): never an answer.
 package Guard;
 use strict;
 use warnings;
@@ -848,6 +851,7 @@ sub main {
   if ($tool eq 'PowerShell') {
     return refuse('G2', "the PowerShell tool is refused in method projects: the method's checks read bash; use the Bash tool ($WAY_OUT)", $tool, $raw, $in);
   }
+  my @cmds;
   if ($tool eq 'Bash' || $tool eq 'Monitor') {
     my $cmd = ref $input eq 'HASH' ? $input->{command} : undef;
     if (!defined $cmd || ref $cmd) {
@@ -855,7 +859,7 @@ sub main {
     }
     # (line continuations joined first, as bash joins them)
     my ($text0, $joined) = Shell::join_lines($cmd);
-    my @cmds = Shell::commands($text0);
+    @cmds = Shell::commands($text0);
     my ($rule, $text) = judge_command($text0, \@cmds, $joined);
     ($rule, $text) = judge_git(\@cmds, $in) unless $rule;
     ($rule, $text) = Outside::judge_bash(\@cmds, $project, [cmd_dirs(\@cmds, defined $start ? $start : '.')]) unless $rule;
@@ -897,6 +901,10 @@ sub main {
     my ($rule, $text) = Watch::judge_def($tool, $input, $project);
     return refuse($rule, $text, $tool, $raw, $in) if $rule;
   }
+  # B8 (step 5b.2): a call that writes, made while a gate runs, leaves a
+  # mark for the gate's receipt (lib/receipt.pl); it prints nothing, and a
+  # failure never changes the answer
+  eval { Protect::call_writes($tool, \@cmds) && do { require File::Spec->catfile($lib, 'receipt.pl'); Receipt::mark($in, $tool, $input) }; 1 };
   # warnings, never refusals: G16's one-time message, G12
   my @say;
   if (defined $project && $project ne '' && -e File::Spec->catfile($project, '.method', 'local', 'settings-refused')) {

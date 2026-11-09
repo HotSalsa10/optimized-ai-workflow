@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Plants for lib/log.pl's writers of step 5b (gates.log's fields, a file
-# written whole, the newest files kept) and for the settings snapshot that
+# Plants for lib/log.pl's writers of step 5b (gates.log's fields, the
+# guard's write marks' fields (5b.2), a file written whole, the newest
+# files kept) and for the settings snapshot that
 # lib/watch.pl now writes with them: each planted break turns
 # tests/hook-lib.test.sh (only the cases kept for its reason, after they
 # pass on the clean copy) or tests/guard-watch.test.sh red for its stated
@@ -21,9 +22,21 @@ echo "plants: log writers and the snapshot's file"
 work=$(new_sandbox_dir) || abort_sandbox
 cat >"$work/lib.txt" <<'PLANTS-END'
 === gates.log's field set dropped | method/scripts/method/lib/log.pl | append writes a gates.log line: the time, then the word, gate, tree, model, effort and reason, tab-separated
-my @SETS = ([qw(rule tool hash)], [qw(word gate tree model effort why)]);
+my @SETS = ([qw(rule tool hash)], [qw(word gate tree model effort why)], [qw(at top)]);
 ---
-my @SETS = ([qw(rule tool hash)]);
+my @SETS = ([qw(rule tool hash)], [qw(at top)]);
+=== the write marks' field set dropped | method/scripts/method/lib/log.pl | append writes a write mark line: the time, then the mark's time and the worktree's top, tab-separated
+my @SETS = ([qw(rule tool hash)], [qw(word gate tree model effort why)], [qw(at top)]);
+---
+my @SETS = ([qw(rule tool hash)], [qw(word gate tree model effort why)]);
+=== a mark's time of any shape | method/scripts/method/lib/log.pl | write marks refuse a mark's time in words
+  at => qr/\A[0-9]{9,11}\.[0-9]{1,6}\z/,
+---
+  at => qr/\A[0-9a-z.]+\z/,
+=== a mark's top of any shape | method/scripts/method/lib/log.pl | write marks refuse a mark's top as a path
+  top => qr/\A[0-9]{1,20}-[0-9]{1,20}\z/,
+---
+  top => qr/\A\S+\z/,
 === lines reads the default set whatever it is asked for | method/scripts/method/lib/log.pl | lines reads the gates form when given its fields, and a line of the other form as another line
   my $set = $SETS[0];
   if (defined $fields) {

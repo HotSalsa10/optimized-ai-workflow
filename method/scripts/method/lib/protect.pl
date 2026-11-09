@@ -38,6 +38,11 @@
 #     tool's file.
 #   Protect::judge_mcp(TOOL, INPUT, BASE, PROJECT) () or ('G6', TEXT): an
 #     MCP tool whose name does not read, given a protected path.
+#   Protect::writes(CMDS) 1 when a command in CMDS may write (G6 judges
+#     only such calls), else 0. Protect::call_writes(TOOL, CMDS) 1 when a
+#     call of TOOL may write as G6 counts it: Bash or Monitor whose
+#     commands write, an edit tool, an MCP tool whose name does not read.
+#     gate-receipt's write marks are made for these (step 5b.2, B8).
 #   Protect::git_versions(DIR, SUB, WORDS, PROJECT) () or ('G6', TEXT): a
 #     switch, checkout, merge, cherry-pick, revert or worktree add that
 #     would leave a protected file at a version that is neither HEAD's nor
@@ -549,14 +554,37 @@ sub text_re {
 
 my $NO = "; the method's files, its settings and git's own config and hooks are the owner's to change: read them with cat, grep or sed -n, or tell the owner what you needed";
 
+# writes CMDS: 1 when a command in CMDS may write: it is not on the
+# read-only list, or it redirects its output into a file
+sub writes {
+  my ($cmds) = @_;
+  for my $c (@$cmds) {
+    return 1 if !read_only($c) || grep { is_write_redir($_->[0]) && $_->[1] !~ m{\A/dev/(?:null|stdout|stderr|tty|fd/[0-9]+)\z} && $_->[1] !~ /\A[0-9-]\z/ } @{ $c->{redirs} || [] };
+  }
+  return 0;
+}
+
+# an MCP tool whose name (the part after its last __) says it only reads
+our $MCP_READS = qr/\A(?:read|get|list|search|find|view|stat|show|head|tail|cat|describe|query|fetch)/i;
+
+# call_writes TOOL CMDS: 1 when a call of TOOL may write, as G6 counts it
+# (CMDS: the reader's commands of a Bash or Monitor call)
+sub call_writes {
+  my ($tool, $cmds) = @_;
+  return 0 unless defined $tool && !ref $tool;
+  return writes($cmds || []) if $tool eq 'Bash' || $tool eq 'Monitor';
+  return 1 if $tool =~ /\A(?:Edit|Write|MultiEdit|NotebookEdit)\z/;
+  if ($tool =~ /\Amcp__/) {
+    (my $short = $tool) =~ s/\A.*__//s;
+    return $short =~ $MCP_READS ? 0 : 1;
+  }
+  return 0;
+}
+
 sub judge_bash {
   my ($cmds, $dirs, $project) = @_;
   # most calls only read: nothing to look up
-  my $writes = 0;
-  for my $c (@$cmds) {
-    if (!read_only($c) || grep { is_write_redir($_->[0]) && $_->[1] !~ m{\A/dev/(?:null|stdout|stderr|tty|fd/[0-9]+)\z} && $_->[1] !~ /\A[0-9-]\z/ } @{ $c->{redirs} || [] }) { $writes = 1; last }
-  }
-  return () unless $writes;
+  return () unless writes($cmds);
   my $set = set($project);
   my ($top) = @{ $set->{tops} };
   my $text = text_re($set);
@@ -889,7 +917,7 @@ sub judge_file {
 sub judge_mcp {
   my ($tool, $input, $base, $project) = @_;
   (my $short = $tool) =~ s/\A.*__//s;
-  return () if $short =~ /\A(?:read|get|list|search|find|view|stat|show|head|tail|cat|describe|query|fetch)/i;
+  return () if $short =~ $MCP_READS;
   my @strings;
   my $walk;
   $walk = sub {

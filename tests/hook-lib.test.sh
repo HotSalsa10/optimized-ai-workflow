@@ -354,6 +354,21 @@ done
 pl "gates.log refuses a line without one of its fields" 'eval { Log::append($ENV{ROOT}, "gates-missing.log", undef, word => "VALID", gate => "method-reviewer", tree => "none", model => "none", effort => "none") }; print($@ =~ /why is missing/ && !-e "$ENV{ROOT}/gates-missing.log" ? "ok" : "bad: $@")'
 pl "fields of both sets on one line are refused, and nothing is written" 'my $n = 0; for my $extra ([word => "VALID"], [why => "none"]) { eval { Log::append($ENV{ROOT}, "gates-mixed.log", undef, rule => "G4", tool => "Bash", hash => $ENV{H}, @$extra) }; $n++ if $@ =~ /not of one field set/ } eval { Log::append($ENV{ROOT}, "gates-mixed.log", undef, word => "VALID", gate => "method-reviewer", tree => "none", model => "none", effort => "none", why => "none", hash => $ENV{H}) }; $n++ if $@ =~ /not of one field set/; print($n == 3 && !-e "$ENV{ROOT}/gates-mixed.log" ? "ok" : "only $n of 3 refused")'
 pl "lines refuses fields to read that are not one set, in its order" 'my $n = 0; for my $f ([qw(word gate)], [qw(rule tool hash word)], [qw(gate word tree model effort why)], "word") { eval { Log::lines($ENV{ROOT}, "gates2.log", $f) }; $n++ if $@ =~ /one field set/ } print($n == 4 ? "ok" : "only $n of 4 refused")'
+# (the guard's write marks for a running gate, step 5b.2: the time to the
+# microsecond and the worktree's top as device-inode, never a path)
+pl "append writes a write mark line: the time, then the mark's time and the worktree's top, tab-separated" 'Log::append($ENV{ROOT}, "method-write-marks", 1000, at => "1794241362.373456", top => "2049-123456"); Log::append($ENV{ROOT}, "method-write-marks", 1000, rule => "G4", tool => "Bash", hash => $ENV{H}); open my $f, "<", "$ENV{ROOT}/method-write-marks" or die; my @l = <$f>; my ($ok, $bad) = Log::lines($ENV{ROOT}, "method-write-marks", [qw(at top)]); print($l[0] =~ /\A\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ\t1794241362\.373456\t2049-123456\n\z/ && @$ok == 1 && $ok->[0][2] eq "2049-123456" && $bad == 1 ? "ok" : "@l; " . scalar(@$ok) . " marks, $bad other")'
+for pair in "a mark's time in words|at|now" "a mark's time without its fraction|at|1794241362" "a mark's top as a path|top|/tmp/x" "a mark's top without its dash|top|2049123456"; do
+  what=${pair%%|*}
+  rest=${pair#*|}
+  key=${rest%%|*}
+  val=${rest#*|}
+  wanted "write marks refuse $what" || continue
+  got=$(KEY="$key" VAL="$val" perl -e 'require "$ENV{LIBDIR}/log.pl"; my %f = (at => "1794241362.5", top => "1-2"); $f{$ENV{KEY}} = $ENV{VAL}; eval { Log::append($ENV{ROOT}, "marks-shape", undef, %f); 1 } and print "WRITTEN"; print $@' 2>&1)
+  case "$got" in
+    "log: the field $key is missing or not of its shape"*) pass "write marks refuse $what" ;;
+    *) fail "write marks refuse $what" "$got" ;;
+  esac
+done
 
 mkdir -p "$root/ww"
 pl "write_whole writes the whole file over the old one, and leaves no temporary file" 'my $d = "$ENV{ROOT}/ww"; my $big = join("", map { "{\"n\":$_}\n" } 1 .. 20000); Log::write_whole($d, "method-a.json", "old"); my $r = Log::write_whole($d, "method-a.json", $big); open my $f, "<:raw", "$d/method-a.json" or die; my $t = do { local $/; <$f> }; opendir my $h, $d or die; my @tmp = grep { /\.tmp\./ } readdir $h; print($r == 1 && $t eq $big && !@tmp ? "ok" : "bad: " . length($t) . " bytes; temporary files: @tmp")'

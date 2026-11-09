@@ -791,7 +791,7 @@ if h_gates "$root" default; then
   gate_q context "gates: the start's context line (METHOD-ACTIVE gate=method-reviewer tree=<the tree>) reaches each gate's requests, and neither the main conversation's nor my-method-reviewer's"
   gate_q no-hook "gates: an agent named my-method-reviewer (a longer name holding a gate's) gets no gate-receipt hook at all and no receipt (the client's debug log: no run during its call, two during a gate's)"
   gate_q valid "gates (default mode): a report with both lines gets a VALID receipt in the project's git folder, with its opening word, in one turn"
-  gate_q log "gates (default mode): .method/local/gates.log gets one line a gate run: the word, the gate, the tree and the effort the client gave"
+  gate_q log "gates (default mode): .method/local/gates.log gets one line a gate run: the word, the gate, the tree, the model read from the gate's record and the effort the client gave"
   gate_q cut-off "gates (default mode): a report cut off is sent back once, gate-receipt's reason reaching the gate's next request; completed, it is VALID"
   gate_q never "gates (default mode): a report never completed gets one more turn only, then INCOMPLETE (lines-missing-after-retry)"
   h_safe gates-default

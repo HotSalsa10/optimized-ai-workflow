@@ -21,6 +21,9 @@
 #   have, the effort level by name.
 # It also writes G16's snapshot of the local and user settings when a
 # session starts (lib/watch.pl; step 5.9), never at clear, compact or fork.
+# Since step 5b.2, one LOOK line names how many of the gates' receipts for
+# the files at HEAD do not say the first receipt word, and how many say
+# each other word (lib/receipt.pl; the words are verdicts.txt's).
 # Over the caps, the last line says how many more and to run status.sh.
 # Every line is one clean line (Hook::clean); anything that goes wrong
 # becomes a LOOK line, never a crash that hides the rest.
@@ -197,6 +200,21 @@ sub warnings_for {
   return @w;
 }
 
+# the gates' receipts for HEAD's tree in TOP that do not say the first
+# receipt word: one LOOK line, or none
+sub receipt_lines {
+  my ($top, $project) = @_;
+  my @c = eval { require File::Spec->catfile($lib, 'receipt.pl'); Receipt::counts($project, $top) };
+  my $err = $@;
+  in_time();
+  return (look("the gates' receipts could not be read; .method/local/gates.log has a line for each gate run")) if $err;
+  return () unless @c;
+  my $n = 0;
+  $n += $_->[1] for @c;
+  return (look("$n gate receipt" . ($n == 1 ? '' : 's') . " for the files at HEAD " . ($n == 1 ? 'does' : 'do') . ' not say '
+    . Receipt::words()->{good} . ': ' . join(', ', map { "$_->[1] $_->[0]" } @c) . ' (.method/local/gates.log says why)'));
+}
+
 sub status_lines {
   my ($top) = @_;
   return (look('status could not be loaded (lib/status.pl); run bash scripts/method/status.sh')) unless $STATUS_LOADED;
@@ -263,6 +281,7 @@ sub main {
     in_time();
     push @lines, warnings_for($in, $top, $in_err);
     in_time();
+    push @lines, receipt_lines($top, $project);
     alarm 0;
     1;
   };

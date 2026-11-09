@@ -320,7 +320,7 @@ rp=scripts/method/lib/receipt.pl
   # not take my-method-reviewer; a pattern without ^ does)
   gate_plant default settings.fragment.json 's/"\^\((method-reviewer\|[^"]*)\)\$"/"($1|HARNESS-PLANT)\$"/g' \
     no-hook "gate-receipt ran 2 times during my-method-reviewer's call" "gates: the fragment's gate matchers unanchored at the start"
-  gate_plant default "$rp" 's/^(\s*)\$r->\{state\} = \@why \? \$w->\{unchecked\} : \$w->\{good\};/$1\$r->{state} = \$w->{unchecked}; # HARNESS-PLANT/' \
+  gate_plant default "$rp" 's/^(\s*)return \@why \? \$w->\{unchecked\} : \$w->\{good\};/$1return \$w->{unchecked}; # HARNESS-PLANT/' \
     valid "gate A's receipt: INCOMPLETE why=none open=APPROVE" "gates: the receipt never VALID"
   gate_plant default "$rp" 's/^(\s*)log_line\(\$project, \$r, \$in\);/$1# HARNESS-PLANT/' \
     log "gates.log: 0 VALID, 0 INCOMPLETE, 0 lines" "gates: the gates.log line dropped"

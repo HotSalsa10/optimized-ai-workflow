@@ -346,6 +346,79 @@ case "$perl_fn" in
   *) fail "an exported shell function named perl does not stand in for perl" "$perl_fn" ;;
 esac
 
+# --- the write marks for a running gate (step 5b.2, B8; lib/receipt.pl) ---
+# A call let through that writes, by the main session or an agent that is
+# not a gate, while a gate runs in its repository (a running file in git's
+# folder), adds one line to git's method-write-marks: the time and the
+# worktree's top. It prints nothing and never changes the answer.
+mproj="$work/marks"
+mwt="$work/marks-wt"
+marks="$mproj/.git/method-write-marks"
+running="$mproj/.git/method-running-0123456789abcdef01234567"
+# mcall TOOL INPUT-JSON [AGENT-TYPE]: one call in the marks project
+mcall() {
+  TOOL=$1 IN=$2 AT=${3:-} CWD="$mproj" perl -MJSON::PP -e 'my %h = (session_id => "s-1", hook_event_name => "PreToolUse", cwd => $ENV{CWD}, tool_name => $ENV{TOOL}, tool_input => JSON::PP->new->decode($ENV{IN}), tool_use_id => "toolu_1"); @h{qw(agent_id agent_type)} = ("a1", $ENV{AT}) if $ENV{AT} ne ""; print JSON::PP->new->canonical->encode(\%h)' >"$work/in.json"
+  merr=$(cd "$mproj" && env -u CLAUDE_CODE_EXECPATH CLAUDE_PROJECT_DIR="$mproj" perl -e 'alarm 60; exec @ARGV' bash "$guard" <"$work/in.json" 2>&1 >"$work/out")
+  mcode=$?
+  mout=$(cat "$work/out")
+}
+nmarks() { if [ -f "$marks" ]; then wc -l <"$marks" | tr -d ' '; else echo 0; fi; }
+devino() { perl -e 'my @s = stat $ARGV[0]; print "$s[0]-$s[1]"' "$1"; }
+mark_cases="a write leaves no mark while no gate runs|a write by the main session while a gate runs leaves a mark|the guard's answer to a marked write is unchanged|a gate's own call leaves no mark|an agent that is not a gate leaves a mark|a call that only reads leaves no mark|a Bash call that writes leaves a mark|an MCP tool whose name reads leaves no mark|an MCP tool that writes leaves a mark|a refused call leaves no mark|an edit leaves a mark in the worktree of its file|a running file left over a day ago marks nothing|a mark that cannot be written leaves the answer unchanged|a write while a gate runs takes"
+old_ifs=$IFS
+IFS='|'
+# shellcheck disable=SC2086 # split at | on purpose
+set -- $mark_cases
+IFS=$old_ifs
+if wanted_any "$@"; then
+  mkdir -p "$mproj"
+  (cd "$mproj" && git init -q && git -c user.email=t@example.invalid -c user.name=T commit -q --allow-empty -m one && git remote add origin https://github.com/example/marks.git && git worktree add -q "$mwt" -b wt 2>/dev/null) || abort_sandbox
+  w="{\"file_path\":\"$mproj/notes.txt\",\"content\":\"x\"}"
+  mcall Write "$w"
+  if [ "$mcode" -eq 0 ] && [ "$(nmarks)" = 0 ]; then pass "a write leaves no mark while no gate runs"; else fail "a write leaves no mark while no gate runs" "exit $mcode, $(nmarks) marks"; fi
+  : >"$running"
+  mcall Write "$w"
+  top=$(devino "$mproj")
+  if [ "$(nmarks)" = 1 ] && LC_ALL=C grep -q "^[0-9-]*T[0-9:]*Z	[0-9]\{9,11\}\.[0-9]\{6\}	$top\$" "$marks"; then pass "a write by the main session while a gate runs leaves a mark: the time and the worktree's top (device-inode)"; else fail "a write by the main session while a gate runs leaves a mark" "$(cat "$marks" 2>&1); top $top"; fi
+  if [ "$mcode:$mout:$merr" = "0::" ]; then pass "the guard's answer to a marked write is unchanged: let through, nothing printed"; else fail "the guard's answer to a marked write is unchanged" "exit $mcode: $mout $merr"; fi
+  mcall Write "$w" method-reviewer
+  mcall Bash '{"command":"touch notes.txt"}' method-security-checker
+  if [ "$(nmarks)" = 1 ]; then pass "a gate's own call leaves no mark"; else fail "a gate's own call leaves no mark" "$(nmarks) marks"; fi
+  mcall Write "$w" Explore
+  if [ "$(nmarks)" = 2 ]; then pass "an agent that is not a gate leaves a mark"; else fail "an agent that is not a gate leaves a mark" "$(nmarks) marks"; fi
+  mcall Bash '{"command":"ls -la && git status"}'
+  mcall Read "{\"file_path\":\"$mproj/notes.txt\"}"
+  if [ "$(nmarks)" = 2 ]; then pass "a call that only reads leaves no mark"; else fail "a call that only reads leaves no mark" "$(nmarks) marks"; fi
+  mcall Bash '{"command":"touch notes.txt"}'
+  if [ "$(nmarks)" = 3 ]; then pass "a Bash call that writes leaves a mark"; else fail "a Bash call that writes leaves a mark" "$(nmarks) marks"; fi
+  mcall mcp__github__get_issue '{"owner":"example","repo":"marks","issue_number":1}'
+  if [ "$(nmarks)" = 3 ]; then pass "an MCP tool whose name reads leaves no mark"; else fail "an MCP tool whose name reads leaves no mark" "$(nmarks) marks"; fi
+  mcall mcp__github__add_issue_comment '{"owner":"example","repo":"marks","issue_number":1,"body":"x"}'
+  if [ "$(nmarks)" = 4 ]; then pass "an MCP tool that writes leaves a mark"; else fail "an MCP tool that writes leaves a mark" "$(nmarks) marks"; fi
+  mcall Write "{\"file_path\":\"$mproj/.claude/settings.json\",\"content\":\"{}\"}"
+  case "$mcode:$merr:$(nmarks)" in
+    "2:guard G6: "*":4") pass "a refused call leaves no mark, and is still refused" ;;
+    *) fail "a refused call leaves no mark" "exit $mcode: $merr; $(nmarks) marks" ;;
+  esac
+  mcall Write "{\"file_path\":\"$mwt/sub/new.txt\",\"content\":\"x\"}"
+  if [ "$(nmarks)" = 5 ] && tail -1 "$marks" | LC_ALL=C grep -q "	$(devino "$mwt")\$"; then pass "an edit leaves a mark in the worktree of its file (a folder still to be made counts as the one above it)"; else fail "an edit leaves a mark in the worktree of its file" "$(tail -1 "$marks")"; fi
+  touch -t 200001010000 "$running"
+  mcall Write "$w"
+  if [ "$(nmarks)" = 5 ] && [ -e "$running" ]; then pass "a running file left over a day ago marks nothing (and the guard leaves it be)"; else fail "a running file left over a day ago marks nothing" "$(nmarks) marks"; fi
+  : >"$running"
+  # a mark that cannot be written (the marks file a folder) never changes
+  # the guard's answer: a crash in the guard would refuse the call
+  mv "$marks" "$marks.kept" && mkdir "$marks"
+  mcall Write "$w"
+  if [ "$mcode:$mout:$merr" = "0::" ]; then pass "a mark that cannot be written leaves the answer unchanged"; else fail "a mark that cannot be written leaves the answer unchanged" "exit $mcode: $mout $merr"; fi
+  rmdir "$marks" && mv "$marks.kept" "$marks"
+  if wanted "a write while a gate runs takes"; then
+    printf '%s' "$(TOOL=Write IN="$w" CWD="$mproj" perl -MJSON::PP -e 'print JSON::PP->new->encode({session_id => "s-1", hook_event_name => "PreToolUse", cwd => $ENV{CWD}, tool_name => $ENV{TOOL}, tool_input => JSON::PP->new->decode($ENV{IN})})')" >"$work/in.json"
+    times=$(cd "$mproj" && CLAUDE_PROJECT_DIR="$mproj" perl -MTime::HiRes=time -e 'my @t; for (1 .. 10) { my $s = time; system("bash", "-c", "bash \"\$0\" < \"\$1\"", $ARGV[0], $ARGV[1]) == 0 or exit 1; push @t, time - $s } @t = sort { $a <=> $b } @t; printf "%d", 1000 * $t[4]' "$guard" "$work/in.json")
+    if [ -n "$times" ] && [ "$times" -lt 400 ]; then pass "a write while a gate runs takes ${times} ms (median of 10; fails only over 400)"; else fail "a write while a gate runs is quick" "median ${times} ms"; fi
+  fi
+fi
+
 # --- the time a call takes ---
 if wanted "a call takes"; then
   printf '%s' "$(bash_call 'git status && git log --oneline -5')" >"$work/in.json"

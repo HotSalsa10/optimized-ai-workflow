@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Plants for the guard's reader and frame (step 5.5's last repair loop,
-# kept here since step 5's final review): each planted break turns
+# kept here since step 5's final review), and for its write marks for a
+# running gate (step 5b.2, in lib/guard.pl, lib/protect.pl's write test and
+# lib/receipt.pl's mark): each planted break turns
 # tests/guard.test.sh red for its stated reason, in a throwaway copy of the
 # repo. The breaks are data: "=== NAME | FILE | REASON", the text OLD (in
 # FILE exactly once), "---", the text NEW (tests/lib.sh, plant_data).
@@ -151,7 +153,55 @@ in select function ! time { } [[ ]]);
 then|do|else|for)\z/
 ---
 then|do|else)\z/
+=== 5b.2 the write mark not made | method/scripts/method/lib/guard.pl | a write by the main session while a gate runs leaves a mark
+Receipt::mark($in, $tool, $input)
+---
+1
+=== 5b.2 an edit tool not counted as writing | method/scripts/method/lib/protect.pl | a write by the main session while a gate runs leaves a mark
+  return 1 if $tool =~ /\A(?:Edit|Write|MultiEdit|NotebookEdit)\z/;
+---
 
+=== 5b.2 a gate's own call marked | method/scripts/method/lib/receipt.pl | a gate's own call leaves no mark
+  return 0 if defined $type && !ref $type && exists words()->{gate}{$type};
+---
+
+=== 5b.2 any agent's call taken for a gate's | method/scripts/method/lib/receipt.pl | an agent that is not a gate leaves a mark
+  return 0 if defined $type && !ref $type && exists words()->{gate}{$type};
+---
+  return 0 if defined $type && !ref $type;
+=== 5b.2 marks made while no gate runs | method/scripts/method/lib/receipt.pl | a write leaves no mark while no gate runs
+    next unless defined $real && -d $real && running($real);
+---
+    next unless defined $real && -d $real;
+=== 5b.2 a running file left by a crash counted | method/scripts/method/lib/receipt.pl | a running file left over a day ago marks nothing
+    if (@st && $st[9] >= $old) { push @fresh, $n }
+---
+    if (@st) { push @fresh, $n }
+=== 5b.2 the mark answers | method/scripts/method/lib/receipt.pl | the guard's answer to a marked write is unchanged
+    Log::append($real, $MARKS, $MARKS_CAP,
+---
+    print "marked\n"; Log::append($real, $MARKS, $MARKS_CAP,
+=== 5b.2 calls that only read marked | method/scripts/method/lib/protect.pl | a call that only reads leaves no mark
+  return writes($cmds || []) if $tool eq 'Bash' || $tool eq 'Monitor';
+---
+  return 1 if $tool eq 'Bash' || $tool eq 'Monitor';
+=== 5b.2 an MCP tool that reads marked | method/scripts/method/lib/protect.pl | an MCP tool whose name reads leaves no mark
+    return $short =~ $MCP_READS ? 0 : 1;
+---
+    return 1;
+=== 5b.2 an edit marked in the folder the call runs in | method/scripts/method/lib/receipt.pl | an edit leaves a mark in the worktree of its file
+      push @dirs, near_dir(dirname($p));
+---
+      push @dirs, $cwd;
+=== 5b.2 a refused call marked | method/scripts/method/lib/guard.pl | a refused call leaves no mark
+  log_refusal($rule, $tool, $raw, $in);
+---
+  eval { require File::Spec->catfile($lib, 'receipt.pl'); Receipt::mark($in, $tool, $in->{tool_input}) }; log_refusal($rule, $tool, $raw, $in);
+
+=== the mark outside its eval | method/scripts/method/lib/guard.pl | a mark that cannot be written leaves the answer unchanged
+  eval { Protect::call_writes($tool, \@cmds) && do { require File::Spec->catfile($lib, 'receipt.pl'); Receipt::mark($in, $tool, $input) }; 1 };
+---
+  Protect::call_writes($tool, \@cmds) && do { require File::Spec->catfile($lib, 'receipt.pl'); Receipt::mark($in, $tool, $input) };
 PLANTS-END
 plant_data "$work/plants.txt" tests/guard.test.sh only
 drop_sandbox "$work" || true

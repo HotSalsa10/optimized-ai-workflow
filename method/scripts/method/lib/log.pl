@@ -22,13 +22,17 @@
 #     id (7 to 64 hex digits, or none), the model's id (at most 64 letters,
 #     digits and . _ - [ ]), the effort (low, medium, high, xhigh, max or
 #     none) and a reason code (lower case, digits, dashes; never text). A
-#     line holds all of one set's fields, in that order; fields from both
+#     line holds all of one set's fields, in that order; fields from two
 #     sets are refused.
+#   Log::append(ROOT, NAME, CAP, at => T, top => D) adds a line of the third
+#     field set, the guard's write marks for a running gate (step 5b.2): the
+#     time T in seconds with up to six decimals, and the worktree's top as
+#     its device and inode numbers joined by a dash (never a path).
 #   Log::lines(ROOT, NAME[, FIELDS]) gives ([TIME, FIELD...]...) for the
 #     well-formed lines among the newest 4 times CAP, oldest first, and the
 #     number of other lines (an older part, not read, counts as one); an
 #     absent log gives none. FIELDS names the set to read as a list in its
-#     order ([qw(rule tool hash)] when not given); a line of the other set
+#     order ([qw(rule tool hash)] when not given); a line of another set
 #     counts as another line. It writes nothing and takes no lock: a log
 #     replaced by a trim while it is opened is opened again. It dies with a
 #     reason, as append does, on a name or a folder append would refuse, and
@@ -97,9 +101,13 @@ my %SHAPE = (
   model => qr/\A[A-Za-z0-9._\[\]-]{1,64}\z/,    # (none is one of them)
   effort => qr/\A(?:low|medium|high|xhigh|max|none)\z/,
   why => qr/\A[a-z][a-z0-9-]{0,47}\z/,
+  # the guard's write marks for a running gate (step 5b.2, B8): the time,
+  # to the microsecond, and the worktree's top as its device and inode
+  at => qr/\A[0-9]{9,11}\.[0-9]{1,6}\z/,
+  top => qr/\A[0-9]{1,20}-[0-9]{1,20}\z/,
 );
 # the field sets: a line holds all of one set's fields, in its order
-my @SETS = ([qw(rule tool hash)], [qw(word gate tree model effort why)]);
+my @SETS = ([qw(rule tool hash)], [qw(word gate tree model effort why)], [qw(at top)]);
 my $STAMP = qr/\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\z/;
 
 # the log's full path, after checking (and making, unless READ) each folder

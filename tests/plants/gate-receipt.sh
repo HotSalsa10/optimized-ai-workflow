@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Plants for gate-receipt (step 5b.1): each planted break in lib/receipt.pl
-# or the wrapper turns tests/gate-receipt.test.sh red for its stated
-# reason, in a throwaway copy of the repo. The breaks are data:
-# "=== NAME | FILE | REASON", the text OLD (in FILE exactly once), "---",
-# the text NEW (tests/lib.sh, plant_data). PLANT_SHARD=K/N runs every Nth
-# one from the Kth.
+# Plants for gate-receipt (steps 5b.1 and 5b.2): each planted break in
+# lib/receipt.pl or the wrapper turns tests/gate-receipt.test.sh red for
+# its stated reason, in a throwaway copy of the repo, with only the cases
+# kept for that reason (after they pass on the clean copy). The breaks are
+# data: "=== NAME | FILE | REASON", the text OLD (in FILE exactly once),
+# "---", the text NEW (tests/lib.sh, plant_data). PLANT_SHARD=K/N runs
+# every Nth one from the Kth.
 # shellcheck disable=SC2016 # the plants are literal perl and shell text
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
@@ -97,6 +98,196 @@ exit "$code"
   return defined $real && -d $real ? $real : undef;
 ---
   return -d $c && !-l $c ? $c : undef;
+=== 5b.2 unclean at the start not judged | method/scripts/method/lib/receipt.pl | files not clean at the start make it INVALID
+    push @why, 'unclean-start' if defined $r->{clean_start} && !$r->{clean_start};
+---
+    1;
+=== 5b.2 sent back though the start makes it INVALID | method/scripts/method/lib/receipt.pl | a report without its lines is not sent back when the start already makes it INVALID
+      if (!$r->{blocked} && !@why) {
+---
+      if (!$r->{blocked} && !grep { $_ eq 'no-start' } @why) {
+=== 5b.2 unclean at the stop not judged | method/scripts/method/lib/receipt.pl | files not clean at the stop make it INVALID
+  push @why, 'unclean-stop' if defined $g->{clean} && !$g->{clean};
+---
+
+=== 5b.2 the tree not compared | method/scripts/method/lib/receipt.pl | a tree changed while the gate ran makes it INVALID
+  push @why, 'tree-changed' if $g->{tree} ne $r->{tree};
+---
+
+=== 5b.2 the stop's folder judged though it is another worktree | method/scripts/method/lib/receipt.pl | a stop run from another repository leaves the files not checked
+  my $same = defined $g->{top} && defined $r->{top} && $g->{top} eq $r->{top};
+---
+  my $same = 1;
+=== 5b.2 files that cannot be told clean taken as clean | method/scripts/method/lib/receipt.pl | files that cannot be told clean leave it not checked
+  push @why, 'clean-unknown' unless $same && defined $g->{clean} && defined $r->{clean_start};
+---
+
+=== 5b.2 write marks not judged | method/scripts/method/lib/receipt.pl | a write by the main session while the gate runs makes it INVALID
+  push @why, 'write-mark' if $marked;
+---
+
+=== 5b.2 a gate's own call marked | method/scripts/method/lib/receipt.pl | the gate's own writes leave no mark
+  return 0 if defined $type && !ref $type && exists words()->{gate}{$type};
+---
+
+=== 5b.2 marks before the start counted | method/scripts/method/lib/receipt.pl | a mark before the gate's start does not count
+$l->[1] > $r->{started} && $l->[1] < $r->{stopped}
+---
+$l->[1] < $r->{stopped}
+=== 5b.2 marks of another worktree counted | method/scripts/method/lib/receipt.pl | a write in another worktree of the repository does not count
+$l->[2] eq $r->{top} && $l->[1] > $r->{started}
+---
+$l->[1] > $r->{started}
+=== 5b.2 marks that cannot be read taken as none | method/scripts/method/lib/receipt.pl | marks that cannot be read leave it not checked
+  push @why, 'marks-unreadable' unless defined $marked;
+---
+
+=== 5b.2 no running file at the start | method/scripts/method/lib/receipt.pl | the start writes a running file in git's folder, so the guard marks writes
+    running($dir, 1);
+    Log::write_whole($dir, running_of(
+---
+    running($dir, 1);
+    0 && Log::write_whole($dir, running_of(
+=== 5b.2 the running file kept after the stop | method/scripts/method/lib/receipt.pl | the stop removes the running file
+  unlink File::Spec->catfile($dir, running_of(
+---
+  0 && unlink File::Spec->catfile($dir, running_of(
+=== 5b.2 a running file left by a crash kept | method/scripts/method/lib/receipt.pl | a running file left by a crash a day ago is removed at the next start
+elsif ($prune) { unlink $p }
+---
+elsif (0) { }
+=== 5b.2 the record not waited for | method/scripts/method/lib/receipt.pl | a record written 0.3 s after the stop began still makes it VALID
+  my $until = Time::HiRes::time() + ($ctx->{wait} ? $WAIT : 0);
+---
+  my $until = Time::HiRes::time();
+=== 5b.2 a record that never completes taken as read | method/scripts/method/lib/receipt.pl | a record that never completes leaves it not checked
+    return 'record-late' if Time::HiRes::time() >= $until;
+---
+    return undef if Time::HiRes::time() >= $until;
+=== 5b.2 any file read as the record | method/scripts/method/lib/receipt.pl | a record that is not a regular file leaves it not checked
+      return 'record-unreadable' unless -f $fh;
+---
+
+=== 5b.2 a record of any size read | method/scripts/method/lib/receipt.pl | a record over 200 MB is not read
+      return 'record-unreadable' if !defined $size || $size > $RECORD_MAX;
+---
+      return 'record-unreadable' if !defined $size;
+=== 5b.2 lines that are not JSON skipped | method/scripts/method/lib/receipt.pl | a record line that is not JSON leaves it not checked
+  push @why, 'record-unreadable' if $ev{bad};
+---
+
+=== 5b.2 models not checked against the list | method/scripts/method/lib/receipt.pl | a model off the project's list makes it INVALID
+  push @why, 'model-off-list' if !%allowed || grep { !$allowed{$_} } @{ $ev{models} };
+---
+  push @why, 'model-off-list' if !%allowed;
+=== 5b.2 no model list taken as any model | method/scripts/method/lib/receipt.pl | no availableModels in the project's settings makes it INVALID
+  push @why, 'model-off-list' if !%allowed || grep { !$allowed{$_} } @{ $ev{models} };
+---
+  push @why, 'model-off-list' if %allowed && grep { !$allowed{$_} } @{ $ev{models} };
+=== 5b.2 a reply the client wrote taken as a model's | method/scripts/method/lib/receipt.pl | a reply the client wrote itself leaves it not checked
+    if ($model eq '<synthetic>') { $ev->{synthetic} = 1 }
+---
+    if (0) { }
+=== 5b.2 no model line not required | method/scripts/method/lib/receipt.pl | a record with no model line leaves it not checked
+  push @why, 'no-model' if $whole && !@{ $ev{models} };
+---
+
+=== 5b.2 efforts not judged | method/scripts/method/lib/receipt.pl | a request at effort low makes it INVALID
+  push @why, 'effort-low' if $floor && grep { ($RANK{$_} || 0) < $floor } @{ $ev{efforts} };
+---
+
+=== 5b.2 the request's effort not read | method/scripts/method/lib/receipt.pl | a request at effort low makes it INVALID
+    effort_seen($ev, $p->{output_config}{effort}) if
+---
+    1 if
+=== 5b.2 an assistant line's effort not read | method/scripts/method/lib/receipt.pl | an assistant line at effort low makes it INVALID
+    effort_seen($ev, part($f->{$k})) if exists $f->{$k};
+---
+    1;
+=== 5b.2 no effort not required | method/scripts/method/lib/receipt.pl | a record with no effort leaves it not checked
+  push @why, 'no-effort' if $whole && !@{ $ev{efforts} };
+---
+
+=== 5b.2 the method file's effort not required | method/scripts/method/lib/receipt.pl | a method file without its effort makes it INVALID
+    push @why, 'instructions-differ' if defined $r->{top} && !$r->{effort_file};
+---
+    1;
+=== 5b.2 instructions not compared | method/scripts/method/lib/receipt.pl | instructions other than the method file's make it INVALID
+    push @why, 'instructions-differ' if $same && !($m && trimmed($ev{prompt}) eq $m->{body});
+---
+    1;
+=== 5b.2 the body compared untrimmed | method/scripts/method/lib/receipt.pl | its receipt is good, with its opening word
+sub trimmed { my ($s) = @_; $s =~ s/\A\s+//; $s =~ s/\s+\z//; return $s }
+---
+sub trimmed { return $_[0] }
+=== 5b.2 the frontmatter kept in the body | method/scripts/method/lib/receipt.pl | its receipt is good, with its opening word
+? ($1, $2) : ('', $text);
+---
+? ($1, $text) : ('', $text);
+=== 5b.2 no prompt snapshot not required | method/scripts/method/lib/receipt.pl | a record with no prompt snapshot leaves it not checked
+    push @why, 'no-instructions';
+---
+    1;
+=== 5b.2 Agent calls not seen | method/scripts/method/lib/receipt.pl | an Agent call makes it INVALID
+      $ev->{called} = 1 if $name eq 'Agent' || $name eq 'Task';
+---
+
+=== 5b.2 folders not compared | method/scripts/method/lib/receipt.pl | a turn in another folder makes it INVALID
+  $ev->{elsewhere} = 1 if !defined $c || ref $c || sha('cwd', $c) ne $ctx->{cwd};
+---
+
+=== 5b.2 background shells not judged | method/scripts/method/lib/receipt.pl | a background shell of its own still running leaves it not checked
+  push @why, 'background-task' if grep {
+---
+  push @why, 'background-task' if 0 && grep {
+=== 5b.2 any running shell taken as the gate's own | method/scripts/method/lib/receipt.pl | another's background shell still running does not count
+    && defined $_->{id} && !ref $_->{id} && $ev{bg}{ $_->{id} } } @tasks;
+---
+    } @tasks;
+=== 5b.2 a shell that ended counted | method/scripts/method/lib/receipt.pl | another's background shell still running does not count
+($_->{status} // '') eq 'running'
+---
+1
+=== 5b.2 packets not judged | method/scripts/method/lib/receipt.pl | a packet built for other files makes it INVALID
+  push @why, 'packet-other-tree' if grep { $_ ne $r->{tree} } @{ $ev{packets} };
+---
+
+=== 5b.2 a Read result's line numbers kept | method/scripts/method/lib/receipt.pl | a packet for other files read with line numbers makes it INVALID
+    $x =~ s/\A[ \t]*[0-9]+(?:\t|\x{2192})//;
+---
+
+=== 5b.2 tokens counted on every line | method/scripts/method/lib/receipt.pl | tokens are counted once a message id
+!(defined $id && $ev->{counted}{$id}++)
+---
+1
+=== 5b.2 the handback not confirmed | method/scripts/method/lib/receipt.pl | a handback the record shows refused leaves it not checked
+  push @why, 'handback-unconfirmed' if defined $hb
+---
+  push @why, 'handback-unconfirmed' if 0 && defined $hb
+=== 5b.2 a refused handback taken as accepted | method/scripts/method/lib/receipt.pl | a handback the record shows refused leaves it not checked
+      $ev->{hb_ok} = $c->{is_error} ? 0 : 1;
+---
+      $ev->{hb_ok} = 1;
+=== 5b.2 the handback's message not compared | method/scripts/method/lib/receipt.pl | a handback the record shows with another message leaves it not checked
+$ev{hb_sha} eq ($r->{handback}{sha} // '')
+---
+1
+=== 5b.2 the second word's reasons not first | method/scripts/method/lib/receipt.pl | with reasons of both kinds, INVALID, its reasons first
+  return ((grep { $WRONG{$_} } @why), (grep { !$WRONG{$_} } @why));
+---
+  return @why;
+=== 5b.2 the second word never given | method/scripts/method/lib/receipt.pl | a model off the project's list makes it INVALID
+  return $w->{wrong} if grep { $WRONG{$_} } @why;
+---
+
+=== 5b.2 gates.log without the model | method/scripts/method/lib/receipt.pl | gates.log gets one fixed-field line
+  my $model = ref $r->{models} eq 'ARRAY' ? $r->{models}[0] : undef;
+---
+  my $model;
+=== 5b.2 models, efforts and tokens not kept | method/scripts/method/lib/receipt.pl | the receipt keeps the models, efforts and tokens
+  $r->{tokens} = $ev{tokens};
+---
+
 PLANTS-END
 # Git Bash copies a link, so a .git link cannot be made there: that plant
 # is skipped, and said so
@@ -106,7 +297,7 @@ case "$(uname -s)" in
     skip "the plant on a .git link (Git Bash cannot make one)"
     ;;
 esac
-plant_data "$work/plants.txt" tests/gate-receipt.test.sh
+plant_data "$work/plants.txt" tests/gate-receipt.test.sh only
 drop_sandbox "$work" || true
 echo "plants: gate-receipt: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]

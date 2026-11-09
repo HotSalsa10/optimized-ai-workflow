@@ -221,7 +221,9 @@ h_turns() {
 #   valid      gate A (both lines): VALID with its opening word, one turn
 #   log        .method/local/gates.log: one line a gate run, VALID for A and
 #              B, INCOMPLETE lines-missing-after-retry for C, each with the
-#              gate, the tree and the effort the client gave (xhigh)
+#              gate, the tree, the model read from the gate's record
+#              (claude-opus-5-5, the fragment's only model) and the effort
+#              the client gave (xhigh)
 #   cut-off    gate B: one more turn, whose request carries gate-receipt's
 #              reason; then VALID (two stops, sent back once)
 #   never      gate C: one more turn only; INCOMPLETE
@@ -259,8 +261,8 @@ h_gate_holds() {
       [ "$n" = 1 ] || H_WHY="$H_WHY gate A's turns: $n;"
       ;;
     log)
-      v=$(LC_ALL=C grep -c "	VALID	method-reviewer	$H_TREE	none	xhigh	none\$" "$H_PROJ/.method/local/gates.log" 2>/dev/null)
-      i=$(LC_ALL=C grep -c "	INCOMPLETE	method-reviewer	$H_TREE	none	xhigh	lines-missing-after-retry\$" "$H_PROJ/.method/local/gates.log" 2>/dev/null)
+      v=$(LC_ALL=C grep -c "	VALID	method-reviewer	$H_TREE	claude-opus-5-5	xhigh	none\$" "$H_PROJ/.method/local/gates.log" 2>/dev/null)
+      i=$(LC_ALL=C grep -c "	INCOMPLETE	method-reviewer	$H_TREE	claude-opus-5-5	xhigh	lines-missing-after-retry\$" "$H_PROJ/.method/local/gates.log" 2>/dev/null)
       n=0
       [ ! -f "$H_PROJ/.method/local/gates.log" ] || n=$(wc -l <"$H_PROJ/.method/local/gates.log" | tr -d ' ')
       [ "${v:-0}/${i:-0}/${n:-0}" = 2/1/3 ] || H_WHY="$H_WHY gates.log: ${v:-0} VALID, ${i:-0} INCOMPLETE, ${n:-0} lines;"

@@ -76,6 +76,21 @@ if [ "$first" = "METHOD-ACTIVE vunreleased" ] && [ "$code" -eq 0 ]; then pass "t
 has "a clean project gets status's summary, with the client's version and CI left to /start" "status: nothing needs a look" "claude-code" "ci)"
 lacks "status's PASS lines stay out of the context" "records: PASS"
 
+# the gates' receipts for the files at HEAD (step 5b.2): one LOOK line with
+# how many do not say VALID, and how many say each other word; receipts
+# for another tree, and VALID ones, are not counted
+ptree=$(git -C "$p" rev-parse 'HEAD^{tree}')
+n=0
+for r in "$ptree INVALID" "$ptree INCOMPLETE" "$ptree INCOMPLETE" "$ptree VALID" "0123456789abcdef0123456789abcdef01234567 INVALID"; do
+  n=$((n + 1))
+  printf '{"gate":"method-reviewer","state":"%s","tree":"%s","v":1,"why":["x"]}' "${r#* }" "${r% *}" >"$p/.git/method-receipt-$(printf '%024d' "$n").json"
+done
+hook "$p"
+has "gate receipts for the files at HEAD that do not say VALID are named in one LOOK line, by word" "session-status: LOOK - 3 gate receipts for the files at HEAD do not say VALID: 1 INVALID, 2 INCOMPLETE (.method/local/gates.log says why)"
+rm -f "$p"/.git/method-receipt-*.json
+hook "$p"
+lacks "with no such receipts there is no receipts line" "gate receipt"
+
 printf 'x\n' >"$p/new.txt"
 hook "$p"
 has "a dirty project still gets METHOD-ACTIVE, the work LOOK line and status's summary, and exits 0 (status exited 1)" "METHOD-ACTIVE vunreleased" "work: LOOK - " "status: 1 areas need a look (work)"
