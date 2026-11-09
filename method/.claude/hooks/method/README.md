@@ -99,6 +99,25 @@ For G6 and G3 also (step 5's final review): a bulk edit by a `while read` loop o
 
 **When G6 refuses something you want.** Change the file yourself, or tell Claude to read it and show you the change to make. A recursive copy or an extraction into the project's top folder can go into a new subfolder instead.
 
+## gate-receipt.sh
+
+**What it does.** The method's checking agents (gates) are named in `scripts/method/verdicts.txt`: `method-reviewer`, `method-security-checker`, `method-diagnose` and `method-tester`, each defined in `.claude/agents/method/`. When one starts, gate-receipt records the checkout's files (HEAD, its tree, whether anything is uncommitted) and tells the gate the last line its report must end with: `END-VERDICT <tree>`. When it stops, gate-receipt writes a receipt (`lib/receipt.pl`): one file per gate run in git's folder (`.git/method-receipt-*.json`, which the guard protects, the newest 500 kept), and one line in `.method/local/gates.log`.
+
+A receipt says one of three words, with reason codes:
+- **VALID**: the report opens with one of its gate's words and ends with its line; the files were committed and did not change while the gate worked; nobody wrote while it ran (the guard marks writes by the main session and by other agents); it ran on the allowed models at least at its file's effort, from the method's own definition; it called no other agent, worked in its own folder, left no background shell running, and was given no review packet for other files.
+- **INVALID**: it checked the wrong thing or the wrong way (for example `unclean-start`, `tree-changed`, `write-mark`, `effort-low`, `model-off-list`, `instructions-differ`, `called-agent`, `packet-other-tree`).
+- **INCOMPLETE**: not checked (for example `lines-missing-after-retry`, `no-report`, `record-late`, `no-start`, `background-task`).
+
+**What it stops.** A cut-off review counted as an approval: a report without its first and last lines is sent back once (default mode) or its handback refused once (auto mode); still without them, the receipt says INCOMPLETE. A stale review, one made on uncommitted or changing files or on a packet built for other files. A gate run off the allowed models, below its effort, from another definition, or handing its work to another agent.
+
+**What it does not stop.** Whether the verdict is right. A receipt, mark or record changed by a program Claude writes and runs: they are local files (RISKS #2, #18). Until step 6 nothing reads receipts: done-check still reads the typed verdict line. Where the hooks do not run (above), no receipt is made.
+
+**What you will see.** One line per gate run in `.method/local/gates.log`: the time, the word, the gate, the tree, the model, the effort and the first reason (`none` for VALID). At the next session start, session-status says how many receipts for the files at HEAD do not say VALID. A gate sent back sees gate-receipt's reason, with the exact first and last lines, as its next message.
+
+**What it costs.** About 0.3 s at a gate's start and under 1 s at its stop on a 10,000-file repository with a 50 MB agent record (measured; the plan's limit is 5 s). While gate-receipt's code is loaded, each guard call that writes takes about 16 ms more.
+
+**When it goes wrong.** Every failure is exit 0 and the receipt says INCOMPLETE: gate-receipt never blocks a gate for its own trouble, only once for a report without its lines. Known limits (step 5b): another gate's writes during a gate leave no mark; a write made and undone within the instant a gate starts; a gate launched with a doctored prompt; the auto-mode check's own warning is not seen; on Git Bash, a checkout whose `.git` is a link is not tested.
+
 ## When the guard blocks something it should not
 
 The guard refuses rather than guesses, so now and then it will refuse something harmless. What to do, in this order:

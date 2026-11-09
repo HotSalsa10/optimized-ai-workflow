@@ -58,7 +58,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M050 | Check what a fresh clone gets, not only what works locally | incident | method/scripts/method/run-checks.sh | done |
 | M051 | Long runs write their log where they run | incident | method/scripts/method/run-checks.sh | done |
 | M052 | A plant shows a check worked once; a committed test keeps it working | incident | method/.claude/skills/checks/SKILL.md | step 6 |
-| M053 | Silence is never an outcome: loud pass, loud fail or loud skip | incident | method/.claude/hooks/method/gate-receipt.sh | step 5b |
+| M053 | Silence is never an outcome: loud pass, loud fail or loud skip | incident | method/.claude/hooks/method/gate-receipt.sh | done |
 | M054 | Claims about how something looks go before a person before they go into a record | incident | method/.claude/rules/method/method.md | step 6 |
 | M055 | Human tags: [CHECK] agent, [EYES] owner looks, [CREDENTIAL] owner only, [AUTHORITY] empowered person | incident | method/.claude/rules/method/method.md | step 6 |
 | M056 | Stop after 3 repair loops and report what is failing and what was tried | incident | method/.claude/rules/method/method.md | step 6 |
@@ -83,7 +83,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M075 | Never use /code-review, /goal or the advisor as a gate (the settings fragment's skillOverrides keeps /code-review to the owner; this rule's home stays method.md) | research: Claude Code internals | method/.claude/rules/method/method.md | step 6 |
 | M076 | The server-side advisor is off | research: advisor docs; decision A5 | method/settings.fragment.json @CLAUDE_CODE_DISABLE_ADVISOR_TOOL | done |
 | M077 | Never set CLAUDE_CODE_EFFORT_LEVEL | research: measured; decision A4 | method/scripts/method/status.sh | done |
-| M078 | A refusal or a missing verdict means "not checked" | research: model fallback docs | method/.claude/hooks/method/gate-receipt.sh | step 5b |
+| M078 | A refusal or a missing verdict means "not checked" | research: model fallback docs | method/.claude/hooks/method/gate-receipt.sh | done |
 | M079 | One repo per code-changing cloud session | research: cloud docs | method/.claude/rules/method/method.md | step 6 |
 | M080 | Check /permissions on each new clone | research: untrusted folders | README.md | step 9 |
 | M081 | Nested claude -p runs use < /dev/null, an explicit effort and METHOD_NESTED=1 | research: measured | method/.claude/skills/checks/SKILL.md | step 6 |
@@ -111,7 +111,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M103 | A change to the reviewer is kept only if its score on past incidents rises; re-score on any prompt, tool or model change | research: Claude Code team | bench/README.md | R2 |
 | M104 | Auto memory is off in method projects; lessons go into the repo through /lesson | research: docs; decision A1 | method/settings.fragment.json @autoMemoryEnabled | done |
 | M105 | No Claude Code mods during method work | research: mods docs | method/.claude/rules/method/owner.md | step 6 |
-| M106 | An approval covers one exact version of the files; any change to them voids it | research: Claude Code team | method/.claude/hooks/method/gate-receipt.sh | step 5b |
+| M106 | An approval covers one exact version of the files; any change to them voids it | research: Claude Code team | method/.claude/hooks/method/gate-receipt.sh | done |
 | M107 | An agent's approval never counts as a person's | research: Claude Code team | method/.claude/rules/method/method.md | step 6 |
 | M108 | A branch must be up to date with main before it merges | research: merge queue | method/scripts/method/done-check.sh | done |
 | M109 | A person is accountable for every change that ships | research: Claude Code team | method/.claude/rules/method/method.md | step 6 |
@@ -121,7 +121,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M113 | Packet separators are escaped so file content cannot fake a section or a verdict | research: Cloudflare | method/scripts/method/review-packet.sh | done |
 | M114 | Checking agents get a "do not flag" list: unchanged code, far-fetched risks, style, "consider library X" | research: Cloudflare | method/.claude/agents/method/reviewer.md | step 6 |
 | M115 | A checking agent reads its packet and every changed file in its first turn | research: Cloudflare | method/.claude/agents/method/reviewer.md | step 6 |
-| M116 | Receipts record token classes, first-request cache reads and a hash of the agent's instructions | research: Cloudflare | method/.claude/hooks/method/gate-receipt.sh | step 5b |
+| M116 | Receipts record token classes, first-request cache reads and a hash of the agent's instructions | research: Cloudflare | method/.claude/hooks/method/gate-receipt.sh | done |
 | M117 | A blocking finding without run evidence becomes a question | research: Cloudflare review bot | method/.claude/agents/method/reviewer.md | step 6 |
 | M118 | In CI, checking-agent files and merge logic come from the main branch, so a change cannot grade itself | research: Cloudflare review bot | method/.github/workflows/method-gate.yml | R2 |
 | M119 | Give the whole task in one message with the finish line and the stops; keep going unless input is needed or a step is destructive | research: claude.dev | method/.claude/rules/method/method.md | step 6 |
