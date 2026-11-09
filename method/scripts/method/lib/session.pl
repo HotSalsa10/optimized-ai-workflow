@@ -247,16 +247,18 @@ sub main {
   my ($in, $in_err) = Hook::read_input();
   my $top = ref $in eq 'HASH' && defined $in->{cwd} && !ref $in->{cwd} && -d $in->{cwd} ? $in->{cwd} : ($ENV{CLAUDE_PROJECT_DIR} // '.');
   chdir $top;
-  # G16's snapshot (a failure leaves none: G16 then judges what the files
-  # hold)
   my $project = defined $ENV{CLAUDE_PROJECT_DIR} && -d $ENV{CLAUDE_PROJECT_DIR} ? $ENV{CLAUDE_PROJECT_DIR} : $top;
-  eval { require File::Spec->catfile($lib, 'watch.pl'); Watch::snapshot($in, $project) };
   # (within 20 s in all, so the hook ends well inside its 30 s and
   # METHOD-ACTIVE always reaches Claude; a nested run skips status only)
   my @lines;
   my $ok = eval {
     local $SIG{ALRM} = sub { $OUT = 1; die "out of time\n" };
     alarm $DEADLINE;
+    # G16's snapshot, inside the deadline (a git call that hangs cannot hold
+    # the hook; final review of step 5); a failure leaves none, and G16
+    # then judges what the files hold
+    eval { require File::Spec->catfile($lib, 'watch.pl'); Watch::snapshot($in, $project) };
+    in_time();
     push @lines, status_lines($top) unless ($ENV{METHOD_NESTED} // '') eq '1';
     in_time();
     push @lines, warnings_for($in, $top, $in_err);

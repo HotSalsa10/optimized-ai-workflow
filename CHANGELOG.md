@@ -69,6 +69,8 @@ Nothing yet. Release 1 is being built.
 
 - Settings changes and skill hooks (step 5.9): a change to your settings during a session that would switch the method's hooks off or run something around them (hooks, env variables, plugins, `disableAllHooks`, a removed deny entry) is refused for that session and applies from the next one; Claude tells you once when that happened. A skill or agent that brings its own hooks is refused when Claude calls it. The hooks now run as `bash -p`, so a function or shell option set in a settings env cannot switch them off.
 
+- Step 5's final review: a push to a branch held in a variable, a write right after a `cd` that is not followed by `&&`, a loop that writes over the method's files, and a bulk `grep -rl | xargs sed -i` edit across the project are now refused, as is Claude Code's own tool for scheduling remote agents. `git pull --ff-only` now pulls only your branch's own upstream and is checked like a merge.
+
 ### Changed (step 4b)
 
 - `mutate-changed.sh` runs mutants (step 4b.3b): run A, then one mutant at a time in the working tree, each written through one write function with a journal in git's own folder, each check under the limited runner with a time limit; survivors are named (exit 1); all killed is SKIPPED kills-unchecked until step 4b.4. `--recover` puts back what a cut-off run left; the next run does it first. `--minutes` (default 8) bounds a run.

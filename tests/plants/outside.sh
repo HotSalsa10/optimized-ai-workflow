@@ -170,6 +170,11 @@ plant "G4 not asked for Bash" "gh pr merge is refused" method/scripts/method/lib
 plant "G4 not asked for MCP tools" "the GitHub MCP merge tool is refused" method/scripts/method/lib/guard.pl '($rule, $text) = Outside::judge_mcp($tool, $input, $project) unless $rule;' ''
 plant "SendMessage let through" "SendMessage is refused" method/scripts/method/lib/guard.pl "if (\$tool eq 'SendMessage') {" 'if (0) {'
 plant "an MCP tool's whole name logged" "an MCP refusal is logged by the tool's server only" method/scripts/method/lib/guard.pl '$t =~ s/\A(mcp__[A-Za-z0-9_.:-]*?)__.*\z/$1/s;' ''
+# the final review of step 5
+plant "RemoteTrigger let through" "RemoteTrigger, which schedules remote agents, is refused" method/scripts/method/lib/guard.pl "if (\$tool eq 'RemoteTrigger') {" 'if (0) {'
+plant "an agent in a remote sandbox let through" "an agent in a remote sandbox (isolation remote) is refused" method/scripts/method/lib/guard.pl "&& \$input->{isolation} eq 'remote') {" "&& 0) {"
+plant "an MCP write with no branch field let through" "an MCP write tool with no branch field is refused" "$lib" "if !defined \$b || (!ref \$b && \$b eq '');" "if 0;
+    next unless defined \$b;"
 
 echo "plants: outside: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]

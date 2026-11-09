@@ -48,7 +48,7 @@ echo "${x:-'default'}"
 @@ allow xargs -I@ with a plain command after git ls-files [R3-F6]
 git ls-files '*.sh' | xargs -I@ echo checking @
 @@ allow xargs -I X with no watched word [R3-F6]
-find . -name '*.log' | xargs -I X rm X
+find build -name '*.log' | xargs -I X rm X
 @@ allow xargs -0 wc after git ls-files -z [R3-F6]
 git ls-files -z | xargs -0 wc -l
 @@ allow perl -I with a program file [R3-F7]

@@ -560,14 +560,27 @@ sub judge_bash {
   my $set = set($project);
   my ($top) = @{ $set->{tops} };
   my $text = text_re($set);
+  # every folder a command may run in: DIRS gives one folder, or a list
+  # (Guard::cmd_dir_sets); one that cannot be told is the project's top
+  # (final review of step 5: after a cd that may have failed, both the cd's
+  # folder and the one before it; A69)
+  my $bases = sub {
+    my ($k) = @_;
+    my $d = $dirs->[$k];
+    my @b = ref $d eq 'ARRAY' ? @$d : ($d);
+    my %seen;
+    return grep { !$seen{$_}++ } map { defined $_ ? $_ : $top } (@b ? @b : (undef));
+  };
   # 1. does the call name a protected path?
   my $named;
   for my $k (0 .. $#$cmds) {
     my $c = $cmds->[$k];
-    my $base = defined $dirs->[$k] ? $dirs->[$k] : $top;
     my @w = @{ $c->{words} };
     my @look = (@w ? (($w[0] =~ m{[/\\]}) ? $w[0] : ()) : ());
     push @look, @w[1 .. $#w] if @w > 1;
+    # (a for or select header names the paths its loop works on; final
+    # review of step 5)
+    push @look, @{ $c->{header_text} || [] };
     # a plain cp only reads its sources (not -l or -s, which make links);
     # where it writes is judged below (5.7 repair loop 1)
     if (@w && name_of($w[0]) eq 'cp' && !grep { /\A-[A-Za-z]*[ls]/ && !/\A--/ || /\A--(?:l|sy)/ } @w[1 .. $#w]) {
@@ -578,11 +591,14 @@ sub judge_bash {
     push @look, map { /\A[A-Za-z_][A-Za-z0-9_]*\+?=(.*)\z/s ? $1 : () } @{ $c->{assigns} || [] };
     push @look, map { $_->[1] } grep { $_->[0] !~ /\A[0-9]*<<[-<]?\z/ } @{ $c->{redirs} || [] };
     my @more = map { /\A[^=]*=(.+)\z/s ? $1 : () } @look;
-    for my $x (@look, @more) {
-      next if $x =~ m{\A[A-Za-z][A-Za-z0-9+.-]*://};
-      for my $p (paths($x, $base)) {
-        my $e = protected($p, $set);
-        if ($e) { $named = $e; last }
+    for my $base ($bases->($k)) {
+      for my $x (@look, @more) {
+        next if $x =~ m{\A[A-Za-z][A-Za-z0-9+.-]*://};
+        for my $p (paths($x, $base)) {
+          my $e = protected($p, $set);
+          if ($e) { $named = $e; last }
+        }
+        last if $named;
       }
       last if $named;
     }
@@ -604,31 +620,83 @@ sub judge_bash {
   if ($named) {
     for my $k (0 .. $#$cmds) {
       my $c = $cmds->[$k];
-      my $base = defined $dirs->[$k] ? $dirs->[$k] : $top;
+      my @bases = $bases->($k);
       my @w = @{ $c->{words} };
-      for my $r (@{ $c->{redirs} || [] }) {
-        next unless is_write_redir($r->[0]);
-        my $e = protected(resolve($r->[1], $base), $set);
-        return ('G6', "this call writes into $e->{what}, which Claude may only read$NO") if $e;
+      for my $base (@bases) {
+        for my $r (@{ $c->{redirs} || [] }) {
+          next unless is_write_redir($r->[0]);
+          # (a write to a path held in a variable, in a call that names a
+          # protected path: where it lands cannot be told; final review of
+          # step 5)
+          if ((ref $r->[2] eq 'HASH' && ($r->[2]{var} || $r->[2]{subst})) || $r->[1] =~ /[\$`]/) {
+            return ('G6', "this call names $named->{what}, which Claude may only read, and writes to a path held in a variable$NO");
+          }
+          my $e = protected(resolve($r->[1], $base), $set);
+          return ('G6', "this call writes into $e->{what}, which Claude may only read$NO") if $e;
+        }
       }
       next unless @w;
-      next if $CARRIER{ name_of($w[0]) } || read_only($c) || method_script($c, $base, $set);
+      next if $CARRIER{ name_of($w[0]) } || read_only($c) || !grep { !method_script($c, $_, $set) } @bases;
       next if ((name_of($w[0]) =~ /\A(?:bash|sh|dash|zsh|ksh)\z/) && grep { /\A-[A-Za-z]*c[A-Za-z]*\z/ } @w) && !grep { /\Aa pipe/ } @{ $c->{unread} || [] };
       return ('G6', "this call names $named->{what}, which Claude may only read, and " . shown(name_of($w[0])) . " is not on the read-only list$NO");
     }
     return ();
   }
-  # 2. what each write lands on
+  # 2. what each write lands on, from every folder it may run in
   for my $k (0 .. $#$cmds) {
     my $c = $cmds->[$k];
     my @w = @{ $c->{words} };
     next unless @w;
-    my $base = defined $dirs->[$k] ? $dirs->[$k] : $top;
     my $n = name_of($w[0]);
-    my $why = lands($c, $n, $base, $set);
-    return ('G6', $why . $NO) if $why;
+    for my $base ($bases->($k)) {
+      my $why = lands($c, $n, $base, $set) || listed($cmds, $k, $base, $set);
+      return ('G6', $why . $NO) if $why;
+    }
   }
   return ();
+}
+
+# listed CMDS K BASE SET: xargs running a command that writes, on the file
+# names a recursive listing earlier in its pipeline found (grep -r, rg,
+# git grep, git ls-files, find, ls -R) in a folder that holds a protected
+# path: the reason, or undef. The usual bulk edit, grep -rl OLD . | xargs
+# sed -i, would rewrite the method's files, as find -exec would (final
+# review of step 5)
+sub listed {
+  my ($cmds, $k, $base, $set) = @_;
+  my $c = $cmds->[$k];
+  my @w = @{ $c->{words} };
+  return undef unless name_of($w[0]) eq 'xargs' && $c->{piped} && !read_only($c);
+  for (my $j = $k - 1; $j >= 0 && $cmds->[$j]{to_pipe}; $j--) {
+    my @l = @{ $cmds->[$j]{words} };
+    next unless @l;
+    my $ln = name_of($l[0]);
+    my @a = @l[1 .. $#l];
+    my $recursive;
+    if ($ln =~ /\A(?:grep|egrep|fgrep)\z/) { $recursive = grep { /\A-[A-Za-z]*[rR]/ && !/\A--/ || /\A--(?:recursive|dereference-recursive)\z/ || /\A--directories=recurse\z/ } @a }
+    elsif ($ln =~ /\A(?:rg|ag|ack|fd|fdfind|find)\z/) { $recursive = 1 }
+    elsif ($ln eq 'ls') { $recursive = grep { /\A-[A-Za-z]*R/ && !/\A--/ || $_ eq '--recursive' } @a }
+    elsif ($ln eq 'git') {
+      my ($sub) = grep { !/\A-/ } @a;
+      $recursive = defined $sub && ($sub eq 'grep' || $sub eq 'ls-files');
+    }
+    next unless $recursive;
+    # where it starts: the folders it is given, or the one it runs in
+    my @start = grep { my $p = resolve($_, $base); defined $p && -d $p } grep { !/\A-/ } @a;
+    if (!@start && $ln eq 'find') {
+      # (find's paths come first, after its own options)
+      my @b = @a;
+      while (@b && $b[0] =~ /\A-(?:[HLP]+|D|O[0-9]*)\z/) { my $o = shift @b; shift @b if $o eq '-D' }
+      for my $x (@b) { last if $x =~ /\A[-(!]/; push @start, $x }
+    }
+    @start = ('.') unless @start;
+    for my $s (@start) {
+      my $sp = resolve($s, $base);
+      my $e = protected($sp, $set) || above($sp, $set);
+      return "this xargs runs a command that writes on files a listing found in a folder that holds $e->{what}; run the listing in a subfolder, or name the files" if $e;
+    }
+  }
+  return undef;
 }
 
 # a cp's sources: its positionals but the last, or all of them with -t
@@ -905,6 +973,13 @@ sub git_versions {
   if ($sub eq 'switch' || $sub eq 'checkout' || $sub eq 'merge') {
     return () unless @pos;
     @targets = map { [$_] } ($sub eq 'merge' ? @pos : $pos[-1]);
+  } elsif ($sub eq 'pull') {
+    # (its own upstream as of the last fetch: what the pull itself fetches
+    # is not seen; final review of step 5. With no upstream git refuses the
+    # pull itself)
+    my ($ust) = Git::run('-C', $dir, 'rev-parse', '--verify', '-q', '@{upstream}');
+    return () unless $ust == 0;
+    @targets = (['@{upstream}']);
   } elsif ($sub eq 'worktree') {
     return () unless @pos && $pos[0] eq 'add';
     @targets = ([@pos > 2 ? $pos[-1] : 'HEAD']);

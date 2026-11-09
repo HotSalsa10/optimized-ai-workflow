@@ -239,6 +239,36 @@ case "$err" in
   *) fail "a push to a URL is refused" "$err" ;;
 esac
 
+# --- the final review of step 5 ---
+# a push named through a variable, a substitution, a glob or braces: where
+# it goes cannot be told
+judge "a push whose branch is a variable set before it is refused" "$proj" 'B=main; git push -q origin HEAD:$B' G3
+judge "a push in a for loop over branch names is refused" "$proj" 'for b in task main; do git push -q origin HEAD:$b; done' G3
+judge "a push to a quoted variable is refused" "$proj" 'git push -q origin HEAD:"$BRANCH"' G3
+judge "a push to a variable with a default is refused" "$proj" 'git push -q origin HEAD:${B:-main}' G3
+judge "a push to branches in braces is refused" "$proj" 'git push -q origin HEAD:{task,main}' G3
+judge "a push to a remote held in a variable is refused" "$proj" 'R=origin; git push -q $R HEAD' G3
+judge "a plain push of HEAD still passes" "$proj" 'git push -q -u origin HEAD' allow
+# refusals name no word of the command that could hold a key
+CMD='git push -q origin HEAD:MAIN' CWD="$proj" perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({tool_name => "Bash", tool_input => {command => $ENV{CMD}}, cwd => $ENV{CWD}})' >"$work/in.json"
+err=$(cd "$proj" && CLAUDE_PROJECT_DIR="$proj" perl -e 'alarm 60; exec @ARGV' bash "$guard" <"$work/in.json" 2>&1 >/dev/null)
+case "$err" in *MAIN*) fail "a push refusal does not repeat the branch as written" "$err" ;; "guard G3: pushing to main is refused"*) pass "a push refusal does not repeat the branch as written (it says main)" ;; *) fail "a push to MAIN is refused" "$err" ;; esac
+tk="sec$(printf '%s' 'ret987')"
+CMD="git -chttp.extraheader=Authorization:$tk fetch origin" CWD="$proj" perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({tool_name => "Bash", tool_input => {command => $ENV{CMD}}, cwd => $ENV{CWD}})' >"$work/in.json"
+err=$(cd "$proj" && CLAUDE_PROJECT_DIR="$proj" perl -e 'alarm 60; exec @ARGV' bash "$guard" <"$work/in.json" 2>&1 >/dev/null)
+case "$err" in *"$tk"*) fail "an option's refusal names the option only, not its value" "$err" ;; "guard G3: "*) pass "an option's refusal names the option only, not its value" ;; *) fail "an attached -c is refused" "$err" ;; esac
+CMD="git Tok_$tk status" CWD="$proj" perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({tool_name => "Bash", tool_input => {command => $ENV{CMD}}, cwd => $ENV{CWD}})' >"$work/in.json"
+err=$(cd "$proj" && CLAUDE_PROJECT_DIR="$proj" perl -e 'alarm 60; exec @ARGV' bash "$guard" <"$work/in.json" 2>&1 >/dev/null)
+case "$err" in *"$tk"*) fail "an unknown subcommand is named only when it is a plain word" "$err" ;; "guard G3: "*) pass "an unknown subcommand is named only when it is a plain word" ;; *) fail "an unknown subcommand is refused" "$err" ;; esac
+# the list: honest reads in, a forced submodule update and a pull of
+# another branch out
+judge "git branch --merged passes" "$proj" 'git branch --merged' allow
+judge "git branch --no-merged passes" "$proj" 'git branch --no-merged' allow
+judge "git branch --merged with a commit passes" "$proj" 'git branch --merged origin/main' allow
+judge "git submodule update --force is refused (it drops a submodule's uncommitted work)" "$proj" 'git submodule update --init --force' G3
+judge "a pull of another branch by name is refused (only the branch's own upstream)" "$proj" 'git pull --ff-only origin other' G3
+judge "a pull from the branch's own remote passes" "$proj" 'git pull --ff-only origin' allow
+
 # --- the method's list itself ---
 got=$(perl -e 'require "$ARGV[0]/gitlist.pl"; open my $h, "<", $ARGV[1] or die; local $/; my ($s, $e) = GitList::parse(<$h>, "git-shapes.txt"); my @no = grep { $_->{reason} !~ /\S/ } @$s; print scalar(@$s), " shapes; ", scalar(@$e), " errors; ", scalar(@no), " without a reason"' "$lib" "$root/method/.claude/hooks/method/git-shapes.txt")
 case "$got" in *" shapes; 0 errors; 0 without a reason") pass "the method's git list reads, every shape with its reason ($got)" ;; *) fail "the method's git list reads, every shape with its reason" "$got" ;; esac

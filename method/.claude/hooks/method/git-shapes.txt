@@ -64,7 +64,7 @@ reflog show -* ARG... :: reads the reflog
 stash list -* ARG... :: reads the stash list
 stash show -* ARG... :: reads a stash
 submodule status -* ARG... :: reads the submodules
-submodule update -* !--remote ARG... :: checks out the submodules at the commits this repository records
+submodule update -* !--remote !--force !-f ARG... :: checks out the submodules at the commits this repository records; never with --force, which drops their uncommitted work
 submodule init -* ARG... :: registers the submodules
 submodule sync -* ARG... :: copies the submodules' addresses into their settings
 worktree list -* :: lists worktrees
@@ -81,6 +81,8 @@ config get -* ARG... :: reads a setting (git 2.46 and later); "git config list" 
 branch -a -r -v -vv --all --remotes --verbose --show-current --contains= --no-contains= --merged= --no-merged= --sort= --format= --points-at= --color= --no-color --column --no-column --abbrev= --no-abbrev -i --ignore-case :: lists branches
 branch +--list -a -r -v -vv --all --remotes --verbose --contains= --no-contains= --merged= --no-merged= --sort= --format= --points-at= --color= --no-color --column --no-column --abbrev= --no-abbrev -i --ignore-case ARG... :: lists branches (with --list nothing is created)
 branch +-l -a -r -v -vv --all --remotes --verbose --contains= --no-contains= --merged= --no-merged= --sort= --format= --points-at= --color= --no-color --column --no-column --abbrev= --no-abbrev -i --ignore-case ARG... :: lists branches (with -l nothing is created)
+branch +--merged -a -r -v -vv --all --remotes --verbose :: lists branches merged into HEAD
+branch +--no-merged -a -r -v -vv --all --remotes --verbose :: lists branches not merged into HEAD
 tag :: lists tags
 tag +-l -n -n: --contains= --no-contains= --merged= --no-merged= --points-at= --sort= --format= --column --no-column -i --ignore-case ARG... :: lists tags (with -l nothing is created)
 tag +--list -n -n: --contains= --no-contains= --merged= --no-merged= --points-at= --sort= --format= --column --no-column -i --ignore-case ARG... :: lists tags (with --list nothing is created)
@@ -113,7 +115,7 @@ worktree remove NAME :: removes a worktree with no uncommitted changes (git refu
 worktree prune -n --dry-run -v --verbose :: forgets worktrees whose folders are gone
 
 # Bringing in work.
-pull +--ff-only -q --quiet REMOTE? NAME? @off-main :: brings in commits pushed to this branch from elsewhere, only when nothing local is lost (fast-forward)
+pull +--ff-only -q --quiet REMOTE? @off-main :: brings in commits pushed to this branch from elsewhere, from its own upstream only and only when nothing local is lost (fast-forward); the guard checks the method's files against the upstream as last fetched
 fetch --prune -p --tags -t --unshallow --deepen= --depth= --shallow-since= REMOTE? :: fetches the remote's branches by its own settings: no refspec, not from a folder
 fetch --prune -p --tags -t --unshallow --deepen= --depth= --shallow-since= REMOTE REFNAME... :: fetches named branches of a remote into its own remote-tracking refs: no refspec, so nothing else moves (K4)
 merge --no-edit --ff-only MAIN @off-main :: brings the remote's main into a task branch

@@ -90,6 +90,10 @@ printf '{"theme": "dark", "env": {"FOO": "1"}, "permissions": {"deny": ["Bash(rm
 change "a plugin enabled is refused" s1 user_settings G16
 printf '{"theme": "dark", "env": {"FOO": "1"}, "permissions": {"deny": ["Bash(rm:*)"]}, "hooks": {"PreToolUse": []}}\n' >"$user"
 change "hooks added to the user settings are refused" s1 user_settings G16
+printf '{"theme": "dark", "env": {"FOO": "1"}, "permissions": {"deny": ["Bash(rm:*)"]}, "statusLine": {"type": "command", "command": "touch /tmp/x"}}\n' >"$user"
+change "a statusLine added to the user settings is refused (it runs a program outside the hooks)" s1 user_settings G16
+printf '{"theme": "dark", "env": {"FOO": "1"}, "permissions": {"deny": ["Bash(rm:*)"]}, "apiKeyHelper": "/tmp/x"}\n' >"$user"
+change "an apiKeyHelper added to the user settings is refused" s1 user_settings G16
 printf '{"theme": "dark", "env": {"FOO": "1"}, "permissions": {"deny": ["Bash(rm:*)"]}}\n' >"$user"
 printf '{"theme": "light", "disableAllHooks": true}\n' >"$local_s"
 change "disableAllHooks in the local settings is refused" s1 local_settings G16
@@ -189,9 +193,9 @@ for e in command perl noexec; do
 }' ;;
     noexec) var='SHELLOPTS=noexec' ;;
   esac
-  (cd "$proj" && env "$var" CLAUDE_PROJECT_DIR="$proj" bash -p "$guard" <"$work/in.json" >/dev/null 2>&1)
+  (cd "$proj" && perl -e 'alarm 60; exec @ARGV' env "$var" CLAUDE_PROJECT_DIR="$proj" bash -p "$guard" <"$work/in.json" >/dev/null 2>&1)
   c=$?
-  (cd "$proj" && env "$var" CLAUDE_PROJECT_DIR="$proj" bash "$guard" <"$work/in.json" >/dev/null 2>&1)
+  (cd "$proj" && perl -e 'alarm 60; exec @ARGV' env "$var" CLAUDE_PROJECT_DIR="$proj" bash "$guard" <"$work/in.json" >/dev/null 2>&1)
   cc=$?
   if [ "$c" -eq 2 ] && { [ "$e" = perl ] || [ "$cc" -ne 2 ]; }; then
     pass "bash -p: with $e set in the environment the guard still refuses a Write to the settings (as plain bash: exit $cc)"

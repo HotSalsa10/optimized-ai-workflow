@@ -88,6 +88,55 @@ make_sandbox() {
   printf '%s\n' "$dir"
 }
 
+# plant_data DATA TEST: the planted breaks in the file DATA, each in a
+# throwaway copy (make_sandbox); each must turn TEST red with a FAIL line
+# that starts with its stated reason. DATA holds blocks: a line
+# "=== NAME | FILE | REASON", the text OLD (FILE must hold it exactly
+# once), a line "---", the text NEW. PLANT_SHARD=K/N runs every Nth block
+# from the Kth (0-based), so copies can run side by side.
+plant_data() {
+  pd_data=$1
+  pd_test=$2
+  # shellcheck disable=SC2016 # perl code, expanded by perl
+  pd_n=$(perl -e 'local $/; my $t = <>; my @b = $t =~ /^=== /mg; print scalar @b' "$pd_data") || return 1
+  # shellcheck disable=SC2016 # perl code, expanded by perl
+  pd_prog='
+      local $/; my $t = <>; my @b = grep { length } split /^=== /m, $t;
+      my ($name, $file, $reason, $old, $new) = $b[$ENV{K}] =~ /\A(.*?) \| (\S+) \| (.*?)\n(.*?)\n---\n(.*?)\n?\z/s or die "block $ENV{K} cannot be read\n";
+      print "$name\n$reason\n";
+      open my $h, "<", "$ENV{SB}/$file" or die "no $file\n"; my $src = <$h>; close $h;
+      my $i = index($src, $old);
+      if ($i < 0 || index($src, $old, $i + 1) >= 0) { print "NOT APPLIED\n"; exit 0 }
+      substr($src, $i, length $old) = $new;
+      open $h, ">", "$ENV{SB}/$file" or die; print $h $src; close $h;
+      print "APPLIED\n";'
+  pd_k=0
+  while [ "$pd_k" -lt "$pd_n" ]; do
+    case "${PLANT_SHARD:-}" in
+      */*) if [ $((pd_k % ${PLANT_SHARD#*/})) -ne "${PLANT_SHARD%/*}" ]; then pd_k=$((pd_k + 1)); continue; fi ;;
+    esac
+    pd_sb=$(make_sandbox) || abort_sandbox
+    pd_info=$(K="$pd_k" SB="$pd_sb" perl -e "$pd_prog" "$pd_data") || { fail "plant $pd_k: its data cannot be read"; drop_sandbox "$pd_sb" || true; pd_k=$((pd_k + 1)); continue; }
+    pd_name=$(printf '%s\n' "$pd_info" | sed -n 1p)
+    pd_reason=$(printf '%s\n' "$pd_info" | sed -n 2p)
+    if [ "$(printf '%s\n' "$pd_info" | sed -n 3p)" != APPLIED ]; then
+      fail "$pd_name: the plant did not apply, so the check result would mean nothing"
+    else
+      pd_got=$(cd "$pd_sb" && bash "$pd_test" 2>&1)
+      pd_rc=$?
+      if [ "$pd_rc" -eq 0 ]; then
+        fail "$pd_name: the test stayed green" "$(printf '%s\n' "$pd_got" | tail -2)"
+      elif ! printf '%s\n' "$pd_got" | grep -F -q -- "FAIL  $pd_reason"; then
+        fail "$pd_name: went red, but not for the stated reason ('$pd_reason')" "$(printf '%s\n' "$pd_got" | grep FAIL | head -3)"
+      else
+        pass "$pd_name"
+      fi
+    fi
+    drop_sandbox "$pd_sb" || true
+    pd_k=$((pd_k + 1))
+  done
+}
+
 # drop_sandbox DIR: removes a sandbox made above, and refuses anything else.
 drop_sandbox() {
   case "$1" in

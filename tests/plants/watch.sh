@@ -40,10 +40,11 @@ plant() {
 }
 
 # --- G16 ---
-plant "env dropped from the keys compared" "any change to an env value is refused" watch.pl 'for my $k (qw(env hooks disableAllHooks enabledPlugins)) {' 'for my $k (qw(hooks disableAllHooks enabledPlugins)) {'
-plant "hooks dropped from the keys compared" "hooks added to the user settings are refused" watch.pl 'for my $k (qw(env hooks disableAllHooks enabledPlugins)) {' 'for my $k (qw(env disableAllHooks enabledPlugins)) {'
-plant "disableAllHooks dropped from the keys compared" "disableAllHooks in the local settings is refused" watch.pl 'for my $k (qw(env hooks disableAllHooks enabledPlugins)) {' 'for my $k (qw(env hooks enabledPlugins)) {'
-plant "enabledPlugins dropped from the keys compared" "a plugin enabled is refused" watch.pl 'for my $k (qw(env hooks disableAllHooks enabledPlugins)) {' 'for my $k (qw(env hooks disableAllHooks)) {'
+plant "env dropped from the keys compared" "any change to an env value is refused" watch.pl 'for my $k (qw(env hooks disableAllHooks enabledPlugins), @RUNS) {' 'for my $k (qw(hooks disableAllHooks enabledPlugins), @RUNS) {'
+plant "hooks dropped from the keys compared" "hooks added to the user settings are refused" watch.pl 'for my $k (qw(env hooks disableAllHooks enabledPlugins), @RUNS) {' 'for my $k (qw(env disableAllHooks enabledPlugins), @RUNS) {'
+plant "disableAllHooks dropped from the keys compared" "disableAllHooks in the local settings is refused" watch.pl 'for my $k (qw(env hooks disableAllHooks enabledPlugins), @RUNS) {' 'for my $k (qw(env hooks enabledPlugins), @RUNS) {'
+plant "enabledPlugins dropped from the keys compared" "a plugin enabled is refused" watch.pl 'for my $k (qw(env hooks disableAllHooks enabledPlugins), @RUNS) {' 'for my $k (qw(env hooks disableAllHooks), @RUNS) {'
+plant "the settings that run a program not compared" "a statusLine added to the user settings is refused" watch.pl 'for my $k (qw(env hooks disableAllHooks enabledPlugins), @RUNS) {' 'for my $k (qw(env hooks disableAllHooks enabledPlugins)) {'
 plant "a removed deny entry not seen" "a permissions.deny entry removed is refused" watch.pl "push @why, 'a permissions.deny entry removed' if" "push @why, 'a permissions.deny entry removed' if 0 &&"
 plant "skill shell lines turned on not seen" "skill shell lines turned on in the local settings is refused" watch.pl "push @why, 'disableSkillShellExecution turned off' if is_false(\$now->{disableSkillShellExecution}) && !is_false(\$snap->{disableSkillShellExecution});" ''
 plant "the project's settings let change" "any change to the project's settings is refused" watch.pl "if \$src eq 'project_settings';" "if 0;"

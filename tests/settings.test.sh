@@ -71,7 +71,7 @@ my %want = (
   # every server name (5.8, M139: holds with the hooks off); nothing else
   # under permissions, as one of the wrong shape makes the client skip the
   # whole file
-  permissions => [obj => { deny => [list => [map { "mcp__*__$_" } qw(merge_pull_request enable_pr_auto_merge create_session send_message create_trigger fire_trigger update_trigger unarchive_session)]] }],
+  permissions => [obj => { deny => [list => [(map { "mcp__*__$_" } qw(merge_pull_request enable_pr_auto_merge create_session send_message create_trigger fire_trigger update_trigger unarchive_session)), "RemoteTrigger"]] }],
 );
 # hooks are checked below (from 5.4)
 my %later = (hooks => 'hooks (from 5.4)');
@@ -196,7 +196,7 @@ if (!defined $hooks) {
   # the entries the plan registers so far (section 6.4): EVENT, MATCHER
   # (undef: none, every source), SCRIPT, TIMEOUT (seconds)
   my @registered = (['SessionStart', undef, 'session-status', 30],
-    ['PreToolUse', 'Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|ExitWorktree|SendMessage|Skill|Agent|Task', 'guard', 30],
+    ['PreToolUse', 'Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|ExitWorktree|SendMessage|Skill|Agent|Task|RemoteTrigger', 'guard', 30],
     ['PreToolUse', '^mcp__', 'guard', 30],
     ['ConfigChange', 'user_settings|project_settings|local_settings', 'guard', 30]);
   for my $r (@registered) {

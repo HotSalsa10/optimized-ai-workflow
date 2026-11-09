@@ -236,6 +236,40 @@ judge "cd reads .. as written, before the link (as bash does)" "$proj" 'cd lnk/.
 rm -f "$proj/lnk"
 tool "NotebookEdit is judged by both its path fields" NotebookEdit "{\"file_path\":$(jstr "$proj/notes.ipynb"),\"notebook_path\":$(jstr "$proj/.claude/settings.json"),\"new_source\":\"x\"}" G6
 tool "an MCP tool given a file:// address of a protected path is refused" mcp__fs__write_file "{\"path\":$(jstr "file://$proj/.claude/settings.json"),\"content\":\"x\"}" G6
+# --- the final review of step 5 ---
+# after a cd that may have failed, a write is judged from both folders
+for c in "cd .claude/hooks/method; echo 'exit 0' > guard.sh" 'cd .claude || exit 1; echo "{}" > settings.local.json' \
+  'pushd .claude; echo x > settings.local.json' 'cd ~/.claude; echo "{}" > settings.json' 'if cd .claude; then echo x > settings.local.json; fi' \
+  'cd .claude/hooks; rm -rf method' 'cd .git/hooks; cp ../../notes.txt pre-commit'; do
+  judge "a write after a cd that may have failed is judged from the cd's folder too: $c" "$proj" "$c" G6
+done
+judge "a write after a cd on its own line is judged from the cd's folder too" "$proj" 'cd .git/hooks
+cat > pre-commit <<EOF
+exit 0
+EOF' G6
+for c in 'cd build; echo x > out.txt' 'cd sub; rm -rf ../build' 'cd src || exit 1; echo x > app.log'; do
+  judge "an ordinary write after a cd passes: $c" "$proj" "$c" allow
+done
+# a for loop's header names the paths its loop writes
+for c in 'for d in .claude/hooks/method scripts/method; do rm -rf "$d"; done' 'for f in scripts/method/*.sh; do sed -i "s/a/b/" "$f"; done' \
+  'for f in .claude/settings.json; do echo x > "$f"; done'; do
+  judge "a loop over protected paths that writes is refused: $c" "$proj" "$c" G6
+done
+for c in 'for f in src/*.py; do sed -i "s/a/b/" "$f"; done' 'for f in .claude/settings.json scripts/method/status.sh; do cat "$f"; done'; do
+  judge "a loop that writes elsewhere, or only reads, passes: $c" "$proj" "$c" allow
+done
+# xargs writing on what a recursive listing found
+for c in "grep -rl master . | xargs sed -i 's/master/main/g'" "git grep -l master | xargs sed -i 's/x/y/'" "find . -name '*.log' | xargs rm" \
+  "rg -l old | xargs sed -i 's/old/new/'"; do
+  judge "a bulk edit by xargs from the project's top is refused, as find -exec is: $c" "$proj" "$c" G6
+done
+for c in "grep -rl master src | xargs sed -i 's/x/y/'" "grep -rl x . | xargs grep -n y" "find build -name '*.log' | xargs rm"; do
+  judge "a bulk edit in a subfolder, or a bulk read, passes: $c" "$proj" "$c" allow
+done
+# git pull --ff-only is checked against the branch's upstream
+(cd "$proj" && git push -q origin evil && git fetch -q origin && git switch -q -c track task && git branch -q -u origin/evil) || fail "setup: a branch that tracks the evil one"
+judge "a pull whose upstream changed the guard is refused" "$proj" 'git pull --ff-only' G6
+(cd "$proj" && git switch -q task && git branch -q -D track) || fail "setup: back to the task branch"
 # the text forms an interpreter's code is searched for
 cat >"$work/forms.txt" <<'TEXT'
 open(os.path.expanduser('~/.claude/skills/x/SKILL.md'), 'w')

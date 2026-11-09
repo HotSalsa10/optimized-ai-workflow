@@ -29,7 +29,8 @@
       "mcp__*__create_trigger",
       "mcp__*__fire_trigger",
       "mcp__*__update_trigger",
-      "mcp__*__unarchive_session"
+      "mcp__*__unarchive_session",
+      "RemoteTrigger"
     ]
   },
   "hooks": {
@@ -59,7 +60,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|ExitWorktree|SendMessage|Skill|Agent|Task",
+        "matcher": "Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|ExitWorktree|SendMessage|Skill|Agent|Task|RemoteTrigger",
         "hooks": [
           {
             "type": "command",

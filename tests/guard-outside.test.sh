@@ -113,6 +113,14 @@ run_case allow "Claude Code's gh pr create form, without --head, passes once the
 run_case G4 "gh pr create without --head is refused while the branch has commits its upstream lacks" x "$(bash_json "$pr_form")"
 run_case allow "gh pr create --head passes whatever the upstream holds" x "$(bash_json 'gh pr create --head task --title x --body y')"
 
+# --- the final review of step 5 ---
+run_case G4 "RemoteTrigger, which schedules remote agents, is refused" x "$(perl -MJSON::PP -e 'print JSON::PP->new->encode({tool_name => "RemoteTrigger", tool_input => {action => "create", prompt => "x"}, cwd => $ARGV[0]})' "$proj")"
+run_case G4 "an agent in a remote sandbox (isolation remote) is refused" x "$(perl -MJSON::PP -e 'print JSON::PP->new->encode({tool_name => "Agent", tool_input => {description => "x", prompt => "x", subagent_type => "general-purpose", isolation => "remote"}, cwd => $ARGV[0]})' "$proj")"
+run_case G4 "the same through Task is refused" x "$(perl -MJSON::PP -e 'print JSON::PP->new->encode({tool_name => "Task", tool_input => {description => "x", prompt => "x", subagent_type => "general-purpose", isolation => "remote"}, cwd => $ARGV[0]})' "$proj")"
+run_case allow "an agent in a worktree (isolation worktree) passes" x "$(perl -MJSON::PP -e 'print JSON::PP->new->encode({tool_name => "Agent", tool_input => {description => "x", prompt => "x", subagent_type => "general-purpose", isolation => "worktree"}, cwd => $ARGV[0]})' "$proj")"
+run_case G4 "an MCP write tool with no branch field is refused (a server may then write to the default branch)" x "$(perl -MJSON::PP -e 'print JSON::PP->new->encode({tool_name => "mcp__github__create_or_update_file", tool_input => {owner => "example-owner", repo => "example-repo", path => "a.txt", content => "x", message => "m", sha => "0"}, cwd => $ARGV[0]})' "$proj")"
+run_case G4 "an MCP write tool with an empty branch field is refused" x "$(perl -MJSON::PP -e 'print JSON::PP->new->encode({tool_name => "mcp__github__push_files", tool_input => {owner => "example-owner", repo => "example-repo", branch => "", files => [], message => "m"}, cwd => $ARGV[0]})' "$proj")"
+
 drop_sandbox "$work" || true
 echo "tests: guard (outside): $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]

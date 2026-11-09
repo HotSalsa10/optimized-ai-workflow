@@ -308,6 +308,13 @@ case "$dl" in
   *) fail "a deadline caught inside a settings read still ends the perl part, and says so" "$dl" ;;
 esac
 rm -f "$p/.claude/settings.local.json"
+# G16's snapshot runs inside the deadline too: one that hangs (a git call
+# that blocks) cannot hold the hook (final review of step 5)
+dl=$(cd "$p" && printf '{"hook_event_name":"SessionStart","source":"startup","session_id":"s1"}' | LIBDIR="$root/method/scripts/method/lib" CLAUDE_PROJECT_DIR="$p" perl -e 'require "$ENV{LIBDIR}/session.pl"; require "$ENV{LIBDIR}/watch.pl"; no warnings "redefine"; *Session::status_lines = sub { () }; *Watch::snapshot = sub { sleep 5; 1 }; $Session::DEADLINE = 1; my $t = time; Session::main(); print STDERR "took ", time - $t, "\n"' 2>&1)
+case "$dl" in
+  *"ran out of time (1 s)"*) case "$dl" in *"took "[12]*) pass "a snapshot that hangs is cut off at the deadline, with a line saying so" ;; *) fail "a snapshot that hangs is cut off at the deadline" "$dl" ;; esac ;;
+  *) fail "a snapshot that hangs is cut off at the deadline" "$dl" ;;
+esac
 has "missing scripts still leave METHOD-ACTIVE and say so, in a line that holds no path" "METHOD-ACTIVE vunreleased" "the method's scripts are missing (scripts/method/lib); run the method's sync"
 # a lone surrogate escape, which Claude Code reads, is read too: the env
 # name is shown, not "is not JSON"

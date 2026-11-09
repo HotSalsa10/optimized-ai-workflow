@@ -16,7 +16,9 @@
 #     assigns  the leading NAME=VALUE assignments (after quote removal);
 #              assigns_raw the same as written
 #     header   a for or select header's words as written (on its "for"
-#              command, kept when they cannot be read)
+#              command when they cannot be read; otherwise on a command
+#              with no words of its own); header_text the same after
+#              quote removal
 #     redirs   [OP, TARGET] for each redirection (TARGET after quote removal)
 #     piped    1 when the command's input comes from a pipe
 #     heredoc  1 when it reads a here-document or here-string
@@ -756,6 +758,9 @@ sub commands {
         $header = 0;
         # (its words are kept as written, so what they run is judged)
         if (@{ $cur->{unread} }) { $cur->{words} = ['for']; $cur->{raw} = ['for', @{ $cur->{header} || [] }]; push @cmds, $cur }
+        # (a readable header is kept too, as a command with no words, so
+        # G6 sees the paths the loop works on; final review of step 5)
+        elsif (@{ $cur->{header} || [] }) { push @cmds, $cur }
         $new->();
         next;
       }
@@ -781,7 +786,7 @@ sub commands {
     }
     if ($header) {
       if ($w->{text} eq 'do' && !$w->{flags}{quoted}) { $header = 0 }
-      else { push @{ $cur->{unread} }, 'command substitution or backticks' if $w->{flags}{subst}; $take_subs->($w); push @{ $cur->{header} }, $w->{raw}; next }
+      else { push @{ $cur->{unread} }, 'command substitution or backticks' if $w->{flags}{subst}; $take_subs->($w); push @{ $cur->{header} }, $w->{raw}; push @{ $cur->{header_text} }, $w->{text}; next }
     }
     # leading keywords and assignments
     if (!@{ $cur->{words} }) {

@@ -140,7 +140,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M132 | Claude only reads the method's installed files, its settings and git's own config and hooks; it never writes them | research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | done |
 | M133 | No commit while a mutation run or its journal exists | research: decision A41 | method/.claude/hooks/method/guard.sh | done |
 | M134 | Effort below xhigh is announced at a session's first tool call | research: decision A3 | method/.claude/hooks/method/guard.sh | done |
-| M135 | Secrets, personal data and Claude attribution are stopped before they leave the machine: a push, gh text and MCP writes are scanned | incident | method/.claude/hooks/method/guard.sh | step 5 |
+| M135 | Secrets, personal data and Claude attribution are stopped before they leave the machine: a push, gh text and MCP writes are scanned | incident | method/.claude/hooks/method/guard.sh | R2 |
 | M136 | A settings change that switches off or weakens the hooks is refused mid-session | research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | done |
 | M137 | A skill or agent that declares its own hooks is refused (the method's own declare none) | research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | done |
 | M138 | Skills run no inline shell lines in method projects | research: measured, step 5 plan | method/settings.fragment.json @disableSkillShellExecution | done |

@@ -60,6 +60,7 @@ git log' 'git commit -F -||
 git log||'
 reads "if, for and while are read through to their commands" 'if git diff --quiet; then echo same; fi; for f in a b; do git add "$f"; done' 'git diff --quiet||
 echo same||
+||
 git add $f||'
 reads "command substitution and backticks cannot be read, and what they run is read as commands of their own, first" 'echo $(git rev-parse HEAD); echo `date`' 'git rev-parse HEAD|substitution|
 echo $(git rev-parse HEAD)||command substitution or backticks
@@ -202,7 +203,8 @@ done <"$work/round3-ok.txt"
 }
 # more substitutions than the guard reads in its time, next to git
 judge "more substitutions than the guard reads, next to git, are refused whole" "$(bash_call "$(perl -e 'print "echo ", "\$(true) " x 70, "; git status"')")" G0
-reads "for (( )) is arithmetic, and the loop's body is read" 'for ((i=0; i<2; i++)); do git status; done' 'git status||'
+reads "for (( )) is arithmetic, and the loop's body is read" 'for ((i=0; i<2; i++)); do git status; done' '||
+git status||'
 # the reader reads what a substitution inside arithmetic, and a backtick
 # inside backticks, runs (so a hidden command word there is judged)
 reads "a substitution inside arithmetic is read as a command" 'echo $(( $(wc -l < f) + 1 ))' 'wc -l|substitution|

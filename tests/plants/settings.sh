@@ -76,6 +76,8 @@ for t in merge_pull_request enable_pr_auto_merge create_session send_message cre
   plant "the deny entry for $t dropped" "$frag" "permissions.deny is not exactly" "\$d->{permissions}{deny} = [grep { \$_ ne 'mcp__*__$t' } @{ \$d->{permissions}{deny} }]"
 done
 plant "the merge tool denied on one server name only" "$frag" "permissions.deny is not exactly" '$_ = "mcp__github__merge_pull_request" for grep { $_ eq "mcp__*__merge_pull_request" } @{ $d->{permissions}{deny} }'
+plant "the RemoteTrigger deny entry dropped" "$frag" "permissions.deny is not exactly" '$d->{permissions}{deny} = [grep { $_ ne "RemoteTrigger" } @{ $d->{permissions}{deny} }]'
+plant "RemoteTrigger left out of the guard's matcher" "$frag" "it is not registered so" '$_->{matcher} =~ s/\|RemoteTrigger// for @{ $d->{hooks}{PreToolUse} }'
 plant "an env variable the plan does not set" "$frag" "env has keys the plan does not set: EXTRA_X" '$d->{env}{EXTRA_X} = "1"'
 plant "a second model allowed" "$frag" "availableModels is not exactly" '$d->{availableModels} = ["claude-opus-5-5", "claude-sonnet-5-5"]'
 plant "this repo's settings turn auto memory on" .claude/settings.json "they differ on: autoMemoryEnabled" '$d->{autoMemoryEnabled} = JSON::PP::true()'
@@ -96,7 +98,7 @@ plant "session-status with a 1 s time limit" "$frag" "its timeout is 1" '$d->{ho
 plant "session-status with no time limit" "$frag" "its timeout is not set" 'delete $d->{hooks}{SessionStart}[0]{hooks}[0]{timeout}'
 plant "session-status's time limit written as a string (the client drops the hook: METHOD-ACTIVE never arrives)" "$frag" 'its timeout is "30"' '$d->{hooks}{SessionStart}[0]{hooks}[0]{timeout} = "30"'
 plant "the guard on outside tools with a 600 s time limit" "$frag" "FAIL  guard.sh on PreToolUse for ^mcp__ has a 30 s time limit" '$d->{hooks}{PreToolUse}[1]{hooks}[0]{timeout} = 600'
-plant "the guard on the built-in tools with no time limit" "$frag" "Task has a 30 s time limit" 'delete $d->{hooks}{PreToolUse}[0]{hooks}[0]{timeout}'
+plant "the guard on the built-in tools with no time limit" "$frag" "RemoteTrigger has a 30 s time limit" 'delete $d->{hooks}{PreToolUse}[0]{hooks}[0]{timeout}'
 plant "the guard without onFailure block" "$frag" 'no onFailure "block" on PreToolUse' '$d->{hooks}{PreToolUse} = [{matcher => "Bash", hooks => [{type => "command", command => $ENV{OK_HOOK}}]}]'
 plant "a stray .sh in the hooks folder" method/settings.fragment.json "also extra.sh" 'open my $x, ">", "method/.claude/hooks/method/extra.sh" or die'
 

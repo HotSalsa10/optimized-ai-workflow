@@ -508,7 +508,9 @@ sub push_rule {
   }
   $dst =~ s{\A(?:refs/)?heads/}{};
   return "this push's destination is not a branch; $form" if $dst =~ m{\Arefs/} || $dst eq '' || $dst =~ /\A-/;
-  return "pushing to $dst is refused: the owner merges into main on GitHub (until review receipts exist, step 6); push your task branch instead"
+  # (refusals name no word of the push, the branch included; final review
+  # of step 5)
+  return "pushing to main is refused: the owner merges into main on GitHub (until review receipts exist, step 6); push your task branch instead"
     if main_names($dir)->{ lc $dst };
   my ($st, $out) = git_at($dir, 'config', '--get-regexp', '^remote\..*\.(push|mirror)$');
   return 'a remote.*.push or remote.*.mirror setting would change where this push goes; the owner must remove it first' if $st == 0 && $out ne '';
@@ -532,13 +534,46 @@ sub push_rule {
   return ();
 }
 
+# cd_to C HERE: the folder the cd or pushd C leads to from HERE, or undef
+# where it cannot be told (a folder in a variable or a glob, cd -, ~user,
+# a CDPATH, pushd alone); cd reads .. in the path as written, before any
+# link, unless -P (5.7 repair loop 1)
+sub cd_to {
+  my ($c, $here) = @_;
+  my @w = @{ $c->{words} };
+  my ($to) = grep { !/\A-/ } @w[1 .. $#w];
+  my ($raw) = grep { !/\A-/ } @{ $c->{raw} }[1 .. $#{ $c->{raw} }];
+  my $d;
+  if ((grep { $_ eq '-' } @w[1 .. $#w]) || (defined $to && $to =~ /\A~[^\/]/) || (defined $to && $to !~ m{\A[/.~]} && ($ENV{CDPATH} // '') ne '')) { return undef }
+  elsif (!defined $to) { return $w[0] eq 'pushd' ? undef : $ENV{HOME} }
+  elsif (defined $raw && $raw =~ /[\$`*?\[]/) { return undef }
+  elsif (!defined $here) { return undef unless $to =~ m{\A/}; $d = $to }
+  else { $to =~ s{\A~(?=/|\z)}{$ENV{HOME} // '~'}e; $d = File::Spec->rel2abs($to, $here) }
+  if (!grep { /\A-[A-Za-z]*P/ } @w[1 .. $#w]) {
+    my @p;
+    for my $part (split m{/+}, $d) {
+      next if $part eq '' || $part eq '.';
+      if ($part eq '..') { pop @p } else { push @p, $part }
+    }
+    $d = '/' . join('/', @p);
+  }
+  return $d;
+}
+
+# is C a cd or pushd that moves its shell (not piped, not in the background)?
+sub is_cd {
+  my ($c) = @_;
+  my @w = @{ $c->{words} };
+  return @w && ($w[0] eq 'cd' || $w[0] eq 'pushd') && !$c->{piped} && !$c->{to_pipe} && !$c->{bg};
+}
+
 # cmd_dirs CMDS START: the folder each command runs in, followed from START
 # through cd, pushd and popd in each scope (lib/shell.pl: a subshell or a
-# new process has its own), or undef where it cannot be told (a folder in a
-# variable, after popd, cd -, ~user, a CDPATH, and after a cd that the next
-# command does not depend on: not followed by &&, so it may have failed and
-# left the folder as it was; 5.6 repair loop 1). Where it cannot be told,
-# G3 judges git as this repository and G6 judges from the project's top.
+# new process has its own), or undef where it cannot be told (cd_to's
+# cases, after popd, and after a cd that the next command does not depend
+# on: not followed by &&, so it may have failed and left the folder as it
+# was; 5.6 repair loop 1). Where it cannot be told, G3 judges git as this
+# repository (the strict side for git).
 sub cmd_dirs {
   my ($cmds, $start) = @_;
   my %dir;    # scope => folder, or undef when it cannot be told
@@ -556,24 +591,8 @@ sub cmd_dirs {
     my $here = $dir_of->($scope);
     push @out, $here;
     next unless @w;
-    if (($w[0] eq 'cd' || $w[0] eq 'pushd') && !$c->{piped} && !$c->{to_pipe} && !$c->{bg}) {
-      my ($to) = grep { !/\A-/ } @w[1 .. $#w];
-      my ($raw) = grep { !/\A-/ } @{ $c->{raw} }[1 .. $#{ $c->{raw} }];
-      if ((grep { $_ eq '-' } @w[1 .. $#w]) || (defined $to && $to =~ /\A~[^\/]/) || (defined $to && $to !~ m{\A[/.~]} && ($ENV{CDPATH} // '') ne '')) { $dir{$scope} = undef }
-      elsif (!defined $to) { $dir{$scope} = $w[0] eq 'pushd' ? undef : $ENV{HOME} }
-      elsif (defined $raw && $raw =~ /[\$`*?\[]/) { $dir{$scope} = undef }
-      elsif (!defined $here) { $dir{$scope} = $to =~ m{\A/} ? $to : undef }
-      else { $to =~ s{\A~(?=/|\z)}{$ENV{HOME} // '~'}e; $dir{$scope} = File::Spec->rel2abs($to, $here) }
-      # (cd reads .. in the path as written, before any link, unless -P;
-      # 5.7 repair loop 1)
-      if (defined $dir{$scope} && !grep { /\A-[A-Za-z]*P/ } @w[1 .. $#w]) {
-        my @p;
-        for my $part (split m{/+}, $dir{$scope}) {
-          next if $part eq '' || $part eq '.';
-          if ($part eq '..') { pop @p } else { push @p, $part }
-        }
-        $dir{$scope} = '/' . join('/', @p);
-      }
+    if (is_cd($c)) {
+      $dir{$scope} = cd_to($c, $here);
       # (a cd the next command does not depend on may have failed)
       $dir{$scope} = undef unless ($c->{next_op} // '') eq '&&';
     } elsif ($w[0] eq 'popd') {
@@ -581,6 +600,46 @@ sub cmd_dirs {
     }
   }
   undef $dir_of;
+  return @out;
+}
+
+# cmd_dir_sets CMDS START: for each command, every folder it may run in
+# (undef among them where one cannot be told). For G6 a single guess is the
+# lenient side: after a cd that may have failed, the write is judged from
+# both the cd's folder and the folder before it (final review of step 5;
+# A69). At most 16 folders per scope are kept.
+sub cmd_dir_sets {
+  my ($cmds, $start) = @_;
+  my %set;    # scope => [folders]
+  my $set_of;
+  $set_of = sub {
+    my ($s) = @_;
+    return $set{$s} if exists $set{$s};
+    (my $p = $s) =~ s{/[^/]*\z}{};
+    return $set{$s} = $p eq $s ? [$start] : [@{ $set_of->($p) }];
+  };
+  my @out;
+  for my $c (@$cmds) {
+    my @w = @{ $c->{words} };
+    my $scope = defined $c->{scope} ? $c->{scope} : 't';
+    my $here = $set_of->($scope);
+    push @out, [@$here];
+    next unless @w;
+    my @next;
+    if (is_cd($c)) {
+      @next = map { cd_to($c, $_) } @$here;
+      push @next, @$here unless ($c->{next_op} // '') eq '&&';
+    } elsif ($w[0] eq 'popd') {
+      @next = (@$here, undef);
+    } else {
+      next;
+    }
+    my %seen;
+    @next = grep { !$seen{ defined $_ ? "d:$_" : 'u' }++ } @next;
+    splice @next, 16 if @next > 16;
+    $set{$scope} = \@next;
+  }
+  undef $set_of;
   return @out;
 }
 
@@ -639,7 +698,9 @@ sub judge_git {
       }
       if ($o =~ /\A--(?:version|help)\z|\A-h\z/) { $i = -1; last }
       if ($o =~ /\A(?:--no-pager|-P|--no-optional-locks|--no-replace-objects|--literal-pathspecs)\z/) { $i++; next }
-      return ('G3', "git's option $o is refused (it can point git at another repository or settings); not on the method's git list, and the owner can add a shape to .claude/method-local/git-shapes.txt");
+      # (an option is named only by its name; what follows it may be a key)
+      my $on = $o =~ /\A(--?[A-Za-z][A-Za-z-]{0,30})/ ? $1 : 'this option';
+      return ('G3', "git's option $on is refused (it can point git at another repository or settings); not on the method's git list, and the owner can add a shape to .claude/method-local/git-shapes.txt");
     }
     next if $i < 0;    # git --version, git --help
     my @rest = @w[$i .. $#w];
@@ -662,6 +723,14 @@ sub judge_git {
       return ('G3', "git -c with that setting is refused (it can run a program or change where git writes); only core.quotepath, color.*, user.name, user.email and commit.gpgsign may be set with -c");
     }
     if ($sub eq 'push') {
+      # (a remote or branch named through a variable, a substitution, a
+      # glob or braces: where the push goes cannot be told; final review of
+      # step 5)
+      my @r = @{ $c->{raw} || [] };
+      my ($pi) = grep { ($c->{words}[$_] // '') eq 'push' } 1 .. $#r;
+      if (defined $pi && grep { /[\$`*?\[{]/ } @r[ $pi + 1 .. $#r ]) {
+        return ('G3', 'this push names its remote or branch through a variable, a substitution, a glob or braces, so where it goes cannot be told; write it out: git push [-q] [-u] <remote> HEAD, or HEAD:<branch>');
+      }
       my ($why) = push_rule($tdir, [@rest[1 .. $#rest]], $is_session ? 1 : 0, $session, $c, $cmds);
       # (only a push to main has no allowed form to rewrite it in)
       return ('G3', $why =~ /\Apushing to / ? "$why. Do not try another form of the same push; tell the owner what you needed" : "$why.") if $why;
@@ -687,9 +756,10 @@ sub judge_git {
       return ('G3', 'switching branches while tracked files have uncommitted changes is refused; commit them first') if $why eq 'clean';
       return ('G3', 'merging into main here is refused; switch to your task branch, or let the owner merge on GitHub') if $why eq 'off-main';
       my $var = defined $d ? '' : ' (the folder it runs in is held in a variable, so it was judged as this project\'s repository; if it is a scratch folder, write its path out)';
-      return ('G3', "\"git $sub\" in this form is not on the method's git list$var; the owner can add a shape to .claude/method-local/git-shapes.txt. Do not try another form of the same command; tell the owner what you needed");
+      my $shown = $sub =~ /\A[a-z][a-z0-9-]{0,40}\z/ ? "\"git $sub\"" : 'this git command';
+      return ('G3', "$shown in this form is not on the method's git list$var; the owner can add a shape to .claude/method-local/git-shapes.txt. Do not try another form of the same command; tell the owner what you needed");
     }
-    if ($sub =~ /\A(?:switch|checkout|merge|cherry-pick|revert|worktree)\z/) {
+    if ($sub =~ /\A(?:switch|checkout|merge|cherry-pick|revert|worktree|pull)\z/) {
       my @v = Protect::git_versions($tdir, $sub, \@rest, $project);
       return @v if @v;
     }
@@ -789,7 +859,7 @@ sub main {
     my ($rule, $text) = judge_command($text0, \@cmds, $joined);
     ($rule, $text) = judge_git(\@cmds, $in) unless $rule;
     ($rule, $text) = Outside::judge_bash(\@cmds, $project, [cmd_dirs(\@cmds, defined $start ? $start : '.')]) unless $rule;
-    ($rule, $text) = Protect::judge_bash(\@cmds, [cmd_dirs(\@cmds, defined $start ? $start : '.')], $project) unless $rule;
+    ($rule, $text) = Protect::judge_bash(\@cmds, [cmd_dir_sets(\@cmds, defined $start ? $start : '.')], $project) unless $rule;
     return refuse($rule, $text, $tool, $raw, $in) if $rule;
   }
   if ($tool =~ /\A(?:Edit|Write|MultiEdit|NotebookEdit)\z/) {
@@ -811,6 +881,15 @@ sub main {
   }
   if ($tool eq 'ExitWorktree' && ref $input eq 'HASH' && $input->{discard_changes}) {
     return refuse('G3', 'leaving a worktree with discard_changes would delete its uncommitted work; commit it first, or keep the worktree and tell the owner', $tool, $raw, $in);
+  }
+  # G4: a scheduled remote agent, or an agent run in a remote sandbox,
+  # starts work that runs without this project's hooks (D10, D11; final
+  # review of step 5)
+  if ($tool eq 'RemoteTrigger') {
+    return refuse('G4', "scheduled remote agents are refused in this method (D10, D11): they run without this project's hooks; tell the owner what you needed", $tool, $raw, $in);
+  }
+  if ($tool =~ /\A(?:Agent|Task)\z/ && ref $input eq 'HASH' && defined $input->{isolation} && !ref $input->{isolation} && $input->{isolation} eq 'remote') {
+    return refuse('G4', "an agent in a remote sandbox runs without this project's hooks (D10, D11), so it is refused; run it here, without isolation remote", $tool, $raw, $in);
   }
   # G17: a skill or agent whose frontmatter declares hooks
   if ($tool =~ /\A(?:Skill|Agent|Task)\z/) {

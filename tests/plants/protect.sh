@@ -103,11 +103,7 @@ plant "the resolution of .. removed" "Edit by a path with .. in it: wanted guard
 plant "links not followed" "Edit through a link into a protected folder: wanted guard G6" 'if (-l $next) {' 'if (0) {'
 plant "backslashes not read as /" "a write with backslashes in the path is refused" '$p =~ tr{\\}{/};' ''
 plant "letter case never folded" "letter case" 'return $FOLD ? lc $p : $p' 'return $p'
-plant "the folder of the call not followed" "a write after a cd within the project is judged from the folder it moved to" '    my $base = defined $dirs->[$k] ? $dirs->[$k] : $top;
-    my @w = @{ $c->{words} };
-    my @look' '    my $base = $top;
-    my @w = @{ $c->{words} };
-    my @look'
+plant "the folder of the call not followed" "a write after a cd within the project is judged from the folder it moved to" 'return grep { !$seen{$_}++ } map { defined $_ ? $_ : $top } (@b ? @b : (undef));' 'return ($top);'
 
 # --- git and G12 ---
 plant "the git version check removed" "a cherry-pick of a commit that changes the guard is refused" 'next unless @$m;' 'next;'
@@ -127,7 +123,8 @@ plant "tar judged in its own folder when another is named" "an ordinary write pa
     shift @t if @t > 1;
 ' ''
 plant "unzip -dDIR not read" "unzip -d with the folder attached is read (from a subfolder)" '|| $a[$i] =~ /\A-d(.+)\z/s) { push @t, $1 }' ') { push @t, $1 }'
-plant "find's own options taken for its end" "find's own options before its path do not hide the path" "while (@b && \$b[0] =~ /\\A-(?:[HLP]+|D|O[0-9]*)\\z/) { my \$o = shift @b; shift @b if \$o eq '-D' }" ''
+plant "find's own options taken for its end" "find's own options before its path do not hide the path" "    my @b = @a;
+    while (@b && \$b[0] =~ /\\A-(?:[HLP]+|D|O[0-9]*)\\z/) { my \$o = shift @b; shift @b if \$o eq '-D' }" '    my @b = @a;'
 plant "git -C not followed for git rm" "git -C: the paths git rm is given are read from that folder" '$gbase = $d if defined $d;' ''
 plant "git --output read as reading" "git log --output into a protected file, from another repository, is refused" 'return 0 if grep { /\A--output(?:=|\z)/ } @w;' ''
 plant "the version check run in the subfolder" "a switch run from a subfolder is judged over the whole tree" '  $dir = top_of($dir);
@@ -141,6 +138,14 @@ plant "a linked skill's real folder not protected" "Write into the real folder a
 plant "the new text forms dropped" "the text forms" '
     . q!|(?:~|HOME\}?)/\.claude/(?:agents|skills|commands)\b|\.git/(?:method-|refs/remotes\b|packed-refs\b)!;' ';'
 plant "G12 keeps one session" "G12: a session warned before another one is not warned again" "'.method/local/effort-warned', 20," "'.method/local/effort-warned', 1,"
+# (the final review of step 5)
+PLANT_FILE=guard.pl plant "one folder guessed after a cd that may have failed" "a write after a cd that may have failed is judged from the cd's folder too: cd .claude/hooks/method;" "Protect::judge_bash(\\@cmds, [cmd_dir_sets(" "Protect::judge_bash(\\@cmds, [cmd_dirs("
+PLANT_FILE=guard.pl plant "a cd's folder dropped when it may have failed" "a write after a cd that may have failed is judged from the cd's folder too: cd .claude || exit 1;" "      push @next, @\$here unless (\$c->{next_op} // '') eq '&&';" "      @next = @\$here unless (\$c->{next_op} // '') eq '&&';"
+plant "a for header not read" "a loop over protected paths that writes is refused: for d in .claude/hooks/method" "    push @look, @{ \$c->{header_text} || [] };" ''
+PLANT_FILE=shell.pl plant "a readable for header dropped by the reader" "a loop over protected paths that writes is refused: for d in .claude/hooks/method" "        elsif (@{ \$cur->{header} || [] }) { push @cmds, \$cur }" ''
+plant "xargs on a recursive listing not judged" "a bulk edit by xargs from the project's top is refused, as find -exec is: grep -rl master" '|| listed($cmds, $k, $base, $set);' ';'
+plant "a write to a variable path let through" "a loop over protected paths that writes is refused: for f in .claude/settings.json; do echo x" "            return ('G6', \"this call names \$named->{what}, which Claude may only read, and writes to a path held in a variable\$NO\");" ''
+plant "a pull not version-checked" "a pull whose upstream changed the guard is refused" "    @targets = (['@{upstream}']);" '    return ();'
 # (round 1's second part)
 r="a write is refused (5.7 repair loop 1, round 1's second part):"
 ok="a read, or a write elsewhere, passes (5.7 repair loop 1, round 1's second part):"
@@ -158,8 +163,8 @@ plant "git add counted as writing" "$ok git add .claude/settings.json" '  add fo
 plant "patch with its file judged by the folder" "$ok patch notes.txt < x.diff" "if (@pos && defined \$d && -f (resolve(\$pos[0], \$d) // '')) {" 'if (0) {'
 plant "git's relative settings paths read from the hook's folder" "from a subfolder, a .git folder there is not the project's" 'File::Spec->rel2abs(slashes($p), File::Spec->rel2abs(slashes($project)))' 'File::Spec->rel2abs(slashes($p))' '$from = File::Spec->rel2abs(slashes($from), File::Spec->rel2abs(slashes($project))) if defined $from && slashes($from) !~ m{\A/};' ''
 plant "a file:// address not read" "an MCP tool given a file:// address of a protected path is refused" '$s =~ s{\Afile://(?:localhost)?(?=/)}{}i;' ''
-PLANT_FILE=guard.pl plant "pushd with no folder read as cd home" "pushd with no folder leaves the folder unknown" "\$dir{\$scope} = \$w[0] eq 'pushd' ? undef : \$ENV{HOME}" '$dir{$scope} = $ENV{HOME}'
-PLANT_FILE=guard.pl plant "cd's .. read through the link" "cd reads .. as written, before the link (as bash does)" 'if (defined $dir{$scope} && !grep { /\A-[A-Za-z]*P/ } @w[1 .. $#w]) {' 'if (0) {'
+PLANT_FILE=guard.pl plant "pushd with no folder read as cd home" "pushd with no folder leaves the folder unknown" "return \$w[0] eq 'pushd' ? undef : \$ENV{HOME}" 'return $ENV{HOME}'
+PLANT_FILE=guard.pl plant "cd's .. read through the link" "cd reads .. as written, before the link (as bash does)" 'if (!grep { /\A-[A-Za-z]*P/ } @w[1 .. $#w]) {' 'if (0) {'
 PLANT_FILE=guard.pl plant "NotebookEdit judged by file_path only" "NotebookEdit is judged by both its path fields" 'for my $k (qw(file_path notebook_path)) {' 'for my $k (qw(file_path)) {'
 
 echo "plants: protected files: $tests_pass passed, $tests_fail failed, $tests_skip skipped"

@@ -384,7 +384,9 @@ sub judge_mcp {
   $main{ lc $1 } = 1 if $st == 0 && $head =~ m{\Arefs/remotes/origin/(\S+)\n?\z};
   for my $f (@{ $entry->{branch} }) {
     my $b = $input->{$f};
-    next unless defined $b;
+    # (a missing branch field: a server may then write to the default
+    # branch; final review of step 5)
+    return ('G4', "the MCP tool " . shown($name) . " names no branch in its $f field, so where it writes cannot be told; name your task branch$NO") if !defined $b || (!ref $b && $b eq '');
     return ('G4', "the MCP tool " . shown($name) . " names a branch in a form the guard cannot judge$NO") if ref $b || $b !~ m{\A[A-Za-z0-9_][A-Za-z0-9._/-]*\z} || $b =~ m{\.\.};
     (my $short = $b) =~ s{\A(?:refs/)?heads/}{};
     return ('G4', "the MCP tool " . shown($name) . " may not write to main: the owner merges into main on GitHub; use your task branch$NO") if $main{ lc $short };

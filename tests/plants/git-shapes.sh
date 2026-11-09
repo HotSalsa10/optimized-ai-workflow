@@ -133,6 +133,14 @@ plant "a pull that can merge allowed" "$list" "a plain git pull is still refused
 plant "git init with a template allowed" "$list" "git init with a template is refused in this repository" 's/^init -b=/init --template= -b=/m'
 plant "G8 judging commit only" "$guard" "a cherry-pick --continue while a mutate journal is there is refused (G8)" 's/\(\?:commit\|merge\|cherry-pick\|revert\|pull\)/(?:commit)/'
 
+# the final review of step 5
+plant "a push named through a variable let through" "$guard" "a push in a for loop over branch names is refused" 's/if \(defined \$pi && grep \{ \/\[\\\$`\*\?\\\[\{\]\/ \} \@r\[ \$pi \+ 1 \.\. \$#r \]\) \{/if (0) {/'
+plant "a refusal naming the branch as written" "$guard" "a push refusal does not repeat the branch as written" 's/return "pushing to main is refused:/return "pushing to \$dst is refused:/'
+plant "an option's value named in a refusal" "$guard" "an option's refusal names the option only, not its value" 's/my \$on = \$o =~ [^;]*;/my \$on = \$o;/'
+plant "any subcommand word named in a refusal" "$guard" "an unknown subcommand is named only when it is a plain word" 's/my \$shown = \$sub =~ [^;]*;/my \$shown = "\\"git \$sub\\"";/'
+plant "submodule update --force allowed" "$list" "git submodule update --force is refused (it drops a submodule's uncommitted work)" 's/!--remote !--force !-f ARG/!--remote ARG/'
+plant "a pull of any branch allowed" "$list" "a pull of another branch by name is refused (only the branch's own upstream)" 's/^pull \+--ff-only -q --quiet REMOTE\? \@off-main/pull +--ff-only -q --quiet REMOTE? NAME? \@off-main/m'
+
 drop_sandbox "$work" || true
 echo "plants: git list: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]

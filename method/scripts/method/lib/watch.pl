@@ -11,7 +11,8 @@
 # project_settings and local_settings) the guard refuses:
 #   - any change to the project's settings (.claude/settings.json);
 #   - in the local or user settings, a change to env, hooks,
-#     disableAllHooks or enabledPlugins, a permissions.deny entry removed,
+#     disableAllHooks, enabledPlugins or a setting that runs a program
+#     (statusLine, apiKeyHelper and the like), a permissions.deny entry removed,
 #     or disableSkillShellExecution turned off, compared with the snapshot
 #     session-status took when the session started (in git's folder, which
 #     G6 protects); with no snapshot, a file that holds any of those (or
@@ -52,7 +53,10 @@ require File::Spec->catfile($lib, 'log.pl');
 
 our $MAX = 1024 * 1024;    # a settings or definition file is small
 our $KEEP = 20;            # snapshots kept: the last sessions' (A67's G12 note keeps as many)
-our @KEYS = qw(env hooks disableAllHooks enabledPlugins disableSkillShellExecution);
+# the settings that run a program outside the hooks: compared with the
+# snapshot too (final review of step 5)
+our @RUNS = qw(statusLine apiKeyHelper fileSuggestion otelHeadersHelper awsAuthRefresh awsCredentialExport);
+our @KEYS = (qw(env hooks disableAllHooks enabledPlugins disableSkillShellExecution), @RUNS);
 our $NOTE = '.method/local/settings-refused';
 
 sub bytes { my ($s) = @_; utf8::encode($s) if defined $s && utf8::is_utf8($s); return $s }
@@ -145,8 +149,12 @@ sub snapshot {
     my ($d, $e) = read_settings($f->{$k});
     $snap{$k} = defined $e ? { unreadable => 1 } : watched($d);
   }
+  # (a new file, never an existing one or a link: O_EXCL)
   my $tmp = "$path.$$.tmp";
-  open my $o, '>:raw', $tmp or return;
+  unlink $tmp;
+  require Fcntl;
+  sysopen(my $o, $tmp, Fcntl::O_WRONLY() | Fcntl::O_CREAT() | Fcntl::O_EXCL(), 0600) or return;
+  binmode $o;
   print $o $CANON->encode(\%snap);
   close $o or do { unlink $tmp; return };
   rename $tmp, $path or do { unlink $tmp; return };
@@ -181,7 +189,7 @@ sub judge_change {
   }
   my @why;
   if ($snap && !$snap->{unreadable}) {
-    for my $k (qw(env hooks disableAllHooks enabledPlugins)) {
+    for my $k (qw(env hooks disableAllHooks enabledPlugins), @RUNS) {
       push @why, $k if ($now->{$k} // '') ne ($snap->{$k} // '');
     }
     my %has = map { $_ => 1 } @{ $now->{deny} };
