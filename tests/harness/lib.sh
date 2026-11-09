@@ -49,6 +49,9 @@
 # each request, which holds the last message's results only), h_ran FILE.
 # h_safe NAME passes or fails the six safety questions (the first six) as
 # one line. h_init FIELD prints a field of the client's init event.
+# Step 5b.1's gate cases: h_gates ROOT MODE runs them (below);
+# h_receipt LETTER and h_hook_runs LETTER TEXT read one gate run's receipt
+# and the hook runs during its call.
 # req-001 is h_fake's own alive probe.
 
 # settings a caller's environment must not carry into every case
@@ -125,6 +128,177 @@ h_holds_start() {
   [ ! -e "$H_PROJ/perlfunc-ran.txt" ] || H_HOLD="$H_HOLD a method hook ran the function named perl;"
   [ ! -e "$H_PROJ/commandfunc-ran.txt" ] || H_HOLD="$H_HOLD a method hook ran the function named command;"
   return 0
+}
+
+# h_gates ROOT MODE: step 5b.1's gate cases (gate-receipt), with the
+# method from the repository at ROOT (a planted copy in
+# tests/plants/harness.sh) and its fragment as the project's settings. The
+# harness's stand-in reviewer gate (agents/method/method-reviewer.md) is
+# committed into the project before the tree is taken, so the END-VERDICT
+# line the fake writes names the tree the gate starts on (H_TREE). Each
+# gate is called by the main session in the foreground, one after another,
+# and told apart by its Agent call's description ("harness gate A" ...).
+# MODE default: first my-method-reviewer (a copy of the gate under a longer
+# name holding the gate's: not a gate), then gate A (a report with both
+# lines), gate B (cut off, then complete), gate C (never complete). MODE
+# auto, with the test-only allow hook on Agent (2.1.319 refuses the call
+# against the fake without it; at 2.1.316 it only skips the main
+# conversation's check): gate D (a handback without its lines, then one
+# with them), gate E (twice without), gate F (a complete report as text,
+# never handed back). The client's debug log goes to $H_DIR/debug.log.
+# Returns 1 when the case could not be made or the fake did not answer
+# (the client was then not started)
+h_gates() {
+  local mode=$2
+  H_TREE=""
+  { h_case "gates-$mode" && h_method "$1"; } || return 1
+  mkdir -p "$H_PROJ/.claude/agents/method" && cp "$HARNESS/agents/method/method-reviewer.md" "$H_PROJ/.claude/agents/method/" || return 1
+  if [ "$mode" = auto ]; then
+    mkdir -p "$H_PROJ/.claude/hooks/fixture" && cp "$HARNESS/hooks/allow.sh" "$H_PROJ/.claude/hooks/fixture/" || return 1
+    perl -MJSON::PP -e 'my $f = shift; open my $h, "<", $f or die; my $d = JSON::PP->new->decode(do { local $/; <$h> }); close $h;
+      push @{ $d->{hooks}{PreToolUse} }, {matcher => "Agent|Task", hooks => [{type => "command", command => q{bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fixture/allow.sh"}, timeout => 30}]};
+      open $h, ">", $f or die; print $h JSON::PP->new->canonical->pretty->encode($d); close $h or die' "$H_PROJ/.claude/settings.json" || return 1
+  else
+    sed 's/^name: method-reviewer$/name: my-method-reviewer/' "$HARNESS/agents/method/method-reviewer.md" >"$H_PROJ/.claude/agents/my-method-reviewer.md" || return 1
+  fi
+  (cd "$H_PROJ" && HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git add -A && HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git commit -q -m "the gates") || return 1
+  H_TREE=$(HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git -C "$H_PROJ" rev-parse 'HEAD^{tree}') || return 1
+  perl -MJSON::PP -e '
+    my ($mode, $t) = @ARGV;
+    my $good = "APPROVE\nSummary: the change is fine.\nEND-VERDICT $t";
+    my $agent = sub { my ($g, $type) = @_; return {tool => "Agent", input => {description => "harness gate $g", prompt => "HARNESS-GATE-$g: review the change",
+      subagent_type => $type // "method-reviewer", run_in_background => JSON::PP::false}} };
+    my $hand = sub { return {tool => "SubagentHandback", input => {message => $_[0]}} };
+    my (@convs, @calls);
+    if ($mode eq "auto") {
+      # (the check auto mode runs, matched by its first message: the
+      # transcript, or the CLAUDE.md of the project once there is one)
+      push @convs, {name => "classifier", match => "(?:^<transcript>|<user_claude_md>)", turns => [{text => "<block>no</block>"}]},
+        {name => "gateD", match => "HARNESS-GATE-D", turns => [$hand->("my findings, no verdict yet"), $hand->($good)]},
+        {name => "gateE", match => "HARNESS-GATE-E", turns => [$hand->("my findings, no verdict yet"), $hand->("still no verdict")]},
+        # (the client nudges a gate that ends without a handback three times)
+        {name => "gateF", match => "HARNESS-GATE-F", turns => [map { {text => $good} } 1 .. 4]};
+      @calls = map { $agent->($_) } qw(D E F);
+    } else {
+      push @convs, {name => "mine", match => "HARNESS-GATE-mine", turns => [{text => $good}]},
+        {name => "gateA", match => "HARNESS-GATE-A", turns => [{text => $good}]},
+        {name => "gateB", match => "HARNESS-GATE-B", turns => [{text => "partial review, no verdict yet"}, {text => "REQUEST CHANGES: one finding\nEND-VERDICT $t"}]},
+        {name => "gateC", match => "HARNESS-GATE-C", turns => [{text => "partial review"}, {text => "still partial"}]};
+      @calls = ($agent->("mine", "my-method-reviewer"), map { $agent->($_) } qw(A B C));
+    }
+    push @convs, {name => "main", match => "^go\$", turns => [@calls, map { {text => "MAIN-DONE-$_"} } 1 .. 4]};
+    print JSON::PP->new->canonical->encode({convs => \@convs, fallback => {text => "FAKE-FALLBACK"}, usage => {input_tokens => 11, output_tokens => 7}})' "$mode" "$H_TREE" >"$H_DIR/gates.json" || return 1
+  h_fake "$H_DIR/gates.json" || return 1
+  if [ "$mode" = auto ]; then
+    h_client 90 -- --permission-mode auto --debug-file "$H_DIR/debug.log"
+  else
+    h_client 90 -- --permission-mode default --allowedTools Bash --debug-file "$H_DIR/debug.log"
+  fi
+  h_stop
+}
+# h_receipt LETTER: the receipt of gate LETTER's run (read.pl receipt), or
+# "none"
+h_receipt() {
+  perl "$HARNESS/read.pl" receipt "harness gate $1" "$H_DIR/home" "$H_PROJ/.git"
+}
+# h_hook_runs LETTER TEXT: how many hook runs whose command holds TEXT the
+# client's debug log shows during gate LETTER's Agent call, or "none"
+h_hook_runs() {
+  perl "$HARNESS/read.pl" hooks "harness gate $1" "$2" "$H_DIR/home" "$H_DIR/debug.log"
+}
+# h_turns CONV: how many requests the fake got for its conversation CONV
+h_turns() {
+  LC_ALL=C grep -c "	conv=$1 turn=" "$H_DIR/fake/requests.tsv" 2>/dev/null
+}
+# h_gate_holds QUESTION: 0 when QUESTION holds for the gate case h_gates
+# ran last; else 1, with H_WHY saying what was seen. The questions:
+#   context    the start's context line, with the tree, reached the requests
+#              of gates A, B and C, and neither the main conversation's nor
+#              my-method-reviewer's
+#   no-hook    gate-receipt ran no time during my-method-reviewer's call,
+#              which has no receipt, and twice during gate A's (its start
+#              and its stop: so the debug log can tell)
+#   valid      gate A (both lines): VALID with its opening word, one turn
+#   log        .method/local/gates.log: one line a gate run, VALID for A and
+#              B, INCOMPLETE lines-missing-after-retry for C, each with the
+#              gate, the tree and the effort the client gave (xhigh)
+#   cut-off    gate B: one more turn, whose request carries gate-receipt's
+#              reason; then VALID (two stops, sent back once)
+#   never      gate C: one more turn only; INCOMPLETE
+#              lines-missing-after-retry
+#   deny-once  gate D: its first handback refused, the refusal in its next
+#              request; the second let through; VALID
+#   twice      gate E: two handbacks, the second let through; INCOMPLETE
+#              lines-missing-after-retry
+#   text-only  gate F (no handback; the client nudges it three times):
+#              INCOMPLETE no-report, never refused or sent back
+h_gate_holds() {
+  local got c n v i
+  H_WHY=""
+  case $1 in
+    context)
+      for c in gateA gateB gateC; do
+        h_req_in "$c" "METHOD-ACTIVE gate=method-reviewer tree=$H_TREE" || H_WHY="$H_WHY the context line is not in $c's requests;"
+      done
+      for c in main mine; do
+        ! h_req_in "$c" 'METHOD-ACTIVE gate=' || H_WHY="$H_WHY a context line is in $c's requests;"
+      done
+      ;;
+    no-hook)
+      got=$(h_hook_runs mine gate-receipt.sh)
+      [ "$got" = 0 ] || H_WHY="$H_WHY gate-receipt ran $got times during my-method-reviewer's call;"
+      got=$(h_receipt mine)
+      [ "$got" = none ] || H_WHY="$H_WHY my-method-reviewer has a receipt: $got;"
+      got=$(h_hook_runs A gate-receipt.sh)
+      [ "$got" = 2 ] || H_WHY="$H_WHY gate-receipt ran $got times during gate A's call, not 2 (the debug log cannot tell);"
+      ;;
+    valid)
+      got=$(h_receipt A)
+      [ "$got" = "VALID why=none open=APPROVE stops=1 blocked=0 denied=0" ] || H_WHY="$H_WHY gate A's receipt: $got;"
+      n=$(h_turns gateA)
+      [ "$n" = 1 ] || H_WHY="$H_WHY gate A's turns: $n;"
+      ;;
+    log)
+      v=$(LC_ALL=C grep -c "	VALID	method-reviewer	$H_TREE	none	xhigh	none\$" "$H_PROJ/.method/local/gates.log" 2>/dev/null)
+      i=$(LC_ALL=C grep -c "	INCOMPLETE	method-reviewer	$H_TREE	none	xhigh	lines-missing-after-retry\$" "$H_PROJ/.method/local/gates.log" 2>/dev/null)
+      n=0
+      [ ! -f "$H_PROJ/.method/local/gates.log" ] || n=$(wc -l <"$H_PROJ/.method/local/gates.log" | tr -d ' ')
+      [ "${v:-0}/${i:-0}/${n:-0}" = 2/1/3 ] || H_WHY="$H_WHY gates.log: ${v:-0} VALID, ${i:-0} INCOMPLETE, ${n:-0} lines;"
+      ;;
+    cut-off)
+      n=$(h_turns gateB)
+      [ "$n" = 2 ] || H_WHY="$H_WHY gate B's turns: $n;"
+      h_req_in gateB "gate-receipt: your report must open with one of these words on its first line" || H_WHY="$H_WHY gate-receipt's reason is not in gate B's requests;"
+      got=$(h_receipt B)
+      [ "$got" = "VALID why=none open=REQUEST CHANGES stops=2 blocked=1 denied=0" ] || H_WHY="$H_WHY gate B's receipt: $got;"
+      ;;
+    never)
+      n=$(h_turns gateC)
+      [ "$n" = 2 ] || H_WHY="$H_WHY gate C's turns: $n;"
+      got=$(h_receipt C)
+      [ "$got" = "INCOMPLETE why=lines-missing-after-retry open=none stops=2 blocked=1 denied=0" ] || H_WHY="$H_WHY gate C's receipt: $got;"
+      ;;
+    deny-once)
+      n=$(h_turns gateD)
+      [ "$n" = 2 ] || H_WHY="$H_WHY gate D's turns: $n;"
+      h_req_in gateD "PreToolUse:SubagentHandback hook error: gate-receipt: your report must open with one of these words" || H_WHY="$H_WHY the refusal is not in gate D's requests;"
+      got=$(h_receipt D)
+      [ "$got" = "VALID why=none open=APPROVE stops=1 blocked=0 denied=1" ] || H_WHY="$H_WHY gate D's receipt: $got;"
+      ;;
+    twice)
+      n=$(h_turns gateE)
+      [ "$n" = 2 ] || H_WHY="$H_WHY gate E's turns: $n;"
+      got=$(h_receipt E)
+      [ "$got" = "INCOMPLETE why=lines-missing-after-retry open=none stops=1 blocked=0 denied=1" ] || H_WHY="$H_WHY gate E's receipt: $got;"
+      ;;
+    text-only)
+      got=$(h_receipt F)
+      case $got in "INCOMPLETE why=no-report open=none stops="*" blocked=0 denied=0") ;; *) H_WHY="$H_WHY gate F's receipt: $got;" ;; esac
+      ! h_req_in gateF 'gate-receipt: ' || H_WHY="$H_WHY gate-receipt's reason reached gate F;"
+      ;;
+    *) H_WHY="no such gate question: $1" ;;
+  esac
+  [ -z "$H_WHY" ]
 }
 
 h_fixtures() {

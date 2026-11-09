@@ -780,5 +780,32 @@ else
   fail "g17: the fake did not answer; the client was not started"
 fi
 
+# --- 17. gate-receipt (step 5b.1): a gate's life in the real client, with
+# the method's fragment and the harness's stand-in reviewer gate, one run
+# in default mode and one in auto mode (h_gates, h_gate_holds) ---
+# gate_q QUESTION TEXT: passes TEXT when the gate question holds
+gate_q() {
+  if h_gate_holds "$1"; then pass "$2"; else fail "$2" "$H_WHY"; fi
+}
+if h_gates "$root" default; then
+  gate_q context "gates: the start's context line (METHOD-ACTIVE gate=method-reviewer tree=<the tree>) reaches each gate's requests, and neither the main conversation's nor my-method-reviewer's"
+  gate_q no-hook "gates: an agent named my-method-reviewer (a longer name holding a gate's) gets no gate-receipt hook at all and no receipt (the client's debug log: no run during its call, two during a gate's)"
+  gate_q valid "gates (default mode): a report with both lines gets a VALID receipt in the project's git folder, with its opening word, in one turn"
+  gate_q log "gates (default mode): .method/local/gates.log gets one line a gate run: the word, the gate, the tree and the effort the client gave"
+  gate_q cut-off "gates (default mode): a report cut off is sent back once, gate-receipt's reason reaching the gate's next request; completed, it is VALID"
+  gate_q never "gates (default mode): a report never completed gets one more turn only, then INCOMPLETE (lines-missing-after-retry)"
+  h_safe gates-default
+else
+  fail "gates-default: the case could not be made, or the fake did not answer; the client was not started"
+fi
+if h_gates "$root" auto; then
+  gate_q deny-once "gates (auto mode): a handback without its lines is refused once, the refusal reaching the gate's next request; handed back with them, VALID"
+  gate_q twice "gates (auto mode): a second handback without its lines is let through (no loop), and the receipt is INCOMPLETE (lines-missing-after-retry)"
+  gate_q text-only "gates (auto mode): a complete report given as text, never handed back, is INCOMPLETE (no-report), never refused or sent back"
+  h_safe gates-auto
+else
+  fail "gates-auto: the case could not be made, or the fake did not answer; the client was not started"
+fi
+
 echo "harness: ${H_RUNS:-0} client runs took ${H_TOTAL_SECS:-0} s"
 finish

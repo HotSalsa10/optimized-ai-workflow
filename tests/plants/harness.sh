@@ -284,6 +284,58 @@ else
 fi
 drop_sandbox "$sb" || true
 
+# 15. step 5b.1's gate cases (h_gates, h_gate_holds): with one defect
+# planted in a copy of the method, the gate question it breaks turns red,
+# and for that defect's reason (H_WHY holds what the question saw).
+# gate_plant MODE FILE PERL QUESTION SEEN TEXT: PERL, a perl -pi script
+# that writes the mark HARNESS-PLANT with its change, changes method/FILE
+# in a copy of the repository; h_gates runs there in MODE; QUESTION must
+# fail with SEEN in its H_WHY
+gate_plant() {
+  sb=$(make_sandbox) || abort_sandbox
+  perl -pi -e "$3" "$sb/method/$2"
+  if ! grep -q -F HARNESS-PLANT "$sb/method/$2"; then
+    fail "$6: the plant did not apply, so the check result would mean nothing"
+  elif ! h_gates "$sb" "$1"; then
+    fail "$6: the case could not be made, or the fake did not answer"
+  elif h_gate_holds "$4"; then
+    fail "$6: the gate question '$4' stayed green"
+  else
+    case $H_WHY in
+      *"$5"*) pass "$6: the gate question '$4' turns red ($H_WHY)" ;;
+      *) fail "$6: the gate question '$4' turned red for another reason" "$H_WHY" ;;
+    esac
+  fi
+  h_stop
+  drop_sandbox "$sb" || true
+}
+rp=scripts/method/lib/receipt.pl
+# shellcheck disable=SC2016 # perl code, expanded by perl
+{
+  gate_plant default "$rp" 's/^(\s*)return Hook::json\(\{ hookSpecificOutput => \{ hookEventName => .SubagentStart.*$/$1return 0; # HARNESS-PLANT/' \
+    context "the context line is not in gateA's requests" "gates: the start's context line dropped"
+  # (the pattern without its ^; JSON has no comments, so the mark is an
+  # alternative no agent is named. Measured at 2.1.316 and 2.1.319: a bare
+  # list, "method-reviewer|method-tester", is matched name by name and does
+  # not take my-method-reviewer; a pattern without ^ does)
+  gate_plant default settings.fragment.json 's/"\^\((method-reviewer\|[^"]*)\)\$"/"($1|HARNESS-PLANT)\$"/g' \
+    no-hook "gate-receipt ran 2 times during my-method-reviewer's call" "gates: the fragment's gate matchers unanchored at the start"
+  gate_plant default "$rp" 's/^(\s*)\$r->\{state\} = \@why \? \$w->\{unchecked\} : \$w->\{good\};/$1\$r->{state} = \$w->{unchecked}; # HARNESS-PLANT/' \
+    valid "gate A's receipt: INCOMPLETE why=none open=APPROVE" "gates: the receipt never VALID"
+  gate_plant default "$rp" 's/^(\s*)log_line\(\$project, \$r, \$in\);/$1# HARNESS-PLANT/' \
+    log "gates.log: 0 VALID, 0 INCOMPLETE, 0 lines" "gates: the gates.log line dropped"
+  gate_plant default "$rp" 's/^(\s*)return Hook::block\(form_text\(\$gate, \$r->\{tree\}\)\);/$1return 0; # HARNESS-PLANT/' \
+    cut-off "gate B's turns: 1;" "gates: the block removed (a report without its lines is let go)"
+  gate_plant default "$rp" 's/if \(!\$r->\{blocked\} && !\@why\) \{/if (!\@why) { # HARNESS-PLANT/' \
+    never "gate C's receipt: INCOMPLETE why=lines-missing open=none" "gates: the block not once (every stop without the lines is sent back)"
+  gate_plant auto "$rp" 's/if \(!\$ok && !\$r->\{denied\}\) \{/if (0) { # HARNESS-PLANT/' \
+    deny-once "the refusal is not in gate D's requests" "gates: the denial removed (a handback without its lines is let through)"
+  gate_plant auto "$rp" 's/if \(!\$ok && !\$r->\{denied\}\) \{/if (!\$ok) { # HARNESS-PLANT/' \
+    twice "gate E's receipt: INCOMPLETE why=no-report" "gates: the denial not once (every handback without its lines is refused)"
+  gate_plant auto "$rp" 's/\} elsif \(\$auto\) \{/} elsif (0) { # HARNESS-PLANT/' \
+    text-only "gate F's receipt: VALID why=none open=APPROVE" "gates: auto mode's text taken as the report"
+}
+
 # 13. get-client: a download that does not match the pinned checksum is refused
 reg="$H_WORK/registry/@anthropic-ai/claude-code-linux-x64/-"
 mkdir -p "$reg" "$H_WORK/pkg/package"

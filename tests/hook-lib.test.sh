@@ -3,6 +3,8 @@
 # Tests for the hooks' shared helpers (step 5.1): lib/hook.pl (input and
 # output), lib/log.pl (the capped log, M072), json.pl as a library
 # (Json::decode, Json::encode) and Secrets::scan_text in lib/secrets.pl.
+# Since step 5b.1, lib/log.pl's writers too: gates.log's field set,
+# Log::write_whole and Log::keep_newest.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=tests/lib.sh
