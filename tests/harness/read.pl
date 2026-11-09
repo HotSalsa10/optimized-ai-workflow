@@ -14,6 +14,15 @@
 # the client's agent-<id>.meta.json under HOME/.claude/projects, the
 # receipt by that id among the method-receipt-*.json files in the git
 # folder GIT. Prints "none" and exits 1 when either is missing or not one.
+# read.pl used DESC HOME GIT: the same receipt's evidence from the agent's
+# record (step 5b.2), as "models=M efforts=E input=N output=N
+# cache_creation=N cache_read=N" (M and E joined by commas, "none" for
+# none), or "none" and exit 1 as above.
+# read.pl effort CONV DIR: prints each effort the requests the fake logged
+# in DIR for its conversation CONV carried (the request body's
+# output_config.effort; "none" for a request without one), once, in the
+# order first seen, joined by commas; "none" and exit 1 when there is no
+# such request.
 # read.pl hooks DESC TEXT HOME LOG: prints how many hook runs whose command
 # holds TEXT the client's debug log LOG shows during the Agent call
 # described DESC (its "Hooks: ... [COMMAND] finished with status" lines
@@ -41,8 +50,10 @@ sub agent_of {
   } }, $top);
   return @found == 1 ? @{ $found[0] } : ();
 }
-if (($what // '') eq 'receipt' && @ARGV == 4) {
-  my ($desc, $home, $git) = @ARGV[1 .. 3];
+# the receipt of the agent described DESC (HOME, the git folder GIT), or
+# undef when there is not exactly one
+sub receipt_of {
+  my ($desc, $home, $git) = @_;
   my ($id) = agent_of($desc, $home);
   my @r;
   if (defined $id && opendir my $d, $git) {
@@ -52,8 +63,25 @@ if (($what // '') eq 'receipt' && @ARGV == 4) {
       push @r, $r if ref $r eq 'HASH' && ($r->{agent} // '') eq $id;
     }
   }
-  if (@r != 1) { print "none\n"; exit 1 }
-  my $r = $r[0];
+  return @r == 1 ? $r[0] : undef;
+}
+# the bodies of the requests the fake logged in DIR for its conversation
+# CONV, in the order sent
+sub requests_of {
+  my ($conv, $dir) = @_;
+  my @b;
+  opendir my $d, $dir or return ();
+  for my $n (sort grep { /\Areq-[0-9]+\.json\z/ } readdir $d) {
+    open my $h, '<', "$dir/$n" or next;
+    my $r = eval { local $/; JSON::PP->new->utf8->decode(<$h>) } or next;
+    next unless ref $r eq 'HASH' && ($r->{info} // '') =~ /\Aconv=\Q$conv\E /;
+    push @b, $r->{body} if ref $r->{body} eq 'HASH';
+  }
+  return @b;
+}
+if (($what // '') eq 'receipt' && @ARGV == 4) {
+  my $r = receipt_of(@ARGV[1 .. 3]);
+  if (!$r) { print "none\n"; exit 1 }
   my @why = ref $r->{why} eq 'ARRAY' ? @{ $r->{why} } : ();
   binmode STDOUT, ':utf8';
   printf "%s why=%s open=%s stops=%s blocked=%s denied=%s\n", $r->{state} // 'none', @why ? join(',', @why) : 'none',
@@ -75,6 +103,26 @@ if (($what // '') eq 'hooks' && @ARGV == 5) {
   print "$n\n";
   exit 0;
 }
+if (($what // '') eq 'used' && @ARGV == 4) {
+  my $r = receipt_of(@ARGV[1 .. 3]);
+  if (!$r) { print "none\n"; exit 1 }
+  my $list = sub { my @l = ref $_[0] eq 'ARRAY' ? grep { defined && !ref } @{ $_[0] } : (); return @l ? join(',', @l) : 'none' };
+  my $t = ref $r->{tokens} eq 'HASH' ? $r->{tokens} : {};
+  binmode STDOUT, ':utf8';
+  printf "models=%s efforts=%s input=%s output=%s cache_creation=%s cache_read=%s\n", $list->($r->{models}), $list->($r->{efforts}),
+    map { $t->{$_} // 'none' } qw(input output cache_creation cache_read);
+  exit 0;
+}
+if (($what // '') eq 'effort' && @ARGV == 3) {
+  my @e;
+  for my $b (requests_of(@ARGV[1, 2])) {
+    my $e = ref $b->{output_config} eq 'HASH' ? $b->{output_config}{effort} : undef;
+    $e = 'none' unless defined $e && !ref $e;
+    push @e, $e unless grep { $_ eq $e } @e;
+  }
+  print @e ? join(',', @e) : 'none', "\n";
+  exit(@e ? 0 : 1);
+}
 if (($what // '') eq 'req' && @ARGV == 4) {
   my ($conv, $text, $dir) = @ARGV[1 .. 3];
   utf8::decode($text);
@@ -86,19 +134,13 @@ if (($what // '') eq 'req' && @ARGV == 4) {
       : ref $v eq 'ARRAY' ? map { $strings->($_) } @$v
       : defined $v && !ref $v ? ($v) : ();
   };
-  opendir my $d, $dir or exit 1;
-  for my $n (sort grep { /\Areq-[0-9]+\.json\z/ } readdir $d) {
-    open my $h, '<', "$dir/$n" or next;
-    my $r = eval { local $/; JSON::PP->new->utf8->decode(<$h>) } or next;
-    next unless ref $r eq 'HASH' && ($r->{info} // '') =~ /\Aconv=\Q$conv\E /;
-    my $b = $r->{body};
-    next unless ref $b eq 'HASH';
+  for my $b (requests_of($conv, $dir)) {
     my $sent = join "\n", $strings->([$b->{system}, grep { ref $_ eq 'HASH' && ($_->{role} // '') ne 'assistant' } @{ ref $b->{messages} eq 'ARRAY' ? $b->{messages} : [] }]);
     exit 0 if index($sent, $text) >= 0;
   }
   exit 1;
 }
-die "usage: read.pl init FIELD FILE | read.pl req CONV TEXT DIR | read.pl receipt DESC HOME GIT | read.pl hooks DESC TEXT HOME LOG\n" unless defined $file && $what eq 'init';
+die "usage: read.pl init FIELD FILE | read.pl req CONV TEXT DIR | read.pl effort CONV DIR | read.pl receipt DESC HOME GIT | read.pl used DESC HOME GIT | read.pl hooks DESC TEXT HOME LOG\n" unless defined $file && $what eq 'init';
 open my $f, '<', $file or exit 1;
 while (my $l = <$f>) {
   my $o = eval { JSON::PP->new->utf8->decode($l) } or next;

@@ -782,10 +782,13 @@ fi
 
 # --- 17. gate-receipt (step 5b.1): a gate's life in the real client, with
 # the method's fragment and the harness's stand-in reviewer gate, one run
-# in default mode and one in auto mode (h_gates, h_gate_holds) ---
-# gate_q QUESTION TEXT: passes TEXT when the gate question holds
+# in default mode and one in auto mode (h_gates, h_gate_holds); step
+# 5b.2's evidence (an effort override, a second definition, the record's
+# models and tokens) in the same default run ---
+# gate_q QUESTION TEXT: passes TEXT (with what the question noted, if
+# anything) when the gate question holds
 gate_q() {
-  if h_gate_holds "$1"; then pass "$2"; else fail "$2" "$H_WHY"; fi
+  if h_gate_holds "$1"; then pass "$2${H_NOTE:+ ($H_NOTE)}"; else fail "$2" "$H_WHY"; fi
 }
 if h_gates "$root" default; then
   gate_q context "gates: the start's context line (METHOD-ACTIVE gate=method-reviewer tree=<the tree>) reaches each gate's requests, and neither the main conversation's nor my-method-reviewer's"
@@ -794,6 +797,9 @@ if h_gates "$root" default; then
   gate_q log "gates (default mode): .method/local/gates.log gets one line a gate run: the word, the gate, the tree, the model read from the gate's record and the effort the client gave"
   gate_q cut-off "gates (default mode): a report cut off is sent back once, gate-receipt's reason reaching the gate's next request; completed, it is VALID"
   gate_q never "gates (default mode): a report never completed gets one more turn only, then INCOMPLETE (lines-missing-after-retry)"
+  gate_q effort "gates (default mode): a gate whose Agent call asks for effort low, below its file's xhigh, runs at low and is INVALID (effort-low), its gates.log line saying low"
+  gate_q definition "gates (default mode): a gate run from another definition of its name is INVALID (instructions-differ): one given with --agents, which the client takes over the project's files; with a second project file of the name outside .claude/agents/method/, the receipt follows the file the client ran (INVALID for the other, VALID for the method's)"
+  gate_q record "gates (default mode): a receipt's models, efforts and tokens are what the client wrote in the gate's record: claude-opus-5-5, the effort the gate ran at, and the fake's tokens summed over the gate's turns"
   h_safe gates-default
 else
   fail "gates-default: the case could not be made, or the fake did not answer; the client was not started"

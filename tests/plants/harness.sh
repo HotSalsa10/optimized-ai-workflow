@@ -284,9 +284,9 @@ else
 fi
 drop_sandbox "$sb" || true
 
-# 15. step 5b.1's gate cases (h_gates, h_gate_holds): with one defect
-# planted in a copy of the method, the gate question it breaks turns red,
-# and for that defect's reason (H_WHY holds what the question saw).
+# 15. step 5b.1's and 5b.2's gate cases (h_gates, h_gate_holds): with one
+# defect planted in a copy of the method, the gate question it breaks turns
+# red, and for that defect's reason (H_WHY holds what the question saw).
 # gate_plant MODE FILE PERL QUESTION SEEN TEXT: PERL, a perl -pi script
 # that writes the mark HARNESS-PLANT with its change, changes method/FILE
 # in a copy of the repository; h_gates runs there in MODE; QUESTION must
@@ -334,6 +334,13 @@ rp=scripts/method/lib/receipt.pl
     twice "gate E's receipt: INCOMPLETE why=no-report" "gates: the denial not once (every handback without its lines is refused)"
   gate_plant auto "$rp" 's/\} elsif \(\$auto\) \{/} elsif (0) { # HARNESS-PLANT/' \
     text-only "gate F's receipt: VALID why=none open=APPROVE" "gates: auto mode's text taken as the report"
+  # (step 5b.2's evidence, in the same default run)
+  gate_plant default "$rp" 's/^(\s*push \@why, .effort-low. if )(\$floor && .*;)$/${1}0 && $2 # HARNESS-PLANT/' \
+    effort "gate G's receipt: VALID why=none open=APPROVE" "gates: the effort check removed (a gate run below its file's effort passes)"
+  gate_plant default "$rp" 's/^(\s*push \@why, .instructions-differ. if )(\$same && !\(\$m && trimmed.*;)$/${1}0 && $2 # HARNESS-PLANT/' \
+    definition "gate H's receipt: VALID why=none open=APPROVE" "gates: the instructions check removed (a gate run from another definition passes)"
+  gate_plant default "$rp" 's/^(\s*\$ev->\{tokens\}\{ \$k->\[0\] \}) \+= (\$v if .*;)$/$1 = $2 # HARNESS-PLANT/' \
+    record "gate B's receipt holds models=claude-opus-5-5 efforts=xhigh input=11 output=7 " "gates: the record's tokens not summed (each message's usage replaces the one before)"
 }
 
 # 13. get-client: a download that does not match the pinned checksum is refused

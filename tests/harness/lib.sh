@@ -51,7 +51,9 @@
 # one line. h_init FIELD prints a field of the client's init event.
 # Step 5b.1's gate cases: h_gates ROOT MODE runs them (below);
 # h_receipt LETTER and h_hook_runs LETTER TEXT read one gate run's receipt
-# and the hook runs during its call.
+# and the hook runs during its call; h_used LETTER (step 5b.2) the models,
+# efforts and tokens its receipt took from the agent's record, and
+# h_req_effort CONV the efforts the requests of one conversation carried.
 # req-001 is h_fake's own alive probe.
 
 # settings a caller's environment must not carry into every case
@@ -140,7 +142,19 @@ h_holds_start() {
 # and told apart by its Agent call's description ("harness gate A" ...).
 # MODE default: first my-method-reviewer (a copy of the gate under a longer
 # name holding the gate's: not a gate), then gate A (a report with both
-# lines), gate B (cut off, then complete), gate C (never complete). MODE
+# lines), gate B (cut off, then complete), gate C (never complete), and
+# step 5b.2's three, each with a report with both lines: gate G (the
+# reviewer, its Agent call asking for effort low, below its file's xhigh;
+# measured at 2.1.316 and 2.1.319: the call's effort takes, while the
+# settings' effortLevel and --effort do not reach a gate whose file sets
+# one), gate H (method-security-checker: its file in the method's folder,
+# and a second definition of its name with other instructions given with
+# --agents, which the client takes over the project's files, measured at
+# both versions) and gate I (method-tester: its file in the method's
+# folder, and a second project file of its name outside it with other
+# instructions; measured at both versions, the client runs the one its
+# file listing (ripgrep's) gives last, which on ext4 follows the file
+# system's name hashing, so either may run on another machine). MODE
 # auto, with the test-only allow hook on Agent (2.1.319 refuses the call
 # against the fake without it; at 2.1.316 it only skips the main
 # conversation's check): gate D (a handback without its lines, then one
@@ -149,7 +163,7 @@ h_holds_start() {
 # Returns 1 when the case could not be made or the fake did not answer
 # (the client was then not started)
 h_gates() {
-  local mode=$2
+  local mode=$2 agents g
   H_TREE=""
   { h_case "gates-$mode" && h_method "$1"; } || return 1
   mkdir -p "$H_PROJ/.claude/agents/method" && cp "$HARNESS/agents/method/method-reviewer.md" "$H_PROJ/.claude/agents/method/" || return 1
@@ -160,14 +174,22 @@ h_gates() {
       open $h, ">", $f or die; print $h JSON::PP->new->canonical->pretty->encode($d); close $h or die' "$H_PROJ/.claude/settings.json" || return 1
   else
     sed 's/^name: method-reviewer$/name: my-method-reviewer/' "$HARNESS/agents/method/method-reviewer.md" >"$H_PROJ/.claude/agents/my-method-reviewer.md" || return 1
+    for g in method-security-checker method-tester; do
+      sed "s/^name: method-reviewer\$/name: $g/" "$HARNESS/agents/method/method-reviewer.md" >"$H_PROJ/.claude/agents/method/$g.md" || return 1
+    done
+    # (the second definitions: the same model and effort as the method's
+    # file, other instructions, which the gate's requests show)
+    printf '%s\n' '---' 'name: method-tester' 'description: A second project file named method-tester (test-only). Use when asked for a harness gate review.' \
+      'model: opus' 'effort: xhigh' '---' 'You are HARNESS-OTHER-DEFINITION, a second project file named method-tester (test-only).' >"$H_PROJ/.claude/agents/method-tester.md" || return 1
+    agents='{"method-security-checker":{"description":"A second definition of method-security-checker, on the command line (test-only).","prompt":"You are HARNESS-OTHER-DEFINITION, a second definition of method-security-checker given on the command line (test-only).","model":"opus","effort":"xhigh"}}'
   fi
   (cd "$H_PROJ" && HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git add -A && HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git commit -q -m "the gates") || return 1
   H_TREE=$(HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git -C "$H_PROJ" rev-parse 'HEAD^{tree}') || return 1
   perl -MJSON::PP -e '
     my ($mode, $t) = @ARGV;
     my $good = "APPROVE\nSummary: the change is fine.\nEND-VERDICT $t";
-    my $agent = sub { my ($g, $type) = @_; return {tool => "Agent", input => {description => "harness gate $g", prompt => "HARNESS-GATE-$g: review the change",
-      subagent_type => $type // "method-reviewer", run_in_background => JSON::PP::false}} };
+    my $agent = sub { my ($g, $type, $effort) = @_; return {tool => "Agent", input => {description => "harness gate $g", prompt => "HARNESS-GATE-$g: review the change",
+      subagent_type => $type // "method-reviewer", run_in_background => JSON::PP::false, defined $effort ? (effort => $effort) : ()}} };
     my $hand = sub { return {tool => "SubagentHandback", input => {message => $_[0]}} };
     my (@convs, @calls);
     if ($mode eq "auto") {
@@ -183,8 +205,12 @@ h_gates() {
       push @convs, {name => "mine", match => "HARNESS-GATE-mine", turns => [{text => $good}]},
         {name => "gateA", match => "HARNESS-GATE-A", turns => [{text => $good}]},
         {name => "gateB", match => "HARNESS-GATE-B", turns => [{text => "partial review, no verdict yet"}, {text => "REQUEST CHANGES: one finding\nEND-VERDICT $t"}]},
-        {name => "gateC", match => "HARNESS-GATE-C", turns => [{text => "partial review"}, {text => "still partial"}]};
-      @calls = ($agent->("mine", "my-method-reviewer"), map { $agent->($_) } qw(A B C));
+        {name => "gateC", match => "HARNESS-GATE-C", turns => [{text => "partial review"}, {text => "still partial"}]},
+        {name => "gateG", match => "HARNESS-GATE-G", turns => [{text => $good}]},
+        {name => "gateH", match => "HARNESS-GATE-H", turns => [{text => $good}]},
+        {name => "gateI", match => "HARNESS-GATE-I", turns => [{text => "TESTS PASS\nSummary: the tests ran.\nEND-VERDICT $t"}]};
+      @calls = ($agent->("mine", "my-method-reviewer"), (map { $agent->($_) } qw(A B C)), $agent->("G", undef, "low"),
+        $agent->("H", "method-security-checker"), $agent->("I", "method-tester"));
     }
     push @convs, {name => "main", match => "^go\$", turns => [@calls, map { {text => "MAIN-DONE-$_"} } 1 .. 4]};
     print JSON::PP->new->canonical->encode({convs => \@convs, fallback => {text => "FAKE-FALLBACK"}, usage => {input_tokens => 11, output_tokens => 7}})' "$mode" "$H_TREE" >"$H_DIR/gates.json" || return 1
@@ -192,7 +218,7 @@ h_gates() {
   if [ "$mode" = auto ]; then
     h_client 90 -- --permission-mode auto --debug-file "$H_DIR/debug.log"
   else
-    h_client 90 -- --permission-mode default --allowedTools Bash --debug-file "$H_DIR/debug.log"
+    h_client 90 -- --permission-mode default --allowedTools Bash --agents "$agents" --debug-file "$H_DIR/debug.log"
   fi
   h_stop
 }
@@ -205,6 +231,16 @@ h_receipt() {
 # client's debug log shows during gate LETTER's Agent call, or "none"
 h_hook_runs() {
   perl "$HARNESS/read.pl" hooks "harness gate $1" "$2" "$H_DIR/home" "$H_DIR/debug.log"
+}
+# h_used LETTER: the models, efforts and tokens gate LETTER's receipt took
+# from the agent's record (read.pl used), or "none"
+h_used() {
+  perl "$HARNESS/read.pl" used "harness gate $1" "$H_DIR/home" "$H_PROJ/.git"
+}
+# h_req_effort CONV: the efforts the requests of the fake's conversation
+# CONV carried, joined by commas, or "none"
+h_req_effort() {
+  perl "$HARNESS/read.pl" effort "$1" "$H_DIR/fake"
 }
 # h_turns CONV: how many requests the fake got for its conversation CONV
 h_turns() {
@@ -219,15 +255,29 @@ h_turns() {
 #              which has no receipt, and twice during gate A's (its start
 #              and its stop: so the debug log can tell)
 #   valid      gate A (both lines): VALID with its opening word, one turn
-#   log        .method/local/gates.log: one line a gate run, VALID for A and
-#              B, INCOMPLETE lines-missing-after-retry for C, each with the
-#              gate, the tree, the model read from the gate's record
-#              (claude-opus-5-5, the fragment's only model) and the effort
-#              the client gave (xhigh)
+#   log        .method/local/gates.log: one line a gate run (six), VALID
+#              for A and B, INCOMPLETE lines-missing-after-retry for C,
+#              each with the gate, the tree, the model read from the gate's
+#              record (claude-opus-5-5, the fragment's only model) and the
+#              effort the client gave (xhigh)
 #   cut-off    gate B: one more turn, whose request carries gate-receipt's
 #              reason; then VALID (two stops, sent back once)
 #   never      gate C: one more turn only; INCOMPLETE
 #              lines-missing-after-retry
+#   effort     gate G: its requests went out at effort low (so the case can
+#              tell), and its receipt is INVALID effort-low, its gates.log
+#              line giving effort low
+#   definition gate H: the command line's instructions reached its
+#              requests (so the case can tell), and its receipt is INVALID
+#              instructions-differ; gate I: its receipt follows the
+#              definition the client used, INVALID instructions-differ for
+#              the second project file, VALID for the method's (H_NOTE
+#              says which ran)
+#   record     the receipts' models, efforts and tokens are what the
+#              client wrote in each gate's record from the fake's answers
+#              (11 input and 7 output tokens a turn): gate A
+#              claude-opus-5-5, xhigh, 11 and 7; gate B (two turns), 22
+#              and 14; gate G, effort low
 #   deny-once  gate D: its first handback refused, the refusal in its next
 #              request; the second let through; VALID
 #   twice      gate E: two handbacks, the second let through; INCOMPLETE
@@ -235,8 +285,9 @@ h_turns() {
 #   text-only  gate F (no handback; the client nudges it three times):
 #              INCOMPLETE no-report, never refused or sent back
 h_gate_holds() {
-  local got c n v i
+  local got c n v i want
   H_WHY=""
+  H_NOTE=""
   case $1 in
     context)
       for c in gateA gateB gateC; do
@@ -265,7 +316,7 @@ h_gate_holds() {
       i=$(LC_ALL=C grep -c "	INCOMPLETE	method-reviewer	$H_TREE	claude-opus-5-5	xhigh	lines-missing-after-retry\$" "$H_PROJ/.method/local/gates.log" 2>/dev/null)
       n=0
       [ ! -f "$H_PROJ/.method/local/gates.log" ] || n=$(wc -l <"$H_PROJ/.method/local/gates.log" | tr -d ' ')
-      [ "${v:-0}/${i:-0}/${n:-0}" = 2/1/3 ] || H_WHY="$H_WHY gates.log: ${v:-0} VALID, ${i:-0} INCOMPLETE, ${n:-0} lines;"
+      [ "${v:-0}/${i:-0}/${n:-0}" = 2/1/6 ] || H_WHY="$H_WHY gates.log: ${v:-0} VALID, ${i:-0} INCOMPLETE, ${n:-0} lines;"
       ;;
     cut-off)
       n=$(h_turns gateB)
@@ -279,6 +330,36 @@ h_gate_holds() {
       [ "$n" = 2 ] || H_WHY="$H_WHY gate C's turns: $n;"
       got=$(h_receipt C)
       [ "$got" = "INCOMPLETE why=lines-missing-after-retry open=none stops=2 blocked=1 denied=0" ] || H_WHY="$H_WHY gate C's receipt: $got;"
+      ;;
+    effort)
+      got=$(h_req_effort gateG)
+      [ "$got" = low ] || H_WHY="$H_WHY gate G's requests went out at effort $got, not low (the Agent call's effort did not take, so the case cannot tell);"
+      got=$(h_receipt G)
+      [ "$got" = "INVALID why=effort-low open=APPROVE stops=1 blocked=0 denied=0" ] || H_WHY="$H_WHY gate G's receipt: $got;"
+      n=$(LC_ALL=C grep -c "	INVALID	method-reviewer	$H_TREE	claude-opus-5-5	low	effort-low\$" "$H_PROJ/.method/local/gates.log" 2>/dev/null)
+      [ "${n:-0}" = 1 ] || H_WHY="$H_WHY gates.log: ${n:-0} INVALID effort-low lines at effort low, not 1;"
+      ;;
+    definition)
+      h_req_in gateH HARNESS-OTHER-DEFINITION || H_WHY="$H_WHY the command line's definition did not reach gate H's requests (the client used another, so the case cannot tell);"
+      got=$(h_receipt H)
+      [ "$got" = "INVALID why=instructions-differ open=APPROVE stops=1 blocked=0 denied=0" ] || H_WHY="$H_WHY gate H's receipt: $got;"
+      if h_req_in gateI HARNESS-OTHER-DEFINITION; then
+        H_NOTE="the client ran gate I from the second project file"
+        want="INVALID why=instructions-differ open=TESTS PASS stops=1 blocked=0 denied=0"
+      else
+        H_NOTE="the client ran gate I from the method's file"
+        want="VALID why=none open=TESTS PASS stops=1 blocked=0 denied=0"
+      fi
+      got=$(h_receipt I)
+      [ "$got" = "$want" ] || H_WHY="$H_WHY gate I's receipt: $got ($H_NOTE);"
+      ;;
+    record)
+      got=$(h_used A)
+      [ "$got" = "models=claude-opus-5-5 efforts=xhigh input=11 output=7 cache_creation=0 cache_read=0" ] || H_WHY="$H_WHY gate A's receipt holds $got;"
+      got=$(h_used B)
+      [ "$got" = "models=claude-opus-5-5 efforts=xhigh input=22 output=14 cache_creation=0 cache_read=0" ] || H_WHY="$H_WHY gate B's receipt holds $got;"
+      got=$(h_used G)
+      case $got in "models=claude-opus-5-5 efforts=low input=11 output=7 "*) ;; *) H_WHY="$H_WHY gate G's receipt holds $got;" ;; esac
       ;;
     deny-once)
       n=$(h_turns gateD)
