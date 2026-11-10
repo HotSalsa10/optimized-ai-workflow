@@ -812,6 +812,14 @@ if h_gates "$root" auto; then
 else
   fail "gates-auto: the case could not be made, or the fake did not answer; the client was not started"
 fi
+# (step 5b's repair: the client's prompt_id is the owner's current message,
+# so receipts are kept by session, agent and run number)
+if h_gates "$root" background; then
+  gate_q background "gates (background): a background gate whose run outlives the owner's next message gets one receipt, VALID, and leaves no running file"
+  h_safe gates-background
+else
+  fail "gates-background: the case could not be made, or the fake did not answer; the client was not started"
+fi
 
 echo "harness: ${H_RUNS:-0} client runs took ${H_TOTAL_SECS:-0} s"
 finish

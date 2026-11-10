@@ -28,6 +28,10 @@
 #                        inside the case, no retries) and SendMessage
 #                        switched off (H_SEND_MESSAGE=1 keeps it, for a case
 #                        that addresses a stand-in inside the case);
+#                        with H_FEED (a steps file, feed.pl's format) the
+#                        owner's messages come as stream-json from feed.pl,
+#                        which waits between them for what the case needs,
+#                        in place of "go";
 #                        every run is given --strict-mcp-config, so a case
 #                        that wants an MCP server passes --mcp-config.
 #                        VAR=VALUE adds to it; a name that could replace
@@ -57,7 +61,7 @@
 # req-001 is h_fake's own alive probe.
 
 # settings a caller's environment must not carry into every case
-unset H_CWD H_PROMPT H_TMPDIR H_TMP_ROOT H_FAKE_API H_SEND_MESSAGE H_FAKE_PID H_PORT H_RUNS H_TOTAL_SECS
+unset H_CWD H_PROMPT H_FEED H_TMPDIR H_TMP_ROOT H_FAKE_API H_SEND_MESSAGE H_FAKE_PID H_PORT H_RUNS H_TOTAL_SECS
 
 h_case() {
   H_DIR="$H_WORK/it's a case ü/$1"
@@ -159,15 +163,25 @@ h_holds_start() {
 # against the fake without it; at 2.1.316 it only skips the main
 # conversation's check): gate D (a handback without its lines, then one
 # with them), gate E (twice without), gate F (a complete report as text,
-# never handed back). The client's debug log goes to $H_DIR/debug.log.
-# Returns 1 when the case could not be made or the fake did not answer
-# (the client was then not started)
+# never handed back). MODE background (step 5b's repair): the owner's
+# messages come as stream-json (H_FEED): "go1", whose turn calls gate X
+# in the background (its first turn a Bash sleep of 4 s, then a report with
+# both lines), then, once the gate has started and the first turn has
+# ended, "go2", while the gate still runs; the input closes a second after
+# gates.log has its line, or at 60 s. The client's prompt_id is the
+# session's id for the owner's current message (measured at 2.1.316 and
+# 2.1.319), so the gate's stop comes under go2's. The client's debug log
+# goes to $H_DIR/debug.log (not in MODE background). Returns 1 when the
+# case could not be made or the fake did not answer (the client was then
+# not started)
 h_gates() {
   local mode=$2 agents g
   H_TREE=""
   { h_case "gates-$mode" && h_method "$1"; } || return 1
   mkdir -p "$H_PROJ/.claude/agents/method" && cp "$HARNESS/agents/method/method-reviewer.md" "$H_PROJ/.claude/agents/method/" || return 1
-  if [ "$mode" = auto ]; then
+  if [ "$mode" = background ]; then
+    :
+  elif [ "$mode" = auto ]; then
     mkdir -p "$H_PROJ/.claude/hooks/fixture" && cp "$HARNESS/hooks/allow.sh" "$H_PROJ/.claude/hooks/fixture/" || return 1
     perl -MJSON::PP -e 'my $f = shift; open my $h, "<", $f or die; my $d = JSON::PP->new->decode(do { local $/; <$h> }); close $h;
       push @{ $d->{hooks}{PreToolUse} }, {matcher => "Agent|Task", hooks => [{type => "command", command => q{bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fixture/allow.sh"}, timeout => 30}]};
@@ -188,11 +202,16 @@ h_gates() {
   perl -MJSON::PP -e '
     my ($mode, $t) = @ARGV;
     my $good = "APPROVE\nSummary: the change is fine.\nEND-VERDICT $t";
-    my $agent = sub { my ($g, $type, $effort) = @_; return {tool => "Agent", input => {description => "harness gate $g", prompt => "HARNESS-GATE-$g: review the change",
-      subagent_type => $type // "method-reviewer", run_in_background => JSON::PP::false, defined $effort ? (effort => $effort) : ()}} };
+    my $agent = sub { my ($g, $type, $effort, $bg) = @_; return {tool => "Agent", input => {description => "harness gate $g", prompt => "HARNESS-GATE-$g: review the change",
+      subagent_type => $type // "method-reviewer", run_in_background => $bg ? JSON::PP::true : JSON::PP::false, defined $effort ? (effort => $effort) : ()}} };
     my $hand = sub { return {tool => "SubagentHandback", input => {message => $_[0]}} };
     my (@convs, @calls);
-    if ($mode eq "auto") {
+    my $go = "go";
+    if ($mode eq "background") {
+      push @convs, {name => "gateX", match => "HARNESS-GATE-X", turns => [{tool => "Bash", input => {command => "sleep 4", description => "wait"}}, {text => $good}]};
+      @calls = ($agent->("X", undef, undef, 1));
+      $go = "go1";
+    } elsif ($mode eq "auto") {
       # (the check auto mode runs, matched by its first message: the
       # transcript, or the CLAUDE.md of the project once there is one)
       push @convs, {name => "classifier", match => "(?:^<transcript>|<user_claude_md>)", turns => [{text => "<block>no</block>"}]},
@@ -212,10 +231,14 @@ h_gates() {
       @calls = ($agent->("mine", "my-method-reviewer"), (map { $agent->($_) } qw(A B C)), $agent->("G", undef, "low"),
         $agent->("H", "method-security-checker"), $agent->("I", "method-tester"));
     }
-    push @convs, {name => "main", match => "^go\$", turns => [@calls, map { {text => "MAIN-DONE-$_"} } 1 .. 4]};
+    push @convs, {name => "main", match => "^$go\$", turns => [@calls, map { {text => "MAIN-DONE-$_"} } 1 .. 4]};
     print JSON::PP->new->canonical->encode({convs => \@convs, fallback => {text => "FAKE-FALLBACK"}, usage => {input_tokens => 11, output_tokens => 7}})' "$mode" "$H_TREE" >"$H_DIR/gates.json" || return 1
   h_fake "$H_DIR/gates.json" || return 1
-  if [ "$mode" = auto ]; then
+  if [ "$mode" = background ]; then
+    printf 'say\tgo1\nfile\t%s\tmethod-running-\nholds\t%s\t"type":"result"\nsay\tgo2 while the gate runs\nholds\t%s\tmethod-reviewer\nsleep\t1\n' \
+      "$H_PROJ/.git" "$H_DIR/out.jsonl" "$H_PROJ/.method/local/gates.log" >"$H_DIR/feed.txt" || return 1
+    H_FEED="$H_DIR/feed.txt" h_client 60 -- --permission-mode default --allowedTools Bash
+  elif [ "$mode" = auto ]; then
     h_client 90 -- --permission-mode auto --debug-file "$H_DIR/debug.log"
   else
     h_client 90 -- --permission-mode default --allowedTools Bash --agents "$agents" --debug-file "$H_DIR/debug.log"
@@ -284,6 +307,10 @@ h_turns() {
 #              lines-missing-after-retry
 #   text-only  gate F (no handback; the client nudges it three times):
 #              INCOMPLETE no-report, never refused or sent back
+#   background gate X (MODE background): the owner's second message
+#              reached the fake before the gate's last request (so the
+#              gate's stop came under it, and the case can tell); the gate
+#              has one receipt, VALID, and no running file is left
 h_gate_holds() {
   local got c n v i want
   H_WHY=""
@@ -379,6 +406,18 @@ h_gate_holds() {
       case $got in "INCOMPLETE why=no-report open=none stops="*" blocked=0 denied=0") ;; *) H_WHY="$H_WHY gate F's receipt: $got;" ;; esac
       ! h_req_in gateF 'gate-receipt: ' || H_WHY="$H_WHY gate-receipt's reason reached gate F;"
       ;;
+    background)
+      v=$(perl "$HARNESS/read.pl" first main "go2 while the gate runs" "$H_DIR/fake")
+      i=$(perl "$HARNESS/read.pl" first gateX tool_result "$H_DIR/fake")
+      case "$v:$i" in
+        *none*) H_WHY="$H_WHY the owner's second message (request $v) or the gate's last request ($i) did not reach the fake;" ;;
+        *) [ "$v" -lt "$i" ] || H_WHY="$H_WHY the owner's second message (request $v) came after the gate's last request ($i), so the case cannot tell;" ;;
+      esac
+      got=$(h_receipt X)
+      [ "$got" = "VALID why=none open=APPROVE stops=1 blocked=0 denied=0" ] || H_WHY="$H_WHY gate X's receipt: $got;"
+      n=$(find "$H_PROJ/.git" -maxdepth 1 -name 'method-running-*' | wc -l | tr -d ' ')
+      [ "$n" = 0 ] || H_WHY="$H_WHY $n running files left in git's folder;"
+      ;;
     *) H_WHY="no such gate question: $1" ;;
   esac
   [ -z "$H_WHY" ]
@@ -445,6 +484,15 @@ h_client() {
   [ "${1:-}" = "--" ] && shift
   h_no_send=(--disallowedTools SendMessage)
   [ "${H_SEND_MESSAGE:-0}" = 1 ] && h_no_send=()
+  # (the owner's messages: "go" on the command line, or, with H_FEED,
+  # stream-json from feed.pl on standard input)
+  if [ -n "${H_FEED:-}" ]; then
+    h_prompt=(-p --input-format stream-json)
+    exec 9< <(perl "$HARNESS/feed.pl" "$H_FEED" "$secs")
+  else
+    h_prompt=(-p "${H_PROMPT:-go}")
+    exec 9</dev/null
+  fi
   # (so h_tmp_used asks about this run, not an earlier one in the case)
   [ -n "${H_TMPDIR:-}" ] || rm -rf "$H_DIR/tmp/claude-$(id -u)"
   start=$(perl -MTime::HiRes=time -e 'printf "%.3f", time')
@@ -457,9 +505,10 @@ h_client() {
     https_proxy="http://127.0.0.1:$H_PORT" http_proxy="http://127.0.0.1:$H_PORT" all_proxy="http://127.0.0.1:$H_PORT" no_proxy=127.0.0.1 \
     GIT_CONFIG_NOSYSTEM=1 ${h_env[@]+"${h_env[@]}"} \
     /bin/sh -c 'cd "$1" && shift && exec "$@"' sh "${H_CWD:-$H_PROJ}" \
-    "$H_CLIENT" -p "${H_PROMPT:-go}" --output-format stream-json --verbose --strict-mcp-config ${h_no_send[@]+"${h_no_send[@]}"} "$@" \
-    </dev/null >"$H_DIR/out.jsonl" 2>"$H_DIR/err.txt"
+    "$H_CLIENT" "${h_prompt[@]}" --output-format stream-json --verbose --strict-mcp-config ${h_no_send[@]+"${h_no_send[@]}"} "$@" \
+    <&9 >"$H_DIR/out.jsonl" 2>"$H_DIR/err.txt"
   H_RC=$?
+  exec 9<&-
   end=$(perl -MTime::HiRes=time -e 'printf "%.3f", time')
   H_SECS=$(perl -e 'printf "%.1f", $ARGV[1] - $ARGV[0]' "$start" "$end")
   H_TOTAL_SECS=$(perl -e 'printf "%.1f", $ARGV[0] + $ARGV[1]' "${H_TOTAL_SECS:-0}" "$H_SECS")

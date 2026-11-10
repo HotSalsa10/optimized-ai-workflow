@@ -23,6 +23,9 @@
 # output_config.effort; "none" for a request without one), once, in the
 # order first seen, joined by commas; "none" and exit 1 when there is no
 # such request.
+# read.pl first CONV TEXT DIR: prints the number of the first request the
+# fake logged in DIR for its conversation CONV that holds TEXT in what the
+# client sent (as req reads it), or "none" and exit 1.
 # read.pl hooks DESC TEXT HOME LOG: prints how many hook runs whose command
 # holds TEXT the client's debug log LOG shows during the Agent call
 # described DESC (its "Hooks: ... [COMMAND] finished with status" lines
@@ -123,10 +126,10 @@ if (($what // '') eq 'effort' && @ARGV == 3) {
   print @e ? join(',', @e) : 'none', "\n";
   exit(@e ? 0 : 1);
 }
-if (($what // '') eq 'req' && @ARGV == 4) {
-  my ($conv, $text, $dir) = @ARGV[1 .. 3];
-  utf8::decode($text);
-  # every string in what the client sent, joined
+# what the client sent in a request body: every string of its system text
+# and of its messages that are not the assistant's, joined
+sub sent {
+  my ($b) = @_;
   my $strings;
   $strings = sub {
     my ($v) = @_;
@@ -134,13 +137,33 @@ if (($what // '') eq 'req' && @ARGV == 4) {
       : ref $v eq 'ARRAY' ? map { $strings->($_) } @$v
       : defined $v && !ref $v ? ($v) : ();
   };
+  return join "\n", $strings->([$b->{system}, grep { ref $_ eq 'HASH' && ($_->{role} // '') ne 'assistant' } @{ ref $b->{messages} eq 'ARRAY' ? $b->{messages} : [] }]);
+}
+if (($what // '') eq 'req' && @ARGV == 4) {
+  my ($conv, $text, $dir) = @ARGV[1 .. 3];
+  utf8::decode($text);
   for my $b (requests_of($conv, $dir)) {
-    my $sent = join "\n", $strings->([$b->{system}, grep { ref $_ eq 'HASH' && ($_->{role} // '') ne 'assistant' } @{ ref $b->{messages} eq 'ARRAY' ? $b->{messages} : [] }]);
-    exit 0 if index($sent, $text) >= 0;
+    exit 0 if index(sent($b), $text) >= 0;
   }
   exit 1;
 }
-die "usage: read.pl init FIELD FILE | read.pl req CONV TEXT DIR | read.pl effort CONV DIR | read.pl receipt DESC HOME GIT | read.pl used DESC HOME GIT | read.pl hooks DESC TEXT HOME LOG\n" unless defined $file && $what eq 'init';
+if (($what // '') eq 'first' && @ARGV == 4) {
+  my ($conv, $text, $dir) = @ARGV[1 .. 3];
+  utf8::decode($text);
+  opendir my $d, $dir or do { print "none\n"; exit 1 };
+  for my $n (sort grep { /\Areq-[0-9]+\.json\z/ } readdir $d) {
+    open my $h, '<', "$dir/$n" or next;
+    my $r = eval { local $/; JSON::PP->new->utf8->decode(<$h>) } or next;
+    next unless ref $r eq 'HASH' && ($r->{info} // '') =~ /\Aconv=\Q$conv\E / && ref $r->{body} eq 'HASH';
+    next unless index(sent($r->{body}), $text) >= 0;
+    my ($num) = $n =~ /([0-9]+)/;
+    print 0 + $num, "\n";
+    exit 0;
+  }
+  print "none\n";
+  exit 1;
+}
+die "usage: read.pl init FIELD FILE | read.pl req CONV TEXT DIR | read.pl first CONV TEXT DIR | read.pl effort CONV DIR | read.pl receipt DESC HOME GIT | read.pl used DESC HOME GIT | read.pl hooks DESC TEXT HOME LOG\n" unless defined $file && $what eq 'init';
 open my $f, '<', $file or exit 1;
 while (my $l = <$f>) {
   my $o = eval { JSON::PP->new->utf8->decode($l) } or next;

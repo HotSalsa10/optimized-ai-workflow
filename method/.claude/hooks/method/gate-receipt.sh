@@ -15,7 +15,8 @@
 # Rules done here (docs/rule-map.md): M053 (never silent: every gate run
 # leaves a receipt that says what it is), M078 (a missing verdict means
 # "not checked"), M106 (an approval covers one exact tree), M116 (receipts
-# record models, efforts, tokens and the instructions' hash).
+# record models, efforts, tokens by class, the first request's cache reads
+# and the instructions' hash).
 case "$0" in
   */*) here=${0%/*} ;;
   *) here=. ;;

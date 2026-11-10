@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Plants for gate-receipt (steps 5b.1 and 5b.2): each planted break in
+# Plants for gate-receipt (steps 5b.1 and 5b.2, and step 5b's review,
+# named "review F<n>" after its findings): each planted break in
 # lib/receipt.pl or the wrapper turns tests/gate-receipt.test.sh red for
 # its stated reason, in a throwaway copy of the repo, with only the cases
 # kept for that reason (after they pass on the clean copy). The breaks are
@@ -69,13 +70,48 @@ defined $word && index($last, $w->{end}) == 0;
 ---
   } elsif (0) {
 === a resumed gate's earlier receipt left standing | method/scripts/method/lib/receipt.pl | resumed under the same agent id, its earlier receipt no longer stands
-      $o->{state} = $w->{unchecked};
+    $o->{state} = $w->{unchecked};
 ---
-      next;
+    next;
 === a stop with no start judged | method/scripts/method/lib/receipt.pl | a stop with no start: not checked, never blocked
-    push @why, 'no-start';
+  push @why, 'no-start' unless defined $r->{started};
 ---
-    1;
+  1;
+=== review F1: a handback's receipt with no start judged | method/scripts/method/lib/receipt.pl | a handback with no start, then its stop: not checked
+  push @why, 'no-start' unless defined $r->{started};
+---
+  push @why, 'no-start' unless $r->{stops} || $r->{handback} || defined $r->{started};
+=== review F1: a second stop of a run with no start judged | method/scripts/method/lib/receipt.pl | a second stop of a run with no start: not checked, never blocked
+  push @why, 'no-start' unless defined $r->{started};
+---
+  push @why, 'no-start' unless $r->{stops} || defined $r->{started};
+=== review F2: a stop takes the run of its prompt id | method/scripts/method/lib/receipt.pl | a background gate whose stop comes after the owner's next message gets its run's receipt
+  my $r = load($dir, $name) || fresh($in, $gate, 'no-start', $run);
+---
+  my $r = load($dir, $name);
+  $r = undef if $r && ($r->{prompt} // '') ne ($in->{prompt_id} // '');
+  $r ||= fresh($in, $gate, 'no-start', $run);
+=== review F2: a handback takes the run of its prompt id | method/scripts/method/lib/receipt.pl | a handback after the owner's next message is noted in its run's receipt
+  my (undef, undef, $name, $r) = current($in, $gate, $dir);
+---
+  my (undef, undef, $name, $r) = current($in, $gate, $dir);
+  $r = fresh($in, $gate, 'no-start', 1) if ($r->{prompt} // '') ne ($in->{prompt_id} // '');
+=== review F2: a prompt id required | method/scripts/method/lib/receipt.pl | a stop with no prompt id takes the agent's newest run
+    return 0 unless id_ok($in->{session_id}) && id_ok($in->{agent_id});
+---
+    return 0 unless id_ok($in->{session_id}) && id_ok($in->{agent_id}) && id_ok($in->{prompt_id});
+=== review F2: a start takes the agent's newest run again | method/scripts/method/lib/receipt.pl | a start makes the agent's next run
+    $run = newest($dir, $part) + 1;
+---
+    $run = newest($dir, $part) || 1;
+=== review F2: no receipt before the start's clean check | method/scripts/method/lib/receipt.pl | a start cut off before it has looked at the files leaves its run not checked
+    eval { save($dir, $name, fresh($in, $gate, 'starting', $run)) };
+---
+
+=== review F2: a cut-off start's run without a tree | method/scripts/method/lib/receipt.pl | a start cut off before it has looked at the files leaves its run not checked
+ if !defined $r->{started} && ($r->{tree} // 'none') eq 'none';
+---
+ if !$r;
 === no gates.log line | method/scripts/method/lib/receipt.pl | gates.log gets one fixed-field line
   log_line($project, $r, $in);
 ---
@@ -143,15 +179,28 @@ $l->[1] > $r->{started}
 ---
 
 === 5b.2 no running file at the start | method/scripts/method/lib/receipt.pl | the start writes a running file in git's folder, so the guard marks writes
-    running($dir, 1);
-    Log::write_whole($dir, running_of(
+      running($dir, 1);
+      Log::write_whole($dir, running_of(
 ---
-    running($dir, 1);
-    0 && Log::write_whole($dir, running_of(
+      running($dir, 1);
+      0 && Log::write_whole($dir, running_of(
 === 5b.2 the running file kept after the stop | method/scripts/method/lib/receipt.pl | the stop removes the running file
   unlink File::Spec->catfile($dir, running_of(
 ---
   0 && unlink File::Spec->catfile($dir, running_of(
+=== review F3: the running file removed at auto mode's stop with no handback | method/scripts/method/lib/receipt.pl | auto mode: a stop with no handback keeps the running file
+ running_of($part, $run)) unless $nudged;
+---
+ running_of($part, $run));
+=== review F4: no judging receipt before the stop's checks | method/scripts/method/lib/receipt.pl | a second stop of a VALID run, cut off while it waits for the record, leaves it not checked
+  @$r{qw(state why stopped)} = ($w->{unchecked}, ['judging'], Time::HiRes::time());
+  save($dir, $name, $r);
+---
+  @$r{qw(state why stopped)} = ($w->{unchecked}, ['judging'], Time::HiRes::time());
+=== review F6: the last request's cache reads kept for the first's | method/scripts/method/lib/receipt.pl | the receipt keeps the first request's cache reads apart
+$ev->{tokens}{cache_read_first} = 0 + $c if $first &&
+---
+$ev->{tokens}{cache_read_first} = 0 + $c if
 === 5b.2 a running file left by a crash kept | method/scripts/method/lib/receipt.pl | a running file left by a crash a day ago is removed at the next start
 elsif ($prune) { unlink $p }
 ---

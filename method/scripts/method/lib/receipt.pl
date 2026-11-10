@@ -27,32 +27,45 @@
 #   the one noted). Then the receipt is written, and one fixed-field line
 #   goes to .method/local/gates.log.
 # A receipt is one JSON file per gate run in git's common folder
-# (method-receipt-<16 hex for session and agent><8 hex for the prompt>.json,
-# which G6 protects), written whole, the newest 500 kept. Its state is one
-# of the receipt words: the first (every check holds), the second (it
-# checked the wrong thing or the wrong way: any reason in %WRONG), the
-# third (not checked: any other reason), with reason codes, never text.
-# Each stop first writes the third word with the reason "judging", so a
-# crash never leaves an earlier first word standing. Anything that goes
-# wrong is exit 0 (B11): at SubagentStop an exit 2 sends the gate back to
-# work, and at the handback a refusal on every crash would loop; only a
-# deliberate block exits 3, which the wrapper turns into 2.
+# (method-receipt-<16 hex for session and agent><8 hex for the run
+# number>.json, which G6 protects), written whole, the newest 500 kept. A
+# start makes the agent's next run; a handback and a stop take its newest
+# run. (Not the prompt id: the client gives the session's id for the
+# owner's current message, so a background gate's stop after the owner's
+# next message carries another one; measured at 2.1.316 and 2.1.319.) Its
+# state is one of the receipt words: the first (every check holds), the
+# second (it checked the wrong thing or the wrong way: any reason in
+# %WRONG), the third (not checked: any other reason), with reason codes,
+# never text. A run whose start was not recorded is the third word at every
+# stop ("no-start"), never sent back. Each stop first writes the third word
+# with the reason "judging", so a crash never leaves an earlier first word
+# standing. Anything that goes wrong is exit 0 (B11): at SubagentStop an
+# exit 2 sends the gate back to work, and at the handback a refusal on
+# every crash would loop; only a deliberate block exits 3, which the
+# wrapper turns into 2.
 # Also loaded with require: Receipt::mark (the guard's write mark, B8) and
 # Receipt::counts (session-status's line on the receipts for HEAD's tree).
 # Known limits: a record, a receipt or a mark changed by a program Claude
-# writes and runs (RISKS #2); a handback the client delivers with a
-# warning that its check could not run (the hook cannot see it); the
-# record's format as measured at 2.1.316 and 2.1.319 (a change reads as
-# not checked, or, for its cwd and the Bash tool's background-shell text,
-# can hide a reason); the stop's folder is the main session's, so the
-# files are judged at the stop only when it is the worktree the gate
-# started in (otherwise not checked).
+# writes and runs (RISKS #2), and the agent's record by any write, a plain
+# sed -i or Edit included (G6 does not protect ~/.claude/projects); a
+# handback the client delivers with a warning that its check could not run
+# (the hook cannot see it); the record's format as measured at 2.1.316 and
+# 2.1.319 (a change reads as not checked, or, for its cwd and the Bash
+# tool's background-shell text, can hide a reason; another form of model
+# or effort reads as the second word); the stop's folder is the main
+# session's, so the files are judged at the stop only when it is the
+# worktree the gate started in (otherwise not checked); a packet read only
+# in part (no Tree line) reads as another tree's; a write the guard lets
+# through but the permission prompt or the tool then refuses still marks;
+# delegation other than an Agent or Task call (a Skill that forks into an
+# agent) is not seen; user memory and rules files can add instructions
+# B10 does not compare; a start that takes over 30 s leaves its run not
+# checked.
 package Receipt;
 use strict;
 use warnings;
 use Fcntl qw(O_RDONLY);
 use File::Basename qw(dirname);
-use File::Glob qw(bsd_glob GLOB_QUOTE GLOB_NOSORT);
 use File::Spec;
 use Digest::SHA ();
 use Time::HiRes ();
@@ -100,7 +113,6 @@ sub words {
 }
 
 sub id_ok { my ($s) = @_; return defined $s && !ref $s && $s =~ /\A[A-Za-z0-9_.-]{1,128}\z/ }
-sub glob_quote { my ($s) = @_; $s =~ s/([\\*?\[\]{}~])/\\$1/g; return $s }
 sub sha { return Digest::SHA::sha256_hex(Hook::bytes(join "\0", @_)) }
 sub secs { return 0 + sprintf('%.3f', $_[0]) }
 
@@ -220,9 +232,25 @@ sub allowed_models {
 }
 
 sub agent_part { my ($sid, $aid) = @_; return substr(sha('receipt', $sid, $aid), 0, 16) }
-sub run_id { my ($sid, $aid, $pid) = @_; return agent_part($sid, $aid) . substr(sha('prompt', $pid), 0, 8) }
-sub name_of { return $PREFIX . run_id(@_) . '.json' }
-sub running_of { return $RUNNING . run_id(@_) }
+# a run's receipt and running file: the agent's part, then the run number
+# in 8 hex
+sub name_of { my ($part, $run) = @_; return $PREFIX . $part . sprintf('%08x', $run) . '.json' }
+sub running_of { my ($part, $run) = @_; return $RUNNING . $part . sprintf('%08x', $run) }
+
+# the agent PART's newest run in DIR: the highest run number among its
+# receipts and running files (a start writes its running file first), or 0
+sub newest {
+  my ($dir, $part) = @_;
+  opendir my $d, $dir or return 0;
+  my $n = 0;
+  for (readdir $d) {
+    next unless /\A(?:\Q$PREFIX$part\E([0-9a-f]{8})\.json|\Q$RUNNING$part\E([0-9a-f]{8}))\z/;
+    my $k = hex(defined $1 ? $1 : $2);
+    $n = $k if $k > $n;
+  }
+  closedir $d;
+  return $n;
+}
 
 # a receipt: the hash, or undef when there is none or it cannot be read
 sub load {
@@ -280,8 +308,12 @@ sub near_dir {
 # counts it (Protect::call_writes). When the call is the main session's or
 # an agent's that is not a gate, and a gate runs in the repository it
 # writes in (a running file less than a day old in git's folder), one line
-# goes to method-write-marks there: the time and the worktree's top.
-# Prints nothing; dies on a failure, which the guard's eval catches.
+# goes to method-write-marks there: the time and the worktree's top. A
+# write in a checked-out submodule marks each repository that holds it
+# too, up to $SUPER levels, with that repository's worktree top: a gate's
+# clean check counts the submodules. Prints nothing; dies on a failure,
+# which the guard's eval catches.
+our $SUPER = 4;
 sub mark {
   my ($in, $tool, $input) = @_;
   my $type = $in->{agent_type};
@@ -303,18 +335,23 @@ sub mark {
   }
   @dirs = ($cwd) unless grep { defined } @dirs;
   my %done;
-  for my $d (grep { defined && -d } @dirs) {
-    my ($st, $out) = Git::run('-C', $d, 'rev-parse', '--show-toplevel', '--git-common-dir');
-    next if $st;
-    my ($top, $common) = split /\n/, $out;
-    next unless defined $common && $common ne '' && defined $top && $top ne '';
-    require Cwd;
-    my $real = Cwd::realpath(File::Spec->rel2abs($common, $d));
-    next unless defined $real && -d $real && running($real);
-    my @t = stat $top;
-    next unless @t;
-    next if $done{"$real\0$t[0]-$t[1]"}++;
-    Log::append($real, $MARKS, $MARKS_CAP, at => sprintf('%.6f', Time::HiRes::time()), top => "$t[0]-$t[1]");
+  require Cwd;
+  for my $from (grep { defined && -d } @dirs) {
+    my $d = $from;
+    for (1 .. $SUPER) {
+      my ($st, $out) = Git::run('-C', $d, 'rev-parse', '--show-toplevel', '--git-common-dir', '--show-superproject-working-tree');
+      last if $st;
+      my ($top, $common, $super) = split /\n/, $out;
+      last unless defined $common && $common ne '' && defined $top && $top ne '';
+      my $real = Cwd::realpath(File::Spec->rel2abs($common, $d));
+      my @t = stat $top;
+      if (defined $real && -d $real && running($real) && @t && !$done{"$real\0$t[0]-$t[1]"}++) {
+        Log::append($real, $MARKS, $MARKS_CAP, at => sprintf('%.6f', Time::HiRes::time()), top => "$t[0]-$t[1]");
+      }
+      # (the repository this one is a checked-out submodule of)
+      last unless defined $super && $super ne '' && -d $super;
+      $d = $super;
+    }
   }
   return 0;
 }
@@ -554,10 +591,14 @@ sub on_assistant {
   if (defined $m->{usage} && !(defined $id && $ev->{counted}{$id}++)) {
     my $u = part($m->{usage});
     if (ref $u eq 'HASH') {
+      my $first = !$ev->{usage_seen}++;
       for my $k ([input => 'input_tokens'], [output => 'output_tokens'], [cache_creation => 'cache_creation_input_tokens'], [cache_read => 'cache_read_input_tokens']) {
         my $v = $u->{ $k->[1] };
         $ev->{tokens}{ $k->[0] } += $v if defined $v && !ref $v && $v =~ /\A[0-9]{1,15}\z/;
       }
+      # (M116: the first request's cache reads, kept apart)
+      my $c = $u->{cache_read_input_tokens};
+      $ev->{tokens}{cache_read_first} = 0 + $c if $first && defined $c && !ref $c && $c =~ /\A[0-9]{1,15}\z/;
     }
   }
   for my $c (defined $m->{content} ? arr(\$m->{content}) : ()) {
@@ -703,7 +744,7 @@ sub evidence {
   my $m = $same ? method_file($g->{path}, $gate) : undef;
   # R: the agent's record
   my $w = words();
-  my %ev = (models => [], efforts => [], tokens => { input => 0, output => 0, cache_creation => 0, cache_read => 0 },
+  my %ev = (models => [], efforts => [], tokens => { input => 0, output => 0, cache_creation => 0, cache_read => 0, cache_read_first => undef },
     counted => {}, bg => {}, packets => [], found => 0, bad => 0, lines => 0);
   my $hb = $r->{handback} && id_ok($r->{handback}{id}) ? $r->{handback}{id} : undef;
   my %ctx = (cwd => $r->{cwd}, wait => $ok ? 1 : 0, hb => $hb, end => defined $hb ? undef : "$w->{end} $r->{tree}");
@@ -756,10 +797,10 @@ sub ordered {
 }
 
 sub fresh {
-  my ($in, $gate, $why) = @_;
-  return { v => 1, gate => $gate, agent => $in->{agent_id}, prompt => $in->{prompt_id}, started => undef, stopped => undef,
-    head => 'none', tree => 'none', state => words()->{unchecked}, why => [$why], open => undef, stops => 0,
-    blocked => 0, denied => 0, handback => undef };
+  my ($in, $gate, $why, $run) = @_;
+  return { v => 1, gate => $gate, agent => $in->{agent_id}, run => $run, prompt => (id_ok($in->{prompt_id}) ? $in->{prompt_id} : undef),
+    started => undef, stopped => undef, head => 'none', tree => 'none', state => words()->{unchecked}, why => [$why], open => undef,
+    stops => 0, blocked => 0, denied => 0, handback => undef };
 }
 
 sub effort_of { my ($e) = @_; $e = $e->{level} if ref $e eq 'HASH'; return defined $e && !ref $e && $e =~ /\A(low|medium|high|xhigh|max)\z/ ? $1 : 'none' }
@@ -777,37 +818,68 @@ sub log_line {
   return;
 }
 
+# a background gate resumed under the same agent id: the agent PART's
+# earlier receipts in DIR (all but NAME) no longer stand for what it does
+# now
+sub resumed {
+  my ($dir, $part, $name) = @_;
+  my $w = words();
+  opendir my $d, $dir or return;
+  my @names = grep { /\A\Q$PREFIX$part\E[0-9a-f]{8}\.json\z/ && $_ ne $name } readdir $d;
+  closedir $d;
+  for my $other (@names) {
+    my $o = load($dir, $other) or next;
+    next unless ($o->{state} // '') eq $w->{good};
+    $o->{state} = $w->{unchecked};
+    $o->{why} = ['resumed-after-report'];
+    eval { save($dir, $other, $o) };
+  }
+  return;
+}
+
+# the run a handback or a stop belongs to: the agent's newest run (its
+# part, number, receipt name and receipt); a run with no receipt gets one
+# whose start was not recorded, and a run whose start was not recorded
+# (none, or one cut off) the tree of the files now, for its lines
+sub current {
+  my ($in, $gate, $dir) = @_;
+  my $part = agent_part($in->{session_id}, $in->{agent_id});
+  my $run = newest($dir, $part) || 1;
+  my $name = name_of($part, $run);
+  my $r = load($dir, $name) || fresh($in, $gate, 'no-start', $run);
+  @$r{qw(head tree)} = tree_of(Hook::bytes($in->{cwd} // '.')) if !defined $r->{started} && ($r->{tree} // 'none') eq 'none';
+  return ($part, $run, $name, $r);
+}
+
 # --- the three events ---
 
 sub start {
   my ($in, $gate, $project, $dir) = @_;
-  my $w = words();
   my $began = Time::HiRes::time();
-  # (the guard's marks are made while this file is there, from before the
-  # start's own clean check, which takes a while on a large tree; one left
-  # by a crash is removed after a day)
-  eval {
-    running($dir, 1);
-    Log::write_whole($dir, running_of($in->{session_id}, $in->{agent_id}, $in->{prompt_id}), sprintf("%.6f\n", $began), 0600);
-  } if $dir;
+  my ($part, $run, $name);
+  if ($dir) {
+    # a start makes the agent's next run. Before the start's own clean
+    # check, which takes a while on a large tree: the running file (the
+    # guard's marks are made while it is there; one left by a crash is
+    # removed after a day), the agent's earlier receipts set aside, and
+    # the run's receipt with no start yet, so a start cut off at its
+    # time-out leaves its own run not checked, never an earlier run judged
+    # in its place
+    $part = agent_part($in->{session_id}, $in->{agent_id});
+    $run = newest($dir, $part) + 1;
+    $name = name_of($part, $run);
+    eval {
+      running($dir, 1);
+      Log::write_whole($dir, running_of($part, $run), sprintf("%.6f\n", $began), 0600);
+    };
+    resumed($dir, $part, $name);
+    eval { save($dir, $name, fresh($in, $gate, 'starting', $run)) };
+  }
   my $cwd = cwd_of($in, $project);
   my $g = look($cwd);
   my ($head, $tree) = @$g{qw(head tree)};
   if ($dir) {
-    # a background gate resumed under the same agent id: its earlier
-    # receipts no longer stand for what it does now
-    my $part = agent_part($in->{session_id}, $in->{agent_id});
-    my $name = name_of($in->{session_id}, $in->{agent_id}, $in->{prompt_id});
-    for my $p (bsd_glob(glob_quote($dir) . "/$PREFIX$part*.json", GLOB_QUOTE | GLOB_NOSORT)) {
-      my $other = (File::Spec->splitpath($p))[2];
-      next if $other eq $name;
-      my $o = load($dir, $other) or next;
-      next unless ($o->{state} // '') eq $w->{good};
-      $o->{state} = $w->{unchecked};
-      $o->{why} = ['resumed-after-report'];
-      eval { save($dir, $other, $o) };
-    }
-    my $r = fresh($in, $gate, 'running');
+    my $r = fresh($in, $gate, 'running', $run);
     @$r{qw(started head tree)} = ($began, $head, $tree);
     @$r{qw(top clean_start)} = @$g{qw(top clean)};
     $r->{cwd} = sha('cwd', defined $in->{cwd} && !ref $in->{cwd} ? $in->{cwd} : '');
@@ -824,12 +896,7 @@ sub start {
 sub handback {
   my ($in, $gate, $dir) = @_;
   return 0 unless $dir;
-  my $name = name_of($in->{session_id}, $in->{agent_id}, $in->{prompt_id});
-  my $r = load($dir, $name);
-  unless ($r) {
-    $r = fresh($in, $gate, 'no-start');
-    @$r{qw(head tree)} = tree_of(Hook::bytes($in->{cwd} // '.'));
-  }
+  my (undef, undef, $name, $r) = current($in, $gate, $dir);
   my $msg = ref $in->{tool_input} eq 'HASH' ? $in->{tool_input}{message} : undef;
   my ($ok, $word) = lines_ok($msg, $gate, $r->{tree});
   if (!$ok && !$r->{denied}) {
@@ -847,14 +914,11 @@ sub stop {
   my ($in, $gate, $project, $dir) = @_;
   return 0 unless $dir;
   my $w = words();
-  my $name = name_of($in->{session_id}, $in->{agent_id}, $in->{prompt_id});
-  my $r = load($dir, $name);
+  my ($part, $run, $name, $r) = current($in, $gate, $dir);
   my @why;
-  unless ($r) {
-    $r = fresh($in, $gate, 'no-start');
-    @$r{qw(head tree)} = tree_of(Hook::bytes($in->{cwd} // '.'));
-    push @why, 'no-start';
-  }
+  # a run whose start was not recorded is not checked, at every stop of
+  # it, and never sent back
+  push @why, 'no-start' unless defined $r->{started};
   $r->{stops}++;
   # (1) not checked until judged, so a crash leaves no earlier good word
   @$r{qw(state why stopped)} = ($w->{unchecked}, ['judging'], Time::HiRes::time());
@@ -867,12 +931,12 @@ sub stop {
   }
   # (2) and (3): the report and its lines
   my $auto = ($in->{permission_mode} // '') eq 'auto';
-  my ($ok, $word);
+  my ($ok, $word, $nudged);
   if ($r->{handback}) {
     ($ok, $word) = ($r->{handback}{lines}, $r->{handback}{open});
     push @why, 'lines-missing-after-retry' unless $ok;
   } elsif ($auto) {
-    ($ok, $word) = (0, undef);
+    ($ok, $word, $nudged) = (0, undef, 1);
     push @why, 'no-report';    # auto mode delivers only a handback
   } else {
     ($ok, $word) = lines_ok($in->{last_assistant_message}, $gate, $r->{tree});
@@ -896,7 +960,11 @@ sub stop {
   $r->{state} = state_of(@why);
   save($dir, $name, $r);
   log_line($project, $r, $in);
-  unlink File::Spec->catfile($dir, running_of($in->{session_id}, $in->{agent_id}, $in->{prompt_id}));
+  # (in auto mode a stop with no handback is followed by the client's own
+  # nudges to the gate, so its running file stays and the writes made
+  # meanwhile are marked; a later stop removes it, or a start's prune
+  # after a day)
+  unlink File::Spec->catfile($dir, running_of($part, $run)) unless $nudged;
   return 0;
 }
 
@@ -936,7 +1004,7 @@ sub main {
     my $w = words();
     my $gate = $in->{agent_type};
     return 0 unless defined $gate && !ref $gate && exists $w->{gate}{$gate};
-    return 0 unless id_ok($in->{session_id}) && id_ok($in->{agent_id}) && id_ok($in->{prompt_id});
+    return 0 unless id_ok($in->{session_id}) && id_ok($in->{agent_id});
     my $event = $in->{hook_event_name} // '';
     my $project = project($in);
     my $dir = $project ? store($project) : undef;

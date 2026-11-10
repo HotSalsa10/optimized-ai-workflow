@@ -355,16 +355,17 @@ mproj="$work/marks"
 mwt="$work/marks-wt"
 marks="$mproj/.git/method-write-marks"
 running="$mproj/.git/method-running-0123456789abcdef01234567"
-# mcall TOOL INPUT-JSON [AGENT-TYPE]: one call in the marks project
+# mcall TOOL INPUT-JSON [AGENT-TYPE [CWD]]: one call in the marks project
+# (CWD: the folder the call runs in, the project's top by default)
 mcall() {
-  TOOL=$1 IN=$2 AT=${3:-} CWD="$mproj" perl -MJSON::PP -e 'my %h = (session_id => "s-1", hook_event_name => "PreToolUse", cwd => $ENV{CWD}, tool_name => $ENV{TOOL}, tool_input => JSON::PP->new->decode($ENV{IN}), tool_use_id => "toolu_1"); @h{qw(agent_id agent_type)} = ("a1", $ENV{AT}) if $ENV{AT} ne ""; print JSON::PP->new->canonical->encode(\%h)' >"$work/in.json"
+  TOOL=$1 IN=$2 AT=${3:-} CWD="${4:-$mproj}" perl -MJSON::PP -e 'my %h = (session_id => "s-1", hook_event_name => "PreToolUse", cwd => $ENV{CWD}, tool_name => $ENV{TOOL}, tool_input => JSON::PP->new->decode($ENV{IN}), tool_use_id => "toolu_1"); @h{qw(agent_id agent_type)} = ("a1", $ENV{AT}) if $ENV{AT} ne ""; print JSON::PP->new->canonical->encode(\%h)' >"$work/in.json"
   merr=$(cd "$mproj" && env -u CLAUDE_CODE_EXECPATH CLAUDE_PROJECT_DIR="$mproj" perl -e 'alarm 60; exec @ARGV' bash "$guard" <"$work/in.json" 2>&1 >"$work/out")
   mcode=$?
   mout=$(cat "$work/out")
 }
 nmarks() { if [ -f "$marks" ]; then wc -l <"$marks" | tr -d ' '; else echo 0; fi; }
 devino() { perl -e 'my @s = stat $ARGV[0]; print "$s[0]-$s[1]"' "$1"; }
-mark_cases="a write leaves no mark while no gate runs|a write by the main session while a gate runs leaves a mark|the guard's answer to a marked write is unchanged|a gate's own call leaves no mark|an agent that is not a gate leaves a mark|a call that only reads leaves no mark|a Bash call that writes leaves a mark|an MCP tool whose name reads leaves no mark|an MCP tool that writes leaves a mark|a refused call leaves no mark|an edit leaves a mark in the worktree of its file|a running file left over a day ago marks nothing|a mark that cannot be written leaves the answer unchanged|a write while a gate runs takes"
+mark_cases="a write leaves no mark while no gate runs|a write by the main session while a gate runs leaves a mark|the guard's answer to a marked write is unchanged|a gate's own call leaves no mark|an agent that is not a gate leaves a mark|a call that only reads leaves no mark|a Bash call that writes leaves a mark|an MCP tool whose name reads leaves no mark|an MCP tool that writes leaves a mark|a refused call leaves no mark|an edit leaves a mark in the worktree of its file|a running file left over a day ago marks nothing|a mark that cannot be written leaves the answer unchanged|an edit in a checked-out submodule marks the project that holds it|a Bash call that writes inside a submodule marks the project that holds it|a write while a gate runs takes"
 old_ifs=$IFS
 IFS='|'
 # shellcheck disable=SC2086 # split at | on purpose
@@ -412,6 +413,27 @@ if wanted_any "$@"; then
   mcall Write "$w"
   if [ "$mcode:$mout:$merr" = "0::" ]; then pass "a mark that cannot be written leaves the answer unchanged"; else fail "a mark that cannot be written leaves the answer unchanged" "exit $mcode: $mout $merr"; fi
   rmdir "$marks" && mv "$marks.kept" "$marks"
+  # (step 5b's review: a gate's clean check counts a checked-out
+  # submodule's files, so a write in one marks the project that holds it,
+  # with the project's top; the submodule's own git folder has no running
+  # file)
+  if wanted_any "an edit in a checked-out submodule marks the project that holds it" "a Bash call that writes inside a submodule marks the project that holds it"; then
+    (cd "$work" && git init -q marks-subsrc && cd marks-subsrc && printf 's\n' >s.txt && git add s.txt && git -c user.email=t@example.invalid -c user.name=T commit -qm s) || abort_sandbox
+    (cd "$mproj" && git -c protocol.file.allow=always submodule add -q "$work/marks-subsrc" sub && git -c user.email=t@example.invalid -c user.name=T commit -qm sub) || abort_sandbox
+    before=$(nmarks)
+    mcall Edit "{\"file_path\":\"$mproj/sub/s.txt\",\"old_string\":\"s\",\"new_string\":\"t\"}"
+    if [ "$mcode:$mout:$merr" = "0::" ] && [ "$(nmarks)" = $((before + 1)) ] && tail -1 "$marks" | LC_ALL=C grep -q "	$(devino "$mproj")\$" && [ ! -e "$mproj/.git/modules/sub/method-write-marks" ]; then
+      pass "an edit in a checked-out submodule marks the project that holds it (with the project's top), and is let through"
+    else
+      fail "an edit in a checked-out submodule marks the project that holds it" "exit $mcode: $mout $merr; $(nmarks) marks (before $before): $(tail -1 "$marks")"
+    fi
+    mcall Bash '{"command":"touch s.txt"}' "" "$mproj/sub"
+    if [ "$(nmarks)" = $((before + 2)) ] && tail -1 "$marks" | LC_ALL=C grep -q "	$(devino "$mproj")\$"; then
+      pass "a Bash call that writes inside a submodule marks the project that holds it"
+    else
+      fail "a Bash call that writes inside a submodule marks the project that holds it" "$(nmarks) marks (before $before): $(tail -1 "$marks")"
+    fi
+  fi
   if wanted "a write while a gate runs takes"; then
     printf '%s' "$(TOOL=Write IN="$w" CWD="$mproj" perl -MJSON::PP -e 'print JSON::PP->new->encode({session_id => "s-1", hook_event_name => "PreToolUse", cwd => $ENV{CWD}, tool_name => $ENV{TOOL}, tool_input => JSON::PP->new->decode($ENV{IN})})')" >"$work/in.json"
     times=$(cd "$mproj" && CLAUDE_PROJECT_DIR="$mproj" perl -MTime::HiRes=time -e 'my @t; for (1 .. 10) { my $s = time; system("bash", "-c", "bash \"\$0\" < \"\$1\"", $ARGV[0], $ARGV[1]) == 0 or exit 1; push @t, time - $s } @t = sort { $a <=> $b } @t; printf "%d", 1000 * $t[4]' "$guard" "$work/in.json")

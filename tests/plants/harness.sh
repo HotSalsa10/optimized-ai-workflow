@@ -341,6 +341,10 @@ rp=scripts/method/lib/receipt.pl
     definition "gate H's receipt: VALID why=none open=APPROVE" "gates: the instructions check removed (a gate run from another definition passes)"
   gate_plant default "$rp" 's/^(\s*\$ev->\{tokens\}\{ \$k->\[0\] \}) \+= (\$v if .*;)$/$1 = $2 # HARNESS-PLANT/' \
     record "gate B's receipt holds models=claude-opus-5-5 efforts=xhigh input=11 output=7 " "gates: the record's tokens not summed (each message's usage replaces the one before)"
+  # (step 5b's repair: a run numbered by its prompt id again, at the start
+  # and at the handback and stop, as the receipts were named before it)
+  gate_plant background "$rp" 's{^(\s*my \$run = )newest\(\$dir, \$part\) \|\| 1;}{${1}hex(substr(sha("prompt", \$in->{prompt_id} // ""), 0, 7)) || 1; # HARNESS-PLANT}; s{^(\s*\$run = )newest\(\$dir, \$part\) \+ 1;}{${1}hex(substr(sha("prompt", \$in->{prompt_id} // ""), 0, 7)) || 1; # HARNESS-PLANT}' \
+    background "gate X's receipt: none; 1 running files left" "gates: receipts kept by the prompt id again (a background gate's stop after the owner's next message misses its run)"
 }
 
 # 13. get-client: a download that does not match the pinned checksum is refused

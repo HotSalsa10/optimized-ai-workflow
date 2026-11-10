@@ -170,9 +170,9 @@ Receipt::mark($in, $tool, $input)
 ---
   return 0 if defined $type && !ref $type;
 === 5b.2 marks made while no gate runs | method/scripts/method/lib/receipt.pl | a write leaves no mark while no gate runs
-    next unless defined $real && -d $real && running($real);
+-d $real && running($real) && @t &&
 ---
-    next unless defined $real && -d $real;
+-d $real && @t &&
 === 5b.2 a running file left by a crash counted | method/scripts/method/lib/receipt.pl | a running file left over a day ago marks nothing
     if (@st && $st[9] >= $old) { push @fresh, $n }
 ---
@@ -198,6 +198,14 @@ Receipt::mark($in, $tool, $input)
 ---
   eval { require File::Spec->catfile($lib, 'receipt.pl'); Receipt::mark($in, $tool, $in->{tool_input}) }; log_refusal($rule, $tool, $raw, $in);
 
+=== review: a submodule's write marks only the submodule's own repository | method/scripts/method/lib/receipt.pl | an edit in a checked-out submodule marks the project that holds it
+      last unless defined $super && $super ne '' && -d $super;
+---
+      last;
+=== review: a Bash call inside a submodule marks only the submodule's own repository | method/scripts/method/lib/receipt.pl | a Bash call that writes inside a submodule marks the project that holds it
+      last unless defined $super && $super ne '' && -d $super;
+---
+      last;
 === the mark outside its eval | method/scripts/method/lib/guard.pl | a mark that cannot be written leaves the answer unchanged
   eval { Protect::call_writes($tool, \@cmds) && do { require File::Spec->catfile($lib, 'receipt.pl'); Receipt::mark($in, $tool, $input) }; 1 };
 ---
