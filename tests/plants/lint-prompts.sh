@@ -6,8 +6,13 @@
 # way leave it green; a clean copy is green. Part two (step 6.2, M096): each
 # agent-file rule broken in one of the method's gate files, a gate added
 # to verdicts.txt with no file, a gate's file removed, and the fragment's
-# model changed, each red for its reason. Text that would trip the lint
-# lives here, outside method/.claude/, which the lint does not read.
+# model changed, each red for its reason. Part three (step 6.3): a skill
+# folder added (as steps 6.4 and 6.5 will add them) with context: fork,
+# with agent:, without method-, with a name other than its folder's, not
+# on G6's list in protect.pl; a name on the list with no folder; a skill
+# not built yet whose folder comes; each red for its reason, and a well-made
+# listed skill green. Text that would trip the lint lives here, outside
+# method/.claude/, which the lint does not read.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=tests/lib.sh
@@ -88,6 +93,7 @@ drop_sandbox "$sb"
 change() {
   sb=$(make_sandbox) || abort_sandbox
   perl -0pi -e "$3" "$sb/$2"
+  # shellcheck disable=SC2016 # the $1 and $2 are the inner sh's arguments
   if expect_landed "$1" sh -c '! cmp -s "$1" "$2"' sh "$(repo_root)/$2" "$sb/$2"; then
     expect_red "$1" "$sb" "$4" bash scripts/dev/lint-prompts.sh
   fi
@@ -113,6 +119,50 @@ if expect_landed "diagnose's file removed" test ! -e "$sb/$agents/method-diagnos
   expect_red "a gate in verdicts.txt with no file (diagnose's removed)" "$sb" "the gate method-diagnose in verdicts.txt has no file" bash scripts/dev/lint-prompts.sh
 fi
 drop_sandbox "$sb"
+
+# part three (step 6.3; S8 and S10): skill folders against G6's skill list
+# (protect.pl's @METHOD_SKILLS)
+protect=method/scripts/method/lib/protect.pl
+# skill NAME LIST DIR SKILL REASON: in a fresh copy, LIST (a name, or
+# empty) is put on G6's skill list, and DIR (a folder under
+# method/.claude/skills/, or empty) gets SKILL as its SKILL.md; the lint
+# must go red with REASON, or stay green when REASON is "green"
+skill() {
+  sb=$(make_sandbox) || abort_sandbox
+  if [ -n "$2" ]; then
+    # shellcheck disable=SC2016 # perl code, expanded by perl
+    N=$2 perl -pi -e 's/^(our \@METHOD_SKILLS = qw\([^)]*)\);$/$1 $ENV{N});/' "$sb/$protect"
+  fi
+  if [ -n "$3" ]; then
+    mkdir -p "$sb/method/.claude/skills/$3" && printf '%s' "$4" >"$sb/method/.claude/skills/$3/SKILL.md"
+  fi
+  # shellcheck disable=SC2016 # the $1 to $4 are the inner sh's arguments
+  if expect_landed "$1" sh -c '{ [ -z "$1" ] || grep -q "^our @METHOD_SKILLS = qw(.* $1);\$" "$2/$3"; } && { [ -z "$4" ] || [ -f "$2/method/.claude/skills/$4/SKILL.md" ]; }' sh "$2" "$sb" "$protect" "$3"; then
+    if [ "$5" = green ]; then
+      expect_green "$1" "$sb" bash scripts/dev/lint-prompts.sh
+    else
+      expect_red "$1" "$sb" "$5" bash scripts/dev/lint-prompts.sh
+    fi
+  fi
+  drop_sandbox "$sb"
+}
+nl=$'\n'
+ok_skill="---${nl}name: method-x${nl}description: A planted skill.${nl}---${nl}A step.${nl}"
+skill "a listed skill, well made, stays green" method-x method-x "$ok_skill" green
+skill "context: fork in a listed skill" method-x method-x "---${nl}name: method-x${nl}context: fork${nl}---${nl}A step.${nl}" \
+  "method/.claude/skills/method-x/: SKILL.md sets context: fork"
+skill "agent: in a listed skill" method-x method-x "---${nl}name: method-x${nl}agent: method-reviewer${nl}---${nl}A step.${nl}" \
+  "method/.claude/skills/method-x/: SKILL.md sets the key agent:"
+skill "a listed skill folder without method-" plan plan "---${nl}name: plan${nl}---${nl}A step.${nl}" \
+  "method/.claude/skills/plan/: the folder's name does not start method-"
+skill "a skill's name not its folder's" method-x method-x "---${nl}name: method-y${nl}---${nl}A step.${nl}" \
+  "method/.claude/skills/method-x/: the name \"method-y\" in SKILL.md is not the folder's name, method-x"
+skill "a skill folder missing from G6's list" "" method-x "$ok_skill" \
+  "method/.claude/skills/method-x/: the folder is not on G6's skill list"
+skill "a listed folder that does not exist" method-x "" "" \
+  "G6's skill list (@METHOD_SKILLS in method/scripts/method/lib/protect.pl) names method-x, but method/.claude/skills/method-x/ does not exist"
+skill "a skill not built yet whose folder comes (method-plan)" "" method-plan "---${nl}name: method-plan${nl}---${nl}A step.${nl}" \
+  "method/.claude/skills/method-plan/: the skill method-plan has its folder now: take it off %NOT_BUILT"
 
 echo "plants: lint-prompts: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]

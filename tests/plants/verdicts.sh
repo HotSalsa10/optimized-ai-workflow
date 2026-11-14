@@ -29,6 +29,7 @@ plant() {
   shift 3
   sb=$(make_sandbox) || abort_sandbox
   perl -0pi -e "$script" "$sb/$vfile"
+  # shellcheck disable=SC2016 # perl code, expanded by perl
   if expect_landed "$p_name" env LANDED="$landed" perl -0ne 'exit(/$ENV{LANDED}/m ? 0 : 1)' "$sb/$vfile"; then
     for reason in "$@"; do
       expect_red "$p_name: red for '$reason'" "$sb" "FAIL  $reason" bash tests/verdicts.test.sh

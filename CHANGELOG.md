@@ -104,6 +104,10 @@ Nothing yet. Release 1 is being built.
 - What you will see: measured in the real client at 2.1.316 and 2.1.319, all five gates load with no warning, are offered Read and Bash and no delegation tool (and the hand-back tool in auto mode), and get VALID receipts at claude-opus-5-5 and xhigh with their real instructions, called together in one message. The descriptions cost 1,107 of the 3,000 bytes the budget allows.
 - The rule map: 15 more rules done (6 in the reviewer, 1 each in the security checker, the tester and diagnose, 5 in the reporter, and M096 in the prompt check), 108 of 147.
 - Tests: 1 new plant file (verdicts); new cases in verdicts (6), lint-prompts (39), gate-receipt (10) and the harness (9 at each version); new plants in lint-prompts (9), gate-receipt (2) and the harness (4).
+- The guard protects the method's skills (step 6.3): `.claude/skills/method-start/`, `method-plan/` and `method-design/`, a fixed list in `lib/protect.pl`, as it protects `.claude/agents/method/` and `.claude/rules/method/` (G6). Claude can read them but not change them, by an edit tool or a command, and a git switch, checkout, merge, cherry-pick or revert that would bring one to a version that is neither the branch's nor the remote main's is refused. Your project's own skills stay editable. The skills themselves come in steps 6.4 and 6.5.
+- The prompt check also checks the skill folders: each is named `method-<name>`, is on the guard's list, holds a SKILL.md whose name is the folder's, and sets neither `context: fork` nor `agent:` (either would hand the skill's work to an agent no receipt sees); every name on the list has its folder, except the three not built yet, which it names on a line of its own.
+- Tests: new cases in guard-protect (29) and lint-prompts (20); new plants in protect (4) and lint-prompts (8).
+- Two shellcheck notes that turned CI red on step 6.2 (in tests/plants/lint-prompts.sh and tests/plants/verdicts.sh: perl and inner-shell text in single quotes) are marked as meant, as those files already mark theirs.
 
 ### Changed (step 5b, from its review)
 

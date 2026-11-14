@@ -6,8 +6,10 @@
 # G6: Claude may read the method's installed files, its settings, and git's
 # own config and hooks, never write them. The protected paths (set):
 #   in the project (each of its worktrees): .claude/hooks/method/,
-#     .claude/agents/method/, .claude/rules/method/, .claude/method-local/,
-#     scripts/method/, .claude/settings.json, .claude/settings.local.json;
+#     .claude/agents/method/, .claude/rules/method/, the method's skills
+#     (.claude/skills/NAME/ for each NAME in @METHOD_SKILLS, step 6.3),
+#     .claude/method-local/, scripts/method/, .claude/settings.json,
+#     .claude/settings.local.json;
 #   in git's own folder: hooks/, config, config.worktree, and the method's
 #     files there (method-*), also in each worktree's own folder; the folder
 #     core.hooksPath names; every config file git reads (its --show-origin);
@@ -50,6 +52,8 @@
 #   Protect::effort(IN, PROJECT) TEXT or undef (G12): the session's first
 #     main-session tool call at an effort below xhigh gets one warning.
 #   Protect::resolve(WORD, BASE) the path WORD names, as above, or undef.
+#   @Protect::METHOD_SKILLS the method's skill folders, by name;
+#     Protect::skills_re() them as a regex alternation (for guard.pl).
 package Protect;
 use strict;
 use warnings;
@@ -63,6 +67,25 @@ require File::Spec->catfile($lib, 'git.pl');
 
 # 1 when the file system folds letter case (found once, by looking)
 our $FOLD;
+
+# the method's skills, each a folder .claude/skills/NAME/ (step 6.3; docs/
+# plans/step6.md S10). A fixed list, as a method-* pattern would match only
+# a folder's direct children and git reads every path literally: each name
+# is an ordinary dir entry in set, a path in @SPECS (the version check), a
+# text form in text_re, and a watched path in guard.pl's $WATCHED_PATH,
+# which reads it from here. scripts/dev/lint-prompts.sh checks that it
+# names exactly the method's skill folders. A project's own skills stay
+# editable.
+our @METHOD_SKILLS = qw(method-start method-plan method-design);
+
+# the method's skills as one regex alternation, each name whole: it ends
+# where the folder's name ends (no letter, digit, _, - or . follows); with
+# no name, a regex that matches nothing
+sub skills_re {
+  my @n = @METHOD_SKILLS;
+  return '(?!)' unless @n;
+  return '(?:' . join('|', map { quotemeta } @n) . ')(?![A-Za-z0-9_.-])';
+}
 
 # a string as the bytes a file system sees: text decoded from the hook's
 # JSON input is in characters, while paths from the environment and from
@@ -229,6 +252,7 @@ sub set {
     $add->("$t/.claude/hooks/method", 'dir', "the method's hooks (.claude/hooks/method/)");
     $add->("$t/.claude/agents/method", 'dir', "the method's agents (.claude/agents/method/)");
     $add->("$t/.claude/rules/method", 'dir', "the method's rules (.claude/rules/method/)");
+    $add->("$t/.claude/skills/$_", 'dir', "the method's skill $_ (.claude/skills/$_/)") for @METHOD_SKILLS;
     $add->("$t/.claude/method-local", 'dir', "the owner's own lists (.claude/method-local/)");
     $add->("$t/scripts/method", 'dir', "the method's scripts (scripts/method/)");
     $add->("$t/.claude/settings.json", 'file', "the project's settings (.claude/settings.json)");
@@ -546,6 +570,7 @@ sub text_re {
   my ($set) = @_;
   my $abs = join '|', map { quotemeta $_->{path} } @{ $set->{list} };
   my $re = q!(?:\A|[\s'"=:(/,\[{])\.claude/(?:hooks/method|agents/method|rules/method|method-local|settings(?:\.local)?\.json)!
+    . q!|(?:\A|[\s'"=:(/,\[{])\.claude/skills/! . skills_re()
     . q!|(?:\A|[\s'"=:(,\[{])(?:\./)?scripts/method\b|\.git/(?:hooks|config)\b|\.gitconfig\b|\.config/git\b|managed-settings|ClaudeCode!
     . q!|(?:~|HOME\}?)/\.claude/(?:agents|skills|commands)\b|\.git/(?:method-|refs/remotes\b|packed-refs\b)!;
   $re .= "|$abs" if $abs ne '';
@@ -944,7 +969,7 @@ sub judge_mcp {
 
 # the protected paths of the project's tracked tree (Git::run reads every
 # path literally)
-my @SPECS = qw(.claude/hooks/method .claude/agents/method .claude/rules/method .claude/method-local scripts/method .claude/settings.json .claude/settings.local.json);
+my @SPECS = (qw(.claude/hooks/method .claude/agents/method .claude/rules/method .claude/method-local scripts/method .claude/settings.json .claude/settings.local.json), map { ".claude/skills/$_" } @METHOD_SKILLS);
 
 # the protected files whose version differs between commits A and B, or
 # undef when that cannot be told

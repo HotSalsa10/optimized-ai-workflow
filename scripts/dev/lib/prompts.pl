@@ -30,6 +30,16 @@
 # guard's G17, M137); and every gate in verdicts.txt has its file,
 # method/.claude/agents/method/<gate>.md. A problem of a whole file is
 # printed without a line number.
+# Part three (step 6.3; S8 and S10), the skill folders, each a folder
+# directly under method/.claude/skills/: its name starts method- and is on
+# G6's skill list (@METHOD_SKILLS in method/scripts/method/lib/protect.pl,
+# the list's one home, which the guard protects); it holds SKILL.md, whose
+# frontmatter's name is the folder's name and which sets neither context:
+# fork nor agent: (a forked skill hands its work to an agent that receipts
+# do not see, A72). Every name on the list has its folder, except a name
+# on %NOT_BUILT below, which may have none yet and must have none: once its
+# folder comes, the name is taken off. `!` lines are left to
+# disableSkillShellExecution (M138), and hooks: to the guard's G17 (M137).
 use strict;
 use warnings;
 use File::Find ();
@@ -169,6 +179,57 @@ sub agent_problems {
   return @p;
 }
 
+# --- part three (step 6.3; docs/plans/step6.md S8 and S10): the skill
+# folders against G6's skill list, read from protect.pl (its one home,
+# M048); a list that cannot be read is a problem, never a pass.
+# the listed skills that steps 6.4 and 6.5 build: each may have no folder
+# yet, and each is taken off here when its folder comes (a name here whose
+# folder exists is a problem)
+my %NOT_BUILT = map { $_ => 1 } qw(method-start method-plan method-design);
+my (@listed, $list_read);
+{
+  my $ok = eval {
+    local $SIG{__DIE__};
+    require "$root/method/scripts/method/lib/protect.pl";
+    1;
+  };
+  no warnings 'once';
+  if ($ok && defined &Protect::skills_re) {
+    @listed = @Protect::METHOD_SKILLS;
+    $list_read = 1;
+  } else {
+    (my $why = $@ || 'no list') =~ s/\s+\z//;
+    say_line("lint-prompts: could not read G6's skill list from method/scripts/method/lib/protect.pl ($why), so the skill folders were not checked against it (S10)");
+    $bad++;
+  }
+}
+my $skills_dir = "$root/method/.claude/skills";
+my @skill_dirs;
+if (opendir my $sd, $skills_dir) {
+  @skill_dirs = sort grep { !/\A\.\.?\z/ && -d "$skills_dir/$_" } readdir $sd;
+  closedir $sd;
+}
+
+# skill_problems DIR LINES: the problems of the skill folder DIR, whose
+# SKILL.md holds LINES (undef: there is none), each a text
+sub skill_problems {
+  my ($dir, $lines) = @_;
+  my @p;
+  push @p, "the folder's name does not start method-: the method's skills are method-<name>, so a personal skill or the client's own commands do not clash with them (S3)" unless $dir =~ /\Amethod-/;
+  if ($list_read && !grep { $_ eq $dir } @listed) {
+    push @p, "the folder is not on G6's skill list (\@METHOD_SKILLS in method/scripts/method/lib/protect.pl), so the guard would let Claude change it (S10)";
+  }
+  push @p, "the skill $dir has its folder now: take it off %NOT_BUILT in scripts/dev/lib/prompts.pl" if $NOT_BUILT{$dir};
+  return (@p, 'no SKILL.md: a method skill folder holds its SKILL.md') unless $lines;
+  my $fm = frontmatter(@$lines);
+  return (@p, 'no frontmatter in SKILL.md: a method skill opens with a --- line and closes its frontmatter with another') unless $fm;
+  my $n = unquote($fm->{name});
+  push @p, "the name \"$n\" in SKILL.md is not the folder's name, $dir: G6's list and the slash command go by the folder (S3, S10)" if $n ne $dir;
+  push @p, 'SKILL.md sets context: fork: a forked skill hands its work to an agent that receipts do not see (A72)' if exists $fm->{context} && unquote($fm->{context}) eq 'fork';
+  push @p, 'SKILL.md sets the key agent:; a method skill runs in the main session, and an agent it names would do work that receipts do not see (A72)' if exists $fm->{agent};
+  return @p;
+}
+
 for my $file (sort @files) {
   (my $name = $file) =~ s{\A\Q$root\E/}{};
   open my $fh, '<:raw', $file or do { say_line("lint-prompts: cannot read $name"); $bad++; next };
@@ -197,6 +258,31 @@ for my $file (sort @files) {
     s/\r\z// for @all;
     say_line("lint-prompts: $name: $_"), $bad++ for agent_problems($name, @all);
   }
+}
+for my $dir (@skill_dirs) {
+  my $sf = "$skills_dir/$dir/SKILL.md";
+  my $lines;
+  if (-f $sf) {
+    if (open my $h, '<:raw', $sf) {
+      $lines = [map { my $l = $_; $l =~ s/\r?\n\z//; $l } <$h>];
+      close $h;
+    } else {
+      say_line("lint-prompts: cannot read method/.claude/skills/$dir/SKILL.md");
+      $bad++;
+      next;
+    }
+  }
+  say_line("lint-prompts: method/.claude/skills/$dir/: $_"), $bad++ for skill_problems($dir, $lines);
+}
+if ($list_read) {
+  my @waiting;
+  for my $l (@listed) {
+    next if -d "$skills_dir/$l";
+    if ($NOT_BUILT{$l}) { push @waiting, $l; next }
+    say_line("lint-prompts: G6's skill list (\@METHOD_SKILLS in method/scripts/method/lib/protect.pl) names $l, but method/.claude/skills/$l/ does not exist: the list names the method's skill folders, no more (S10)");
+    $bad++;
+  }
+  say_line('lint-prompts: on G6\'s skill list and not built yet (steps 6.4 and 6.5): ' . join(', ', @waiting)) if @waiting;
 }
 if ($gates_read) {
   for my $g (sort keys %gate) {
