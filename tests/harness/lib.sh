@@ -58,6 +58,9 @@
 # and the hook runs during its call; h_used LETTER (step 5b.2) the models,
 # efforts and tokens its receipt took from the agent's record, and
 # h_req_effort CONV the efforts the requests of one conversation carried.
+# Step 6.1's case: h_method_words ROOT lays the method's agents, rules and
+# skills out; h_words ROOT runs the case and h_words_holds QUESTION judges
+# it (below).
 # req-001 is h_fake's own alive probe.
 
 # settings a caller's environment must not carry into every case
@@ -419,6 +422,94 @@ h_gate_holds() {
       [ "$n" = 0 ] || H_WHY="$H_WHY $n running files left in git's folder;"
       ;;
     *) H_WHY="no such gate question: $1" ;;
+  esac
+  [ -z "$H_WHY" ]
+}
+
+# h_method_words ROOT (step 6.1): lays the method's own words out in the
+# project as sync will, from the repository at ROOT: method/.claude/agents/
+# method/, rules/method/ and every skills/method-*/ that exists, into the
+# project's .claude/; then commits. h_method is not changed, so the hook
+# cases keep the harness's stand-in gate.
+h_method_words() {
+  local d
+  for d in agents/method rules/method; do
+    if [ -d "$1/method/.claude/$d" ]; then
+      mkdir -p "$H_PROJ/.claude/$d" && cp -R "$1/method/.claude/$d/." "$H_PROJ/.claude/$d/" || return 1
+    fi
+  done
+  for d in "$1"/method/.claude/skills/method-*; do
+    [ -d "$d" ] || continue
+    mkdir -p "$H_PROJ/.claude/skills/${d##*/}" && cp -R "$d/." "$H_PROJ/.claude/skills/${d##*/}/" || return 1
+  done
+  (cd "$H_PROJ" && HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git add -A && HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git commit -q --allow-empty -m "the method's words")
+}
+
+# h_words ROOT (step 6.1): the case for the method's rules files, with the
+# method (h_method) and its words (h_method_words) from the repository at
+# ROOT (a planted copy in tests/plants/harness.sh), and the harness's
+# stand-in reviewer while the method has no reviewer file of its own (step
+# 6.2 brings it). The main session calls the reviewer once, in the
+# foreground (conversation "gate"), then ends. Returns 1 when the case
+# could not be made or the fake did not answer.
+h_words() {
+  local t
+  { h_case words && h_method "$1" && h_method_words "$1"; } || return 1
+  if [ ! -f "$H_PROJ/.claude/agents/method/method-reviewer.md" ]; then
+    mkdir -p "$H_PROJ/.claude/agents/method" && cp "$HARNESS/agents/method/method-reviewer.md" "$H_PROJ/.claude/agents/method/" &&
+      (cd "$H_PROJ" && HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git add -A && HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git commit -q -m "the stand-in gate") || return 1
+  fi
+  t=$(HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git -C "$H_PROJ" rev-parse 'HEAD^{tree}') || return 1
+  perl -MJSON::PP -e 'my $t = shift; print JSON::PP->new->canonical->encode({convs => [
+      {name => "gate", match => "HARNESS-GATE-W", turns => [{text => "APPROVE\nSummary: the change is fine.\nEND-VERDICT $t"}]},
+      {name => "main", match => "^go\$", turns => [{tool => "Agent", input => {description => "harness gate W", prompt => "HARNESS-GATE-W: review the change",
+        subagent_type => "method-reviewer", run_in_background => JSON::PP::false}}, map { {text => "MAIN-DONE-$_"} } 1 .. 3]}],
+    fallback => {text => "FAKE-FALLBACK"}})' "$t" >"$H_DIR/words.json" || return 1
+  h_fake "$H_DIR/words.json" || return 1
+  h_client 90 -- --permission-mode default --allowedTools Bash
+  h_stop
+}
+# h_words_holds QUESTION: 0 when QUESTION holds for the case h_words ran
+# last; else 1, with H_WHY saying what was seen. The rules files are the
+# project's .claude/rules/**/*.md (at least one, or the case cannot tell).
+#   reach    each reaches the main conversation's first request exactly as
+#            tests/budget.test.sh counts it: its lines holding only a comment
+#            dropped, every other byte kept (read.pl rules)
+#   gate     the same, in the gate's first request
+#   comments no HTML comment from a rules file, alone on its line or not,
+#            reaches any request of the main conversation or the gate (and
+#            the files hold at least one, or the case cannot tell)
+h_words_holds() {
+  local f rel c n got line
+  H_WHY=""
+  find "$H_PROJ/.claude/rules" -type f -name '*.md' 2>/dev/null | sort >"$H_DIR/words-files.txt"
+  if [ ! -s "$H_DIR/words-files.txt" ]; then
+    H_WHY="no rules file in the project, so the case cannot tell"
+    return 1
+  fi
+  case $1 in
+    reach | gate)
+      c=main
+      [ "$1" = gate ] && c=gate
+      while IFS= read -r f; do
+        rel=${f#"$H_PROJ/"}
+        got=$(perl "$HARNESS/read.pl" rules "$c" "$rel" "$f" "$H_DIR/fake")
+        [ "$got" = same ] || H_WHY="$H_WHY $rel in $c's first request: $got;"
+      done <"$H_DIR/words-files.txt"
+      ;;
+    comments)
+      # shellcheck disable=SC2016 # perl code, expanded by perl
+      while IFS= read -r f; do perl -ne 'print "$1\n" while /(<!--(?:(?!-->).)*-->)/g' "$f"; done <"$H_DIR/words-files.txt" >"$H_DIR/words-comments.txt"
+      n=0
+      while IFS= read -r line; do
+        n=$((n + 1))
+        for c in main gate; do
+          ! perl "$HARNESS/read.pl" req "$c" "$line" "$H_DIR/fake" || H_WHY="$H_WHY the comment '$line' reached $c's requests;"
+        done
+      done <"$H_DIR/words-comments.txt"
+      [ "$n" -gt 0 ] || H_WHY="$H_WHY the rules files hold no comment, so the case cannot tell;"
+      ;;
+    *) H_WHY="no such words question: $1" ;;
   esac
   [ -z "$H_WHY" ]
 }

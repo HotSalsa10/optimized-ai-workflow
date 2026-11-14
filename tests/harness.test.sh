@@ -821,5 +821,21 @@ else
   fail "gates-background: the case could not be made, or the fake did not answer; the client was not started"
 fi
 
+# --- 18. the method's rules (step 6.1): the real rules files, laid out as
+# sync will (h_method_words), reach the main session's first request and a
+# gate's, exactly as tests/budget.test.sh counts them, and their rule ID
+# comments reach no request (h_words, h_words_holds) ---
+words_q() {
+  if h_words_holds "$1"; then pass "$2"; else fail "$2" "$H_WHY"; fi
+}
+if h_words "$root"; then
+  words_q reach "words: the method's rules files reach the main session's first request exactly as the budget counts them (each line holding only a comment dropped, every other byte kept)"
+  words_q gate "words: the method's rules files reach a gate's first request the same way"
+  words_q comments "words: no rule ID comment from the rules files reaches any request of the main session or the gate"
+  h_safe words
+else
+  fail "words: the case could not be made, or the fake did not answer; the client was not started"
+fi
+
 echo "harness: ${H_RUNS:-0} client runs took ${H_TOTAL_SECS:-0} s"
 finish

@@ -358,7 +358,9 @@ Plan: docs/plans/step5b.md (version 2). Process: A66 (one review and one repair 
 Plan: docs/plans/step6.md (version 2), approved by the owner on 14 November 2026 (choices left to me; recorded in the plan's status line): step 6 as planned; 6b approved in direction, re-checked before its build. M045 is later (its twelve questions are not available). Process: A66.
 
 - [x] 6.0 Measure (F1 to F6, F8, F9, F11, F12), and fix the records. All measured at 2.1.316 and 2.1.319, no decision changed; rule IDs go on lines of their own (F4). A66 restored; AGENTS.md says method/.claude/ text is product here; M073 done.
-- [ ] 6.1 The rules.
+- [x] 6.1 The rules. `method/.claude/rules/method/method.md` (43 rules, M140 and M143 among them) and `owner.md` (7): 6,334 of the 8,000 bytes reach the model (5,042 and 1,292). `method/docs/method/why.md` (M067, M088, M109): four tables, enforced by a hook, by a script, partly, and written down only. The rule map: 54 more rules done (93 of 147), the moves of S6 and section 3 item 12, the `method-` homes, M140 to M147. `scripts/dev/lint-prompts.sh` part one (M095), in validate.sh: tests/lint-prompts.test.sh 41 cases (26 patterns red, 9 look-alikes green, 6 on counts, nothing examined and escaping); tests/plants/lint-prompts.sh 15 (13 plants red, a clean copy and look-alikes green). tests/budget.test.sh 14 cases and 1 SKIPPED (no agent or skill description yet); tests/plants/budget.sh 8 (3 one byte over red, 5 green). The harness's words case (`h_method_words`, `h_words`, `read.pl rules`): 4 checks at 2.1.316 and at 2.1.319 (115 passed at each), 2 plants at 2.1.319 (48 passed).
+  - Measured while building, at both pins: the client drops a line that holds only an HTML comment, two comments on one line, an empty comment and a comment over two lines, and keeps a comment beside text and one with spaces or a tab before it. So the lint accepts only a comment that is its whole line (and refuses the rest, which it need not have), and the budget counts every line but those.
+  - Decided while building: why.md is `method/docs/method/why.md` (it ships; section 2's paths are under `method/`); M042, M043 and M052 are in method.md's Checking part, as `/method-checks` is not built (S18); the `/method-finish` rules (M007, M011, M070, M087) and M126 are `step 6b`; M045 and M081 keep a `method-checks` home, M100 `method-setup`, M110 `method-research-update`; M026 is in the checking agents' part, as section 2 places it; LIGHT's sentence carries S13's approving round; the description budget says SKIPPED until an agent or skill exists; the harness's words case uses the stand-in reviewer until 6.2; M028's rule text names the [EYES] mapping.
 - [ ] 6.2 The gates.
 - [ ] 6.3 Skill protection.
 - [ ] 6.4 The architect, /method-plan, /method-design.
@@ -367,4 +369,4 @@ Plan: docs/plans/step6.md (version 2), approved by the owner on 14 November 2026
 
 ## Next
 
-Steps 5 and 5b are merged (pull request #2). Step 6's plan is approved; 6.0, the measurements, is next.
+Steps 5 and 5b are merged (pull request #2). Step 6: 6.0 and 6.1 are done; 6.2, the gates, is next.

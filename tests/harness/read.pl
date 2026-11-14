@@ -26,6 +26,14 @@
 # read.pl first CONV TEXT DIR: prints the number of the first request the
 # fake logged in DIR for its conversation CONV that holds TEXT in what the
 # client sent (as req reads it), or "none" and exit 1.
+# read.pl rules CONV SUFFIX FILE DIR (step 6.1): exit 0, printing "same",
+# when the first request the fake logged in DIR for its conversation CONV
+# holds, after the client's heading for a file whose path ends in SUFFIX
+# ("... SUFFIX (project instructions, checked into the codebase):" and a
+# blank line), FILE's text without its lines that hold only an HTML comment
+# (as tests/budget.test.sh counts it), followed by a line break or the end;
+# otherwise exit 1, printing "no request", "missing" (no such heading) or
+# "differs at byte N".
 # read.pl hooks DESC TEXT HOME LOG: prints how many hook runs whose command
 # holds TEXT the client's debug log LOG shows during the Agent call
 # described DESC (its "Hooks: ... [COMMAND] finished with status" lines
@@ -163,7 +171,29 @@ if (($what // '') eq 'first' && @ARGV == 4) {
   print "none\n";
   exit 1;
 }
-die "usage: read.pl init FIELD FILE | read.pl req CONV TEXT DIR | read.pl first CONV TEXT DIR | read.pl effort CONV DIR | read.pl receipt DESC HOME GIT | read.pl used DESC HOME GIT | read.pl hooks DESC TEXT HOME LOG\n" unless defined $file && $what eq 'init';
+if (($what // '') eq 'rules' && @ARGV == 5) {
+  my ($conv, $suffix, $file, $dir) = @ARGV[1 .. 4];
+  my ($b) = requests_of($conv, $dir);
+  if (!$b) { print "no request\n"; exit 1 }
+  open my $h, '<:raw', $file or do { print "cannot read $file\n"; exit 1 };
+  my $want = join '', grep { !/\A<!--(?:(?!-->).)*-->\n?\z/ } <$h>;
+  close $h;
+  utf8::decode($want);
+  utf8::decode($suffix);
+  $want =~ s/\n+\z//;
+  my $s = sent($b);
+  my $key = "$suffix (project instructions, checked into the codebase):\n\n";
+  my $at = index($s, $key);
+  if ($at < 0) { print "missing\n"; exit 1 }
+  my $got = substr($s, $at + length $key, length $want);
+  my $next = substr($s, $at + length($key) + length($want), 1);
+  if ($got eq $want && ($next eq '' || $next eq "\n")) { print "same\n"; exit 0 }
+  my $i = 0;
+  $i++ while $i < length $want && substr($got, $i, 1) eq substr($want, $i, 1);
+  print "differs at byte $i\n";
+  exit 1;
+}
+die "usage: read.pl init FIELD FILE | read.pl req CONV TEXT DIR | read.pl first CONV TEXT DIR | read.pl rules CONV SUFFIX FILE DIR | read.pl effort CONV DIR | read.pl receipt DESC HOME GIT | read.pl used DESC HOME GIT | read.pl hooks DESC TEXT HOME LOG\n" unless defined $file && $what eq 'init';
 open my $f, '<', $file or exit 1;
 while (my $l = <$f>) {
   my $o = eval { JSON::PP->new->utf8->decode($l) } or next;

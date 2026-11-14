@@ -347,6 +347,47 @@ rp=scripts/method/lib/receipt.pl
     background "gate X's receipt: none; 1 running files left" "gates: receipts kept by the prompt id again (a background gate's stop after the owner's next message misses its run)"
 }
 
+# 16. step 6.1's case for the method's rules (h_words, h_words_holds):
+# with one defect planted in a copy of the method's rules files, the
+# questions it breaks turn red, and for that defect's reason.
+# words_plant PERL QUESTIONS SEEN TEXT: PERL, a perl -0pi script that
+# writes the mark HARNESS-PLANT with its change, changes method.md in a copy
+# of the repository; h_words runs there; each of QUESTIONS (space
+# separated) must fail with SEEN in its H_WHY
+words_plant() {
+  local q
+  sb=$(make_sandbox) || abort_sandbox
+  perl -0pi -e "$1" "$sb/method/.claude/rules/method/method.md"
+  if ! grep -q -F HARNESS-PLANT "$sb/method/.claude/rules/method/method.md"; then
+    fail "$4: the plant did not apply, so the check result would mean nothing"
+  elif ! h_words "$sb"; then
+    fail "$4: the case could not be made, or the fake did not answer"
+  else
+    # shellcheck disable=SC2086 # the questions are words on purpose
+    for q in $2; do
+      if h_words_holds "$q"; then
+        fail "$4: the words question '$q' stayed green"
+      else
+        case $H_WHY in
+          *"$3"*) pass "$4: the words question '$q' turns red ($H_WHY)" ;;
+          *) fail "$4: the words question '$q' turned red for another reason" "$H_WHY" ;;
+        esac
+      fi
+    done
+  fi
+  h_stop
+  drop_sandbox "$sb" || true
+}
+# shellcheck disable=SC2016 # perl code, expanded by perl
+{
+  words_plant 's/<!-- M079 -->\n(A cloud session[^\n]*)/$1 <!-- M079 HARNESS-PLANT -->/' \
+    comments "the comment '<!-- M079 HARNESS-PLANT -->' reached main's requests" "words: an ID comment moved onto its sentence's line"
+  # (a rules file with paths: loads only when Claude touches a matching
+  # file, so it is missing from the first requests)
+  words_plant 's/\A/---\npaths:\n  - "harness-plant\/**" # HARNESS-PLANT\n---\n/' \
+    "reach gate" "method.md in" "words: method.md loaded only for some paths"
+}
+
 # 13. get-client: a download that does not match the pinned checksum is refused
 reg="$H_WORK/registry/@anthropic-ai/claude-code-linux-x64/-"
 mkdir -p "$reg" "$H_WORK/pkg/package"
