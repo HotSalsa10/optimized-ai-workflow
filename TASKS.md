@@ -353,6 +353,18 @@ Plan: docs/plans/step5b.md (version 2). Process: A66 (one review and one repair 
     - Records only: reviewer F7 (RISKS #18 reworded: tokens are recorded, not checked; another form of model or effort reads INVALID); reviewer F8a and F8b, security F3, F4 and F5, and a start over 30 s, as known limits in the hooks README, A72 and the plan's section 5. A72 (2) now says receipts are keyed by session, agent and run number, and why.
   - Tests: gate-receipt 87 to 99 cases, its plants 66 to 77; guard 336 to 338, its plants 44 to 46; harness 109 to 111 at each version (the background question and its safety line), its plants 44 to 45.
 
+## Step 6: rules, agents and skills
+
+Plan: docs/plans/step6.md (version 2), approved by the owner on 14 November 2026 (choices left to me; recorded in the plan's status line): step 6 as planned; 6b approved in direction, re-checked before its build. M045 is later (its twelve questions are not available). Process: A66.
+
+- [ ] 6.0 Measure (F1 to F6, F8, F9, F11, F12), and fix the records.
+- [ ] 6.1 The rules.
+- [ ] 6.2 The gates.
+- [ ] 6.3 Skill protection.
+- [ ] 6.4 The architect, /method-plan, /method-design.
+- [ ] 6.5 /method-start.
+- [ ] 6.6 Close: one review and one repair loop.
+
 ## Next
 
-Steps 5 and 5b are merged into main (pull request #2, 5a7fd60). Next: step 6, rules, agents and skills; its plan, docs/plans/step6.md (version 2, a draft), waits for the owner's approval (M034).
+Steps 5 and 5b are merged (pull request #2). Step 6's plan is approved; 6.0, the measurements, is next.
