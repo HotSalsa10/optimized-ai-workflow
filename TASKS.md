@@ -357,7 +357,7 @@ Plan: docs/plans/step5b.md (version 2). Process: A66 (one review and one repair 
 
 Plan: docs/plans/step6.md (version 2), approved by the owner on 14 November 2026 (choices left to me; recorded in the plan's status line): step 6 as planned; 6b approved in direction, re-checked before its build. M045 is later (its twelve questions are not available). Process: A66.
 
-- [ ] 6.0 Measure (F1 to F6, F8, F9, F11, F12), and fix the records.
+- [x] 6.0 Measure (F1 to F6, F8, F9, F11, F12), and fix the records. All measured at 2.1.316 and 2.1.319, no decision changed; rule IDs go on lines of their own (F4). A66 restored; AGENTS.md says method/.claude/ text is product here; M073 done.
 - [ ] 6.1 The rules.
 - [ ] 6.2 The gates.
 - [ ] 6.3 Skill protection.
