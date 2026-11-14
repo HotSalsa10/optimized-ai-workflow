@@ -1,0 +1,6 @@
+@@ allow a here-document delimiter written with a backslash inside $( )
+x=$(cat <<\EOF
+)
+EOF
+); git status
+@@ END

@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "model": "claude-opus-5-5",
+  "availableModels": ["claude-opus-5-5"],
+  "enforceAvailableModels": true,
+  "effortLevel": "xhigh",
+  "attribution": {
+    "commit": "",
+    "pr": "",
+    "sessionUrl": false
+  },
+  "autoMemoryEnabled": false,
+  "disableSkillShellExecution": true,
+  "skillOverrides": {
+    "code-review": "user-invocable-only"
+  },
+  "disableAllHooks": false,
+  "minimumVersion": "2.1.316",
+  "env": {
+    "CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "1",
+    "CLAUDE_CODE_USE_POWERSHELL_TOOL": "0"
+  },
+  "permissions": {
+    "deny": [
+      "mcp__*__merge_pull_request",
+      "mcp__*__enable_pr_auto_merge",
+      "mcp__*__create_session",
+      "mcp__*__send_message",
+      "mcp__*__create_trigger",
+      "mcp__*__fire_trigger",
+      "mcp__*__update_trigger",
+      "mcp__*__unarchive_session",
+      "RemoteTrigger"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "BASH_ENV= ENV= bash -p \"$CLAUDE_PROJECT_DIR/.claude/hooks/method/session-status.sh\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "ConfigChange": [
+      {
+        "matcher": "user_settings|project_settings|local_settings",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "BASH_ENV= ENV= bash -p \"$CLAUDE_PROJECT_DIR/.claude/hooks/method/guard.sh\"",
+            "timeout": 30,
+            "onFailure": "block"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|ExitWorktree|SendMessage|Skill|Agent|Task|RemoteTrigger",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "BASH_ENV= ENV= bash -p \"$CLAUDE_PROJECT_DIR/.claude/hooks/method/guard.sh\"",
+            "timeout": 30,
+            "onFailure": "block"
+          }
+        ]
+      },
+      {
+        "matcher": "^mcp__",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "BASH_ENV= ENV= bash -p \"$CLAUDE_PROJECT_DIR/.claude/hooks/method/guard.sh\"",
+            "timeout": 30,
+            "onFailure": "block"
+          }
+        ]
+      },
+      {
+        "matcher": "SubagentHandback",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "BASH_ENV= ENV= bash -p \"$CLAUDE_PROJECT_DIR/.claude/hooks/method/gate-receipt.sh\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "matcher": "^(method-reviewer|method-security-checker|method-diagnose|method-tester)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "BASH_ENV= ENV= bash -p \"$CLAUDE_PROJECT_DIR/.claude/hooks/method/gate-receipt.sh\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "^(method-reviewer|method-security-checker|method-diagnose|method-tester)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "BASH_ENV= ENV= bash -p \"$CLAUDE_PROJECT_DIR/.claude/hooks/method/gate-receipt.sh\"",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

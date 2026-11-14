@@ -26,4 +26,4 @@ SPEC.md (requirements), ROADMAP.md (tracks), TASKS.md (current step), DECISIONS.
 ## Commands
 
 - `bash scripts/dev/validate.sh` runs every repo check.
-- `bash tests/run.sh` runs every test and plant.
+- `bash tests/run.sh` runs every test and plant (`bash tests/run.sh tests` or `plants` runs one half).

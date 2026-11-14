@@ -6,7 +6,9 @@
 # Usage:
 #   perl verdicts.pl words KIND   prints the words of one kind, one per line
 #                                 (KIND: verdict, trailer-key, trailer,
-#                                 trailer-reason, ready)
+#                                 trailer-reason, ready, gate-verdict,
+#                                 gate-diagnosis, gate-test-result,
+#                                 diagnosis, test-result, receipt, end-key)
 #   perl verdicts.pl check-trailer
 #                                 reads one commit message on standard input;
 #                                 exit 0 when it ends with a valid trailer,
@@ -24,6 +26,15 @@
 # control, format or invisible character (trailing spaces and tabs are
 # dropped); and no other line starts with "<trailer-key>:".
 #
+# Verdicts::gates(ROWS) is the one reading of the gate lines (DECISIONS
+# A71): the gates, the checking agents gate-receipt watches, in file order,
+# each [NAME, OPENING KIND], where the opening kind is the gate line's kind
+# without "gate-": the kind of word the gate's report opens with. The
+# receipt words are read by their place: the first means valid, the second
+# invalid, the third incomplete; the file holds exactly three, and exactly
+# one end-key word. No kind starts with "trailer" but the trailer kinds,
+# which done-check finds by that prefix.
+#
 # Verdicts::judged(TIP, FROM) is the one rule for which commits on main's
 # first-parent history carry a verdict that counts (DECISIONS A30); status
 # and done-check use it. Callers load lib/git.pl first.
@@ -33,7 +44,8 @@ use warnings;
 use File::Basename qw(dirname);
 use File::Spec;
 
-my %kinds = map { $_ => 1 } qw(verdict trailer-key trailer trailer-reason ready);
+my @kinds = qw(verdict trailer-key trailer trailer-reason ready gate-verdict gate-diagnosis gate-test-result diagnosis test-result receipt end-key);
+my %kinds = map { $_ => 1 } @kinds;
 
 # rows: the file's entries in order, each [KIND, WORDS, MEANING]. Dies with
 # a message when the file is missing or malformed. Read once per process.
@@ -52,6 +64,8 @@ sub rows {
     my @f = split /\t/, $line, -1;
     die "verdicts.txt line $n: expected KIND<TAB>WORDS<TAB>MEANING with a known KIND\n"
       unless @f == 3 && $kinds{ $f[0] } && $f[1] =~ /\A[A-Za-z][A-Za-z -]*[A-Za-z]\z/ && $f[2] =~ /\S/ && $f[2] !~ /[\x00-\x1F\x7F]/;
+    die "verdicts.txt line $n: the gate name $f[1] must be lower-case letters and hyphens, as an agent's name is\n"
+      if $f[0] =~ /\Agate-/ && $f[1] !~ /\A[a-z]+(?:-[a-z]+)*\z/;
     $count{ $f[0] }++;
     die "verdicts.txt line $n: $f[0] $f[1] is listed twice\n" if $count{"$f[0]\t$f[1]"}++;
     push @rows, [@f];
@@ -63,6 +77,15 @@ sub rows {
   for my $r (grep { $_->[0] eq 'ready' } @rows) {
     die "verdicts.txt: the ready word $r->[1] is not a trailer word (a ready word stands alone)\n" unless $alone{ $r->[1] };
   }
+  my @gates = gates(@rows);
+  die "verdicts.txt: expected at least one gate line (gate-verdict, gate-diagnosis or gate-test-result)\n" unless @gates;
+  my %gate;
+  for my $g (@gates) {
+    die "verdicts.txt: the gate $g->[0] stands under two gate kinds; a gate opens with one kind of word\n" if $gate{ $g->[0] }++;
+    die "verdicts.txt: the gate $g->[0] opens with a $g->[1] word, but there is no $g->[1] line\n" unless $count{ $g->[1] };
+  }
+  die "verdicts.txt: expected exactly one end-key line\n" unless ($count{'end-key'} || 0) == 1;
+  die "verdicts.txt: expected exactly three receipt lines (valid, invalid, incomplete, in this order)\n" unless ($count{receipt} || 0) == 3;
   return @rows_read = @rows;
 }
 
@@ -70,6 +93,13 @@ sub rows {
 sub words {
   my ($kind, @rows) = @_;
   return map { $_->[1] } grep { $_->[0] eq $kind } @rows;
+}
+
+# gates ROWS: the gates in file order, each [NAME, OPENING KIND]; the
+# opening kind is the gate line's kind without "gate-"
+sub gates {
+  my (@rows) = @_;
+  return map { [ $_->[1], substr($_->[0], length 'gate-') ] } grep { $_->[0] =~ /\Agate-/ } @rows;
 }
 
 # trailer_word MESSAGE: the word of a valid message's trailer value, its
@@ -149,7 +179,7 @@ sub main {
   my $words = defined $cmd && $cmd eq 'words' && defined $kind && $kinds{$kind} && !@rest;
   my $check = defined $cmd && $cmd eq 'check-trailer' && !defined $kind;
   unless ($words || $check) {
-    print STDERR "verdicts: usage: verdicts.pl words verdict|trailer-key|trailer|trailer-reason|ready, or verdicts.pl check-trailer <MESSAGE\n";
+    print STDERR "verdicts: usage: verdicts.pl words " . join('|', @kinds) . ", or verdicts.pl check-trailer <MESSAGE\n";
     exit 2;
   }
   my @rows = eval { rows() };

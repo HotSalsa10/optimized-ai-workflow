@@ -58,7 +58,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M050 | Check what a fresh clone gets, not only what works locally | incident | method/scripts/method/run-checks.sh | done |
 | M051 | Long runs write their log where they run | incident | method/scripts/method/run-checks.sh | done |
 | M052 | A plant shows a check worked once; a committed test keeps it working | incident | method/.claude/skills/checks/SKILL.md | step 6 |
-| M053 | Silence is never an outcome: loud pass, loud fail or loud skip | incident | method/.claude/hooks/method/gate-receipt.sh | step 5 |
+| M053 | Silence is never an outcome: loud pass, loud fail or loud skip | incident | method/.claude/hooks/method/gate-receipt.sh | done |
 | M054 | Claims about how something looks go before a person before they go into a record | incident | method/.claude/rules/method/method.md | step 6 |
 | M055 | Human tags: [CHECK] agent, [EYES] owner looks, [CREDENTIAL] owner only, [AUTHORITY] empowered person | incident | method/.claude/rules/method/method.md | step 6 |
 | M056 | Stop after 3 repair loops and report what is failing and what was tried | incident | method/.claude/rules/method/method.md | step 6 |
@@ -77,14 +77,14 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M069 | A reporter agent re-derives claims before the owner approves; /supervise stays optional | incident; decision A12 | method/.claude/agents/method/reporter.md | step 6 |
 | M070 | A handoff file and the pull request carry reports between sessions | incident | method/.claude/skills/finish/SKILL.md | step 6 |
 | M071 | Plain language; one complete paste-able prompt; no deadline pressure | incident | method/.claude/rules/method/owner.md | step 6 |
-| M072 | No log grows forever or stores secrets | incident | method/.claude/hooks/method/guard.sh | step 5 |
+| M072 | No log grows forever or stores secrets | incident | method/scripts/method/lib/log.pl | done |
 | M073 | Few hooks, each documented with what it prevents, what it costs and how it was seen to fire | incident | method/.claude/hooks/method/README.md | step 5 |
 | M074 | Keep every hedge and every number exactly, with currency, sign and period | research: writing test | method/.claude/rules/method/owner.md | step 6 |
-| M075 | Never use /code-review, /goal or the advisor as a gate | research: Claude Code internals | method/.claude/rules/method/method.md | step 6 |
-| M076 | The server-side advisor is off | research: advisor docs; decision A5 | method/settings.fragment.json | step 5 |
+| M075 | Never use /code-review, /goal or the advisor as a gate (the settings fragment's skillOverrides keeps /code-review to the owner; this rule's home stays method.md) | research: Claude Code internals | method/.claude/rules/method/method.md | step 6 |
+| M076 | The server-side advisor is off | research: advisor docs; decision A5 | method/settings.fragment.json @CLAUDE_CODE_DISABLE_ADVISOR_TOOL | done |
 | M077 | Never set CLAUDE_CODE_EFFORT_LEVEL | research: measured; decision A4 | method/scripts/method/status.sh | done |
-| M078 | A refusal or a missing verdict means "not checked" | research: model fallback docs | method/.claude/hooks/method/gate-receipt.sh | step 5 |
-| M079 | One repo per code-changing cloud session | research: cloud docs | method/.claude/hooks/method/session-status.sh | step 5 |
+| M078 | A refusal or a missing verdict means "not checked" | research: model fallback docs | method/.claude/hooks/method/gate-receipt.sh | done |
+| M079 | One repo per code-changing cloud session | research: cloud docs | method/.claude/rules/method/method.md | step 6 |
 | M080 | Check /permissions on each new clone | research: untrusted folders | README.md | step 9 |
 | M081 | Nested claude -p runs use < /dev/null, an explicit effort and METHOD_NESTED=1 | research: measured | method/.claude/skills/checks/SKILL.md | step 6 |
 | M082 | When the work is done and its checks pass, stop and report; no unrequested changes | research: scope creep at high effort | method/.claude/rules/method/method.md | step 6 |
@@ -109,9 +109,9 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M101 | Each project has a REVIEW.md: what failure looks like, a nit cap, paths to skip, file-and-line evidence, a count-first summary | research: Claude Code team | templates/REVIEW.md | step 7 |
 | M102 | The reviewer flags changes that leave CLAUDE.md, AGENTS.md or the architecture document out of date | research: Claude Code team | method/.claude/agents/method/reviewer.md | step 6 |
 | M103 | A change to the reviewer is kept only if its score on past incidents rises; re-score on any prompt, tool or model change | research: Claude Code team | bench/README.md | R2 |
-| M104 | Auto memory is off in method projects; lessons go into the repo through /lesson | research: docs; decision A1 | method/settings.fragment.json | step 5 |
+| M104 | Auto memory is off in method projects; lessons go into the repo through /lesson | research: docs; decision A1 | method/settings.fragment.json @autoMemoryEnabled | done |
 | M105 | No Claude Code mods during method work | research: mods docs | method/.claude/rules/method/owner.md | step 6 |
-| M106 | An approval covers one exact version; any new commit voids it | research: Claude Code team | method/.claude/hooks/method/gate-receipt.sh | step 5 |
+| M106 | An approval covers one exact version of the files; any change to them voids it | research: Claude Code team | method/.claude/hooks/method/gate-receipt.sh | done |
 | M107 | An agent's approval never counts as a person's | research: Claude Code team | method/.claude/rules/method/method.md | step 6 |
 | M108 | A branch must be up to date with main before it merges | research: merge queue | method/scripts/method/done-check.sh | done |
 | M109 | A person is accountable for every change that ships | research: Claude Code team | method/.claude/rules/method/method.md | step 6 |
@@ -121,8 +121,8 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M113 | Packet separators are escaped so file content cannot fake a section or a verdict | research: Cloudflare | method/scripts/method/review-packet.sh | done |
 | M114 | Checking agents get a "do not flag" list: unchanged code, far-fetched risks, style, "consider library X" | research: Cloudflare | method/.claude/agents/method/reviewer.md | step 6 |
 | M115 | A checking agent reads its packet and every changed file in its first turn | research: Cloudflare | method/.claude/agents/method/reviewer.md | step 6 |
-| M116 | Receipts record token classes, first-request cache reads and a hash of the agent's instructions | research: Cloudflare | method/.claude/hooks/method/gate-receipt.sh | step 5 |
-| M117 | A blocking finding without run evidence becomes a question | research: Cloudflare review bot | method/.claude/hooks/method/gate-receipt.sh | step 5 |
+| M116 | Receipts record token classes, first-request cache reads and a hash of the agent's instructions | research: Cloudflare | method/.claude/hooks/method/gate-receipt.sh | done |
+| M117 | A blocking finding without run evidence becomes a question | research: Cloudflare review bot | method/.claude/agents/method/reviewer.md | step 6 |
 | M118 | In CI, checking-agent files and merge logic come from the main branch, so a change cannot grade itself | research: Cloudflare review bot | method/.github/workflows/method-gate.yml | R2 |
 | M119 | Give the whole task in one message with the finish line and the stops; keep going unless input is needed or a step is destructive | research: claude.dev | method/.claude/rules/method/method.md | step 6 |
 | M120 | /explain writes a plain explainer of any part of a project | research: Claude Code team | method/.claude/skills/explain/SKILL.md | step 6 |
@@ -133,3 +133,15 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M125 | Before planning a FULL task, the planner asks for whatever is missing of: who it is for, what is out of scope, what done looks like that the owner can see, and what the owner expects to happen | research: Osmani, critical thinking with agents | method/.claude/agents/method/planner.md | step 6 |
 | M126 | The report check lists every number that appears in no log, and refuses a report whose "what the checks would miss" part is missing, empty or "nothing" (SPEC R8) | research: Osmani, critical thinking with agents | method/scripts/method/report-check.sh | step 6 |
 | M127 | Session start says how much finished work waits for the owner's merge approval (steps, commits, files) and makes that approval the one next thing, unless the owner says to keep building | incident: 117 commits waited unmerged | method/.claude/skills/start/SKILL.md | step 6 |
+| M128 | The guard refuses what it cannot check: a command it cannot read that names something it watches, input it cannot parse, or a missing perl | research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | done |
+| M129 | No PowerShell tool in method projects: the guard and the method's scripts read bash | research: docs | method/.claude/hooks/method/guard.sh | done |
+| M130 | Claude's git commands at the session's repository match a short list of allowed shapes; anything else is refused with what to do instead | research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | done |
+| M131 | Claude never lands a change; gh, HTTP calls to GitHub, MCP tools and other Claude runs pass only from a list | incident; research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | done |
+| M132 | Claude only reads the method's installed files, its settings and git's own config and hooks; it never writes them | research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | done |
+| M133 | No commit while a mutation run or its journal exists | research: decision A41 | method/.claude/hooks/method/guard.sh | done |
+| M134 | Effort below xhigh is announced at a session's first tool call | research: decision A3 | method/.claude/hooks/method/guard.sh | done |
+| M135 | Secrets, personal data and Claude attribution are stopped before they leave the machine: a push, gh text and MCP writes are scanned | incident | method/.claude/hooks/method/guard.sh | R2 |
+| M136 | A settings change that switches off or weakens the hooks is refused mid-session | research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | done |
+| M137 | A skill or agent that declares its own hooks is refused (the method's own declare none) | research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | done |
+| M138 | Skills run no inline shell lines in method projects | research: measured, step 5 plan | method/settings.fragment.json @disableSkillShellExecution | done |
+| M139 | Merge tools, and tools that start, message or schedule other sessions, are denied in settings, so the deny holds with hooks off | research: measured, step 5 plan | method/settings.fragment.json @mcp__*__merge_pull_request | done |

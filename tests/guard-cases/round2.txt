@@ -1,0 +1,137 @@
+@@ G0 a here-document read as text stops at its first end line (quoted)
+echo "$(cat <<'EOF'
+safe text
+EOF
+git push --force origin main
+EOF
+)"
+@@ G0 a here-document read as text stops at its first end line (not quoted)
+echo "$(cat <<EOF
+safe text
+EOF
+git push --force origin main
+EOF
+)"
+@@ G0 code piped into bash with an option that takes a value
+echo 'git push --force origin main' | bash -o errexit
+@@ G0 code piped into bash -s
+echo 'git push --force origin main' | bash -s x
+@@ G0 code piped into bash /dev/stdin
+echo 'git push --force origin main' | bash /dev/stdin
+@@ G0 a here-document into bash /dev/stdin
+bash /dev/stdin <<'EOF'
+git push --force origin main
+EOF
+@@ G0 code piped into python3 -
+echo 'import os; os.system("git push --force origin main")' | python3 - x
+@@ G0 code piped into python3 with an option that takes a value
+echo 'import os; os.system("git push --force origin main")' | python3 -W ignore
+@@ G0 code piped into python3 -m code
+echo 'import os; os.system("git push --force origin main")' | python3 -m code
+@@ G0 a backslash before git inside $( )
+out=$(\git push --force origin main)
+@@ G0 a backslash before git inside backticks
+out=`\git push --force origin main`
+@@ G0 git with a redirect stuck to it inside $( )
+out=$(git>/dev/null push --force origin main)
+@@ G0 git with an input redirect stuck to it inside $( )
+out=$(git</dev/null push --force origin main)
+@@ G0 a brace around git inside $( )
+out=$({git,} push --force origin main)
+@@ G0 quotes inside git's name inside $( )
+out=$(g''it push --force origin main)
+@@ G0 a backslash inside git's name inside $( )
+out=$(g\it push --force origin main)
+@@ G0 a backslash before git in a default value
+echo "${x:-$(\git push --force origin main)}"
+@@ G0 quotes inside git's name piped into bash
+echo 'g""it push -f origin main' | bash
+@@ G0 git in another letter case inside $( )
+x=$(GIT push --force origin main)
+@@ G0 git.exe inside $( )
+x=$(git.exe push --force origin main)
+@@ G3 bash -c -- runs its script, which is read
+bash -c -- 'git push --force origin main'
+@@ G0 $ and ( split by a line continuation in double quotes
+echo "$\
+(git push --force origin main)"
+@@ G0 $ and ( split by a line continuation in a here-document
+cat <<EOF
+$\
+(git push --force origin main)
+EOF
+@@ G0 a here-document delimiter written with a backslash, and a quote in a comment
+out=$(cat <<\EOF
+) ;'
+EOF
+git push --force origin main # '
+)
+@@ G0 python's create_subprocess_shell
+python3 -c 'import asyncio; asyncio.run(asyncio.create_subprocess_shell("git push --force origin main"))'
+@@ G0 python's posix_spawnp
+python3 -c 'import os; os.posix_spawnp("git", ["git","push","--force","origin","main"], os.environ)'
+@@ G0 perl's readpipe
+perl -e 'readpipe("git push --force origin main")'
+@@ G0 perl's open with a pipe at the end
+perl -e 'open F, "git push --force origin main|"; print <F>'
+@@ G0 awk's getline from a command
+awk 'BEGIN { "git push -f origin main" | getline x }'
+@@ G0 awk's print into a command
+awk 'BEGIN { print "" | "git push -f origin main" }'
+@@ G0 R's system2
+Rscript -e 'system2("git", c("push", "-f", "origin", "main"))'
+@@ G0 osascript's do shell script
+osascript -e 'do shell script "git push -f origin main"'
+@@ G3 tcsh -c is read as a shell
+tcsh -c 'git push -f origin main'
+@@ G3 fish -c is read as a shell
+fish -c 'git push -f origin main'
+@@ G0 source of a process substitution
+c='git push -f origin main'; source <(echo "$c")
+@@ G0 bash of a process substitution
+c='git push -f origin main'; bash <(echo "$c")
+@@ G0 bash reading a process substitution on stdin
+c='git push -f origin main'; bash < <(echo "$c")
+@@ G0 coproc of eval
+c='git push -f origin main'; coproc eval "$c"
+@@ G0 trap -- of a variable
+c='git push -f origin main'; trap -- "$c" EXIT
+@@ G0 env -- before sh -c of a variable
+c='git push -f origin main'; env -- sh -c "$c"
+@@ G0 env --ignore-signal before sh -c of a variable
+c='git push -f origin main'; env --ignore-signal=PIPE sh -c "$c"
+@@ G0 stdbuf --output L before sh -c of a variable
+c='git push -f origin main'; stdbuf --output L sh -c "$c"
+@@ G0 xargs -a before sh -c of a variable
+c='git push -f origin main'; xargs -a /dev/null sh -c "$c"
+@@ G0 ionice --class before sh -c of a variable
+c='git push -f origin main'; ionice --class 3 sh -c "$c"
+@@ G0 sudo -Eu USER before sh -c of a variable
+c='git push -f origin main'; sudo -Eu root sh -c "$c"
+@@ G0 xargs -I{} sh -c '{}'
+echo 'git push -f origin main' | xargs -I{} sh -c '{}'
+@@ G0 find -exec {} as the command
+find . -name git -exec {} push -f origin main \;
+@@ G0 (( << )) after if hides no lines (refused whole since 5.5 repair loop 3)
+if ((x << 2)); then :; fi
+git push --force origin main
+@@ G0 $[ << ] hides no lines (refused whole since 5.5 repair loop 3)
+echo $[1<<2]
+git push --force origin main
+@@ G0 ${ << } hides no lines (refused whole since 5.5 repair loop 3)
+echo ${x/<<EOF/y}; git push --force origin main
+@@ G0 a glob in the name of .claude in a write target
+echo pwned > .c?aude/hooks/method/guard.sh
+@@ G0 a glob in the name of scripts/method in a write target
+echo pwned > scripts/meth[o]d/status.sh
+@@ G0 a glob for a folder in a write target
+echo pwned > s*/method/status.sh
+@@ G0 an alias for git
+shopt -s expand_aliases
+alias g=git
+g push -f origin main
+@@ G0 an alias built from pieces, whose text names no git
+shopt -s expand_aliases
+x=g; alias g="${x}it"
+g push --force origin main
+@@ END

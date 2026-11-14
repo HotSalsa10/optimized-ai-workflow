@@ -1,0 +1,34 @@
+# The tools the Claude Code client offers in a -p run (its init event), one
+# per line: NAME<TAB>guarded|not<TAB>why. The harness fails when the client
+# offers a tool this list does not name, so a new tool cannot slip past the
+# guard's matchers unseen (step 5.2; the guard is built from 5.5). Tools that
+# exist only in interactive or cloud sessions, or only with a claude.ai
+# login (the harness uses an API key), are outside what a -p run here
+# shows: they are listed by hand. "guarded" means the guard (docs/plans/step5.md, section 6.4)
+# matches it.
+Agent	guarded	starts a subagent; G17 checks its definition for hooks
+Task	guarded	the agent tool's name in the init event; matched as Agent is
+Bash	guarded	runs commands
+PowerShell	guarded	runs commands; refused outright (G2)
+Monitor	guarded	runs a command in the background
+Edit	guarded	writes a file
+Write	guarded	writes a file
+MultiEdit	guarded	writes a file
+NotebookEdit	guarded	writes a notebook file
+ExitWorktree	guarded	can delete a worktree with uncommitted work (G3)
+SendMessage	guarded	messages other sessions; refused in step 5 (G4)
+RemoteTrigger	guarded	schedules remote agents that run without this project's hooks; offered with a claude.ai login, never with the API key the harness uses, so no -p run here shows it; refused (G4) and denied in the settings
+Skill	guarded	runs a skill, whose frontmatter hooks stay registered (G17)
+Read	not	reads a file
+ToolSearch	not	loads tool definitions; the loaded tools are matched by name
+ListAgents	not	lists agents and sessions
+ReportFindings	not	hands back review findings as data
+CronCreate	not	schedules a prompt into this session; its tool calls go through the guard
+CronDelete	not	removes a schedule this session made
+CronList	not	lists this session's schedules
+ScheduleWakeup	not	schedules this session's next turn
+TaskStop	not	stops a background task this session started
+EnterWorktree	not	makes a new worktree and branch from HEAD, as G3's list allows
+WebFetch	not	reads a web page; writes nothing in the project
+WebSearch	not	searches the web; writes nothing in the project
+Workflow	not	runs agents whose own tool calls fire the hooks

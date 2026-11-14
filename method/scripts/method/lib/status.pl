@@ -11,6 +11,7 @@ use File::Spec;
 use IPC::Open2 ();
 use POSIX ();
 use Time::HiRes ();
+our $QUICK = 0;    # status.sh --quick (set in main)
 
 my $lib = dirname(File::Spec->rel2abs(__FILE__));
 require File::Spec->catfile($lib, $_) for qw(git.pl esc.pl conf.pl verdicts.pl checks.pl runstate.pl);
@@ -100,6 +101,7 @@ sub run_limited {
     if (Time::HiRes::time() > $until) { kill 'KILL', -$pid or kill 'KILL', $pid; waitpid $pid, 0; last }
     Time::HiRes::sleep(0.05);
   }
+  kill 'KILL', -$pid;    # a child that ignored TERM, left in the group
   return;
 }
 
@@ -294,7 +296,7 @@ sub verdicts_lines {
     my $old = $bad[-1];
     my @show = map { short($_) } @bad[0 .. ($#bad < 4 ? $#bad : 4)];
     return ['verdicts', 'LOOK', scalar(@bad) . " commits on $ref $since lack a valid $key line: @show"
-      . (@bad > 5 ? ' ...' : '') . '; the oldest, "' . subject(Git::message($old)) . '": '
+      . (@bad > 5 ? ' ...' : '') . '; the oldest, ' . ($QUICK ? short($old) : '"' . subject(Git::message($old)) . '"') . ': '
       . Verdicts::trailer_problem(Git::message($old))
       . '; accept them by moving VERDICTS_FROM in .claude/method.conf through a reviewed change; never rewrite main'
       . $shallow];
@@ -339,8 +341,17 @@ sub records_lines {
 
 # --- Claude Code, its effort setting, perl ---
 
+# in_hook: run by one of the method's hooks. Claude Code gives a hook
+# CLAUDE_PROJECT_DIR but not CLAUDE_CODE_EXECPATH (measured, 2.1.319), and
+# the settings' variables do reach it.
+sub in_hook {
+  return defined $ENV{CLAUDE_PROJECT_DIR} && $ENV{CLAUDE_PROJECT_DIR} ne ''
+    && !(defined $ENV{CLAUDE_CODE_EXECPATH} && $ENV{CLAUDE_CODE_EXECPATH} ne '');
+}
+
 sub claude_code_lines {
   my $p = $ENV{CLAUDE_CODE_EXECPATH};
+  return ['claude-code', 'SKIPPED', "a hook cannot see the client's version; /start checks it"] if in_hook();
   return ['claude-code', 'SKIPPED', 'not run inside Claude Code (CLAUDE_CODE_EXECPATH is not set)']
     unless defined $p && $p ne '';
   return ['claude-code', 'SKIPPED', 'CLAUDE_CODE_EXECPATH is not an absolute path, so it was not run']
@@ -366,8 +377,22 @@ sub effort_lines {
   return ['effort', 'LOOK', 'CLAUDE_CODE_EFFORT_LEVEL is set; it overrides every per-role effort (DECISIONS A4);'
     . ' remove it where it is set and start a new session'] if exists $ENV{CLAUDE_CODE_EFFORT_LEVEL};
   return ['effort', 'SKIPPED', "not run inside Claude Code; its settings' variables are not visible here"]
-    unless defined $ENV{CLAUDE_CODE_EXECPATH} && $ENV{CLAUDE_CODE_EXECPATH} ne '';
+    unless in_hook() || defined $ENV{CLAUDE_CODE_EXECPATH} && $ENV{CLAUDE_CODE_EXECPATH} ne '';
   return ['effort', 'PASS', 'CLAUDE_CODE_EFFORT_LEVEL is not set'];
+}
+
+# the guard's refusals, from its capped log (.method/local/guard.log)
+sub guard_lines {
+  my $name = '.method/local/guard.log';
+  return ['guard', 'PASS', 'no refusal logged'] unless -e $name || -l $name;
+  require File::Spec->catfile($lib, 'log.pl');
+  my ($ok, $bad) = Log::lines('.', $name);
+  return ['guard', 'PASS', 'no refusal logged' . ($bad ? "; $bad lines not in the log's form" : '')] unless @$ok;
+  my %n;
+  $n{ $_->[1] }++ for @$ok;
+  my $rules = join(', ', map { $n{$_} > 1 ? "$_ ($n{$_})" : $_ } sort { substr($a, 1) <=> substr($b, 1) || $a cmp $b } keys %n);
+  return ['guard', 'LOOK', scalar(@$ok) . ' refusals since ' . $ok->[0][0] . ": $rules"
+    . ($bad ? "; $bad lines not in the log's form" : '') . "; see $name, and remove it once read"];
 }
 
 sub perl_lines {
@@ -466,8 +491,13 @@ sub main {
   binmode STDOUT, ':raw';
   binmode STDERR, ':raw';
   $| = 1;
-  if (@ARGV) {
-    print "status: usage: status.sh (it takes no arguments)\n";
+  my $quick = 0;
+  $QUICK = 0;
+  if (@ARGV == 1 && $ARGV[0] eq '--quick') {
+    $quick = 1;
+    $QUICK = 1;    # (session start: no commit subject, which is free text)
+  } elsif (@ARGV) {
+    print "status: usage: status.sh [--quick]\n";
     exit 2;
   }
   my ($top, $elsewhere) = Git::top();
@@ -500,7 +530,12 @@ sub main {
   area('claude-code', \&claude_code_lines);
   area('effort', \&effort_lines);
   area('perl', \&perl_lines);
-  area('ci', \&ci_lines);
+  area('guard', \&guard_lines);
+  if ($quick) {
+    say_area('ci', 'SKIPPED', 'not checked at session start; /start checks it');
+  } else {
+    area('ci', \&ci_lines);
+  }
   for my $entry (@{ $conf->{REPOS} || [] }) {
     area("repo $entry", sub { repo_lines($top, $entry) });
   }

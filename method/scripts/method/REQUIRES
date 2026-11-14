@@ -1,4 +1,4 @@
 # What the method needs, read by lib/conf.pl (Conf::requires).
 # claude_code_min: the oldest Claude Code version the method supports
 # (SPEC.md, Supported versions); status.sh compares it with the running one.
-claude_code_min=2.1.295
+claude_code_min=2.1.316

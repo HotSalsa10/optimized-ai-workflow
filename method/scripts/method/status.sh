@@ -2,7 +2,9 @@
 # Says where things stand, read-only, for a person or a session starting
 # work. The work is done by lib/status.pl.
 #
-# Usage: bash scripts/method/status.sh   (no arguments)
+# Usage: bash scripts/method/status.sh [--quick]
+#   --quick skips the ci area (SKIPPED), which waits on the network: the
+#   method's session-status hook runs it at every session start (step 5.4).
 #
 # One line per area, "<area>: PASS|LOOK|SKIPPED - <detail>". LOOK means a
 # person should look; status never says FAIL and never blocks anything.
@@ -22,8 +24,12 @@
 #   records      the project records exist, CLAUDE.md imports AGENTS.md,
 #                checks/*.tsv reads cleanly and TESTS.md names each check
 #   claude-code  the running Claude Code is not older than REQUIRES says
-#   effort       CLAUDE_CODE_EFFORT_LEVEL is not set
+#                (SKIPPED inside a hook, which cannot see the client)
+#   effort       CLAUDE_CODE_EFFORT_LEVEL is not set (also checked inside a
+#                hook: CLAUDE_PROJECT_DIR set, CLAUDE_CODE_EXECPATH not)
 #   perl         JSON::PP and Digest::SHA load
+#   guard        the refusals in the guard's log (.method/local/guard.log):
+#                LOOK with their count and rules, else PASS
 #   ci           the newest CI run of each workflow for HEAD and main's tip
 #                (gh, at most 15 seconds; only for a github.com origin)
 #   repo <path>  the work checks for each REPOS entry in .claude/method.conf

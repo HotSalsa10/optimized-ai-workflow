@@ -68,7 +68,7 @@ R15. Writing for people. Reports and docs follow the writing rules in the owner'
 
 | Thing | Version | Why |
 |---|---|---|
-| Claude Code | 2.1.295 or later | hook `onFailure: "block"` needs it |
+| Claude Code | 2.1.316 or later | hook `onFailure: "block"` (2.1.295), a subagent's stop event only when it ends (2.1.311), the Monitor tool seen by a Bash matcher (2.1.314), Windows hook fixes (to 2.1.316); DECISIONS A45 |
 | Opus 5.5 | `claude-opus-5-5` | default model |
 | bash | 3.2 or later | macOS ships 3.2 |
 | Git for Windows | current | provides Git Bash and perl |

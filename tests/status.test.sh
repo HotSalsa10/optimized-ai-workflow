@@ -98,10 +98,35 @@ expect "a clean, pushed project needs no look (exit 0)" 0 "status: w on main at 
   "records: PASS - 9 records present; CLAUDE.md imports AGENTS.md; checks/*.tsv lists no checks" \
   "claude-code: SKIPPED - not run inside Claude Code" "effort: SKIPPED - not run inside Claude Code" "perl: PASS - JSON::PP " \
   "ci: SKIPPED - origin is not on github.com" "status: nothing needs a look; 3 SKIPPED (claude-code, effort, ci)"
-if [ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" -eq 9 ]; then pass "the report is one line per area plus a first and a last line"; else fail "the report is one line per area" "$out"; fi
+if [ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" -eq 10 ]; then pass "the report is one line per area plus a first and a last line"; else fail "the report is one line per area" "$out"; fi
 out=$(cd "$w" && bash "$status" extra 2>&1)
 code=$?
-expect "any argument is bad usage" 2 "status: usage: status.sh (it takes no arguments)"
+st "$w"
+expect "a project with no guard log has nothing for the guard area" 0 "guard: PASS - no refusal logged"
+mkdir -p "$w/.method/local"
+printf '2026-11-08T01:00:00Z\tG0\tBash\t%064d\n2026-11-08T01:05:00Z\tG4\tBash\t%064d\n2026-11-08T01:06:00Z\tG4\tmcp__github__merge_pull_request\t%064d\nfree text here\n' 1 2 3 >"$w/.method/local/guard.log"
+st "$w"
+expect "the guard's refusals are a LOOK, with their count, first time and rules" 1 "guard: LOOK - 3 refusals since 2026-11-08T01:00:00Z: G0, G4 (2); 1 lines not in the log's form; see .method/local/guard.log, and remove it once read"
+rm -rf "$w/.method"
+out=$(cd "$w" && bash "$status" extra 2>&1)
+code=$?
+expect "any argument but --quick is bad usage" 2 "status: usage: status.sh [--quick]"
+out=$(cd "$w" && bash "$status" --quick extra 2>&1)
+code=$?
+expect "--quick with another argument is bad usage" 2 "status: usage: status.sh [--quick]"
+(cd "$w" && unset CLAUDE_CODE_EXECPATH CLAUDE_CODE_EFFORT_LEVEL && bash "$status" --quick) >"$work/out" 2>&1
+code=$?
+out=$(cat "$work/out")
+expect "--quick leaves the ci area to /start" 0 "ci: SKIPPED - not checked at session start; /start checks it" "status: nothing needs a look; 3 SKIPPED (claude-code, effort, ci)"
+(cd "$w" && unset CLAUDE_CODE_EXECPATH CLAUDE_CODE_EFFORT_LEVEL && CLAUDE_PROJECT_DIR="$w" bash "$status") >"$work/out" 2>&1
+code=$?
+out=$(cat "$work/out")
+expect "inside a hook (CLAUDE_PROJECT_DIR set, CLAUDE_CODE_EXECPATH not) the client's version is left to /start and effort is checked" 0 \
+  "claude-code: SKIPPED - a hook cannot see the client's version; /start checks it" "effort: PASS - CLAUDE_CODE_EFFORT_LEVEL is not set"
+(cd "$w" && unset CLAUDE_CODE_EXECPATH && CLAUDE_PROJECT_DIR="$w" CLAUDE_CODE_EFFORT_LEVEL=low bash "$status") >"$work/out" 2>&1
+code=$?
+out=$(cat "$work/out")
+expect "inside a hook, CLAUDE_CODE_EFFORT_LEVEL set is a LOOK" 1 "effort: LOOK - CLAUDE_CODE_EFFORT_LEVEL is set"
 mkdir -p "$work/plain"
 (cd "$work/plain" && GIT_CEILING_DIRECTORIES=$work bash "$status") >"$work/out" 2>&1
 code=$?
@@ -305,6 +330,10 @@ st "$vw"
 expect "a commit after the first verdict without one is a LOOK naming it and the reason" 1 \
   "verdicts: LOOK - 1 commits on refs/remotes/origin/main since " "lack a valid Review-Verdict line: $bad1; the oldest, \"No trailer here\": no line starts with Review-Verdict:" \
   "accept them by moving VERDICTS_FROM in .claude/method.conf through a reviewed change; never rewrite main"
+out=$(cd "$vw" && unset CLAUDE_CODE_EXECPATH CLAUDE_CODE_EFFORT_LEVEL CLAUDE_CODE_REMOTE GH_REPO && bash "$status" --quick 2>&1)
+code=$?
+expect "with --quick (session start) the oldest is named by its id, as its subject is free text that would reach Claude" 1 "lack a valid Review-Verdict line: $bad1; the oldest, $bad1: no line starts with Review-Verdict:"
+case "$out" in *"No trailer here"*) fail "with --quick no commit subject is shown" "$out" ;; *) pass "with --quick no commit subject is shown" ;; esac
 st "$vw" PERLIO=:crlf
 expect "PERLIO=:crlf from the caller adds no CR to what status reads back" 1 "\"No trailer here\": no line starts"
 printf 'VERDICTS_FROM=%s\n' "$(cd "$vw" && git rev-parse HEAD)" >"$vw/.claude-method.conf.tmp"
@@ -512,42 +541,46 @@ rm -rf "$rw/.claude"
 
 # 6. Claude Code, effort and perl
 mkdir -p "$work/cc"
-for v in "2.1.290 (Claude Code)" "2.1.312 (Claude Code)" "2.1.1000 (Claude Code)" "v22.11.0"; do
+for v in "2.1.290 (Claude Code)" "2.1.315 (Claude Code)" "2.1.316 (Claude Code)" "2.1.319 (Claude Code)" "2.1.1000 (Claude Code)" "v22.11.0"; do
   f="$work/cc/claude-$(printf '%s' "$v" | tr -cd '0-9')"
   printf '#!/bin/sh\necho "%s"\n' "$v" >"$f"
   chmod +x "$f"
 done
 st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-21290"
-expect "a Claude Code below the floor is a LOOK" 1 "claude-code: LOOK - 2.1.290 is below the floor 2.1.295; update Claude Code"
-st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-21312"
-expect "a Claude Code at or above the floor passes" 0 "claude-code: PASS - 2.1.312, floor 2.1.295" "effort: PASS - CLAUDE_CODE_EFFORT_LEVEL is not set"
+expect "a Claude Code below the floor is a LOOK" 1 "claude-code: LOOK - 2.1.290 is below the floor 2.1.316; update Claude Code"
+st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-21319"
+expect "a Claude Code at or above the floor passes" 0 "claude-code: PASS - 2.1.319, floor 2.1.316" "effort: PASS - CLAUDE_CODE_EFFORT_LEVEL is not set"
+st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-21315"
+expect "one below the floor is a LOOK" 1 "claude-code: LOOK - 2.1.315 is below the floor 2.1.316; update Claude Code"
+st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-21316"
+expect "the floor itself passes" 0 "claude-code: PASS - 2.1.316, floor 2.1.316"
 st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-211000"
-expect "versions compare as numbers, not as text" 0 "claude-code: PASS - 2.1.1000, floor 2.1.295"
+expect "versions compare as numbers, not as text" 0 "claude-code: PASS - 2.1.1000, floor 2.1.316"
 st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-22110"
 expect "an output that is not a Claude Code version is SKIPPED" 0 "claude-code: SKIPPED - the version could not be read"
 # shellcheck disable=SC2016 # a script for the stand-in to run
-printf '#!/bin/sh\nif read -r x; then echo "read: $x"; else echo "2.1.312 (Claude Code)"; fi\n' >"$work/cc/claude-stdin"
-printf '#!/bin/sh\necho "2.1.312 (Claude Code)"\nexit 1\n' >"$work/cc/claude-fails"
+printf '#!/bin/sh\nif read -r x; then echo "read: $x"; else echo "2.1.319 (Claude Code)"; fi\n' >"$work/cc/claude-stdin"
+printf '#!/bin/sh\necho "2.1.319 (Claude Code)"\nexit 1\n' >"$work/cc/claude-fails"
 chmod +x "$work/cc/claude-stdin" "$work/cc/claude-fails"
 printf 'hello\n' >"$work/hello"
 st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-stdin" <"$work/hello"
-expect "Claude Code is asked for its version with no input" 0 "claude-code: PASS - 2.1.312"
+expect "Claude Code is asked for its version with no input" 0 "claude-code: PASS - 2.1.319"
 st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-fails"
 expect "a version command that fails is SKIPPED" 0 "claude-code: SKIPPED - the version could not be read"
 mkdir -p "$work/m"
 cp -R "$root/method/scripts/method/." "$work/m/"
 printf 'claude_code_min=2.1\n' >"$work/m/REQUIRES"
-out=$(cd "$rw" && unset CLAUDE_CODE_EFFORT_LEVEL && CLAUDE_CODE_EXECPATH="$work/cc/claude-21312" bash "$work/m/status.sh" 2>&1)
+out=$(cd "$rw" && unset CLAUDE_CODE_EFFORT_LEVEL && CLAUDE_CODE_EXECPATH="$work/cc/claude-21319" bash "$work/m/status.sh" 2>&1)
 code=$?
 expect "an area that fails is a LOOK with its reason, and the next areas still report" 1 \
   "claude-code: LOOK - could not be checked: REQUIRES line 1: claude_code_min: a version like 2.1.295" "effort: PASS" "perl: PASS"
-(cd "$work/cc" && cd "$rw" && unset CLAUDE_CODE_EFFORT_LEVEL && CLAUDE_CODE_EXECPATH=claude-21312 PATH="$work/cc:$PATH" bash "$status") >"$work/out" 2>&1
+(cd "$work/cc" && cd "$rw" && unset CLAUDE_CODE_EFFORT_LEVEL && CLAUDE_CODE_EXECPATH=claude-21319 PATH="$work/cc:$PATH" bash "$status") >"$work/out" 2>&1
 code=$?
 out=$(cat "$work/out")
 expect "a relative CLAUDE_CODE_EXECPATH is never run" 0 "claude-code: SKIPPED - CLAUDE_CODE_EXECPATH is not an absolute path"
-st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-21312" CLAUDE_CODE_EFFORT_LEVEL=high
+st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-21319" CLAUDE_CODE_EFFORT_LEVEL=high
 expect "CLAUDE_CODE_EFFORT_LEVEL set is a LOOK" 1 "effort: LOOK - CLAUDE_CODE_EFFORT_LEVEL is set; it overrides every per-role effort (DECISIONS A4)"
-st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-21312" CLAUDE_CODE_EFFORT_LEVEL=
+st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-21319" CLAUDE_CODE_EFFORT_LEVEL=
 expect "CLAUDE_CODE_EFFORT_LEVEL set but empty is a LOOK" 1 "effort: LOOK - CLAUDE_CODE_EFFORT_LEVEL is set"
 st "$rw" CLAUDE_CODE_EFFORT_LEVEL=low
 expect "CLAUDE_CODE_EFFORT_LEVEL set outside Claude Code is a LOOK" 1 "effort: LOOK - CLAUDE_CODE_EFFORT_LEVEL is set"
@@ -597,6 +630,11 @@ if [ "$(cat "$work/gh/args")" = "run list -R https://github.com/example/project.
 else
   fail "gh is asked about origin and this commit, with GH_REPO removed" "$(cat "$work/gh/args" "$work/gh/env")"
 fi
+: >"$work/gh/args"
+(cd "$gw" && unset CLAUDE_CODE_EXECPATH CLAUDE_CODE_EFFORT_LEVEL GH_REPO && PATH="$work/gh:$PATH" bash "$status" --quick) >"$work/out" 2>&1
+code=$?
+out=$(cat "$work/out")
+if [ ! -s "$work/gh/args" ] && printf '%s\n' "$out" | grep -F -q "ci: SKIPPED - not checked at session start"; then pass "--quick never calls gh, even for a github.com origin"; else fail "--quick never calls gh, even for a github.com origin" "gh was asked: $(cat "$work/gh/args"); $out"; fi
 gh_says "[$(run_ok build completed success),$(run_ok lint completed skipped)]"
 st "$gw" PATH="$work/gh:$PATH"
 expect "passed and skipped runs pass" 0 "ci: PASS - 2 workflows passed for "
