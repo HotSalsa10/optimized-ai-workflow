@@ -61,6 +61,8 @@
 # Step 6.1's case: h_method_words ROOT lays the method's agents, rules and
 # skills out; h_words ROOT runs the case and h_words_holds QUESTION judges
 # it (below).
+# Step 6.2's case: h_real_gates ROOT MODE runs the method's own gate files
+# (below); h_real_holds QUESTION judges it.
 # req-001 is h_fake's own alive probe.
 
 # settings a caller's environment must not carry into every case
@@ -447,9 +449,9 @@ h_method_words() {
 
 # h_words ROOT (step 6.1): the case for the method's rules files, with the
 # method (h_method) and its words (h_method_words) from the repository at
-# ROOT (a planted copy in tests/plants/harness.sh), and the harness's
-# stand-in reviewer while the method has no reviewer file of its own (step
-# 6.2 brings it). The main session calls the reviewer once, in the
+# ROOT (a planted copy in tests/plants/harness.sh): since step 6.2 the
+# method's own reviewer, and the harness's stand-in only for a copy that
+# has none. The main session calls the reviewer once, in the
 # foreground (conversation "gate"), then ends. Returns 1 when the case
 # could not be made or the fake did not answer.
 h_words() {
@@ -511,6 +513,116 @@ h_words_holds() {
       ;;
     *) H_WHY="no such words question: $1" ;;
   esac
+  [ -z "$H_WHY" ]
+}
+
+# h_real_gates ROOT MODE (step 6.2): the method's own gate files, from the
+# repository at ROOT (a planted copy in tests/plants/harness.sh), laid out
+# as sync will (h_method, h_method_words: no stand-in), with the fragment as
+# the project's settings. The main session calls every gate verdicts.txt
+# names in one message, in the foreground (each told apart by its Agent
+# call's description, "harness gate <name>", and its conversation named
+# after it); each answers with the first word of its gate's kind and the
+# END-VERDICT line. MODE default: each answers as text, and the client's
+# debug log goes to $H_DIR/debug.log. MODE auto (the test-only allow hook
+# on Agent, as h_gates): each hands its report back. Sets H_GATES (one
+# "NAME<TAB>WORD" a gate) and H_MODEL (the fragment's model). Returns 1
+# when the case could not be made or the fake did not answer.
+h_real_gates() {
+  local mode=$2
+  H_TREE=""
+  H_GATES=$(cd "$1" && perl -e 'require "./method/scripts/method/lib/verdicts.pl"; my @r = Verdicts::rows(); print "$_->[0]\t", (Verdicts::words($_->[1], @r))[0], "\n" for Verdicts::gates(@r)') || return 1
+  H_MODEL=$(perl -MJSON::PP -0ne 'print JSON::PP->new->decode($_)->{model}' "$1/method/settings.fragment.json") || return 1
+  { h_case "real-gates-$mode" && h_method "$1"; } || return 1
+  if [ "$mode" = auto ]; then
+    mkdir -p "$H_PROJ/.claude/hooks/fixture" && cp "$HARNESS/hooks/allow.sh" "$H_PROJ/.claude/hooks/fixture/" || return 1
+    perl -MJSON::PP -e 'my $f = shift; open my $h, "<", $f or die; my $d = JSON::PP->new->decode(do { local $/; <$h> }); close $h;
+      push @{ $d->{hooks}{PreToolUse} }, {matcher => "Agent|Task", hooks => [{type => "command", command => q{bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fixture/allow.sh"}, timeout => 30}]};
+      open $h, ">", $f or die; print $h JSON::PP->new->canonical->pretty->encode($d); close $h or die' "$H_PROJ/.claude/settings.json" || return 1
+  fi
+  h_method_words "$1" || return 1
+  H_TREE=$(HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git -C "$H_PROJ" rev-parse 'HEAD^{tree}') || return 1
+  printf '%s\n' "$H_GATES" | perl -MJSON::PP -e '
+    my ($mode, $t) = @ARGV;
+    my (@convs, @calls);
+    while (my $l = <STDIN>) {
+      chomp $l;
+      my ($g, $w) = split /\t/, $l;
+      my $good = "$w\nSummary: the change is fine.\nEND-VERDICT $t";
+      my @turns = $mode eq "auto" ? ({tool => "SubagentHandback", input => {message => $good}}, map { {text => $good} } 1 .. 3) : ({text => $good});
+      push @convs, {name => $g, match => "HARNESS-GATE-\Q$g\E:", turns => \@turns};
+      push @calls, {type => "tool_use", name => "Agent", input => {description => "harness gate $g", prompt => "HARNESS-GATE-$g: check the change",
+        subagent_type => $g, run_in_background => JSON::PP::false}};
+    }
+    unshift @convs, {name => "classifier", match => "(?:^<transcript>|<user_claude_md>)", turns => [{text => "<block>no</block>"}]} if $mode eq "auto";
+    push @convs, {name => "main", match => "^go\$", turns => [{blocks => \@calls}, map { {text => "MAIN-DONE-$_"} } 1 .. 4]};
+    print JSON::PP->new->canonical->encode({convs => \@convs, fallback => {text => "FAKE-FALLBACK"}, usage => {input_tokens => 11, output_tokens => 7}})' "$mode" "$H_TREE" >"$H_DIR/real-gates.json" || return 1
+  h_fake "$H_DIR/real-gates.json" 80 || return 1
+  if [ "$mode" = auto ]; then
+    h_client 120 -- --permission-mode auto --debug-file "$H_DIR/debug.log"
+  else
+    h_client 120 -- --permission-mode default --allowedTools Bash --debug-file "$H_DIR/debug.log"
+  fi
+  h_stop
+}
+# h_real_holds QUESTION: 0 when QUESTION holds for every gate of the case
+# h_real_gates ran last; else 1, with H_WHY saying what was seen, gate by
+# gate. The questions:
+#   loads    each gate is in the init event's agents, and the client's
+#            debug log (not empty, or the case cannot tell) has no line
+#            naming the gate with "does not recognize or apply" (an unknown
+#            frontmatter key), "Failed to parse agent" or "not loaded"
+#   valid    each gate's receipt is VALID with its word, in one stop, not
+#            sent back or refused: its real body is what the client sent
+#            (B10), and its model and effort are allowed
+#   record   each receipt took the fragment's model and effort xhigh from
+#            the gate's record
+#   tools    each gate's first request offers tools, Read and Bash among
+#            them, and none of Agent, Task, Skill or SendMessage
+#   handback (MODE auto) each gate's first request offers SubagentHandback,
+#            though its tools: line does not list it
+h_real_holds() {
+  local g w got line t
+  H_WHY=""
+  [ -n "$H_GATES" ] || { H_WHY="no gate read from verdicts.txt, so the case cannot tell"; return 1; }
+  if [ "$1" = loads ] && [ ! -s "$H_DIR/debug.log" ]; then
+    H_WHY="the client wrote no debug log, so the case cannot tell"
+    return 1
+  fi
+  while IFS="$(printf '\t')" read -r g w; do
+    case $1 in
+      loads)
+        h_init agents | grep -q -x -F -- "$g" || H_WHY="$H_WHY $g is not in the init event's agents;"
+        line=$(LC_ALL=C grep -F -- "$g" "$H_DIR/debug.log" | LC_ALL=C grep -e 'does not recognize or apply' -e 'Failed to parse agent' -e 'not loaded' | head -1 | cut -c1-200)
+        [ -z "$line" ] || H_WHY="$H_WHY the debug log names $g: $line;"
+        ;;
+      valid)
+        got=$(h_receipt "$g")
+        [ "$got" = "VALID why=none open=$w stops=1 blocked=0 denied=0" ] || H_WHY="$H_WHY $g's receipt: $got;"
+        ;;
+      record)
+        got=$(h_used "$g")
+        case $got in "models=$H_MODEL efforts=xhigh "*) ;; *) H_WHY="$H_WHY $g's receipt holds $got;" ;; esac
+        ;;
+      tools)
+        got=$(perl "$HARNESS/read.pl" tools "$g" "$H_DIR/fake")
+        case ",$got," in ,none, | ,,) H_WHY="$H_WHY $g's first request offers no tools ($got);" ;; esac
+        for t in Agent Task Skill SendMessage; do
+          case ",$got," in *",$t,"*) H_WHY="$H_WHY $g's first request offers $t, a delegation tool: $got;" ;; esac
+        done
+        for t in Read Bash; do
+          case ",$got," in *",$t,"*) ;; *) H_WHY="$H_WHY $g's first request lacks $t: $got;" ;; esac
+        done
+        ;;
+      handback)
+        got=$(perl "$HARNESS/read.pl" tools "$g" "$H_DIR/fake")
+        case ",$got," in *,SubagentHandback,*) ;; *) H_WHY="$H_WHY $g's first request does not offer SubagentHandback: $got;" ;; esac
+        ;;
+      *) H_WHY="no such real-gates question: $1" ;;
+    esac
+  done <<EOF
+$H_GATES
+EOF
   [ -z "$H_WHY" ]
 }
 

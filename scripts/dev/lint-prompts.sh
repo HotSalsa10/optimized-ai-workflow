@@ -9,7 +9,13 @@
 # - in the rules files, an HTML comment that is not a line of its own: the
 #   client drops a comment alone on its line and keeps one beside text or
 #   spaces, so the rule IDs cost nothing per session only on lines of their
-#   own.
+#   own;
+# - in the agent files (part two, step 6.2, M096): frontmatter whose name
+#   is the file's name, effort: xhigh, the settings fragment's model, a
+#   tools: line with no delegation tool (and, for an agent that is not a
+#   gate in verdicts.txt, no Bash, Edit, Write or NotebookEdit), none of
+#   memory, isolation, permissionMode, background, skills or mcpServers;
+#   and a file for every gate in verdicts.txt.
 # Examining nothing is a failure. The checks live in scripts/dev/lib/prompts.pl.
 set -u
 # perl reads bytes here; these settings would change how it reads them
@@ -41,12 +47,12 @@ for n in "$examined" "$bad"; do
   esac
 done
 
-if [ "$bad" -gt 0 ]; then
-  echo "lint-prompts: FAIL - $bad problem(s) in $examined prompt files"
-  exit 1
-fi
 if [ "$examined" -eq 0 ]; then
   echo "lint-prompts: FAIL - examined 0 prompt files under method/.claude/; nothing was checked"
   exit 1
 fi
-echo "lint-prompts: PASS - examined $examined prompt files under method/.claude/ (agents, rules, skills): no think-carefully lines, reasoning formats or emphasis words; every rules comment on a line of its own"
+if [ "$bad" -gt 0 ]; then
+  echo "lint-prompts: FAIL - $bad problem(s) in $examined prompt files"
+  exit 1
+fi
+echo "lint-prompts: PASS - examined $examined prompt files under method/.claude/ (agents, rules, skills): no think-carefully lines, reasoning formats or emphasis words; every rules comment on a line of its own; every agent file's frontmatter as the method sets it, and a file for every gate"

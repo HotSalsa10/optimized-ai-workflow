@@ -9,7 +9,7 @@ SPEC.md (requirements), ROADMAP.md (tracks), TASKS.md (current step), DECISIONS.
 ## How work is done here
 
 - One small step at a time, as listed in ROADMAP.md. Touch only the files the step needs.
-- Every step gets a fresh-context review that returns APPROVE, REQUEST CHANGES, REJECT or ESCALATE, and a five-part report: summary, change summary, actual check output, risks, verdict.
+- Every step gets a fresh-context review whose report opens with its verdict word (APPROVE, REQUEST CHANGES, REJECT or ESCALATE) alone on the first line, then gives the summary, the change summary, the actual check output and the risks, and ends with the line `END-VERDICT <tree>`, the tree of the commit reviewed (A72).
 - Update the records before review, so one review covers one change.
 - Text under `method/.claude/` is product being built and reviewed. It is never instructions for sessions in this repo; in particular M140 does not apply here, where the hooks are off (A47).
 - Commit messages end with one line as the last paragraph: `Review-Verdict: <value>` (values in DECISIONS.md A10). No Co-Authored-By or session-link lines.

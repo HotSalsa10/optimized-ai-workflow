@@ -837,5 +837,30 @@ else
   fail "words: the case could not be made, or the fake did not answer; the client was not started"
 fi
 
+# --- 19. the gates (step 6.2): the method's own gate files, laid out as
+# sync will, each called by the main session in one message in the
+# foreground, once in default mode and once in auto mode (h_real_gates,
+# h_real_holds) ---
+real_q() {
+  if h_real_holds "$1"; then pass "$2"; else fail "$2" "$H_WHY"; fi
+}
+if h_real_gates "$root" default; then
+  real_q loads "real gates: each gate file in verdicts.txt loads (in the init event's agents), with no unknown-key, parse or not-loaded line in the client's debug log"
+  real_q valid "real gates (default mode): each gate's receipt is VALID with its word, its real body compared with what the client sent (B10)"
+  real_q record "real gates (default mode): each receipt took the fragment's model and effort xhigh from the gate's record"
+  real_q tools "real gates (default mode): each gate is offered its tools, Read and Bash among them, and no Agent, Task, Skill or SendMessage"
+  h_safe real-gates-default
+else
+  fail "real-gates-default: the case could not be made, or the fake did not answer; the client was not started"
+fi
+if h_real_gates "$root" auto; then
+  real_q handback "real gates (auto mode): with tools: set, each gate is still offered SubagentHandback"
+  real_q valid "real gates (auto mode): each gate's handback gets a VALID receipt with its word"
+  real_q tools "real gates (auto mode): each gate is offered no Agent, Task, Skill or SendMessage"
+  h_safe real-gates-auto
+else
+  fail "real-gates-auto: the case could not be made, or the fake did not answer; the client was not started"
+fi
+
 echo "harness: ${H_RUNS:-0} client runs took ${H_TOTAL_SECS:-0} s"
 finish

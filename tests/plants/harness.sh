@@ -388,6 +388,49 @@ words_plant() {
     "reach gate" "method.md in" "words: method.md loaded only for some paths"
 }
 
+# 17. step 6.2's case for the method's own gate files (h_real_gates,
+# h_real_holds): one copy of the repository with four defects, each
+# turning one question red for its own gate's reason, in one client run:
+# an unknown frontmatter key in the reviewer's file (loads), Agent in the
+# security checker's tools (tools), effort high in the reporter's file
+# (record), and receipt.pl reading the frontmatter as part of the body, so
+# no real body compares equal (valid)
+sb=$(make_sandbox) || abort_sandbox
+a="$sb/method/.claude/agents/method"
+# shellcheck disable=SC2016 # perl code, expanded by perl
+{
+  perl -0pi -e 's/^(effort: xhigh\n)/${1}bogus-key: 1\n/m' "$a/method-reviewer.md"
+  perl -0pi -e 's/^(tools: [^\n]*)/$1, Agent/m' "$a/method-security-checker.md"
+  perl -0pi -e 's/^effort: xhigh$/effort: high/m' "$a/method-reporter.md"
+  perl -pi -e 's/\? \(\$1, \$2\) : \(\x27\x27, \$text\);/? (\$1, \$text) : (\x27\x27, \$text); # HARNESS-PLANT/' "$sb/method/scripts/method/lib/receipt.pl"
+}
+if ! grep -q '^bogus-key: 1$' "$a/method-reviewer.md" || ! grep -q '^tools: .*, Agent$' "$a/method-security-checker.md" ||
+  ! grep -q '^effort: high$' "$a/method-reporter.md" || ! grep -q -F HARNESS-PLANT "$sb/method/scripts/method/lib/receipt.pl"; then
+  fail "real gates: the plants did not apply, so the check results would mean nothing"
+elif ! h_real_gates "$sb" default; then
+  fail "real gates: the case could not be made, or the fake did not answer"
+else
+  for qr in "loads|the debug log names method-reviewer: |an unknown frontmatter key in the reviewer's file" \
+    "tools|method-security-checker's first request offers Agent, a delegation tool|Agent in the security checker's tools" \
+    "record|method-reporter's receipt holds models=$H_MODEL efforts=high |effort high in the reporter's file" \
+    "valid|method-tester's receipt: INVALID why=instructions-differ|receipt.pl reading the frontmatter as part of a gate's body"; do
+    q=${qr%%|*}
+    rest=${qr#*|}
+    seen=${rest%%|*}
+    text=${rest#*|}
+    if h_real_holds "$q"; then
+      fail "real gates: $text: the question '$q' stayed green"
+    else
+      case $H_WHY in
+        *"$seen"*) pass "real gates: $text: the question '$q' turns red (${H_WHY%%;*})" ;;
+        *) fail "real gates: $text: the question '$q' turned red for another reason" "$H_WHY" ;;
+      esac
+    fi
+  done
+fi
+h_stop
+drop_sandbox "$sb" || true
+
 # 13. get-client: a download that does not match the pinned checksum is refused
 reg="$H_WORK/registry/@anthropic-ai/claude-code-linux-x64/-"
 mkdir -p "$reg" "$H_WORK/pkg/package"

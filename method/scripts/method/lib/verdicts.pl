@@ -35,6 +35,12 @@
 # one end-key word. No kind starts with "trailer" but the trailer kinds,
 # which done-check finds by that prefix.
 #
+# Verdicts::roles(ROWS) is the one reading of the lines read by their place
+# (DECISIONS A10 and A71; docs/plans/step6.md S4): which word approves,
+# which test-result word means pass, fail or not run, and which gate is the
+# reviewer, the security checker, the reporter and the tester. Scripts name
+# a gate or a word by its role, never by its spelling (M039).
+#
 # Verdicts::judged(TIP, FROM) is the one rule for which commits on main's
 # first-parent history carry a verdict that counts (DECISIONS A30); status
 # and done-check use it. Callers load lib/git.pl first.
@@ -100,6 +106,26 @@ sub words {
 sub gates {
   my (@rows) = @_;
   return map { [ $_->[1], substr($_->[0], length 'gate-') ] } grep { $_->[0] =~ /\Agate-/ } @rows;
+}
+
+# roles ROWS: a list of pairs, ROLE => WORD or gate name: approving (the
+# first verdict word); pass, fail and not-run (the test-result words, in
+# that order, exactly three); reviewer, security-checker and reporter (the
+# gate-verdict gates, in that order, exactly three); tester (the one
+# gate-test-result gate). Dies with a message when a place is not filled
+# as the file's header says.
+sub roles {
+  my (@rows) = @_;
+  my @verdict = words('verdict', @rows);
+  my @test = words('test-result', @rows);
+  my @judge = words('gate-verdict', @rows);
+  my @tester = words('gate-test-result', @rows);
+  die "verdicts.txt: expected at least one verdict line (the first approves)\n" unless @verdict;
+  die "verdicts.txt: expected exactly three test-result lines (pass, fail, not run, in this order)\n" unless @test == 3;
+  die "verdicts.txt: expected exactly three gate-verdict lines (the reviewer, the security checker, the reporter, in this order)\n" unless @judge == 3;
+  die "verdicts.txt: expected exactly one gate-test-result line (the tester)\n" unless @tester == 1;
+  return (approving => $verdict[0], pass => $test[0], fail => $test[1], 'not-run' => $test[2],
+    reviewer => $judge[0], 'security-checker' => $judge[1], reporter => $judge[2], tester => $tester[0]);
 }
 
 # trailer_word MESSAGE: the word of a valid message's trailer value, its

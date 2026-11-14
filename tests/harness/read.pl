@@ -40,6 +40,9 @@
 # between that call's tool_dispatch_start and tool_dispatch_end; a
 # foreground agent holds the session for that span). Prints "none" and
 # exits 1 when the call or its span is not found.
+# read.pl tools CONV DIR (step 6.2): prints the tool names the first
+# request the fake logged in DIR for its conversation CONV offered, sorted,
+# joined by commas; "none" and exit 1 when there is no such request.
 # Never shipped.
 use strict;
 use warnings;
@@ -134,6 +137,12 @@ if (($what // '') eq 'effort' && @ARGV == 3) {
   print @e ? join(',', @e) : 'none', "\n";
   exit(@e ? 0 : 1);
 }
+if (($what // '') eq 'tools' && @ARGV == 3) {
+  my ($b) = requests_of(@ARGV[1, 2]);
+  if (!$b) { print "none\n"; exit 1 }
+  print join(',', sort map { ref $_ eq 'HASH' && defined $_->{name} ? $_->{name} : '?' } @{ ref $b->{tools} eq 'ARRAY' ? $b->{tools} : [] }), "\n";
+  exit 0;
+}
 # what the client sent in a request body: every string of its system text
 # and of its messages that are not the assistant's, joined
 sub sent {
@@ -193,7 +202,7 @@ if (($what // '') eq 'rules' && @ARGV == 5) {
   print "differs at byte $i\n";
   exit 1;
 }
-die "usage: read.pl init FIELD FILE | read.pl req CONV TEXT DIR | read.pl first CONV TEXT DIR | read.pl rules CONV SUFFIX FILE DIR | read.pl effort CONV DIR | read.pl receipt DESC HOME GIT | read.pl used DESC HOME GIT | read.pl hooks DESC TEXT HOME LOG\n" unless defined $file && $what eq 'init';
+die "usage: read.pl init FIELD FILE | read.pl req CONV TEXT DIR | read.pl first CONV TEXT DIR | read.pl rules CONV SUFFIX FILE DIR | read.pl effort CONV DIR | read.pl tools CONV DIR | read.pl receipt DESC HOME GIT | read.pl used DESC HOME GIT | read.pl hooks DESC TEXT HOME LOG\n" unless defined $file && $what eq 'init';
 open my $f, '<', $file or exit 1;
 while (my $l = <$f>) {
   my $o = eval { JSON::PP->new->utf8->decode($l) } or next;

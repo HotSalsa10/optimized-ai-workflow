@@ -20,6 +20,14 @@
 #                     thing or the wrong way, the third not checked
 #   end-key           the word that opens a gate report's last line, before
 #                     the tree id the gate was given at its start (one line)
+# Some lines are read by their place, so their order is part of the file
+# (DECISIONS A10 and A71; Verdicts::roles reads them; tests/verdicts.test.sh
+# checks them against the records):
+#   verdict           the first word approves
+#   test-result       pass, then fail, then not run (exactly three)
+#   gate-verdict      the reviewer, then the security checker, then the
+#                     reporter (exactly three)
+#   gate-test-result  the tester (exactly one)
 verdict	APPROVE	the change may go ahead
 verdict	REQUEST CHANGES	fix the listed findings, then review again
 verdict	REJECT	wrong approach; plan again
@@ -32,6 +40,7 @@ trailer-reason	not-required	no review was needed; the reason says why
 ready	approve	the only trailer value that lets a change merge: the review approved this version (SPEC R4)
 gate-verdict	method-reviewer	the reviewer; its report opens with a verdict word
 gate-verdict	method-security-checker	the security checker; its report opens with a verdict word
+gate-verdict	method-reporter	the reporter; its report opens with a verdict word
 gate-diagnosis	method-diagnose	the diagnosing agent; its report opens with a diagnosis word
 gate-test-result	method-tester	the tester; its report opens with a test-result word
 diagnosis	ROOT CAUSE	the cause is found, and the report shows the evidence for it

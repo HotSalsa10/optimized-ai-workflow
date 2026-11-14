@@ -731,6 +731,36 @@ if wanted "instructions other than the method file's make it INVALID"; then
   stop method-reviewer s1 ps default "prompt=You are a reviewer from another definition of method-reviewer."
   is "instructions other than the method file's make it INVALID (instructions-differ: a second definition)" "$(says s1 1)" "INVALID:instructions-differ"
 fi
+# (step 6.2) the method's own gate files, from method/.claude/agents/method/:
+# each one's body, as the client sends it (trimmed), gives VALID with the
+# first word of its gate's kind; the body as it read before an edit made
+# after the start (one word changed in its first line) gives INVALID
+# instructions-differ
+if wanted_any "a method gate file's own body makes it VALID" "a method gate file edited after the start makes it INVALID"; then
+  cp "$root"/method/.claude/agents/method/*.md "$proj/.claude/agents/method/"
+  commit "the method's gate files"
+  t3=$(git -C "$proj" rev-parse 'HEAD^{tree}')
+  i=0
+  for f in "$root"/method/.claude/agents/method/*.md; do
+    i=$((i + 1))
+    g=$(basename "$f" .md)
+    first=$(cd "$root" && perl -e 'require "./method/scripts/method/lib/verdicts.pl"; my @r = Verdicts::rows(); my ($k) = map { $_->[1] } grep { $_->[0] eq $ARGV[0] } Verdicts::gates(@r); print +(Verdicts::words($k, @r))[0] if defined $k' "$g")
+    body=$(perl -0ne 's/\A---[ \t]*\n.*?^---[ \t]*\n//ms or die; s/\A\s+//; s/\s+\z//; print' "$f")
+    edited=$(printf '%s\n' "$body" | perl -pe 's/\bmethod\x27s\b/project\x27s/ if $. == 1')
+    if [ -z "$first" ] || [ -z "$body" ] || [ "$edited" = "$body" ]; then
+      fail "a method gate file's own body makes it VALID ($g): the case could not be made (word '$first')"
+      continue
+    fi
+    report "$first" "END-VERDICT $t3"
+    start "$g" "rb$i" pr
+    stop "$g" "rb$i" pr default "prompt=$body"
+    is "a method gate file's own body makes it VALID ($g, $first)" "$(says "rb$i" 1):$(field "rb$i" 1 effort_file)" "VALID::xhigh"
+    start "$g" "re$i" pr
+    stop "$g" "re$i" pr default "prompt=$edited"
+    is "a method gate file edited after the start makes it INVALID (instructions-differ; $g)" "$(says "re$i" 1)" "INVALID:instructions-differ"
+  done
+  git -C "$proj" reset -q --hard HEAD~1
+fi
 if wanted "a record with no prompt snapshot leaves it not checked"; then
   report "APPROVE" "END-VERDICT $tree"
   start method-reviewer s2 ps

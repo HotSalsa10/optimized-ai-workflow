@@ -94,7 +94,7 @@
     ],
     "SubagentStart": [
       {
-        "matcher": "^(method-reviewer|method-security-checker|method-diagnose|method-tester)$",
+        "matcher": "^(method-reviewer|method-security-checker|method-reporter|method-diagnose|method-tester)$",
         "hooks": [
           {
             "type": "command",
@@ -106,7 +106,7 @@
     ],
     "SubagentStop": [
       {
-        "matcher": "^(method-reviewer|method-security-checker|method-diagnose|method-tester)$",
+        "matcher": "^(method-reviewer|method-security-checker|method-reporter|method-diagnose|method-tester)$",
         "hooks": [
           {
             "type": "command",

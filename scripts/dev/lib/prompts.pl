@@ -20,9 +20,20 @@
 #   rule IDs cost nothing only on a line of their own. Two comments on one
 #   line, or one over several lines, are refused too: the budget counts
 #   them, and they are not needed.
+# Part two (step 6.2, M096; S5 and S8), the agent files under
+# method/.claude/agents/: each opens with frontmatter whose name is the
+# file's name, with effort: xhigh, the settings fragment's model and a
+# tools: line that lists no delegation tool (Agent, Task, Skill,
+# SendMessage); an agent that is not a gate (verdicts.txt) lists none of
+# Bash, Edit, Write or NotebookEdit either; none sets memory, isolation,
+# permissionMode, background, skills or mcpServers (hooks is left to the
+# guard's G17, M137); and every gate in verdicts.txt has its file,
+# method/.claude/agents/method/<gate>.md. A problem of a whole file is
+# printed without a line number.
 use strict;
 use warnings;
 use File::Find ();
+use JSON::PP ();
 
 # Prints one line of output. Control characters taken from file names or
 # content (also UTF-8 C1 controls) are shown as \xNN, and the CI runner's
@@ -53,15 +64,123 @@ for my $part (qw(agents rules skills)) {
 }
 
 my ($examined, $bad) = (0, 0);
+
+# --- part two (step 6.2, M096; docs/plans/step6.md S5 and S8): the agent
+# files. The gates come from verdicts.txt (Verdicts::gates, its one
+# reader) and the model from the settings fragment, so each has one home
+# (M048). A gate's file is method/.claude/agents/method/<gate>.md, the
+# file gate-receipt compares (receipt.pl); every other agent file is a
+# drafting agent's.
+my @delegation = qw(Agent Task Skill SendMessage);
+my @writing = qw(Bash Edit Write NotebookEdit);
+my @never_keys = qw(memory isolation permissionMode background skills mcpServers);
+my (%gate, $gates_read, $model);
+{
+  my @g = eval {
+    local $SIG{__DIE__};
+    require "$root/method/scripts/method/lib/verdicts.pl";
+    map { $_->[0] } Verdicts::gates(Verdicts::rows());
+  };
+  if (@g) {
+    %gate = map { $_ => 1 } @g;
+    $gates_read = 1;
+  } else {
+    (my $why = $@ || 'no gate') =~ s/\s+\z//;
+    say_line("lint-prompts: could not read the gates from method/scripts/method/verdicts.txt ($why), so the agent files were not checked against them (M096)");
+    $bad++;
+  }
+  my $frag = "$root/method/settings.fragment.json";
+  my $d = eval {
+    open my $h, '<:raw', $frag or die "cannot read it\n";
+    local $/;
+    my $text = <$h>;
+    close $h;
+    JSON::PP->new->decode($text);
+  };
+  if (ref $d eq 'HASH' && defined $d->{model} && !ref $d->{model} && $d->{model} ne '') {
+    $model = $d->{model};
+  } else {
+    say_line("lint-prompts: could not read the model from method/settings.fragment.json, so no agent's model was checked against it (M096)");
+    $bad++;
+  }
+}
+
+# frontmatter LINES: the frontmatter's keys and values, {KEY => VALUE},
+# with a block list's items (lines "  - X" under a key with no value) as
+# an array; comment lines skipped; undef when the file has none
+sub frontmatter {
+  my (@lines) = @_;
+  return undef unless @lines && $lines[0] =~ /\A---[ \t]*\z/;
+  my (%fm, $last, $closed);
+  for my $l (@lines[1 .. $#lines]) {
+    if ($l =~ /\A---[ \t]*\z/) { $closed = 1; last }
+    next if $l =~ /\A[ \t]*(?:#|\z)/;
+    if ($l =~ /\A([A-Za-z][A-Za-z0-9_-]*)[ \t]*:[ \t]*(.*?)[ \t]*\z/) {
+      $last = $1;
+      $fm{$last} = $2;
+    } elsif (defined $last && $l =~ /\A[ \t]+-[ \t]*(.*?)[ \t]*\z/) {
+      $fm{$last} = [] unless ref $fm{$last};
+      push @{ $fm{$last} }, $1;
+    }
+  }
+  return $closed ? \%fm : undef;
+}
+sub unquote { my ($v) = @_; $v = '' unless defined $v; $v =~ s/\A(["'])(.*)\1\z/$2/; return $v }
+
+# agent_problems NAME LINES: the problems of one agent file, each a text
+sub agent_problems {
+  my ($name, @lines) = @_;
+  my ($stem) = $name =~ m{([^/]+)\.md\z};
+  my $fm = frontmatter(@lines);
+  return ('no frontmatter: an agent file opens with a --- line and closes its frontmatter with another (M096)') unless $fm;
+  my $is_gate = $gate{$stem} && $name eq "method/.claude/agents/method/$stem.md";
+  my @p;
+  my $n = unquote($fm->{name});
+  push @p, "the name \"$n\" is not the file's name, $stem: the client finds an agent by its name, and gate-receipt by the file (M096)" if $n ne $stem;
+  if (!exists $fm->{effort}) {
+    push @p, 'no effort: line; a method agent runs at effort: xhigh (R5)';
+  } elsif (unquote($fm->{effort}) ne 'xhigh') {
+    push @p, 'the effort is "' . unquote($fm->{effort}) . '", not xhigh (R5)';
+  }
+  if (!exists $fm->{model}) {
+    push @p, 'no model: line; a method agent names the settings fragment\'s model' . (defined $model ? " ($model)" : '');
+  } elsif (defined $model && unquote($fm->{model}) ne $model) {
+    push @p, 'the model "' . unquote($fm->{model}) . "\" is not the settings fragment's model, $model (one home for the model ID, M048)";
+  }
+  if (!exists $fm->{tools}) {
+    push @p, 'no tools: line; a method agent lists its tools, or it gets every tool, the delegation tools among them (M096)';
+  } else {
+    my @t = ref $fm->{tools} ? @{ $fm->{tools} } : do { (my $v = $fm->{tools}) =~ s/\A\[(.*)\]\z/$1/; split /,/, $v };
+    @t = grep { $_ ne '' } map { my $x = unquote(do { (my $y = $_) =~ s/\A[ \t]+|[ \t]+\z//g; $y }); $x =~ s/\(.*\z//; $x } @t;
+    push @p, 'the tools: line lists no tool (M096)' unless @t;
+    my %has = map { $_ => 1 } @t;
+    for my $d (grep { $has{$_} } @delegation) {
+      push @p, "the tools: line lists $d, a delegation tool: a method agent hands no work on, which receipts would not see (A72, M096)";
+    }
+    unless ($is_gate) {
+      for my $w (grep { $has{$_} } @writing) {
+        push @p, "the tools: line lists $w, but this is not a gate in verdicts.txt: a drafting agent runs no command and writes no file (A6, S5)";
+      }
+    }
+  }
+  for my $k (grep { exists $fm->{$_} } @never_keys) {
+    push @p, "the key $k: is set; a method agent sets none of " . join(', ', @never_keys) . ' (docs/plans/step6.md S5)';
+  }
+  return @p;
+}
+
 for my $file (sort @files) {
   (my $name = $file) =~ s{\A\Q$root\E/}{};
   open my $fh, '<:raw', $file or do { say_line("lint-prompts: cannot read $name"); $bad++; next };
   $examined++;
   my $is_rules = $name =~ m{\Amethod/\.claude/rules/};
+  my $is_agent = $name =~ m{\Amethod/\.claude/agents/};
+  my @all;
   my $n = 0;
   while (my $line = <$fh>) {
     $n++;
     $line =~ s/\n\z//;
+    push @all, $line;
     my $problem = sub { say_line("lint-prompts: $name:$n: $_[0]"); $bad++ };
     $problem->('a "think carefully" or "think step by step" line (M095)') if $line =~ $think_re;
     $problem->('a fixed-format reasoning request, a reasoning tag or "reason in this format" (M095)') if $line =~ $tag_re || $line =~ $format_re;
@@ -74,5 +193,16 @@ for my $file (sort @files) {
     }
   }
   close $fh;
+  if ($is_agent) {
+    s/\r\z// for @all;
+    say_line("lint-prompts: $name: $_"), $bad++ for agent_problems($name, @all);
+  }
+}
+if ($gates_read) {
+  for my $g (sort keys %gate) {
+    next if -f "$root/method/.claude/agents/method/$g.md";
+    say_line("lint-prompts: the gate $g in verdicts.txt has no file method/.claude/agents/method/$g.md; gate-receipt reads that file (M096)");
+    $bad++;
+  }
 }
 print "EXAMINED $examined\nBAD $bad\n";

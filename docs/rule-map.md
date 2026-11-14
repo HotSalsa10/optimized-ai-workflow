@@ -29,14 +29,14 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M021 | The planner separates known from assumed and never invents scope | incident | method/.claude/skills/method-plan/SKILL.md | step 6 |
 | M022 | The reviewer works in a fresh context and must give a verdict | incident | method/.claude/rules/method/method.md | done |
 | M023 | The reviewer reads every changed file in full, not just the changed lines | incident | method/.claude/rules/method/method.md | done |
-| M024 | No acceptance criteria: the reviewer says so and stops | incident | method/.claude/agents/method/method-reviewer.md | step 6 |
+| M024 | No acceptance criteria: the reviewer says so and stops | incident | method/.claude/agents/method/method-reviewer.md | done |
 | M025 | Every finding has a concrete failure scenario: this input or state gives this wrong result | incident | method/.claude/rules/method/method.md | done |
 | M026 | Verify before asserting | incident | method/.claude/rules/method/method.md | done |
 | M027 | Never mark CRITICAL a consequence that was not demonstrated | incident | method/.claude/rules/method/method.md | done |
 | M028 | Anything visual comes back as NEEDS A HUMAN: a checking agent lists it as an [EYES] item and still gives its word on the rest; ESCALATE is for a decision a person must make first (step 6 plan, S6) | incident | method/.claude/rules/method/method.md | done |
-| M029 | The tester runs the checks, reports the actual output and fixes nothing | incident | method/.claude/agents/method/method-tester.md | step 6 |
-| M030 | The security check covers secrets, personal data, permissions, injection, dependencies and dangerous shell, on the final change | incident | method/.claude/agents/method/method-security-checker.md | step 6 |
-| M031 | Check what can be checked without a screen, and write the click-by-click script for the rest | incident | method/.claude/agents/method/method-reporter.md | step 6 |
+| M029 | The tester runs the checks, reports the actual output and fixes nothing | incident | method/.claude/agents/method/method-tester.md | done |
+| M030 | The security check covers secrets, personal data, permissions, injection, dependencies and dangerous shell, on the final change | incident | method/.claude/agents/method/method-security-checker.md | done |
+| M031 | Check what can be checked without a screen, and write the click-by-click script for the rest | incident | method/.claude/agents/method/method-reporter.md | done |
 | M032 | Each checking agent reads the project's own incident checklist | incident | method/scripts/method/review-packet.sh | done |
 | M033 | Touch only the files the phase needs | incident | method/.claude/rules/method/method.md | done |
 | M034 | Two owner stops: plan approval and release readiness | incident | method/.claude/rules/method/method.md | done |
@@ -51,7 +51,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M043 | After reverting a plant, diff the touched files and confirm your own work is still there | incident | method/.claude/rules/method/method.md | done |
 | M044 | Break the code under test on purpose | incident | method/scripts/method/mutate-changed.sh | done |
 | M045 | Twelve questions before trusting a new check | incident | method/.claude/skills/method-checks/SKILL.md | later |
-| M046 | Four questions about every claim: reach, measured counts, closed or narrowed, survives re-derivation | incident | method/.claude/agents/method/method-reporter.md | step 6 |
+| M046 | Four questions about every claim: reach, measured counts, closed or narrowed, survives re-derivation | incident | method/.claude/agents/method/method-reporter.md | done |
 | M047 | Write the question in words before computing; two agreeing methods can answer the wrong question | incident | method/.claude/rules/method/method.md | done |
 | M048 | The same rule implemented twice is a defect | incident | method/.claude/rules/method/method.md | done |
 | M049 | Verify through the path the user takes, or say plainly that you did not | incident | method/.claude/rules/method/method.md | done |
@@ -74,7 +74,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M066 | No secrets or personal data in a repo | incident | method/scripts/method/run-checks.sh | done |
 | M067 | Enforcement is stated honestly: what hooks and CI enforce, and what is only convention | incident | method/docs/method/why.md | done |
 | M068 | Writing for people: plain, precise, honest hedges; no machine-sounding habits | incident | method/.claude/rules/method/owner.md | done |
-| M069 | A reporter agent re-derives claims before the owner approves; /supervise stays optional | incident; decision A12 | method/.claude/agents/method/method-reporter.md | step 6 |
+| M069 | A reporter agent re-derives claims before the owner approves; /supervise stays optional | incident; decision A12 | method/.claude/agents/method/method-reporter.md | done |
 | M070 | A handoff file and the pull request carry reports between sessions | incident | method/.claude/skills/method-finish/SKILL.md | step 6b |
 | M071 | Plain language; one complete paste-able prompt; no deadline pressure | incident | method/.claude/rules/method/owner.md | done |
 | M072 | No log grows forever or stores secrets | incident | method/scripts/method/lib/log.pl | done |
@@ -88,26 +88,26 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M080 | Check /permissions on each new clone | research: untrusted folders | README.md | step 9 |
 | M081 | Nested claude -p runs use < /dev/null, an explicit effort and METHOD_NESTED=1 | research: measured | method/.claude/skills/method-checks/SKILL.md | later |
 | M082 | When the work is done and its checks pass, stop and report; no unrequested changes | research: scope creep at high effort | method/.claude/rules/method/method.md | done |
-| M083 | Every finding gets a disposition: fixed with its proving test, wrong, intentional, or not worth it | research: Claude Code team | method/.claude/agents/method/method-reviewer.md | step 6 |
-| M084 | Flag the whole class of bug; never repeat a finding already posted | research: Claude Code team | method/.claude/agents/method/method-reviewer.md | step 6 |
+| M083 | Every finding gets a disposition: fixed with its proving test, wrong, intentional, or not worth it | research: Claude Code team | method/.claude/agents/method/method-reviewer.md | done |
+| M084 | Flag the whole class of bug; never repeat a finding already posted | research: Claude Code team | method/.claude/agents/method/method-reviewer.md | done |
 | M085 | Later review rounds see only the changes since the last reviewed version, or the whole change when in doubt | research: Claude Code team, Cloudflare | method/scripts/method/review-packet.sh | done |
-| M086 | Unproven serious or security findings go on an unresolved list; they are never dropped | research: evidence critique | method/.claude/agents/method/method-reviewer.md | step 6 |
+| M086 | Unproven serious or security findings go on an unresolved list; they are never dropped | research: evidence critique | method/.claude/agents/method/method-reviewer.md | done |
 | M087 | High-risk changes get Deep review: several independent finders and a vote on each finding | research: Claude Code team | method/.claude/skills/method-finish/SKILL.md | step 6b |
 | M088 | People add a review layer and never replace the reviewer agents; they look at intent and risk before the AI findings | research: layered review; decision A8 | method/docs/method/why.md | done |
 | M089 | "No findings" never counts as a pass on its own | research: Anthropic docs | method/scripts/method/done-check.sh | done |
-| M090 | The reviewer checks for gaming: edited tests or expected values, skipped tests, answers hard-coded to tests, special cases, faked or display-only features | research: ImpossibleBench, harness post | method/.claude/agents/method/method-reviewer.md | step 6 |
+| M090 | The reviewer checks for gaming: edited tests or expected values, skipped tests, answers hard-coded to tests, special cases, faked or display-only features | research: ImpossibleBench, harness post | method/.claude/agents/method/method-reviewer.md | done |
 | M091 | The planner checks feasibility; "impossible or contradictory" is an acceptable answer; no hard-coding to tests | research: reward hacking studies | method/.claude/skills/method-plan/SKILL.md | step 6 |
-| M092 | A fresh agent writes an acceptance check after the build, from the spec, and runs it through the real user path | research: harness post | method/.claude/agents/method/method-reporter.md | step 6 |
+| M092 | A fresh agent writes an acceptance check after the build, from the spec, and runs it through the real user path | research: harness post | method/.claude/agents/method/method-reporter.md | done |
 | M093 | Never mix restructuring and behaviour changes in one commit | research: Beck, DORA | method/.claude/rules/method/method.md | done |
 | M094 | A non-AI security scanner runs alongside the security-checker | research: Anthropic security team | templates/checks/project.tsv | step 7 |
 | M095 | Method prompts carry no "think carefully" lines, no fixed-format reasoning requests and no shouting | research: claude.dev, docs | scripts/dev/lint-prompts.sh | done |
-| M096 | Checking agents have static instructions, task text last, and a fixed tool list | research: Cloudflare | scripts/dev/lint-prompts.sh | step 6 |
+| M096 | Checking agents have static instructions, task text last, and a fixed tool list | research: Cloudflare | scripts/dev/lint-prompts.sh | done |
 | M097 | Every change states how it was tested, its risk, how to undo it and what the checks would miss | research: Claude Code team | method/.github/pull_request_template.md | step 7 |
 | M098 | Changes to live systems go to a test copy first, with a backup and a one-step undo | research: Claude Code team | method/.claude/rules/method/method.md | done |
 | M099 | New projects and big features start with a design stage; versions are checked against live registries; a walking skeleton is built first | research: harness post, Titus | method/.claude/skills/method-design/SKILL.md | step 6 |
 | M100 | Setup answers never lower the floor | decision A14 | method/.claude/skills/method-setup/SKILL.md | step 7 |
 | M101 | Each project has a REVIEW.md: what failure looks like, a nit cap, paths to skip, file-and-line evidence, a count-first summary | research: Claude Code team | templates/REVIEW.md | step 7 |
-| M102 | The reviewer flags changes that leave CLAUDE.md, AGENTS.md or the architecture document out of date | research: Claude Code team | method/.claude/agents/method/method-reviewer.md | step 6 |
+| M102 | The reviewer flags changes that leave CLAUDE.md, AGENTS.md or the architecture document out of date | research: Claude Code team | method/.claude/agents/method/method-reviewer.md | done |
 | M103 | A change to the reviewer is kept only if its score on past incidents rises; re-score on any prompt, tool or model change | research: Claude Code team | bench/README.md | R2 |
 | M104 | Auto memory is off in method projects; lessons go into the repo through /lesson | research: docs; decision A1 | method/settings.fragment.json @autoMemoryEnabled | done |
 | M105 | No Claude Code mods during method work | research: mods docs | method/.claude/rules/method/owner.md | done |
@@ -129,7 +129,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M121 | A failed read means "could not read", never "nothing found" | research: claude.dev | method/.claude/rules/method/method.md | done |
 | M122 | Every input a plan's tests use takes at least two values, one of them not the default; a parameter that never does is a warning sign | incident | method/scripts/method/done-check.sh | later |
 | M123 | A report lists the choices the builder made that the plan did not settle (defaults, scope cut or added, which requirement won a clash), each in business terms with the test or file that shows it, or says "none" | research: Osmani, critical thinking with agents | method/.claude/rules/method/owner.md | done |
-| M124 | Before the owner approves a FULL merge, the owner predicts what happens in three cases taken from the locked expected results, then sees the results copied from the test log; a mismatch stops the merge for a talk | research: Osmani, critical thinking with agents | method/.claude/agents/method/method-reporter.md | step 6 |
+| M124 | Before the owner approves a FULL merge, the owner predicts what happens in three cases taken from the locked expected results, then sees the results copied from the test log; a mismatch stops the merge for a talk | research: Osmani, critical thinking with agents | method/.claude/agents/method/method-reporter.md | done |
 | M125 | Before planning a FULL task, the planner asks for whatever is missing of: who it is for, what is out of scope, what done looks like that the owner can see, and what the owner expects to happen | research: Osmani, critical thinking with agents | method/.claude/skills/method-plan/SKILL.md | step 6 |
 | M126 | The report check lists every number that appears in no log, and refuses a report whose "what the checks would miss" part is missing, empty or "nothing" (SPEC R8) | research: Osmani, critical thinking with agents | method/scripts/method/report-check.sh | step 6b |
 | M127 | Session start says how much finished work waits for the owner's merge approval (steps, commits, files) and makes that approval the one next thing, unless the owner says to keep building | incident: 117 commits waited unmerged | method/.claude/skills/method-start/SKILL.md | step 6 |
@@ -147,7 +147,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M139 | Merge tools, and tools that start, message or schedule other sessions, are denied in settings, so the deny holds with hooks off | research: measured, step 5 plan | method/settings.fragment.json @mcp__*__merge_pull_request | done |
 | M140 | At session start the main session looks for session-status's METHOD-ACTIVE line; with none, the method's hooks are off: say so first and change no code until the owner decides. A checking agent's own line reads `METHOD-ACTIVE gate=... tree=...`; other agents get none, and the rule is not theirs | research: measured (step 5 plan E12, RISKS #16) | method/.claude/rules/method/method.md | done |
 | M141 | The architect drafts a design for a new project or big feature (options and trade-offs in business terms; where the project uses packages, versions checked against live registries; the thinnest end-to-end version first) and builds nothing | decision A16 | method/.claude/agents/method/method-architect.md | step 6 |
-| M142 | Diagnose finds the cause before any fix: it reads the evidence, changes nothing, and opens with ROOT CAUSE, SYMPTOM CHASE or SPEC QUESTION | decision A71 | method/.claude/agents/method/method-diagnose.md | step 6 |
+| M142 | Diagnose finds the cause before any fix: it reads the evidence, changes nothing, and opens with ROOT CAUSE, SYMPTOM CHASE or SPEC QUESTION | decision A71 | method/.claude/agents/method/method-diagnose.md | done |
 | M143 | When the same check fails twice, call diagnose before a third fix | plan v3, moved by step 3 (TASKS.md) | method/.claude/rules/method/method.md | done |
 | M144 | A change is ready only when its task's plan carries a quoted approval naming the task | SPEC R4; decision A61 | method/scripts/method/done-check.sh | step 6b |
 | M145 | Expected results, tier and paths are locked at the plan's approval; a test run is seen failing after approval and before the code, and passing at the end | SPEC R6 | method/scripts/method/done-check.sh | step 6b |
