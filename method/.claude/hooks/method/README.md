@@ -116,7 +116,7 @@ A receipt says one of three words, with reason codes:
 
 **What it costs.** About 0.3 s at a gate's start and under 1 s at its stop on a 10,000-file repository with a 50 MB agent record (measured; the plan's limit is 5 s). While gate-receipt's code is loaded, each guard call that writes takes about 16 ms more.
 
-**When it goes wrong.** Every failure is exit 0 and the receipt says INCOMPLETE: gate-receipt never blocks a gate for its own trouble, only once for a report without its lines. A gate whose start was not recorded is INCOMPLETE (`no-start`) and never sent back. Known limits (step 5b):
+**When it goes wrong.** Every failure is exit 0 and the receipt says INCOMPLETE: gate-receipt never blocks a gate for its own trouble, only once for a report without its lines. A gate whose start was not recorded is INCOMPLETE (`no-start`) and never sent back. Known limits (step 5b): A gate that never hands back in auto mode leaves its running file for up to a day, so the guard keeps adding marks in that repository until then; marks count only inside a gate's own run and worktree, so no receipt changes.
 - another gate's writes during a gate leave no mark; a write made and undone within the instant a gate starts;
 - a write the guard lets through but the permission prompt, auto mode's check or the tool itself then refuses still counts as a write (INVALID `write-mark`);
 - a review packet read only in part, without its `Tree:` line (for example its first five lines), reads as a packet for other files (INVALID `packet-other-tree`): give the gate the whole packet;
