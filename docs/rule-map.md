@@ -78,7 +78,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M070 | A handoff file and the pull request carry reports between sessions | incident | method/.claude/skills/finish/SKILL.md | step 6 |
 | M071 | Plain language; one complete paste-able prompt; no deadline pressure | incident | method/.claude/rules/method/owner.md | step 6 |
 | M072 | No log grows forever or stores secrets | incident | method/scripts/method/lib/log.pl | done |
-| M073 | Few hooks, each documented with what it prevents, what it costs and how it was seen to fire | incident | method/.claude/hooks/method/README.md | step 5 |
+| M073 | Few hooks, each documented with what it prevents, what it costs and how it was seen to fire | incident | method/.claude/hooks/method/README.md | done |
 | M074 | Keep every hedge and every number exactly, with currency, sign and period | research: writing test | method/.claude/rules/method/owner.md | step 6 |
 | M075 | Never use /code-review, /goal or the advisor as a gate (the settings fragment's skillOverrides keeps /code-review to the owner; this rule's home stays method.md) | research: Claude Code internals | method/.claude/rules/method/method.md | step 6 |
 | M076 | The server-side advisor is off | research: advisor docs; decision A5 | method/settings.fragment.json @CLAUDE_CODE_DISABLE_ADVISOR_TOOL | done |

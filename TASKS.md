@@ -1,6 +1,6 @@
 # TASKS
 
-Current phase: Release 1. Steps 1 to 4b are merged into main (dd860c3); step 5 is being built (docs/plans/step5.md).
+Current phase: Release 1. Steps 1 to 5b are merged into main (5a7fd60); step 6 is being built (docs/plans/step6.md).
 
 ## Step 1: repo skeleton, records, rule map, CI with planted defects
 
