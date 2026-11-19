@@ -24,12 +24,14 @@
 # method/.claude/agents/: each opens with frontmatter whose name is the
 # file's name, with effort: xhigh, the settings fragment's model and a
 # tools: line that lists no delegation tool (Agent, Task, Skill,
-# SendMessage); an agent that is not a gate (verdicts.txt) lists none of
-# Bash, Edit, Write or NotebookEdit either; none sets memory, isolation,
-# permissionMode, background, skills or mcpServers (hooks is left to the
-# guard's G17, M137); and every gate in verdicts.txt has its file,
-# method/.claude/agents/method/<gate>.md. A problem of a whole file is
-# printed without a line number.
+# SendMessage); an agent that is not a gate (verdicts.txt), such as the
+# architect (step 6.4), lists no tool that runs a command or writes a file
+# either (Bash, PowerShell, Monitor, Edit, Write, MultiEdit, NotebookEdit:
+# the client's tools of that kind, tests/harness/tools.txt); none sets
+# memory, isolation, permissionMode, background, skills or mcpServers
+# (hooks is left to the guard's G17, M137); and every gate in verdicts.txt
+# has its file, method/.claude/agents/method/<gate>.md. A problem of a
+# whole file is printed without a line number.
 # Part three (step 6.3; S8 and S10), the skill folders, each a folder
 # directly under method/.claude/skills/: its name starts method- and is on
 # G6's skill list (@METHOD_SKILLS in method/scripts/method/lib/protect.pl,
@@ -82,7 +84,7 @@ my ($examined, $bad) = (0, 0);
 # file gate-receipt compares (receipt.pl); every other agent file is a
 # drafting agent's.
 my @delegation = qw(Agent Task Skill SendMessage);
-my @writing = qw(Bash Edit Write NotebookEdit);
+my @writing = qw(Bash PowerShell Monitor Edit Write MultiEdit NotebookEdit);
 my @never_keys = qw(memory isolation permissionMode background skills mcpServers);
 my (%gate, $gates_read, $model);
 {
@@ -182,10 +184,11 @@ sub agent_problems {
 # --- part three (step 6.3; docs/plans/step6.md S8 and S10): the skill
 # folders against G6's skill list, read from protect.pl (its one home,
 # M048); a list that cannot be read is a problem, never a pass.
-# the listed skills that steps 6.4 and 6.5 build: each may have no folder
+# the listed skills that step 6.5 builds (6.4 built method-plan and
+# method-design): each may have no folder
 # yet, and each is taken off here when its folder comes (a name here whose
 # folder exists is a problem)
-my %NOT_BUILT = map { $_ => 1 } qw(method-start method-plan method-design);
+my %NOT_BUILT = map { $_ => 1 } qw(method-start);
 my (@listed, $list_read);
 {
   my $ok = eval {
@@ -282,7 +285,7 @@ if ($list_read) {
     say_line("lint-prompts: G6's skill list (\@METHOD_SKILLS in method/scripts/method/lib/protect.pl) names $l, but method/.claude/skills/$l/ does not exist: the list names the method's skill folders, no more (S10)");
     $bad++;
   }
-  say_line('lint-prompts: on G6\'s skill list and not built yet (steps 6.4 and 6.5): ' . join(', ', @waiting)) if @waiting;
+  say_line('lint-prompts: on G6\'s skill list and not built yet (step 6.5): ' . join(', ', @waiting)) if @waiting;
 }
 if ($gates_read) {
   for my $g (sort keys %gate) {

@@ -741,9 +741,11 @@ if wanted_any "a method gate file's own body makes it VALID" "a method gate file
   commit "the method's gate files"
   t3=$(git -C "$proj" rev-parse 'HEAD^{tree}')
   i=0
-  for f in "$root"/method/.claude/agents/method/*.md; do
+  # (each gate in verdicts.txt, by its file; since step 6.4 the folder also
+  # holds the architect, which is not a gate and makes no receipt)
+  for g in $(cd "$root" && perl -e 'require "./method/scripts/method/lib/verdicts.pl"; print "$_->[0]\n" for Verdicts::gates(Verdicts::rows())'); do
     i=$((i + 1))
-    g=$(basename "$f" .md)
+    f="$root/method/.claude/agents/method/$g.md"
     first=$(cd "$root" && perl -e 'require "./method/scripts/method/lib/verdicts.pl"; my @r = Verdicts::rows(); my ($k) = map { $_->[1] } grep { $_->[0] eq $ARGV[0] } Verdicts::gates(@r); print +(Verdicts::words($k, @r))[0] if defined $k' "$g")
     body=$(perl -0ne 's/\A---[ \t]*\n.*?^---[ \t]*\n//ms or die; s/\A\s+//; s/\s+\z//; print' "$f")
     edited=$(printf '%s\n' "$body" | perl -pe 's/\bmethod\x27s\b/project\x27s/ if $. == 1')

@@ -431,6 +431,65 @@ fi
 h_stop
 drop_sandbox "$sb" || true
 
+# 18. step 6.4's case for planning and design (h_design, h_design_holds).
+# design_plant MODE QUESTION|SEEN|TEXT...: with the plants already made in
+# the copy $sb, h_design runs there in MODE; each QUESTION must fail with
+# SEEN in its H_WHY
+design_plant() {
+  local mode=$1 qr q rest seen text
+  shift
+  if ! h_design "$sb" "$mode"; then
+    fail "design ($mode): the case could not be made, or the fake did not answer"
+    return
+  fi
+  for qr in "$@"; do
+    q=${qr%%|*}
+    rest=${qr#*|}
+    seen=${rest%%|*}
+    text=${rest#*|}
+    if h_design_holds "$q"; then
+      fail "design: $text: the question '$q' stayed green"
+    else
+      case $H_WHY in
+        *"$seen"*) pass "design: $text: the question '$q' turns red (${H_WHY%%;*})" ;;
+        *) fail "design: $text: the question '$q' turned red for another reason" "$H_WHY" ;;
+      esac
+    fi
+  done
+}
+# one copy with four defects in default mode, each turning one question red
+# for its own reason, in one client run: an unknown frontmatter key in the
+# architect's file (loads), Bash in its tools (tools), effort high (model),
+# and the architect added to the fragment's gate matchers (receipt)
+sb=$(make_sandbox) || abort_sandbox
+a="$sb/method/.claude/agents/method/method-architect.md"
+# shellcheck disable=SC2016 # perl code, expanded by perl
+{
+  perl -0pi -e 's/^(effort: xhigh\n)/${1}bogus-key: 1\n/m; s/^(tools: [^\n]*)/$1, Bash/m; s/^effort: xhigh$/effort: high/m' "$a"
+  perl -pi -e 's/\|method-tester\)\$"/|method-tester|method-architect)\$"/g' "$sb/method/settings.fragment.json"
+}
+if ! grep -q '^bogus-key: 1$' "$a" || ! grep -q '^tools: .*, Bash$' "$a" || ! grep -q '^effort: high$' "$a" || [ "$(grep -c 'method-tester|method-architect)\$"' "$sb/method/settings.fragment.json")" != 2 ]; then
+  fail "design: the plants did not apply, so the check results would mean nothing"
+else
+  design_plant default "loads|the debug log names method-architect: |an unknown frontmatter key in the architect's file" \
+    "tools|the architect's first request offers Bash|Bash in the architect's tools" \
+    "model|the architect's requests went out at effort high|effort high in the architect's file" \
+    "receipt|gate-receipt ran 2 times during the architect's call, not 0|the architect in the fragment's gate matchers (gate-receipt runs at its start and stop)"
+fi
+h_stop
+drop_sandbox "$sb" || true
+# the design skill made one the owner cannot type (expands)
+sb=$(make_sandbox) || abort_sandbox
+# shellcheck disable=SC2016 # perl code, expanded by perl
+perl -0pi -e 's/^(name: method-design\n)/${1}user-invocable: false\n/m' "$sb/method/.claude/skills/method-design/SKILL.md"
+if ! grep -q '^user-invocable: false$' "$sb/method/.claude/skills/method-design/SKILL.md"; then
+  fail "design: the plant did not apply, so the check result would mean nothing"
+else
+  design_plant auto "expands|/method-design's body and arguments in main's first request: no request|method-design made a skill only Claude can call"
+fi
+h_stop
+drop_sandbox "$sb" || true
+
 # 13. get-client: a download that does not match the pinned checksum is refused
 reg="$H_WORK/registry/@anthropic-ai/claude-code-linux-x64/-"
 mkdir -p "$reg" "$H_WORK/pkg/package"

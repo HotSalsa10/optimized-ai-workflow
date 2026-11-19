@@ -13,15 +13,17 @@
 # - in the agent files (part two, step 6.2, M096): frontmatter whose name
 #   is the file's name, effort: xhigh, the settings fragment's model, a
 #   tools: line with no delegation tool (and, for an agent that is not a
-#   gate in verdicts.txt, no Bash, Edit, Write or NotebookEdit), none of
-#   memory, isolation, permissionMode, background, skills or mcpServers;
+#   gate in verdicts.txt, such as the architect, no tool that runs a
+#   command or writes a file: Bash, PowerShell, Monitor, Edit, Write,
+#   MultiEdit, NotebookEdit), none of memory, isolation, permissionMode,
+#   background, skills or mcpServers;
 #   and a file for every gate in verdicts.txt;
 # - in the skill folders (part three, step 6.3): a folder name that starts
 #   method- and is on G6's skill list (@METHOD_SKILLS in
 #   method/scripts/method/lib/protect.pl), its SKILL.md's name the folder's,
 #   no context: fork and no agent:; and a folder for every name on the list
-#   (a name the lint knows is not built yet excepted, until its folder
-#   comes).
+#   (a name the lint knows is not built yet, method-start until step 6.5,
+#   excepted until its folder comes).
 # Examining nothing is a failure. The checks live in scripts/dev/lib/prompts.pl.
 set -u
 # perl reads bytes here; these settings would change how it reads them

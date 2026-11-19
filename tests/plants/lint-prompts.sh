@@ -11,8 +11,10 @@
 # with agent:, without method-, with a name other than its folder's, not
 # on G6's list in protect.pl; a name on the list with no folder; a skill
 # not built yet whose folder comes; each red for its reason, and a well-made
-# listed skill green. Text that would trip the lint lives here, outside
-# method/.claude/, which the lint does not read.
+# listed skill green. Step 6.4: Bash and PowerShell in the architect's tools
+# (not a gate), and a built skill's folder removed, each red. Text that
+# would trip the lint lives here, outside method/.claude/, which the lint
+# does not read.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=tests/lib.sh
@@ -108,6 +110,8 @@ agents=method/.claude/agents/method
   change "effort high in the security checker's file" "$agents/method-security-checker.md" 's/^effort: xhigh$/effort: high/m' "$agents/method-security-checker.md: the effort is \"high\", not xhigh"
   change "a model other than the fragment's in diagnose's file" "$agents/method-diagnose.md" 's/^model: [^\n]*$/model: opus/m' "$agents/method-diagnose.md: the model \"opus\" is not the settings fragment's model"
   change "the reporter's name not its file's" "$agents/method-reporter.md" 's/^name: method-reporter$/name: reporter/m' "$agents/method-reporter.md: the name \"reporter\" is not the file's name, method-reporter"
+  change "Bash in the architect's tools (not a gate)" "$agents/method-architect.md" 's/^(tools:[^\n]*)$/$1, Bash/m' "$agents/method-architect.md: the tools: line lists Bash, but this is not a gate in verdicts.txt"
+  change "PowerShell in the architect's tools (not a gate)" "$agents/method-architect.md" 's/^(tools:[^\n]*)$/$1, PowerShell/m' "$agents/method-architect.md: the tools: line lists PowerShell, but this is not a gate in verdicts.txt"
   change "a gate in verdicts.txt with no file (a planner added)" method/scripts/method/verdicts.txt 's/(gate-verdict\tmethod-reporter\t[^\n]*\n)/${1}gate-verdict\tmethod-planner\tthe planner; its report opens with a verdict word\n/' \
     "the gate method-planner in verdicts.txt has no file method/.claude/agents/method/method-planner.md"
   change "the fragment's model changed (no agent file names it)" method/settings.fragment.json 's/"model": "[^"]*"/"model": "claude-other-1"/' \
@@ -161,8 +165,16 @@ skill "a skill folder missing from G6's list" "" method-x "$ok_skill" \
   "method/.claude/skills/method-x/: the folder is not on G6's skill list"
 skill "a listed folder that does not exist" method-x "" "" \
   "G6's skill list (@METHOD_SKILLS in method/scripts/method/lib/protect.pl) names method-x, but method/.claude/skills/method-x/ does not exist"
-skill "a skill not built yet whose folder comes (method-plan)" "" method-plan "---${nl}name: method-plan${nl}---${nl}A step.${nl}" \
-  "method/.claude/skills/method-plan/: the skill method-plan has its folder now: take it off %NOT_BUILT"
+skill "a skill not built yet whose folder comes (method-start)" "" method-start "---${nl}name: method-start${nl}---${nl}A step.${nl}" \
+  "method/.claude/skills/method-start/: the skill method-start has its folder now: take it off %NOT_BUILT"
+# a built skill's folder removed (step 6.4): method-plan is no longer
+# excepted as not built yet
+sb=$(make_sandbox) || abort_sandbox
+rm -rf "$sb/method/.claude/skills/method-plan"
+if expect_landed "method-plan's folder removed" test ! -e "$sb/method/.claude/skills/method-plan"; then
+  expect_red "a built skill's folder removed (method-plan)" "$sb" "G6's skill list (@METHOD_SKILLS in method/scripts/method/lib/protect.pl) names method-plan, but method/.claude/skills/method-plan/ does not exist" bash scripts/dev/lint-prompts.sh
+fi
+drop_sandbox "$sb"
 
 echo "plants: lint-prompts: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]

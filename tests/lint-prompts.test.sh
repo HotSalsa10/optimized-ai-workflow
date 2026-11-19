@@ -26,9 +26,10 @@ k=0
 
 # mini: makes a new small repository with the lint, a rules file that
 # passes, what part two reads (step 6.2): the vocabulary and its reader
-# (the gates), the settings fragment (the model) and the method's gate
+# (the gates), the settings fragment (the model) and the method's agent
 # files, which pass; and what part three reads (step 6.3): protect.pl with
-# G6's skill list, and the git.pl it loads; sets m to its path (not in a
+# G6's skill list, the git.pl it loads, and the method's skill folders
+# (since step 6.4), which pass; sets m to its path (not in a
 # subshell, so k counts on)
 mini() {
   k=$((k + 1))
@@ -41,12 +42,13 @@ mini() {
     cp "$root/method/scripts/method/lib/protect.pl" "$root/method/scripts/method/lib/git.pl" "$m/method/scripts/method/lib/" &&
     cp "$root/method/settings.fragment.json" "$m/method/" &&
     cp "$root"/method/.claude/agents/method/*.md "$m/method/.claude/agents/method/" &&
+    cp -R "$root/method/.claude/skills" "$m/method/.claude/" &&
     printf '# Rules\n\n<!-- M001 -->\nA plain rule.\n' >"$m/method/.claude/rules/method/base.md" &&
     (cd "$m" && git init -q .)
 }
-# the files a mini repository holds before a case adds one: the rules file
-# and the method's agent files
-base_files=$(($(find "$root/method/.claude/agents/method" -name '*.md' -type f | wc -l) + 1))
+# the files a mini repository holds before a case adds one: the rules file,
+# the method's agent files and its skill folders' .md files
+base_files=$(($(find "$root/method/.claude/agents/method" "$root/method/.claude/skills" -name '*.md' -type f | wc -l) + 1))
 
 # list_skill NAME: puts NAME on the mini repository's G6 skill list
 # (protect.pl's @METHOD_SKILLS)
@@ -182,7 +184,7 @@ done
 agent_red "Agent with an argument in tools" "$(fm "name: method-x" "model: $model" "effort: xhigh" "tools: Read, Agent(method-y)")" "the tools: line lists Agent, a delegation tool"
 agent_red "Agent in a block list of tools" "$(fm "name: method-x" "model: $model" "effort: xhigh" "tools:" "  - Read" "  - Agent")" "the tools: line lists Agent, a delegation tool"
 agent_red "Task in a quoted flow list of tools" "$(fm "name: method-x" "model: $model" "effort: xhigh" 'tools: ["Read", "Task"]')" "the tools: line lists Task, a delegation tool"
-for t in Bash Edit Write NotebookEdit; do
+for t in Bash PowerShell Monitor Edit Write MultiEdit NotebookEdit; do
   agent_red "$t in a drafting agent's tools" "$(fm "name: method-x" "model: $model" "effort: xhigh" "tools: Read, $t")" "the tools: line lists $t, but this is not a gate in verdicts.txt"
 done
 for key in memory isolation permissionMode background skills mcpServers; do
@@ -244,8 +246,8 @@ lint_red "skill folder: a folder whose name does not start method- (listed)" met
 NOLIST=1 lint_red "skill folder: a folder whose name does not start method-, not listed: two problems" method/.claude/skills/plan/SKILL.md "$(sfm "name: plan")" \
   "lint-prompts: method/.claude/skills/plan/: the folder is not on G6's skill list" 2
 lint_red "skill folder: a folder with no SKILL.md" "${SD}notes.md" $'Notes.\n' "lint-prompts: $SD: no SKILL.md"
-lint_red "skill folder: a skill not built yet whose folder exists" method/.claude/skills/method-plan/SKILL.md "$(sfm "name: method-plan")" \
-  "lint-prompts: method/.claude/skills/method-plan/: the skill method-plan has its folder now: take it off %NOT_BUILT in scripts/dev/lib/prompts.pl"
+lint_red "skill folder: a skill not built yet whose folder exists" method/.claude/skills/method-start/SKILL.md "$(sfm "name: method-start")" \
+  "lint-prompts: method/.claude/skills/method-start/: the skill method-start has its folder now: take it off %NOT_BUILT in scripts/dev/lib/prompts.pl"
 if wanted "skill folder: a listed name with no folder"; then
   mini || abort_sandbox
   list_skill method-y || abort_sandbox
@@ -270,7 +272,7 @@ if wanted "skill folder: the names not built yet pass, and are named"; then
   mini || abort_sandbox
   out=$(cd "$m" && bash scripts/dev/lint-prompts.sh 2>&1)
   code=$?
-  if [ "$code" -eq 0 ] && printf '%s\n' "$out" | grep -q "^lint-prompts: on G6's skill list and not built yet (steps 6.4 and 6.5): "; then
+  if [ "$code" -eq 0 ] && printf '%s\n' "$out" | grep -q "^lint-prompts: on G6's skill list and not built yet (step 6.5): method-start$"; then
     pass "skill folder: the names not built yet pass, and are named"
   else
     fail "skill folder: the names not built yet pass, and are named: exit $code" "$out"

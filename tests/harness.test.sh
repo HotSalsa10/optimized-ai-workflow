@@ -862,5 +862,33 @@ else
   fail "real-gates-auto: the case could not be made, or the fake did not answer; the client was not started"
 fi
 
+# --- 20. planning and design (step 6.4): the method's skills typed as the
+# owner's message (-p "/method-plan ..." and "/method-design ...", F6), and
+# the method's architect called by the main session in the foreground, once
+# in default mode and once in auto mode (h_design, h_design_holds) ---
+design_q() {
+  if h_design_holds "$1"; then pass "$2"; else fail "$2" "$H_WHY"; fi
+}
+if h_design "$root" default; then
+  design_q expands "design (default mode): -p \"/method-plan ...\" sends method-plan's SKILL.md body as written, with the typed arguments; its '# rules:' line reaches no request; every method skill is in init's slash_commands"
+  design_q loads "design: method-architect loads (in the init event's agents), with no unknown-key, parse or not-loaded line in the client's debug log"
+  design_q model "design (default mode): the architect's requests go out at the fragment's model and effort xhigh"
+  design_q tools "design (default mode): the architect is offered Read and WebFetch, and no Agent, Task, Skill, SendMessage, Bash, PowerShell, Monitor, Edit, Write, MultiEdit or NotebookEdit"
+  design_q receipt "design (default mode): the architect makes no receipt (gate-receipt does not run during its call; no receipt, no gates.log line, no METHOD-ACTIVE line for it)"
+  h_safe design-default
+else
+  fail "design-default: the case could not be made, or the fake did not answer; the client was not started"
+fi
+if h_design "$root" auto; then
+  design_q expands "design (auto mode): -p \"/method-design ...\" sends method-design's SKILL.md body as written, with the typed arguments"
+  design_q ends "design (auto mode): the architect is offered SubagentHandback, hands its design back in one turn, and the main session gets it"
+  design_q model "design (auto mode): the architect's requests go out at the fragment's model and effort xhigh"
+  design_q tools "design (auto mode): the architect is offered Read and WebFetch, and no delegation, command or writing tool"
+  design_q receipt "design (auto mode): the architect makes no receipt (gate-receipt runs once, on its handback, and lets it through)"
+  h_safe design-auto
+else
+  fail "design-auto: the case could not be made, or the fake did not answer; the client was not started"
+fi
+
 echo "harness: ${H_RUNS:-0} client runs took ${H_TOTAL_SECS:-0} s"
 finish

@@ -63,6 +63,8 @@
 # it (below).
 # Step 6.2's case: h_real_gates ROOT MODE runs the method's own gate files
 # (below); h_real_holds QUESTION judges it.
+# Step 6.4's case: h_design ROOT MODE types a method skill and runs the
+# method's architect (below); h_design_holds QUESTION judges it.
 # req-001 is h_fake's own alive probe.
 
 # settings a caller's environment must not carry into every case
@@ -623,6 +625,150 @@ h_real_holds() {
   done <<EOF
 $H_GATES
 EOF
+  [ -z "$H_WHY" ]
+}
+
+# h_design ROOT MODE (step 6.4): the method's planning and design words,
+# from the repository at ROOT (a planted copy in tests/plants/harness.sh),
+# laid out as sync will (h_method, h_method_words), with the fragment as the
+# project's settings. The owner's message is a typed skill: MODE default,
+# "/method-plan harness-task HARNESS-ARGS"; MODE auto (the test-only allow
+# hook on Agent, as h_gates), "/method-design harness-design HARNESS-ARGS".
+# The main session (its conversation matched by the skill's command-name
+# line) calls the method-architect agent once, in the foreground ("harness
+# architect", conversation "architect"), which answers with a design (MODE
+# default: as text; MODE auto: handed back, HARNESS-DESIGN-HANDED-BACK in
+# its message), then ends. The client's debug log goes to $H_DIR/debug.log.
+# Sets H_DMODE (MODE), H_SKILL (the skill typed), H_ARGS (its arguments)
+# and H_MODEL (the fragment's model). Returns 1 when the case could not be
+# made or the fake did not answer.
+h_design() {
+  local mode=$2
+  H_DMODE=$mode
+  H_SKILL=method-plan
+  H_ARGS="harness-task HARNESS-ARGS"
+  if [ "$mode" = auto ]; then
+    H_SKILL=method-design
+    H_ARGS="harness-design HARNESS-ARGS"
+  fi
+  H_MODEL=$(perl -MJSON::PP -0ne 'print JSON::PP->new->decode($_)->{model}' "$1/method/settings.fragment.json") || return 1
+  { h_case "design-$mode" && h_method "$1"; } || return 1
+  if [ "$mode" = auto ]; then
+    mkdir -p "$H_PROJ/.claude/hooks/fixture" && cp "$HARNESS/hooks/allow.sh" "$H_PROJ/.claude/hooks/fixture/" || return 1
+    perl -MJSON::PP -e 'my $f = shift; open my $h, "<", $f or die; my $d = JSON::PP->new->decode(do { local $/; <$h> }); close $h;
+      push @{ $d->{hooks}{PreToolUse} }, {matcher => "Agent|Task", hooks => [{type => "command", command => q{bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fixture/allow.sh"}, timeout => 30}]};
+      open $h, ">", $f or die; print $h JSON::PP->new->canonical->pretty->encode($d); close $h or die' "$H_PROJ/.claude/settings.json" || return 1
+  fi
+  h_method_words "$1" || return 1
+  perl -MJSON::PP -e '
+    my ($mode, $skill) = @ARGV;
+    my $design = "HARNESS-DESIGN\nThe card: a walking skeleton first.";
+    my @turns = $mode eq "auto" ? ({tool => "SubagentHandback", input => {message => "$design\nHARNESS-DESIGN-HANDED-BACK"}}, map { {text => $design} } 1 .. 3) : ({text => $design});
+    my @convs = ({name => "architect", match => "HARNESS-ARCHITECT:", turns => \@turns},
+      {name => "main", match => "^<command-name>/\Q$skill\E</command-name>\$", turns => [{tool => "Agent", input => {description => "harness architect",
+        prompt => "HARNESS-ARCHITECT: draft a design for the brief", subagent_type => "method-architect", run_in_background => JSON::PP::false}},
+        map { {text => "MAIN-DONE-$_"} } 1 .. 3]});
+    unshift @convs, {name => "classifier", match => "(?:^<transcript>|<user_claude_md>)", turns => [{text => "<block>no</block>"}]} if $mode eq "auto";
+    print JSON::PP->new->canonical->encode({convs => \@convs, fallback => {text => "FAKE-FALLBACK"}, usage => {input_tokens => 11, output_tokens => 7}})' "$mode" "$H_SKILL" >"$H_DIR/design.json" || return 1
+  h_fake "$H_DIR/design.json" || return 1
+  if [ "$mode" = auto ]; then
+    H_PROMPT="/$H_SKILL $H_ARGS" h_client 90 -- --permission-mode auto --debug-file "$H_DIR/debug.log"
+  else
+    H_PROMPT="/$H_SKILL $H_ARGS" h_client 90 -- --permission-mode default --allowedTools Bash --debug-file "$H_DIR/debug.log"
+  fi
+  h_stop
+}
+# h_design_holds QUESTION: 0 when QUESTION holds for the case h_design ran
+# last; else 1, with H_WHY saying what was seen. The questions:
+#   expands  the typed skill's body (its SKILL.md after the frontmatter, as
+#            written) reached the main conversation's first request, with
+#            the typed arguments; its frontmatter's "# rules:" line reached
+#            no request; and init's slash_commands lists every method skill
+#            folder in the project
+#   loads    method-architect is in init's agents, and the client's debug
+#            log (not empty, or the case cannot tell) has no line naming it
+#            with "does not recognize or apply", "Failed to parse agent" or
+#            "not loaded"
+#   model    every request of the architect's conversation went out at the
+#            fragment's model and effort xhigh
+#   tools    its first request offers Read and WebFetch, and none of Agent,
+#            Task, Skill, SendMessage, Bash, PowerShell, Monitor, Edit,
+#            Write, MultiEdit or NotebookEdit
+#   receipt  it makes no receipt: gate-receipt ran no time during its call
+#            in MODE default, and once in MODE auto (the fragment runs it
+#            on every agent's handback, and it lets one that is not a
+#            gate's through; ends shows the handback was not refused) (the
+#            debug log shows the call's span, so the agent was found, or
+#            the case cannot tell), it has no receipt, gates.log names
+#            it nowhere, and no METHOD-ACTIVE line naming it reached its
+#            requests
+#   ends     (MODE auto) its first request offers SubagentHandback; it
+#            ended in one turn, handing back, and the handed-back message
+#            reached the main conversation
+h_design_holds() {
+  local got t f rules n want
+  H_WHY=""
+  case $1 in
+    expands)
+      f="$H_PROJ/.claude/skills/$H_SKILL/SKILL.md"
+      got=$(perl "$HARNESS/read.pl" skill main "$f" "$H_ARGS" "$H_DIR/fake")
+      [ "$got" = same ] || H_WHY="$H_WHY /$H_SKILL's body and arguments in main's first request: $got;"
+      rules=$(sed -n 's/^# rules: //p' "$f")
+      if [ -z "$rules" ]; then
+        H_WHY="$H_WHY $H_SKILL's SKILL.md has no '# rules:' line, so the case cannot tell;"
+      else
+        ! h_req_has "# rules: $rules" || H_WHY="$H_WHY $H_SKILL's '# rules:' line reached a request;"
+      fi
+      for f in "$H_PROJ"/.claude/skills/method-*; do
+        [ -d "$f" ] || continue
+        h_init slash_commands | grep -q -x -F -- "${f##*/}" || H_WHY="$H_WHY ${f##*/} is not in init's slash_commands;"
+      done
+      ;;
+    loads)
+      if [ ! -s "$H_DIR/debug.log" ]; then
+        H_WHY="the client wrote no debug log, so the case cannot tell"
+        return 1
+      fi
+      h_init agents | grep -q -x -F method-architect || H_WHY="$H_WHY method-architect is not in the init event's agents;"
+      got=$(LC_ALL=C grep -F method-architect "$H_DIR/debug.log" | LC_ALL=C grep -e 'does not recognize or apply' -e 'Failed to parse agent' -e 'not loaded' | head -1 | cut -c1-200)
+      [ -z "$got" ] || H_WHY="$H_WHY the debug log names method-architect: $got;"
+      ;;
+    model)
+      got=$(perl "$HARNESS/read.pl" model architect "$H_DIR/fake")
+      [ "$got" = "$H_MODEL" ] || H_WHY="$H_WHY the architect's requests went out at model $got, not $H_MODEL;"
+      got=$(h_req_effort architect)
+      [ "$got" = xhigh ] || H_WHY="$H_WHY the architect's requests went out at effort $got, not xhigh;"
+      ;;
+    tools)
+      got=$(perl "$HARNESS/read.pl" tools architect "$H_DIR/fake")
+      for t in Read WebFetch; do
+        case ",$got," in *",$t,"*) ;; *) H_WHY="$H_WHY the architect's first request lacks $t: $got;" ;; esac
+      done
+      for t in Agent Task Skill SendMessage Bash PowerShell Monitor Edit Write MultiEdit NotebookEdit; do
+        case ",$got," in *",$t,"*) H_WHY="$H_WHY the architect's first request offers $t: $got;" ;; esac
+      done
+      ;;
+    receipt)
+      want=0
+      [ "$H_DMODE" = auto ] && want=1
+      got=$(perl "$HARNESS/read.pl" hooks "harness architect" gate-receipt.sh "$H_DIR/home" "$H_DIR/debug.log")
+      [ "$got" = "$want" ] || H_WHY="$H_WHY gate-receipt ran $got times during the architect's call, not $want (none: the call or its span was not found, so the case cannot tell);"
+      got=$(perl "$HARNESS/read.pl" receipt "harness architect" "$H_DIR/home" "$H_PROJ/.git")
+      [ "$got" = none ] || H_WHY="$H_WHY the architect has a receipt: $got;"
+      n=0
+      [ ! -f "$H_PROJ/.method/local/gates.log" ] || n=$(LC_ALL=C grep -c -F method-architect "$H_PROJ/.method/local/gates.log")
+      [ "$n" = 0 ] || H_WHY="$H_WHY gates.log names method-architect $n times;"
+      ! h_req_in architect 'METHOD-ACTIVE gate=method-architect' || H_WHY="$H_WHY a METHOD-ACTIVE line naming it reached the architect's requests;"
+      ;;
+    ends)
+      got=$(perl "$HARNESS/read.pl" tools architect "$H_DIR/fake")
+      case ",$got," in *,SubagentHandback,*) ;; *) H_WHY="$H_WHY the architect's first request does not offer SubagentHandback: $got;" ;; esac
+      n=$(h_turns architect)
+      [ "$n" = 1 ] || H_WHY="$H_WHY the architect's turns: $n, not 1;"
+      h_req_in main HARNESS-DESIGN-HANDED-BACK || H_WHY="$H_WHY the handed-back design did not reach the main conversation;"
+      ;;
+    *) H_WHY="no such design question: $1" ;;
+  esac
   [ -z "$H_WHY" ]
 }
 

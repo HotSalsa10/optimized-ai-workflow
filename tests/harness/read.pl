@@ -43,6 +43,18 @@
 # read.pl tools CONV DIR (step 6.2): prints the tool names the first
 # request the fake logged in DIR for its conversation CONV offered, sorted,
 # joined by commas; "none" and exit 1 when there is no such request.
+# read.pl model CONV DIR (step 6.4): prints each model the requests the
+# fake logged in DIR for its conversation CONV named (the request body's
+# model), once, in the order first seen, joined by commas; "none" and exit
+# 1 when there is no such request.
+# read.pl skill CONV FILE ARGS DIR (step 6.4): exit 0, printing "same",
+# when the first request the fake logged in DIR for its conversation CONV
+# holds the body of the skill file FILE (its text after the frontmatter,
+# without the line breaks at its start and end) right after the client's
+# line "Base directory for this skill: ..." and a blank line, and the line
+# "ARGUMENTS: ARGS" after it; otherwise exit 1, printing "no request",
+# "no frontmatter", "missing" (no such line or body), "differs at byte N"
+# or "no arguments".
 # Never shipped.
 use strict;
 use warnings;
@@ -137,6 +149,15 @@ if (($what // '') eq 'effort' && @ARGV == 3) {
   print @e ? join(',', @e) : 'none', "\n";
   exit(@e ? 0 : 1);
 }
+if (($what // '') eq 'model' && @ARGV == 3) {
+  my @m;
+  for my $b (requests_of(@ARGV[1, 2])) {
+    my $m = defined $b->{model} && !ref $b->{model} ? $b->{model} : 'none';
+    push @m, $m unless grep { $_ eq $m } @m;
+  }
+  print @m ? join(',', @m) : 'none', "\n";
+  exit(@m ? 0 : 1);
+}
 if (($what // '') eq 'tools' && @ARGV == 3) {
   my ($b) = requests_of(@ARGV[1, 2]);
   if (!$b) { print "none\n"; exit 1 }
@@ -202,7 +223,36 @@ if (($what // '') eq 'rules' && @ARGV == 5) {
   print "differs at byte $i\n";
   exit 1;
 }
-die "usage: read.pl init FIELD FILE | read.pl req CONV TEXT DIR | read.pl first CONV TEXT DIR | read.pl rules CONV SUFFIX FILE DIR | read.pl effort CONV DIR | read.pl tools CONV DIR | read.pl receipt DESC HOME GIT | read.pl used DESC HOME GIT | read.pl hooks DESC TEXT HOME LOG\n" unless defined $file && $what eq 'init';
+if (($what // '') eq 'skill' && @ARGV == 5) {
+  my ($conv, $file, $args, $dir) = @ARGV[1 .. 4];
+  my ($b) = requests_of($conv, $dir);
+  if (!$b) { print "no request\n"; exit 1 }
+  open my $h, '<:raw', $file or do { print "cannot read $file\n"; exit 1 };
+  my $text = do { local $/; <$h> };
+  close $h;
+  utf8::decode($text);
+  utf8::decode($args);
+  my ($want) = $text =~ /\A---\n.*?\n---\n(.*)\z/s;
+  if (!defined $want) { print "no frontmatter\n"; exit 1 }
+  $want =~ s/\A\n+//;
+  $want =~ s/\n+\z//;
+  my $s = sent($b);
+  my $key = "Base directory for this skill: ";
+  my $at = index($s, $key);
+  $at = index($s, "\n\n", $at) if $at >= 0;
+  if ($at < 0) { print "missing\n"; exit 1 }
+  my $got = substr($s, $at + 2, length $want);
+  if ($got ne $want) {
+    my $i = 0;
+    $i++ while $i < length $want && substr($got, $i, 1) eq substr($want, $i, 1);
+    print "differs at byte $i\n";
+    exit 1;
+  }
+  if (index(substr($s, $at + 2 + length $want), "\nARGUMENTS: $args") < 0) { print "no arguments\n"; exit 1 }
+  print "same\n";
+  exit 0;
+}
+die "usage: read.pl init FIELD FILE | read.pl req CONV TEXT DIR | read.pl first CONV TEXT DIR | read.pl rules CONV SUFFIX FILE DIR | read.pl skill CONV FILE ARGS DIR | read.pl effort CONV DIR | read.pl model CONV DIR | read.pl tools CONV DIR | read.pl receipt DESC HOME GIT | read.pl used DESC HOME GIT | read.pl hooks DESC TEXT HOME LOG\n" unless defined $file && $what eq 'init';
 open my $f, '<', $file or exit 1;
 while (my $l = <$f>) {
   my $o = eval { JSON::PP->new->utf8->decode($l) } or next;
