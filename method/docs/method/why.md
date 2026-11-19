@@ -1,6 +1,6 @@
 # What enforces the method
 
-The method's rules are text, and Claude can fail to follow one. This page says honestly which rules a hook or a script enforces, which are only partly checked, and which are only written down (M067). Each row names its rule IDs; the method's rule map gives each rule's reason and its one home.
+The method's rules are text, and Claude can fail to follow one. This page says honestly which rules a hook or a script enforces, which are only partly checked, and which are only written down (M067). Each row names its rule IDs; the rule map in the method's own repository, not in this project, gives each rule's reason and its one home.
 
 ## Your part
 
@@ -23,8 +23,8 @@ The hooks run in local sessions and in cloud sessions with one repository. Where
 | G12 effort (M134) | Nothing: a warning at the first call of a session below xhigh | guard.sh |
 | G16 settings-change (M136) | A settings change mid-session that switches off or weakens the hooks | guard.sh |
 | G17 skill-and-agent-hooks (M137) | A skill or agent that declares its own hooks | guard.sh |
-| The start line | Working while the method is silently off or weakened: `METHOD-ACTIVE` and status's LOOK lines reach Claude at every start | session-status.sh |
-| Receipts (M053, M078, M106, M116) | A checking agent's report counted when it was cut off, made on files that changed, run below its effort, off the allowed models or from another definition | gate-receipt.sh |
+| The start line | Nothing: a notice. `METHOD-ACTIVE` and status's LOOK lines show the method's state at every start where the hooks run; whether Claude then stops is not checked (below) | session-status.sh |
+| Receipts (M053, M078, M106, M116) | Nothing yet: a checking agent's report cut off, made on files that changed, run below its effort, off the allowed models or from another definition gets an INVALID or INCOMPLETE receipt; from step 6b, done-check counts only VALID ones | gate-receipt.sh |
 | Settings (M076, M104, M138, M139) | The advisor, auto memory and skill shell lines are off; merge tools and tools that start other sessions are denied, also with the hooks off | `.claude/settings.json` |
 
 ## Enforced by a script
@@ -36,6 +36,8 @@ The hooks run in local sessions and in cloud sessions with one repository. Where
 | M032, M038, M085, M112, M113 | The review packet is the reviewer's whole input, without the author's account or noise | `scripts/method/review-packet.sh` |
 | M008, M089, M108 | Ready to merge: the files are the commit, main is merged in, the checks passed, and the verdict line approves | `scripts/method/done-check.sh` |
 | M044 | Mutation testing breaks the changed code on purpose | `scripts/method/mutate-changed.sh` |
+| M039 | Every script reads the verdict words from one file | `scripts/method/verdicts.txt` |
+| M072 | No hook log grows forever or stores secrets: each is cut to its newest lines, and its lines hold only fields of a fixed shape, never a command, a path or a message | `scripts/method/lib/log.pl` |
 | M009, M144 to M147 (step 6b) | The approved plan, the gates' receipts for the exact files, the locked expected results, the tier, at most three review rounds | `scripts/method/done-check.sh` |
 | M126 (step 6b) | Every number in a report is in a log; "What the checks would miss" is not missing or empty | `scripts/method/report-check.sh` |
 | CI | The project's checks run on every change, outside the session | the project's CI (step 9) |
@@ -51,7 +53,7 @@ The hooks run in local sessions and in cloud sessions with one repository. Where
 | Seen failing first (M145, step 6b) | A tester run said TESTS FAIL after the approval and before the code | Which tests failed, or why: the reviewer checks the tests (M090) |
 | The report check (M126, step 6b) | The reporter refuses a report whose check did not pass | A LIGHT change without a reporter: then only the skill runs the check |
 | Predictions before a FULL merge (M124) | Nothing: done-check cannot see that you predicted | All of it |
-| High-risk work beyond Deep review (DECISIONS A9) | Three approving reviewers (step 6b) | Sign-off of expected results, a test copy, an undo plan, a human expert |
+| High-risk work: Deep review | Three approving reviewers (step 6b) | The rest of Deep review: sign-off of expected results, a test copy, an undo plan, a human expert |
 | LIGHT's reporter for [EYES] or [CHECK] items | `/method-finish` runs it then (step 6b) | done-check does not require it |
 | M075 | `/code-review` is kept to you by the settings | That nothing else is treated as a gate |
 
@@ -63,6 +65,7 @@ These rules are text the model reads. A review can notice a broken one; nothing 
 |---|---|
 | `.claude/rules/method/method.md`, loaded in every session | M079, M016, M033, M057, M082, M034, M119, M093, M064, M013; M020, M058, M107, M047, M048, M049, M059, M121, M042, M043, M052, M056, M143, M035, M036; M060, M061, M098, M065, M062, M054, M055, M028; for checking agents M022, M023, M115, M026, M025, M027, M117, M114 |
 | `.claude/rules/method/owner.md`, loaded in every session | M012, M037, M123, M074, M068, M071, M105 |
+| `.claude/hooks/method/README.md` | M073: each hook documented with what it stops, what it costs and how it was seen to fire |
 | The checking agents, `.claude/agents/method/` (step 6) | reviewer M024, M083, M084, M086, M090, M102; security checker M030; tester M029; diagnose M142; reporter M031, M046, M069, M092, M124 |
 | The architect (step 6) | M141 |
 | The skills you type (step 6 and 6b) | `/method-start` M004, M005, M127; `/method-plan` M006, M021, M091, M125; `/method-design` M099; `/method-finish` M007, M011, M070, M087 |

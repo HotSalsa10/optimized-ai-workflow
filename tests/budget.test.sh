@@ -10,8 +10,13 @@
 # - the description fields of the method's agents (every .md under
 #   method/.claude/agents/) and skills (method/.claude/skills/*/SKILL.md):
 #   each at most 300 bytes, all together at most 3,000, counted from the
-#   file (the value after "description:", trimmed; a block value's lines
-#   joined by single spaces).
+#   file as YAML reads the value (the text after "description:", trimmed,
+#   and each indented line after it, as YAML continues a value onto them,
+#   joined by single spaces: a block value's lines, a plain or quoted value
+#   wrapped onto the next lines, or one that starts there; a " #" comment
+#   dropped from a value not in quotes; a quoted value counted with its
+#   quotes). Step 6.6 added the wrapped forms: the client joins them and
+#   sends the whole text (the review's F1, measured at 2.1.319).
 # With no agent or skill file yet, the description budget says SKIPPED.
 # A budget is raised only by the owner; text over it is cut. The counter is
 # tested here on small cases at and one byte over each budget;
@@ -56,10 +61,23 @@ budget_read() {
           last if $l[$i] eq "---";
           if ($l[$i] =~ /\Adescription:[ \t]*(.*?)[ \t]*\z/) {
             $v = $1;
-            if ($v =~ /\A[|>][-+0-9]*\z/) {
-              my @b;
-              for my $j ($i + 1 .. $#l) { last unless $l[$j] =~ /\A[ \t]+(\S.*?)[ \t]*\z/ || $l[$j] eq ""; push @b, $1 if defined $1 }
-              $v = join " ", @b;
+            # the lines YAML reads as part of the value: each indented or
+            # empty line after it, up to the next key, trimmed
+            my @more;
+            for my $j ($i + 1 .. $#l) { last unless $l[$j] =~ /\A(?:[ \t]|\z)/; push @more, $1 if $l[$j] =~ /\A[ \t]*(\S.*?)[ \t]*\z/ }
+            if ($v =~ /\A[|>][-+0-9]*(?:[ \t]+#.*)?\z/) {
+              $v = join " ", @more;
+            } elsif ($v =~ /\A[\x22\x27]/) {
+              $v = join " ", $v, @more;
+            } else {
+              my @p;
+              for my $s (grep { length } $v, @more) {
+                if ($s =~ /\A#/) { last if @p; next }
+                (my $c = $s) =~ s/[ \t]+#.*\z//;
+                push @p, $c;
+                last if $c ne $s;
+              }
+              $v = join " ", @p;
             }
             last;
           }
@@ -193,6 +211,27 @@ if counted "$d" "DESC 14 method/.claude/agents/method/q.md" && counted "$d" "DES
 else
   fail "the counter: description forms" "$(budget_read "$d")"
 fi
+# (step 6.6, the review's F1) the forms YAML reads further than the line:
+# an indented next line continues a plain or quoted value, joined by one
+# space, as the client sends it; a value may start on the next line; a
+# " #" comment ends a value not in quotes
+d=$(case_dir desc-yaml) || abort_sandbox
+printf 'r\n' >"$d/method/.claude/rules/method/r.md"
+printf -- '---\nname: c\ndescription: one two\n  three four\n   five\nmodel: x\n---\n' >"$d/method/.claude/agents/method/c.md"
+printf -- '---\nname: q\ndescription: "one\n  two"\n---\n' >"$d/method/.claude/agents/method/q.md"
+printf -- '---\nname: n\ndescription:\n  on the next line\n---\n' >"$d/method/.claude/agents/method/n.md"
+printf -- '---\nname: h\ndescription: words  # a comment, not sent\n---\n' >"$d/method/.claude/agents/method/h.md"
+printf -- '---\nname: b\ndescription: > # a comment\n  one\n  two\n---\n' >"$d/method/.claude/agents/method/b.md"
+if counted "$d" "DESC 23 method/.claude/agents/method/c.md" && counted "$d" "DESC 9 method/.claude/agents/method/q.md" && counted "$d" "DESC 16 method/.claude/agents/method/n.md" &&
+  counted "$d" "DESC 5 method/.claude/agents/method/h.md" && counted "$d" "DESC 7 method/.claude/agents/method/b.md"; then
+  pass "the counter: continued lines joined by one space, a value on the next line, a comment dropped from a plain value (as YAML reads them)"
+else
+  fail "the counter: continued lines joined by one space, a value on the next line, a comment dropped from a plain value (as YAML reads them)" "$(budget_read "$d")"
+fi
+d=$(case_dir desc-wrapped) || abort_sandbox
+printf 'r\n' >"$d/method/.claude/rules/method/r.md"
+mkdir -p "$d/method/.claude/skills/method-w" && printf -- '---\nname: w\ndescription: %s\n  %s\n---\n' "$(xs 200)" "$(xs 100)" >"$d/method/.claude/skills/method-w/SKILL.md"
+want "the counter: a description wrapped onto an indented line, 301 bytes as YAML joins it, fails" "$d" FAIL "descriptions: a description over the budget of 300 bytes"
 
 echo "tests: budget: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]

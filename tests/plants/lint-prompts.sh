@@ -12,7 +12,10 @@
 # on G6's list in protect.pl; a name on the list with no folder; each red
 # for its reason, and a well-made listed skill green. Step 6.4: Bash and
 # PowerShell in the architect's tools (not a gate), and a built skill's
-# folder removed (method-plan; since 6.5 method-start too), each red. Text that
+# folder removed (method-plan; since 6.5 method-start too), each red. Step
+# 6.6 (the review's F15, F17): Agent in a quoted tools list, Agent before a
+# comment, Bash on a continued tools line, and context: fork before a
+# comment, each red as YAML reads the value. Text that
 # would trip the lint lives here, outside method/.claude/, which the lint
 # does not read.
 set -u
@@ -112,6 +115,12 @@ agents=method/.claude/agents/method
   change "the reporter's name not its file's" "$agents/method-reporter.md" 's/^name: method-reporter$/name: reporter/m' "$agents/method-reporter.md: the name \"reporter\" is not the file's name, method-reporter"
   change "Bash in the architect's tools (not a gate)" "$agents/method-architect.md" 's/^(tools:[^\n]*)$/$1, Bash/m' "$agents/method-architect.md: the tools: line lists Bash, but this is not a gate in verdicts.txt"
   change "PowerShell in the architect's tools (not a gate)" "$agents/method-architect.md" 's/^(tools:[^\n]*)$/$1, PowerShell/m' "$agents/method-architect.md: the tools: line lists PowerShell, but this is not a gate in verdicts.txt"
+  # (step 6.6, the review's F15 and F17: the tools as YAML reads them)
+  change "Agent in the reviewer's tools, the whole list quoted" "$agents/method-reviewer.md" 's/^tools: ([^\n]*)$/tools: "$1, Agent"/m' "$agents/method-reviewer.md: the tools: line lists Agent, a delegation tool"
+  change "Agent before a comment in the tester's tools" "$agents/method-tester.md" 's/^(tools:[^\n]*)$/$1, Agent  # to fan out/m' "$agents/method-tester.md: the tools: line lists Agent, a delegation tool"
+  change "Bash on a continued line of the architect's tools" "$agents/method-architect.md" 's/^(tools:[^\n]*)$/$1,\n  Bash/m' "$agents/method-architect.md: the tools: line lists Bash, but this is not a gate in verdicts.txt"
+  change "context: fork before a comment in method-design's SKILL.md" method/.claude/skills/method-design/SKILL.md 's/^(name: method-design\n)/${1}context: fork  # keeps the main context small\n/m' \
+    "method/.claude/skills/method-design/: SKILL.md sets context: fork"
   change "a gate in verdicts.txt with no file (a planner added)" method/scripts/method/verdicts.txt 's/(gate-verdict\tmethod-reporter\t[^\n]*\n)/${1}gate-verdict\tmethod-planner\tthe planner; its report opens with a verdict word\n/' \
     "the gate method-planner in verdicts.txt has no file method/.claude/agents/method/method-planner.md"
   change "the fragment's model changed (no agent file names it)" method/settings.fragment.json 's/"model": "[^"]*"/"model": "claude-other-1"/' \

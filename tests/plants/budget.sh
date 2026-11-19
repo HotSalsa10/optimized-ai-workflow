@@ -94,6 +94,19 @@ for n in 300 301; do
   drop_sandbox "$sb"
 done
 
+# (step 6.6, the review's F1) a real description wrapped onto an indented
+# next line, 301 bytes as YAML joins the two lines with a space (the client
+# sends it whole): red
+sb=$(make_sandbox) || abort_sandbox
+tester=method/.claude/agents/method/method-tester.md
+# shellcheck disable=SC2016 # perl code, expanded by perl
+perl -0pi -e 's/^(description: ([^\n]*))\n/"$1\n  " . ("w" x (300 - length $2)) . "\n"/me' "$sb/$tester"
+# shellcheck disable=SC2016 # perl code, expanded by perl
+if expect_landed "the tester's description wrapped, 301 bytes joined" perl -0ne 'exit !(/^description: ([^\n]*)\n  (w+)\n/m && length("$1 $2") == 301)' "$sb/$tester"; then
+  judge "budget red with a description wrapped onto an indented line, 301 bytes as YAML reads it" "$sb" red "descriptions: a description over the budget of 300 bytes"
+fi
+drop_sandbox "$sb"
+
 # the descriptions in all: exactly 3,000 bytes, then one byte over, in new
 # files of at most 300 bytes each
 for want in 3000 3001; do

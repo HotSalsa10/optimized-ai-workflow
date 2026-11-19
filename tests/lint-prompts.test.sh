@@ -184,6 +184,16 @@ done
 agent_red "Agent with an argument in tools" "$(fm "name: method-x" "model: $model" "effort: xhigh" "tools: Read, Agent(method-y)")" "the tools: line lists Agent, a delegation tool"
 agent_red "Agent in a block list of tools" "$(fm "name: method-x" "model: $model" "effort: xhigh" "tools:" "  - Read" "  - Agent")" "the tools: line lists Agent, a delegation tool"
 agent_red "Task in a quoted flow list of tools" "$(fm "name: method-x" "model: $model" "effort: xhigh" 'tools: ["Read", "Task"]')" "the tools: line lists Task, a delegation tool"
+# (step 6.6, the review's F15 and F17) the tools as YAML, and so the
+# client, reads them: a value continued on an indented line, or starting
+# there; the whole value quoted; a " #" comment after it; a block list at
+# the key's own indent
+agent_red "Agent on a continued tools line" "$(fm "name: method-x" "model: $model" "effort: xhigh" "tools: Read, Grep," "  Glob, Agent")" "the tools: line lists Agent, a delegation tool"
+agent_red "Task in a tools value on the next line" "$(fm "name: method-x" "model: $model" "effort: xhigh" "tools:" "  Read, Task")" "the tools: line lists Task, a delegation tool"
+agent_red "Agent in a quoted tools list" "$(fm "name: method-x" "model: $model" "effort: xhigh" 'tools: "Read, Grep, Agent"')" "the tools: line lists Agent, a delegation tool"
+agent_red "Agent before a comment in tools" "$(fm "name: method-x" "model: $model" "effort: xhigh" "tools: Read, Agent  # to fan out")" "the tools: line lists Agent, a delegation tool"
+agent_red "Write in a drafting agent's quoted tools" "$(fm "name: method-x" "model: $model" "effort: xhigh" "tools: 'Read, Write'")" "the tools: line lists Write, but this is not a gate in verdicts.txt"
+agent_red "Agent in a block list at the key's indent" "$(fm "name: method-x" "model: $model" "effort: xhigh" "tools:" "- Read" "- Agent  # a comment")" "the tools: line lists Agent, a delegation tool"
 for t in Bash PowerShell Monitor Edit Write MultiEdit NotebookEdit; do
   agent_red "$t in a drafting agent's tools" "$(fm "name: method-x" "model: $model" "effort: xhigh" "tools: Read, $t")" "the tools: line lists $t, but this is not a gate in verdicts.txt"
 done
@@ -199,6 +209,8 @@ lint_red "agent file: a gate's name outside agents/method/, with Bash" "method/.
 # --- part two, green ---
 lint_green "agent file: a drafting agent with web tools, quoted values, a comment line and hooks (left to the guard, G17) passes" "$A" \
   "$(fm 'name: "method-x"' "description: x" "# rules: M001 M002" "model: '$model'" "effort: xhigh" "tools: Read, Grep, Glob, WebFetch, WebSearch" "hooks: x")"
+lint_green "agent file: values with comments after them, a quoted tools list continued on the next line and a # inside a word pass" "$A" \
+  "$(fm "name: method-x  # its file's name" "model: $model # the fragment's" "effort: xhigh" 'tools: "Read, Grep,' '  Glob" # no Bash' "description: a#b")"
 lint_green "agent file: the delegation tools named in the body pass" "$A" "${hdr}Agent, Task, Skill and SendMessage are not yours; memory: none.$nl"
 lint_green "agent file: CRLF line ends pass" "$A" "$(fm "name: method-x" "model: $model" "effort: xhigh" "tools: Read" | perl -pe 's/\n/\r\n/')"
 
@@ -234,6 +246,8 @@ skill_red() {
 }
 skill_red "context: fork" "$(sfm "name: method-x" "description: x" "context: fork")" "SKILL.md sets context: fork: a forked skill hands its work to an agent"
 skill_red "context: fork, quoted" "$(sfm "name: method-x" 'context: "fork"')" "SKILL.md sets context: fork"
+skill_red "context: fork before a comment (F17)" "$(sfm "name: method-x" "context: fork  # keeps the main context small")" "SKILL.md sets context: fork"
+skill_red "context: fork on the next line (F15)" "$(sfm "name: method-x" "context:" "  fork")" "SKILL.md sets context: fork"
 skill_red "agent:" "$(sfm "name: method-x" "agent: method-reviewer")" "SKILL.md sets the key agent:"
 skill_red "agent: with context: fork, two problems" "$(sfm "name: method-x" "context: fork" "agent: Explore")" "SKILL.md sets the key agent:" 2
 skill_red "a name other than the folder's" "$(sfm "name: method-y")" "the name \"method-y\" in SKILL.md is not the folder's name, method-x"

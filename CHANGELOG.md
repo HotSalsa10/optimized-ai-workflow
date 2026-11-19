@@ -125,6 +125,16 @@ Nothing yet. Release 1 is being built.
 - Records before step 6's review (step 6.6): DECISIONS A73 holds step 6's settled choices as built and its known limits so far; RISKS gains #19 (the method's rules, agents and skills are text Claude can fail to follow; why.md says which are enforced), and #7, #11, #16 and #17 say what step 6 reduced; ROADMAP's step 6 line names what step 6 built, step 6b is added, `/setup` stays in step 7 and `/method-explain` goes to Track 4.
 - A shellcheck finding that turned CI red on step 6.5 (a harness variable set and never read, in tests/harness/lib.sh) is removed.
 
+### Changed (step 6)
+
+- From step 6's review (6.6, one repair loop): the prompt check and the description budget read a frontmatter value as Claude Code does. A `tools:` list wrapped onto the next line, written in quotes, or followed by a `# comment` no longer hides a tool such as Agent or Bash from the check, and `context: fork  # a note` in a skill is refused as `context: fork` is. A description wrapped onto the next line is counted whole, since Claude Code joins the lines and sends them all.
+- `/method-start` now gives the one next thing first, as every report does, and says a branch is merged when its files are all on main already, as after a squash merge, rather than counting its commits as waiting for your merge.
+- `/method-design` builds the review packet again after each fix, so a second review round counts, and gives the plan's lines and the Approved line in full, so the session does not need `/method-plan`'s text.
+- The rules: a checking agent never changes your project's files and keeps its scratch work in a temporary copy or under `.method/local/`, and it gives its word on its report's first line, as its own file says; the report order for you leaves a checking agent's report to its own form. When the same check fails twice, Claude commits what it has, runs diagnose in the foreground and waits for its word before a third fix. The reviewer ends a report with no criteria with its END-VERDICT line.
+- `docs/method/why.md`: the start line and the receipts are said to stop nothing yet (the receipts are counted from step 6b); the verdict file, the capped hook logs and the hooks README have rows; it no longer cites this repository's records.
+- Records: DECISIONS A73 (6) matches what was built, and A73 (13) says what the review changed; the rule map's M070 says the pull request and the plan carry reports, not a handoff file.
+- Tests: lint-prompts 111 cases (9 new) and 39 plants (4 new); budget 18 cases (2 new) and 9 plants (1 new); a new harness plant for the design case's `ends` question.
+
 ### Changed (step 5b, from its review)
 
 - A gate run whose start was not recorded is never VALID. Before, a receipt that a handback or an earlier stop had made, with no start, skipped every check and could say VALID; now every stop of such a run says INCOMPLETE (`no-start`), and it is never sent back.

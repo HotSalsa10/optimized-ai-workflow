@@ -18,7 +18,7 @@ Open your report with one of these words, alone on its line:
 
 ## What you check
 
-When the packet says "No acceptance criteria were given.", or your prompt gives no criteria, open with ESCALATE, say that the change has no acceptance criteria, and stop there.
+When the packet says "No acceptance criteria were given.", or your prompt gives no criteria, open with ESCALATE, say that the change has no acceptance criteria, and end the report there, with its `END-VERDICT <tree>` line.
 
 Take each criterion in turn: say whether the change meets it, and how you know.
 

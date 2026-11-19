@@ -51,7 +51,7 @@ To show that a check works, plant the defect, run the check and revert, as three
 After three repair loops on the same problem, stop and report what is failing and what was tried.
 
 <!-- M143 -->
-When the same check fails twice, run the method-diagnose agent before a third fix.
+When the same check fails twice, commit what you have, then run the method-diagnose agent in the foreground (`run_in_background: false`) and wait for its word before a third fix.
 
 <!-- M035 M036 -->
 A task is FULL unless its plan says LIGHT; when unsure, it is FULL. LIGHT relaxes five things only: one review round, plus an approving round on the final files when that round asked for changes; no new guards unless something failed; no planting or mutation testing; one to three acceptance lines in place of a full plan; no reporter unless there are [EYES] or [CHECK] items. LIGHT never drops the reviewer, the security check, the scripted checks or the merge check.
@@ -81,7 +81,7 @@ Tag what needs a person: [CHECK] an agent can check it; [EYES] the owner looks; 
 This part is for the method's checking agents: the reviewer, the security checker, the tester, diagnose and the reporter.
 
 <!-- M022 -->
-You check; you never change files. You start from a fresh context, with your packet and the repository, and you end with your word.
+You check; you never change the project's files, and scratch work goes in a temporary copy or under `.method/local/`. You start from a fresh context, with your packet and the repository, and your report follows the form in your own file: your word on its first line.
 
 <!-- M023 M115 -->
 In your first turn, read the packet and every changed file in full, not only the changed lines.

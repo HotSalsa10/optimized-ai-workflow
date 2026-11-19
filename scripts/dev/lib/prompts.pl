@@ -117,24 +117,65 @@ my (%gate, $gates_read, $model);
 }
 
 # frontmatter LINES: the frontmatter's keys and values, {KEY => VALUE},
-# with a block list's items (lines "  - X" under a key with no value) as
-# an array; comment lines skipped; undef when the file has none
+# read as YAML, and so the client, reads the forms an agent or an editor
+# writes (step 6.6, the review's F15 and F17): a value continued on the
+# indented lines after its key, or starting there, joined by single
+# spaces (a | or > block's lines too); a quoted value unquoted whole; a
+# " #" comment dropped after a value; a block list's items (lines "- X"
+# under a key with no value, indented or not) as an array, each item read
+# the same way; comment lines skipped; undef when the file has none
 sub frontmatter {
   my (@lines) = @_;
   return undef unless @lines && $lines[0] =~ /\A---[ \t]*\z/;
-  my (%fm, $last, $closed);
+  my (%fm, %more, @keys, $last, $closed);
   for my $l (@lines[1 .. $#lines]) {
     if ($l =~ /\A---[ \t]*\z/) { $closed = 1; last }
-    next if $l =~ /\A[ \t]*(?:#|\z)/;
     if ($l =~ /\A([A-Za-z][A-Za-z0-9_-]*)[ \t]*:[ \t]*(.*?)[ \t]*\z/) {
       $last = $1;
+      push @keys, $last unless exists $fm{$last};
       $fm{$last} = $2;
-    } elsif (defined $last && $l =~ /\A[ \t]+-[ \t]*(.*?)[ \t]*\z/) {
-      $fm{$last} = [] unless ref $fm{$last};
-      push @{ $fm{$last} }, $1;
+      $more{$last} = [];
+    } elsif (defined $last && $l =~ /\A(?:[ \t]|-(?:[ \t]|\z)|\z)/) {
+      push @{ $more{$last} }, $l;
+    } elsif ($l !~ /\A#/) {
+      undef $last;
     }
   }
-  return $closed ? \%fm : undef;
+  return undef unless $closed;
+  for my $k (@keys) {
+    my @more = map { /\A[ \t]*(.*?)[ \t]*\z/ ? $1 : '' } @{ $more{$k} };
+    my $v = $fm{$k};
+    my @items = grep { length && !/\A#/ } @more;
+    if (fm_plain($v) eq '' && @items && $items[0] =~ /\A-(?:[ \t]|\z)/) {
+      $fm{$k} = [map { /\A-[ \t]*(.*)\z/ ? fm_scalar($1) : () } grep { /\A-(?:[ \t]|\z)/ } @items];
+    } elsif ($v =~ /\A[|>][-+0-9]*(?:[ \t]+#.*)?\z/) {
+      $fm{$k} = join ' ', grep { length } @more;
+    } else {
+      $fm{$k} = fm_scalar($v, @more);
+    }
+  }
+  return \%fm;
+}
+# fm_plain TEXT: TEXT without a " #" comment after it (or that is one)
+sub fm_plain { my ($s) = @_; return '' if $s =~ /\A#/; $s =~ s/[ \t]+#.*\z//; return $s }
+# fm_scalar FIRST MORE...: a value from the text on its key's line and the
+# trimmed lines that continue it: quoted, the text between the quotes
+# ('' read as '); plain, the lines up to a comment, without it; each joined
+# by single spaces
+sub fm_scalar {
+  my @p = grep { length } @_;
+  my $all = join ' ', @p;
+  return $1 =~ s/''/'/gr if $all =~ /\A'((?:[^']|'')*)'[ \t]*(?:#.*)?\z/s;
+  return $1 if $all =~ /\A"((?:[^"\\]|\\.)*)"[ \t]*(?:#.*)?\z/s;
+  return $all if $all =~ /\A["']/;
+  my @v;
+  for my $s (@p) {
+    my $c = fm_plain($s);
+    if ($c eq '') { last if @v; next }
+    push @v, $c;
+    last if $c ne $s;
+  }
+  return join ' ', @v;
 }
 sub unquote { my ($v) = @_; $v = '' unless defined $v; $v =~ s/\A(["'])(.*)\1\z/$2/; return $v }
 

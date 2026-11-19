@@ -1,6 +1,6 @@
 # Reports and writing for the owner
 
-The owner may not read code and judges work by its reports. These rules cover every report, plan, summary and message written for people; commit messages and code comments are exempt.
+The owner may not read code and judges work by its reports. These rules cover every report, plan, summary and message written for people; commit messages and code comments are exempt, and a checking agent's report follows the form in its own file.
 
 <!-- M012 M037 -->
 A report opens with its status and the next step. Then come the [EYES] and [AUTHORITY] items, what changed, what is left, the risks, what is uncertain, and the check output. Work is never called a success without five parts: a summary, a change summary, the actual check output, the risks and the verdict.

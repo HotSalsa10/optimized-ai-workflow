@@ -75,7 +75,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M067 | Enforcement is stated honestly: what hooks and CI enforce, and what is only convention | incident | method/docs/method/why.md | done |
 | M068 | Writing for people: plain, precise, honest hedges; no machine-sounding habits | incident | method/.claude/rules/method/owner.md | done |
 | M069 | A reporter agent re-derives claims before the owner approves; /supervise stays optional | incident; decision A12 | method/.claude/agents/method/method-reporter.md | done |
-| M070 | A handoff file and the pull request carry reports between sessions | incident | method/.claude/skills/method-finish/SKILL.md | step 6b |
+| M070 | The pull request and the task's plan carry reports between sessions, not a handoff file | incident | method/.claude/skills/method-finish/SKILL.md | step 6b |
 | M071 | Plain language; one complete paste-able prompt; no deadline pressure | incident | method/.claude/rules/method/owner.md | done |
 | M072 | No log grows forever or stores secrets | incident | method/scripts/method/lib/log.pl | done |
 | M073 | Few hooks, each documented with what it prevents, what it costs and how it was seen to fire | incident | method/.claude/hooks/method/README.md | done |

@@ -489,6 +489,20 @@ else
 fi
 h_stop
 drop_sandbox "$sb" || true
+# (step 6.6, the review's F16) gate-receipt refusing every agent's
+# handback, the architect's too (ends: it takes more turns, and its design
+# never reaches the main session; measured at 2.1.319, the other questions
+# stay green)
+sb=$(make_sandbox) || abort_sandbox
+# shellcheck disable=SC2016 # perl code, expanded by perl
+perl -pi -e 's/^(\s*)(return 0 unless defined \$gate && !ref \$gate && exists \$w->\{gate\}\{\$gate\};)$/${1}return Hook::json({ hookSpecificOutput => { hookEventName => "PreToolUse", permissionDecision => "deny", permissionDecisionReason => "refused" } }) if (\$in->{tool_name} \/\/ "") eq "SubagentHandback"; # HARNESS-PLANT\n$1$2/' "$sb/method/scripts/method/lib/receipt.pl"
+if ! grep -q -F HARNESS-PLANT "$sb/method/scripts/method/lib/receipt.pl"; then
+  fail "design: the plant did not apply, so the check result would mean nothing"
+else
+  design_plant auto "ends|the handed-back design did not reach the main conversation|gate-receipt refuses every agent's handback, the architect's too"
+fi
+h_stop
+drop_sandbox "$sb" || true
 
 # 19. step 6.5's case for /method-start (h_start, h_start_holds).
 # start_plant MODE QUESTION|SEEN|TEXT...: with the plants already made in
