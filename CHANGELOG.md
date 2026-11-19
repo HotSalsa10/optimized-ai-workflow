@@ -122,6 +122,8 @@ Nothing yet. Release 1 is being built.
 - What you will see: measured in the real client at 2.1.316 and 2.1.319, `-p "/method-start"` sends the skill's text with the session's effort (xhigh) in place of `${CLAUDE_EFFORT}`; its `status.sh` call passes the guard and runs, while `status.sh && git commit` is refused (G6) and commits nothing; with no start hook, no METHOD-ACTIVE line comes and the skill's text that names it still reaches Claude. Whether Claude then acts on that text is convention.
 - The rule map: 3 more rules done (M004, M005 and M127 in `/method-start`), 117 of 147. Descriptions: 2,178 of the 3,000 bytes (nine files).
 - Tests: lint-prompts 103 to 102 cases (the two not-yet-built cases gone, one added); new cases in the harness (8 at each version); new plants in the harness (5); lint-prompts' not-yet-built plant replaced by method-start's folder removed.
+- Records before step 6's review (step 6.6): DECISIONS A73 holds step 6's settled choices as built and its known limits so far; RISKS gains #19 (the method's rules, agents and skills are text Claude can fail to follow; why.md says which are enforced), and #7, #11, #16 and #17 say what step 6 reduced; ROADMAP's step 6 line names what step 6 built, step 6b is added, `/setup` stays in step 7 and `/method-explain` goes to Track 4.
+- A shellcheck finding that turned CI red on step 6.5 (a harness variable set and never read, in tests/harness/lib.sh) is removed.
 
 ### Changed (step 5b, from its review)
 

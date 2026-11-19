@@ -14,7 +14,8 @@ Steps, each reviewed in a fresh context and committed with a verdict trailer:
 4b. The mutation wrapper (mutate-changed.sh), split from step 4 after its design critique (TASKS.md).
 5. The settings fragment, a free test harness that proves the hooks fire, session-status and the guard (docs/plans/step5.md).
 5b. gate-receipt, the third hook, split from step 5 after its plan review (A54).
-6. Method rules, agents (including the architect) and skills (including setup and design).
+6. Method rules, agents (the five checking agents and the architect) and skills (`/method-start`, `/method-plan`, `/method-design`), with checks on their text and size (docs/plans/step6.md; `/setup` moved to step 7, DECISIONS A73).
+6b. A computed "Ready to merge": done-check reads the gates' receipts and the task's plan, a report check, and `/method-finish`, split from step 6 (docs/plans/step6.md S1).
 7. Project templates, setup, sync, the money, ERPNext and documents packs, three example projects.
 8. Installer and uninstall.
 9. Project CI templates, a live test in a fresh cloud session, README v1.
@@ -39,7 +40,7 @@ Blocker: cleaned copies of the owner's status.sh, review packet, verdict file, p
 
 ## Track 4: later
 
-`/research <link>`, `/research-update`, the model-release checklist and rule pruning; more field packs when a real project needs one.
+`/research <link>`, `/research-update`, `/method-explain` (M120, moved from step 6, DECISIONS A73), the model-release checklist and rule pruning; more field packs when a real project needs one.
 
 Exit: the commands exist and one research run has produced a reviewed change.
 Blocker: Track 1.

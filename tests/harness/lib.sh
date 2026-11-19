@@ -784,12 +784,11 @@ h_design_holds() {
 # commit (HARNESS-CHAINED), then ends; the client's debug log goes to
 # $H_DIR/debug.log. MODE nohook: the fragment without its SessionStart
 # hook, so no METHOD-ACTIVE line comes; the main session only answers.
-# Sets H_SMODE (MODE), H_EFFORT (the fragment's effortLevel) and H_ACTIVE
-# (the first line session-status.sh prints, up to its version). Returns 1
-# when the case could not be made or the fake did not answer.
+# Sets H_EFFORT (the fragment's effortLevel) and H_ACTIVE (the first line
+# session-status.sh prints, up to its version). Returns 1 when the case
+# could not be made or the fake did not answer.
 h_start() {
   local mode=$2
-  H_SMODE=$mode
   H_EFFORT=$(perl -MJSON::PP -0ne 'print JSON::PP->new->decode($_)->{effortLevel}' "$1/method/settings.fragment.json") || return 1
   H_ACTIVE="METHOD-ACTIVE v"
   { h_case "start-$mode" && h_method "$1"; } || return 1
