@@ -490,6 +490,81 @@ fi
 h_stop
 drop_sandbox "$sb" || true
 
+# 19. step 6.5's case for /method-start (h_start, h_start_holds).
+# start_plant MODE QUESTION|SEEN|TEXT...: with the plants already made in
+# the copy $sb, h_start runs there in MODE; each QUESTION must fail with
+# SEEN in its H_WHY
+start_plant() {
+  local mode=$1 qr q rest seen text
+  shift
+  if ! h_start "$sb" "$mode"; then
+    fail "start ($mode): the case could not be made, or the fake did not answer"
+    return
+  fi
+  for qr in "$@"; do
+    q=${qr%%|*}
+    rest=${qr#*|}
+    seen=${rest%%|*}
+    text=${rest#*|}
+    if h_start_holds "$q"; then
+      fail "start: $text: the question '$q' stayed green"
+    else
+      case $H_WHY in
+        *"$seen"*) pass "start: $text: the question '$q' turns red (${H_WHY%%;*})" ;;
+        *) fail "start: $text: the question '$q' turned red for another reason" "$H_WHY" ;;
+      esac
+    fi
+  done
+}
+# one copy with three defects in default mode, each turning one question
+# red for its own reason, in one client run: a variable the client does not
+# substitute added to method-start (effort), the guard taken off the
+# fragment's PreToolUse hook on Bash (guard), and the start hook taken off its
+# SessionStart (active)
+sb=$(make_sandbox) || abort_sandbox
+s="$sb/method/.claude/skills/method-start/SKILL.md"
+# shellcheck disable=SC2016 # the variable is written into the skill as text
+printf '\nPlanted: ${CLAUDE_EFFORTS}.\n' >>"$s"
+perl -MJSON::PP -e 'my $f = shift; open my $h, "<", $f or die; my $d = JSON::PP->new->decode(do { local $/; <$h> }); close $h;
+  delete $d->{hooks}{SessionStart};
+  $d->{hooks}{PreToolUse} = [grep { ($_->{matcher} // "") !~ /(?:\A|\|)Bash(?:\||\z)/ } @{ $d->{hooks}{PreToolUse} }];
+  open $h, ">", $f or die; print $h JSON::PP->new->canonical->pretty->encode($d); close $h or die' "$sb/method/settings.fragment.json"
+# shellcheck disable=SC2016 # the planted variable as written, not expanded here
+if ! grep -q -F 'Planted: ${CLAUDE_EFFORTS}.' "$s" || grep -q -F 'session-status.sh' "$sb/method/settings.fragment.json" ||
+  ! perl -MJSON::PP -0ne 'my $d = JSON::PP->new->decode($_); my @p = @{ $d->{hooks}{PreToolUse} || [] }; exit(@p && !(grep { ($_->{matcher} // "") =~ /(?:\A|\|)Bash(?:\||\z)/ } @p) ? 0 : 1)' "$sb/method/settings.fragment.json"; then
+  fail "start: the plants did not apply, so the check results would mean nothing"
+else
+  start_plant default "effort|the literal \${CLAUDE_EFFORTS} reached main's requests|a variable the client does not substitute in method-start" \
+    "guard|the chained call was not refused by G6|the guard taken off the fragment's PreToolUse hook on Bash" \
+    "active|no start hook's METHOD-ACTIVE line reached main's requests|the start hook taken off the fragment"
+fi
+h_stop
+drop_sandbox "$sb" || true
+# with no start hook: method-start's lines naming METHOD-ACTIVE removed
+# (named), and, in a second copy, method-start made a skill only Claude can
+# call (expands)
+sb=$(make_sandbox) || abort_sandbox
+s="$sb/method/.claude/skills/method-start/SKILL.md"
+perl -ni -e 'print unless /METHOD-ACTIVE/' "$s"
+if grep -q -F METHOD-ACTIVE "$s"; then
+  fail "start: the plant did not apply, so the check result would mean nothing"
+else
+  start_plant nohook "named|method-start's SKILL.md has no line naming METHOD-ACTIVE|method-start's text naming the METHOD-ACTIVE line removed"
+fi
+h_stop
+drop_sandbox "$sb" || true
+sb=$(make_sandbox) || abort_sandbox
+s="$sb/method/.claude/skills/method-start/SKILL.md"
+# shellcheck disable=SC2016 # perl code, expanded by perl
+perl -0pi -e 's/^(name: method-start\n)/${1}user-invocable: false\n/m' "$s"
+if ! grep -q '^user-invocable: false$' "$s"; then
+  fail "start: the plant did not apply, so the check result would mean nothing"
+else
+  start_plant nohook "expands|/method-start's body in main's first request: no request|method-start made a skill only Claude can call"
+fi
+h_stop
+drop_sandbox "$sb" || true
+
 # 13. get-client: a download that does not match the pinned checksum is refused
 reg="$H_WORK/registry/@anthropic-ai/claude-code-linux-x64/-"
 mkdir -p "$reg" "$H_WORK/pkg/package"

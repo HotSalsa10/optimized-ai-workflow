@@ -890,5 +890,29 @@ else
   fail "design-auto: the case could not be made, or the fake did not answer; the client was not started"
 fi
 
+# --- 21. /method-start (step 6.5): the skill typed as the owner's message
+# (-p "/method-start", F6), with the method's fragment, once with the start
+# hook and the main session's two Bash calls, once without the start hook
+# (h_start, h_start_holds) ---
+start_q() {
+  if h_start_holds "$1"; then pass "$2"; else fail "$2" "$H_WHY"; fi
+}
+if h_start "$root" default; then
+  start_q expands "start: -p \"/method-start\" sends method-start's SKILL.md body, with no ARGUMENTS line; its '# rules:' line reaches no request; it is in init's slash_commands"
+  start_q effort "start: \${CLAUDE_EFFORT} in method-start is substituted with the session's effort (the fragment's effortLevel, which the main session's requests carry), and no \${...} reaches a request as written (F6)"
+  start_q guard "start: the skill's Bash calls reach the guard: status.sh in a call of its own passes and runs; status.sh && git commit is refused (G6) and commits nothing"
+  start_q active "start: with the start hook, its METHOD-ACTIVE line reaches the main session's first request"
+  h_safe start-default
+else
+  fail "start-default: the case could not be made, or the fake did not answer; the client was not started"
+fi
+if h_start "$root" nohook; then
+  start_q expands "start (no start hook): -p \"/method-start\" still sends method-start's SKILL.md body"
+  start_q named "start (no start hook): no METHOD-ACTIVE line comes, and the skill's text that names the missing METHOD-ACTIVE line reaches the main session (the text only; acting on it is convention)"
+  h_safe start-nohook
+else
+  fail "start-nohook: the case could not be made, or the fake did not answer; the client was not started"
+fi
+
 echo "harness: ${H_RUNS:-0} client runs took ${H_TOTAL_SECS:-0} s"
 finish

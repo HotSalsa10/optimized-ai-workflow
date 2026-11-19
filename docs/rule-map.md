@@ -9,8 +9,8 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M001 | One read-only status command orients any session: uncommitted and unpushed work in every repo, commits missing a verdict, record consistency, health | incident | method/scripts/method/status.sh | done |
 | M002 | A check that examined nothing prints SKIPPED, never "ok" | incident | method/scripts/method/run-checks.sh | done |
 | M003 | status exits 1 when something needs a look; it reports, it does not block | incident | method/scripts/method/status.sh | done |
-| M004 | Session start says where things stand, what is blocked and on whom, and the one next thing and why | incident | method/.claude/skills/method-start/SKILL.md | step 6 |
-| M005 | Do not start work until the owner says go | incident | method/.claude/skills/method-start/SKILL.md | step 6 |
+| M004 | Session start says where things stand, what is blocked and on whom, and the one next thing and why | incident | method/.claude/skills/method-start/SKILL.md | done |
+| M005 | Do not start work until the owner says go | incident | method/.claude/skills/method-start/SKILL.md | done |
 | M006 | Plan first: read everything, change nothing but the plan's own folder before the go, mark VERIFIED and INFERRED, wait | incident | method/.claude/skills/method-plan/SKILL.md | done |
 | M007 | Update the records before review, so one review covers one change | incident | method/.claude/skills/method-finish/SKILL.md | step 6b |
 | M008 | The verdict comes before the merge | incident | method/scripts/method/done-check.sh | done |
@@ -132,7 +132,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M124 | Before the owner approves a FULL merge, the owner predicts what happens in three cases taken from the locked expected results, then sees the results copied from the test log; a mismatch stops the merge for a talk | research: Osmani, critical thinking with agents | method/.claude/agents/method/method-reporter.md | done |
 | M125 | Before planning a FULL task, the planner asks for whatever is missing of: who it is for, what is out of scope, what done looks like that the owner can see, and what the owner expects to happen | research: Osmani, critical thinking with agents | method/.claude/skills/method-plan/SKILL.md | done |
 | M126 | The report check lists every number that appears in no log, and refuses a report whose "what the checks would miss" part is missing, empty or "nothing" (SPEC R8) | research: Osmani, critical thinking with agents | method/scripts/method/report-check.sh | step 6b |
-| M127 | Session start says how much finished work waits for the owner's merge approval (steps, commits, files) and makes that approval the one next thing, unless the owner says to keep building | incident: 117 commits waited unmerged | method/.claude/skills/method-start/SKILL.md | step 6 |
+| M127 | Session start says how much finished work waits for the owner's merge approval (steps, commits, files) and makes that approval the one next thing, unless the owner says to keep building | incident: 117 commits waited unmerged | method/.claude/skills/method-start/SKILL.md | done |
 | M128 | The guard refuses what it cannot check: a command it cannot read that names something it watches, input it cannot parse, or a missing perl | research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | done |
 | M129 | No PowerShell tool in method projects: the guard and the method's scripts read bash | research: docs | method/.claude/hooks/method/guard.sh | done |
 | M130 | Claude's git commands at the session's repository match a short list of allowed shapes; anything else is refused with what to do instead | research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | done |

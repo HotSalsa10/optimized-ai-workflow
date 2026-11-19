@@ -54,7 +54,11 @@
 # line "Base directory for this skill: ..." and a blank line, and the line
 # "ARGUMENTS: ARGS" after it; otherwise exit 1, printing "no request",
 # "no frontmatter", "missing" (no such line or body), "differs at byte N"
-# or "no arguments".
+# or "no arguments". Since step 6.5: with ARGS empty (the skill typed
+# with no arguments), the body ends there and no ARGUMENTS line follows
+# it ("arguments" when one does); with EFFORT (read.pl skill CONV FILE
+# ARGS DIR EFFORT), each ${CLAUDE_EFFORT} in the body is read as EFFORT,
+# as the client substitutes it.
 # Never shipped.
 use strict;
 use warnings;
@@ -223,8 +227,8 @@ if (($what // '') eq 'rules' && @ARGV == 5) {
   print "differs at byte $i\n";
   exit 1;
 }
-if (($what // '') eq 'skill' && @ARGV == 5) {
-  my ($conv, $file, $args, $dir) = @ARGV[1 .. 4];
+if (($what // '') eq 'skill' && (@ARGV == 5 || @ARGV == 6)) {
+  my ($conv, $file, $args, $dir, $effort) = @ARGV[1 .. 5];
   my ($b) = requests_of($conv, $dir);
   if (!$b) { print "no request\n"; exit 1 }
   open my $h, '<:raw', $file or do { print "cannot read $file\n"; exit 1 };
@@ -236,6 +240,10 @@ if (($what // '') eq 'skill' && @ARGV == 5) {
   if (!defined $want) { print "no frontmatter\n"; exit 1 }
   $want =~ s/\A\n+//;
   $want =~ s/\n+\z//;
+  if (defined $effort) {
+    utf8::decode($effort);
+    $want =~ s/\$\{CLAUDE_EFFORT\}/$effort/g;
+  }
   my $s = sent($b);
   my $key = "Base directory for this skill: ";
   my $at = index($s, $key);
@@ -248,11 +256,20 @@ if (($what // '') eq 'skill' && @ARGV == 5) {
     print "differs at byte $i\n";
     exit 1;
   }
-  if (index(substr($s, $at + 2 + length $want), "\nARGUMENTS: $args") < 0) { print "no arguments\n"; exit 1 }
+  my $rest = substr($s, $at + 2 + length $want);
+  if ($args eq '') {
+    # (typed with no arguments: the client adds no ARGUMENTS line, and the
+    # body ends where the message does)
+    if ($rest =~ /\A\n*ARGUMENTS:/) { print "arguments\n"; exit 1 }
+    if ($rest ne '' && substr($rest, 0, 1) ne "\n") { print "differs at byte ", length $want, "\n"; exit 1 }
+  } elsif (index($rest, "\nARGUMENTS: $args") < 0) {
+    print "no arguments\n";
+    exit 1;
+  }
   print "same\n";
   exit 0;
 }
-die "usage: read.pl init FIELD FILE | read.pl req CONV TEXT DIR | read.pl first CONV TEXT DIR | read.pl rules CONV SUFFIX FILE DIR | read.pl skill CONV FILE ARGS DIR | read.pl effort CONV DIR | read.pl model CONV DIR | read.pl tools CONV DIR | read.pl receipt DESC HOME GIT | read.pl used DESC HOME GIT | read.pl hooks DESC TEXT HOME LOG\n" unless defined $file && $what eq 'init';
+die "usage: read.pl init FIELD FILE | read.pl req CONV TEXT DIR | read.pl first CONV TEXT DIR | read.pl rules CONV SUFFIX FILE DIR | read.pl skill CONV FILE ARGS DIR [EFFORT] | read.pl effort CONV DIR | read.pl model CONV DIR | read.pl tools CONV DIR | read.pl receipt DESC HOME GIT | read.pl used DESC HOME GIT | read.pl hooks DESC TEXT HOME LOG\n" unless defined $file && $what eq 'init';
 open my $f, '<', $file or exit 1;
 while (my $l = <$f>) {
   my $o = eval { JSON::PP->new->utf8->decode($l) } or next;

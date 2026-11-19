@@ -65,6 +65,8 @@
 # (below); h_real_holds QUESTION judges it.
 # Step 6.4's case: h_design ROOT MODE types a method skill and runs the
 # method's architect (below); h_design_holds QUESTION judges it.
+# Step 6.5's case: h_start ROOT MODE types /method-start (below);
+# h_start_holds QUESTION judges it.
 # req-001 is h_fake's own alive probe.
 
 # settings a caller's environment must not carry into every case
@@ -768,6 +770,132 @@ h_design_holds() {
       h_req_in main HARNESS-DESIGN-HANDED-BACK || H_WHY="$H_WHY the handed-back design did not reach the main conversation;"
       ;;
     *) H_WHY="no such design question: $1" ;;
+  esac
+  [ -z "$H_WHY" ]
+}
+
+# h_start ROOT MODE (step 6.5): /method-start typed as the owner's message
+# (-p "/method-start", no arguments), with the method (h_method) and its
+# words (h_method_words) from the repository at ROOT (a planted copy in
+# tests/plants/harness.sh) and the fragment as the project's settings, in
+# default mode. The main session (its conversation matched by the skill's
+# command-name line) answers as the skill asks. MODE default: it runs
+# status.sh in a Bash call of its own, then status.sh chained to a git
+# commit (HARNESS-CHAINED), then ends; the client's debug log goes to
+# $H_DIR/debug.log. MODE nohook: the fragment without its SessionStart
+# hook, so no METHOD-ACTIVE line comes; the main session only answers.
+# Sets H_SMODE (MODE), H_EFFORT (the fragment's effortLevel) and H_ACTIVE
+# (the first line session-status.sh prints, up to its version). Returns 1
+# when the case could not be made or the fake did not answer.
+h_start() {
+  local mode=$2
+  H_SMODE=$mode
+  H_EFFORT=$(perl -MJSON::PP -0ne 'print JSON::PP->new->decode($_)->{effortLevel}' "$1/method/settings.fragment.json") || return 1
+  H_ACTIVE="METHOD-ACTIVE v"
+  { h_case "start-$mode" && h_method "$1"; } || return 1
+  if [ "$mode" = nohook ]; then
+    perl -MJSON::PP -e 'my $f = shift; open my $h, "<", $f or die; my $d = JSON::PP->new->decode(do { local $/; <$h> }); close $h;
+      delete $d->{hooks}{SessionStart} or die "no SessionStart hook\n";
+      open $h, ">", $f or die; print $h JSON::PP->new->canonical->pretty->encode($d); close $h or die' "$H_PROJ/.claude/settings.json" || return 1
+  fi
+  h_method_words "$1" || return 1
+  perl -MJSON::PP -e '
+    my ($mode) = @ARGV;
+    my @turns = map { {text => "MAIN-DONE-$_"} } 1 .. 3;
+    unshift @turns, {tool => "Bash", input => {command => "bash scripts/method/status.sh", description => "HARNESS status alone"}},
+      {tool => "Bash", input => {command => "bash scripts/method/status.sh && git commit -q --allow-empty -m HARNESS-CHAINED", description => "HARNESS status chained"}}
+      if $mode eq "default";
+    print JSON::PP->new->canonical->encode({convs => [{name => "main", match => "^<command-name>/method-start</command-name>\$", turns => \@turns}],
+      fallback => {text => "FAKE-FALLBACK"}, usage => {input_tokens => 11, output_tokens => 7}})' "$mode" >"$H_DIR/start.json" || return 1
+  h_fake "$H_DIR/start.json" || return 1
+  H_PROMPT="/method-start" h_client 90 -- --permission-mode default --allowedTools Bash --debug-file "$H_DIR/debug.log"
+  h_stop
+}
+# h_start_holds QUESTION: 0 when QUESTION holds for the case h_start ran
+# last; else 1, with H_WHY saying what was seen. The questions:
+#   expands  method-start's body (its SKILL.md after the frontmatter, each
+#            ${CLAUDE_EFFORT} read as the fragment's effortLevel) reached the
+#            main conversation's first request, with no ARGUMENTS line (none
+#            was typed); its "# rules:" line reached no request; and init's
+#            slash_commands lists method-start
+#   effort   the SKILL.md holds ${CLAUDE_EFFORT} (or the case cannot tell);
+#            no ${...} written in it reached any request as written; the
+#            body that reached the main conversation holds the effort where
+#            the file has the variable; and the main conversation's requests
+#            went out at that effort, so the variable said the session's
+#            own effort (F6)
+#   guard    (MODE default) the client's debug log (not empty, or the case
+#            cannot tell) shows the method's guard run on a Bash call and
+#            let it through (status 0), and refuse one (status 2); status.sh
+#            in its own call ran (its last line, "status: ...", reached the
+#            main conversation); the call chaining it to git commit was
+#            refused by G6 (its reason reached the main conversation), and
+#            no HARNESS-CHAINED commit was made
+#   active   (MODE default) the start hook's METHOD-ACTIVE line reached the
+#            main conversation's first request (the control for named)
+#   named    (MODE nohook) no METHOD-ACTIVE line from the start hook reached
+#            any request of the main conversation, and every line of the
+#            SKILL.md that names METHOD-ACTIVE (at least one, or the skill
+#            does not name it) reached the main conversation's requests:
+#            the text only; whether Claude acts on it is convention
+h_start_holds() {
+  local f got v line n
+  H_WHY=""
+  f="$H_PROJ/.claude/skills/method-start/SKILL.md"
+  case $1 in
+    expands)
+      got=$(perl "$HARNESS/read.pl" skill main "$f" "" "$H_DIR/fake" "$H_EFFORT")
+      [ "$got" = same ] || H_WHY="$H_WHY /method-start's body in main's first request: $got;"
+      line=$(sed -n 's/^# rules: //p' "$f")
+      if [ -z "$line" ]; then
+        H_WHY="$H_WHY method-start's SKILL.md has no '# rules:' line, so the case cannot tell;"
+      else
+        ! h_req_has "# rules: $line" || H_WHY="$H_WHY method-start's '# rules:' line reached a request;"
+      fi
+      h_init slash_commands | grep -q -x -F method-start || H_WHY="$H_WHY method-start is not in init's slash_commands;"
+      ;;
+    effort)
+      # shellcheck disable=SC2016 # the variable as written in the skill, not expanded here
+      if ! grep -q -F '${CLAUDE_EFFORT}' "$f"; then
+        H_WHY="method-start's SKILL.md holds no \${CLAUDE_EFFORT}, so the case cannot tell"
+        return 1
+      fi
+      # shellcheck disable=SC2016 # perl code, expanded by perl
+      for v in $(perl -ne 'print "$1\n" while /(\$\{[A-Za-z0-9_]+\})/g' "$f" | sort -u); do
+        ! perl "$HARNESS/read.pl" req main "$v" "$H_DIR/fake" || H_WHY="$H_WHY the literal $v reached main's requests, not substituted;"
+      done
+      got=$(perl "$HARNESS/read.pl" skill main "$f" "" "$H_DIR/fake" "$H_EFFORT")
+      [ "$got" = same ] || H_WHY="$H_WHY the body with $H_EFFORT for \${CLAUDE_EFFORT} in main's first request: $got;"
+      got=$(h_req_effort main)
+      [ "$got" = "$H_EFFORT" ] || H_WHY="$H_WHY main's requests went out at effort $got, not $H_EFFORT;"
+      ;;
+    guard)
+      if [ ! -s "$H_DIR/debug.log" ]; then
+        H_WHY="the client wrote no debug log, so the case cannot tell"
+        return 1
+      fi
+      for v in 0 2; do
+        LC_ALL=C grep -F 'Hooks: PreToolUse:Bash [' "$H_DIR/debug.log" | LC_ALL=C grep -F '/.claude/hooks/method/guard.sh' | LC_ALL=C grep -q -F "finished with status $v " ||
+          H_WHY="$H_WHY the debug log shows no run of the method's guard on a Bash call ending with status $v;"
+      done
+      h_req_in main 'status: nothing needs a look' || h_req_in main ' areas need a look (' || H_WHY="$H_WHY status.sh's last line did not reach main: it did not run in its own call;"
+      h_req_in main "guard G6: this call names the method's scripts (scripts/method/)" || H_WHY="$H_WHY the chained call was not refused by G6;"
+      n=$(HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git -C "$H_PROJ" log --format=%s | LC_ALL=C grep -c -x HARNESS-CHAINED)
+      [ "$n" = 0 ] || H_WHY="$H_WHY the chained commit ran ($n HARNESS-CHAINED commits);"
+      ;;
+    active)
+      h_req_in main "$H_ACTIVE" || H_WHY="$H_WHY no start hook's METHOD-ACTIVE line reached main's requests;"
+      ;;
+    named)
+      ! h_req_in main "$H_ACTIVE" || H_WHY="$H_WHY a start hook's METHOD-ACTIVE line reached main's requests, so the case cannot tell;"
+      while IFS= read -r line; do
+        [ -z "$line" ] || perl "$HARNESS/read.pl" req main "$line" "$H_DIR/fake" || H_WHY="$H_WHY the skill's line naming METHOD-ACTIVE did not reach main: $line;"
+      done <<EOF
+$(LC_ALL=C grep -F METHOD-ACTIVE "$f")
+EOF
+      [ "$(LC_ALL=C grep -c -F METHOD-ACTIVE "$f")" -gt 0 ] || H_WHY="$H_WHY method-start's SKILL.md has no line naming METHOD-ACTIVE;"
+      ;;
+    *) H_WHY="no such start question: $1" ;;
   esac
   [ -z "$H_WHY" ]
 }

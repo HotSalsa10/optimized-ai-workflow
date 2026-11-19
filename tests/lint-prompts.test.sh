@@ -246,8 +246,6 @@ lint_red "skill folder: a folder whose name does not start method- (listed)" met
 NOLIST=1 lint_red "skill folder: a folder whose name does not start method-, not listed: two problems" method/.claude/skills/plan/SKILL.md "$(sfm "name: plan")" \
   "lint-prompts: method/.claude/skills/plan/: the folder is not on G6's skill list" 2
 lint_red "skill folder: a folder with no SKILL.md" "${SD}notes.md" $'Notes.\n' "lint-prompts: $SD: no SKILL.md"
-lint_red "skill folder: a skill not built yet whose folder exists" method/.claude/skills/method-start/SKILL.md "$(sfm "name: method-start")" \
-  "lint-prompts: method/.claude/skills/method-start/: the skill method-start has its folder now: take it off %NOT_BUILT in scripts/dev/lib/prompts.pl"
 if wanted "skill folder: a listed name with no folder"; then
   mini || abort_sandbox
   list_skill method-y || abort_sandbox
@@ -268,14 +266,16 @@ lint_green "skill folder: a skill with a description, a comment line, a quoted n
 lint_green "skill folder: context: and agent named only in the body pass" "$S" "${shdr}Do not set context: fork or agent: here.$nl"
 lint_green "skill folder: CRLF line ends pass" "$S" "$(sfm "name: method-x" "description: x" | perl -pe 's/\n/\r\n/')"
 lint_green "skill folder: a project skill folder outside method/.claude/skills is not read" ".claude/skills/deploy/SKILL.md" $'---\nname: other\n---\n'
-if wanted "skill folder: the names not built yet pass, and are named"; then
+# (step 6.5 built the last skill on the list, method-start: no name is
+# excepted as not built yet any more)
+if wanted "skill folder: every name on the real list has its folder, none excepted"; then
   mini || abort_sandbox
   out=$(cd "$m" && bash scripts/dev/lint-prompts.sh 2>&1)
   code=$?
-  if [ "$code" -eq 0 ] && printf '%s\n' "$out" | grep -q "^lint-prompts: on G6's skill list and not built yet (step 6.5): method-start$"; then
-    pass "skill folder: the names not built yet pass, and are named"
+  if [ "$code" -eq 0 ] && ! printf '%s\n' "$out" | grep -q "not built yet" && [ -f "$m/method/.claude/skills/method-start/SKILL.md" ]; then
+    pass "skill folder: every name on the real list has its folder, none excepted"
   else
-    fail "skill folder: the names not built yet pass, and are named: exit $code" "$out"
+    fail "skill folder: every name on the real list has its folder, none excepted: exit $code" "$out"
   fi
 fi
 
