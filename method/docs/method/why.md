@@ -24,7 +24,7 @@ The hooks run in local sessions and in cloud sessions with one repository. Where
 | G16 settings-change (M136) | A settings change mid-session that switches off or weakens the hooks | guard.sh |
 | G17 skill-and-agent-hooks (M137) | A skill or agent that declares its own hooks | guard.sh |
 | The start line | Nothing: a notice. `METHOD-ACTIVE` and status's LOOK lines show the method's state at every start where the hooks run; whether Claude then stops is not checked (below) | session-status.sh |
-| Receipts (M053, M078, M106, M116) | Nothing yet: a checking agent's report cut off, made on files that changed, run below its effort, off the allowed models or from another definition gets an INVALID or INCOMPLETE receipt; from step 6b, done-check counts only VALID ones | gate-receipt.sh |
+| Receipts (M053, M078, M106, M116) | A review that does not count being taken for one: a checking agent's report cut off, made on files that changed, run below its effort, off the allowed models or from another definition gets an INVALID or INCOMPLETE receipt, which done-check does not count. Each receipt also records the base of the review packet its agent read | gate-receipt.sh |
 | Settings (M076, M104, M138, M139) | The advisor, auto memory and skill shell lines are off; merge tools and tools that start other sessions are denied, also with the hooks off | `.claude/settings.json` |
 
 ## Enforced by a script
@@ -34,11 +34,12 @@ The hooks run in local sessions and in cloud sessions with one repository. Where
 | M001, M003, M077 | Where things stand: uncommitted and unpushed work, commits missing a verdict, records, versions, effort | `scripts/method/status.sh` |
 | M002, M050, M051, M066 | Every check runs and examines something; a fresh clone works; no secrets; the log is kept | `scripts/method/run-checks.sh` |
 | M032, M038, M085, M112, M113 | The review packet is the reviewer's whole input, without the author's account or noise | `scripts/method/review-packet.sh` |
-| M008, M089, M108 | Ready to merge: the files are the commit, main is merged in, the checks passed, and the verdict line approves | `scripts/method/done-check.sh` |
+| M008, M089, M108 | Ready to merge: the files are the commit, main is merged in, the checks passed, and the verdict line is the one the receipts give | `scripts/method/done-check.sh` |
 | M044 | Mutation testing breaks the changed code on purpose | `scripts/method/mutate-changed.sh` |
 | M039 | Every script reads the verdict words from one file | `scripts/method/verdicts.txt` |
 | M072 | No hook log grows forever or stores secrets: each is cut to its newest lines, and its lines hold only fields of a fixed shape, never a command, a path or a message | `scripts/method/lib/log.pl` |
-| M009, M144 to M147 (step 6b) | The approved plan, the gates' receipts for the exact files, the locked expected results, the tier, at most three review rounds | `scripts/method/done-check.sh` |
+| M009, M144, M146 | The task's plan with its approval; VALID approving receipts of the reviewer and the security checker for the exact files, reviewed from the merge base or chained back to it; no other word from either on those files; at most three review rounds since the approval; every gate's word on the branch listed | `scripts/method/done-check.sh` |
+| M145, M146, M147 (step 6b) | The locked expected results and tier, a test run seen failing first and passing at the end, the reporter, three approving reviewers on high-risk paths | `scripts/method/done-check.sh` |
 | M126 (step 6b) | Every number in a report is in a log; "What the checks would miss" is not missing or empty | `scripts/method/report-check.sh` |
 | CI | The project's checks run on every change, outside the session | the project's CI (step 9) |
 
@@ -47,8 +48,8 @@ The hooks run in local sessions and in cloud sessions with one repository. Where
 | Rule | What is checked | What is not |
 |---|---|---|
 | M140, the start line | The hook adds `METHOD-ACTIVE` at every start | Whether Claude stops when it is missing |
-| Receipts | A gate's report has its first and last lines and was made the right way on the right files | Whether the verdict is right |
-| The plan's approval (M144, step 6b) | The Approved line's form, and that it quotes `approve <task>` for its own task | That you typed it |
+| Receipts | A gate's report has its first and last lines and was made the right way on the right files | Whether the verdict is right; a review cut off before its first word neither blocks nor counts, so its gate is run again |
+| The plan's approval (M144) | The Approved line's form, and that it quotes `approve <task>` for its own task | That you typed it |
 | The tier (M147, step 6b) | A change on a high-risk path is judged FULL | Whether a change off those paths is really LIGHT |
 | Seen failing first (M145, step 6b) | A tester run said TESTS FAIL after the approval and before the code | Which tests failed, or why: the reviewer checks the tests (M090) |
 | The report check (M126, step 6b) | The reporter refuses a report whose check did not pass | A LIGHT change without a reporter: then only the skill runs the check |

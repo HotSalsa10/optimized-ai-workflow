@@ -14,7 +14,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M006 | Plan first: read everything, change nothing but the plan's own folder before the go, mark VERIFIED and INFERRED, wait | incident | method/.claude/skills/method-plan/SKILL.md | done |
 | M007 | Update the records before review, so one review covers one change | incident | method/.claude/skills/method-finish/SKILL.md | step 6b |
 | M008 | The verdict comes before the merge | incident | method/scripts/method/done-check.sh | done |
-| M009 | Act on the verdict; at most 3 review rounds, then re-plan | incident; research: Claude Code team | method/scripts/method/done-check.sh | step 6b |
+| M009 | Act on the verdict; at most 3 review rounds, then re-plan | incident; research: Claude Code team | method/scripts/method/done-check.sh | done |
 | M010 | When scripts change, run the guards' own tests | incident | method/scripts/method/run-checks.sh | step 7 |
 | M011 | Commit with the verdict trailer, push, show status | incident | method/.claude/skills/method-finish/SKILL.md | step 6b |
 | M012 | Reports open with status and next step, then what changed, what is left, risks, what is uncertain, checks | incident | method/.claude/rules/method/owner.md | done |
@@ -149,7 +149,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M141 | The architect drafts a design for a new project or big feature (options and trade-offs in business terms; where the project uses packages, versions checked against live registries; the thinnest end-to-end version first) and builds nothing | decision A16 | method/.claude/agents/method/method-architect.md | done |
 | M142 | Diagnose finds the cause before any fix: it reads the evidence, changes nothing, and opens with ROOT CAUSE, SYMPTOM CHASE or SPEC QUESTION | decision A71 | method/.claude/agents/method/method-diagnose.md | done |
 | M143 | When the same check fails twice, call diagnose before a third fix | plan v3, moved by step 3 (TASKS.md) | method/.claude/rules/method/method.md | done |
-| M144 | A change is ready only when its task's plan carries a quoted approval naming the task | SPEC R4; decision A61 | method/scripts/method/done-check.sh | step 6b |
+| M144 | A change is ready only when its task's plan carries a quoted approval naming the task | SPEC R4; decision A61 | method/scripts/method/done-check.sh | done |
 | M145 | Expected results, tier and paths are locked at the plan's approval; a test run is seen failing after approval and before the code, and passing at the end | SPEC R6 | method/scripts/method/done-check.sh | step 6b |
 | M146 | Ready to merge needs VALID approving receipts for the exact files, reviewed from the merge base: reviewer and security check always; tester and reporter for FULL; three approving reviewers on high-risk paths; no other word from those gates on those files. The verdict line says what they say | SPEC R4, R6; decision A24 | method/scripts/method/done-check.sh | step 6b |
 | M147 | LIGHT only when the plan says so and the change touches no high-risk path, as main or the branch lists them | SPEC R6 | method/scripts/method/done-check.sh | step 6b |
