@@ -134,6 +134,7 @@ Nothing yet. Release 1 is being built.
 - `docs/method/why.md`: the start line and the receipts are said to stop nothing yet (the receipts are counted from step 6b); the verdict file, the capped hook logs and the hooks README have rows; it no longer cites this repository's records.
 - Records: DECISIONS A73 (6) matches what was built, and A73 (13) says what the review changed; the rule map's M070 says the pull request and the plan carry reports, not a handoff file.
 - Tests: lint-prompts 111 cases (9 new) and 39 plants (4 new); budget 18 cases (2 new) and 9 plants (1 new); a new harness plant for the design case's `ends` question.
+- CI: the planted defects run in three jobs instead of two. One half had grown to 25 minutes of its 30 and stopped at the limit on the next run with nothing failed; each third now has room. tests/suite.test.sh checks that the three parts cover every plant file once.
 
 ### Changed (step 5b, from its review)
 

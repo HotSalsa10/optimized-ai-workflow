@@ -42,7 +42,7 @@ jobs:
           echo "::stop-commands::stop-$RANDOM$RANDOM$RANDOM"
           bash tests/run.sh tests
 
-  # The planted defects run beside the tests, in two halves (every other
+  # The planted defects run beside the tests, in three parts (every third
   # plant file), each plant with only the test cases that can show its
   # stated reason (tests/lib.sh, TEST_ONLY; DECISIONS A70).
   plants:
@@ -52,7 +52,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: ["0/2", "1/2"]
+        shard: ["0/3", "1/3", "2/3"]
     env:
       REQUIRE_SHELLCHECK: "1"
       SHARD: ${{ matrix.shard }}
@@ -106,7 +106,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest, macos-latest]
-        part: ["tests", "plants 0/2", "plants 1/2"]
+        part: ["tests", "plants 0/3", "plants 1/3", "plants 2/3"]
     env:
       PART: ${{ matrix.part }}
     defaults:
