@@ -18,24 +18,29 @@
 #                 currency mark before or after ($, EUR, GBP, JPY signs),
 #                 thousands separators (1,200), a decimal part and a
 #                 percent mark, standing alone between spaces or marks
-#                 such as ( ) * ` " = | ; and closing punctuation. It must
-#                 be in a log exactly as written: 1,200 is not 1200, -3 is
-#                 not 3, $5 is not 5, 90% is not 90 (M074). Not numbers:
-#                 IDs and hashes (M126, A66, #4, b776281, 6b), paths and
-#                 line numbers (file.pl:12, a/7), versions (2.1.316),
-#                 dates and times (2026-11-22, 10:30, 22 November 2026,
-#                 November 22, 2026, 12/30), and a numbered list's or
-#                 heading's marker (1. or 2) at the start of a line). The
-#                 logs are read the same way, after terminal colour codes
-#                 are taken out.
+#                 such as ( ) * ` " = | ; the no-break and other wide
+#                 spaces, the en and em dashes, curly quotes, and closing
+#                 punctuation. Numbers joined by / or - are each read
+#                 (40/44, 3-5, 12/30). It must be in a log exactly as
+#                 written: 1,200 is not 1200, -3 is not 3, $5 is not 5,
+#                 90% is not 90 (M074). Not numbers: IDs and hashes (M126,
+#                 A66, #4, b776281, 6b), paths and line numbers
+#                 (file.pl:12, a/7), versions (2.1.316), dates and times
+#                 (2026-11-22, 22/11/2026, 10:30, 22 November 2026,
+#                 November 22, 2026, March 2026; but "March 14 tests" is a
+#                 number), and a numbered list's or heading's marker (1.
+#                 or 2) at the start of a line). The logs are read the
+#                 same way, after terminal colour codes are taken out.
 #   report-check: no "What the checks would miss" heading
 #   report-check: "What the checks would miss" (line N) has nothing under it
 #   report-check: "What the checks would miss" (line N) says only "none"
 #                 the heading is a markdown heading (#, ##, ...) with that
 #                 text in any case, a colon allowed; its part runs to the
 #                 next heading of its level or higher; headings inside a
-#                 code block do not count. A part that says only "nothing"
-#                 or "none" is listed.
+#                 code block do not count. HTML comments are not text. A
+#                 part whose every line says only "nothing", "none" or
+#                 "n/a" (brackets, quotes and closing marks aside), or
+#                 holds no word at all, is listed.
 # Then "report-check: PASS - ..." when nothing was listed, or
 # "report-check: FAIL - N listed".
 #
@@ -49,7 +54,8 @@
 #   empty, "nothing" or "none" (SPEC R8).
 # Who makes it count: /method-finish runs it, and the reporter answers that
 # changes are needed when it did not exit 0. A number written in words, or
-# with a unit stuck to it (5ms), is not read as a number.
+# with a unit or word stuck to it (5ms, 44-all, 40/s), is not read as a
+# number.
 set -u
 # perl reads bytes; these settings would change how it reads and writes
 # them, and the library paths would let modules from elsewhere run inside it

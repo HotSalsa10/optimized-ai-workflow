@@ -5,17 +5,26 @@
 # Report::numbers(TEXT) is the one reading of what a number is, used for
 # the report and for every log alike (M048): a list of [LINE, NUMBER], the
 # number exactly as written. Each line is cut into pieces at spaces and at
-# the marks ( ) [ ] { } < > " ` * = | ; then the marks ' _ ~ that open a
-# piece and ' _ . , : ! ? that close it are dropped. A piece is a number
-# only when all of it is one ($NUMBER), so a digit inside an ID, a hash, a
-# path, a version or a date is never one. A one- or two-digit day or a
-# four-digit year beside a month's name is a date; the first number of a
-# line that opens with a list or heading marker (1. or 2) after any # or >)
-# is that marker.
+# the marks ( ) [ ] { } < > " ` * = | ; and at the no-break, thin and
+# other wide spaces, the en and em dashes, curly quotes, the bullet and
+# the ellipsis; then the marks ' _ ~ that
+# open a piece and ' _ . , : ! ? that close it are dropped. A piece is a
+# number only when all of it is one ($NUMBER), so a digit inside an ID, a
+# hash, a path, a version or a date is never one. A piece made only of
+# numbers joined by / or - (40/44, 3-5) is those numbers, unless it is a
+# date written so: a four-digit year first or last (2026-11-22, 22/11/2026,
+# 2026-11); 12/30 is two numbers. Beside a month's name, a date is a day
+# (1 to 31) before it (22 November), a day after it followed by a comma or
+# a year (November 22, 2026), or a year after it or after its day (March
+# 2026, 22 November 2026); so "March 14 tests" is a number. The first
+# number of a line that opens with a list or heading marker (1. or 2)
+# after any # or >) is that marker.
 #
 # Report::miss_problems(TEXT): what is wrong with the "What the checks
 # would miss" part, one plain line each; none when it is there and says
-# something.
+# something. HTML comments are not text; a part whose every line says
+# only "nothing", "none" or "n/a" (brackets, quotes, emphasis, list marks
+# and closing . ! ; , : dropped) says nothing.
 package Report;
 use strict;
 use warnings;
@@ -31,7 +40,7 @@ if (!eval { require File::Spec->catfile($lib, 'esc.pl'); 1 }) {
 }
 
 my $HEADING = 'what the checks would miss';
-my %SAYS_NOTHING = map { $_ => 1 } qw(nothing none);
+my %SAYS_NOTHING = map { $_ => 1 } qw(nothing none n/a);
 
 # the marks a number may carry, as UTF-8 bytes
 my $SIGN = qr/(?:[+-]|\xE2\x88\x92)/;                   # + - U+2212
@@ -39,8 +48,17 @@ my $CUR = qr/(?:\$|\xE2\x82\xAC|\xC2\xA3|\xC2\xA5)/;    # $ EUR GBP JPY signs
 our $NUMBER = qr/\A$SIGN?$CUR?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:%|$CUR)?\z/;
 my $MONTH = qr/\A(?:January|February|March|April|May|June|July|August|September|October|November|December
   |Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\z/x;
-my $DATE_PART = qr/\A(?:\d{1,2}|\d{4})\z/;
-my $CUT = qr/[ \t\r\f\x0B()\[\]{}<>"`*=|;]+/;
+my $DAY = qr/\A(?:0?[1-9]|[12]\d|3[01])\z/;
+my $YEAR = qr/\A(?:19|20)\d\d\z/;
+# what joins numbers into one piece, and a date written with it
+my $JOIN = qr{[/-]};
+my $JOINED_DATE = qr{\A(?:\d{4}([/-])\d{1,2}(?:\1\d{1,2})?|\d{1,2}([/-])\d{1,2}\2\d{4})\z};
+# where a line is cut: spaces and marks; U+00A0, U+2000 to U+200A and
+# U+202F (spaces); U+2012 to U+2015 (dashes); U+2018 to U+201F, U+2022 and
+# U+2026 (quotes, the bullet, the ellipsis)
+my $CUT = qr/(?:[ \t\r\f\x0B()\[\]{}<>"`*=|;]|\xC2\xA0|\xE2\x80[\x80-\x8A\xAF]|\xE2\x80[\x92-\x95]|\xE2\x80[\x98-\x9F\xA2\xA6])+/;
+# dashes and spaces that are no word in the miss part
+my $NO_WORD = qr/(?:\xC2\xA0|\xE2\x80[\x80-\x8A\xAF\x92-\x95])+/;
 my $LIST_MARK = qr/\A[ \t]*(?:(?:#{1,6}|>)[ \t]+)*\d+[.)][ \t]/;
 
 sub say_line { print Esc::line("report-check: $_[0]"), "\n" }
@@ -56,30 +74,57 @@ sub usage {
   exit 2;
 }
 
+# joined PIECE: the numbers of a piece made only of numbers joined by / or
+# - (40/44 is 40 and 44, -2-44 is -2 and 44); none for any other piece and
+# for a date written so
+sub joined {
+  my ($x) = @_;
+  my $sign = $x =~ s/\A($SIGN)// ? $1 : '';
+  return () unless $x =~ $JOIN;
+  my @parts = split $JOIN, $x, -1;
+  return () if grep { $_ !~ $NUMBER } @parts;
+  return () if $x =~ $JOINED_DATE;
+  $parts[0] = $sign . $parts[0];
+  return @parts;
+}
+
+# date PIECES I COMMA: the number at I is part of a date beside a month's
+# name; COMMA: a comma closed it
+sub date {
+  my ($p, $i, $comma) = @_;
+  my ($x, $before, $after) = ($p->[$i], $i > 0 ? $p->[$i - 1] : '', $i < $#$p ? $p->[$i + 1] : '');
+  return 1 if $x =~ $DAY && $after =~ $MONTH;
+  return 1 if $x =~ $DAY && $before =~ $MONTH && ($comma || $after =~ $YEAR);
+  return 1 if $x =~ $YEAR && $before =~ $MONTH;
+  return 1 if $x =~ $YEAR && $i > 1 && $p->[$i - 2] =~ $MONTH && $before =~ $DAY;
+  return 0;
+}
+
 sub numbers {
   my ($text) = @_;
   my @out;
   my $n = 0;
   for my $line (split /\n/, Esc::plain($text), -1) {
     $n++;
-    my @p = grep { length } map {
+    my (@p, @comma);
+    for (split $CUT, $line) {
       my $x = $_;
       $x =~ s/\A['_~]+//;
-      $x =~ s/['_.,:!?]+\z//;
-      $x
-    } split $CUT, $line;
+      my $close = $x =~ s/(['_.,:!?]+)\z// ? $1 : '';
+      next unless length $x;
+      push @p, $x;
+      push @comma, index($close, ',') >= 0;
+    }
     my $marker = $line =~ $LIST_MARK;
     for my $i (0 .. $#p) {
-      next unless $p[$i] =~ $NUMBER;
+      my @nums = $p[$i] =~ $NUMBER ? ($p[$i]) : joined($p[$i]);
+      next unless @nums;
       if ($marker) {    # the line's first number is its marker
         $marker = 0;
         next;
       }
-      next if $p[$i] =~ $DATE_PART
-        && (($i > 0 && $p[$i - 1] =~ $MONTH)
-        || ($i < $#p && $p[$i + 1] =~ $MONTH)
-        || ($i > 1 && $p[$i - 2] =~ $MONTH && $p[$i - 1] =~ $DATE_PART));
-      push @out, [$n, $p[$i]];
+      next if @nums == 1 && $nums[0] eq $p[$i] && date(\@p, $i, $comma[$i]);
+      push @out, map { [$n, $_] } @nums;
     }
   }
   return @out;
@@ -125,20 +170,25 @@ sub miss_problems {
       last if defined $l && $l <= $level;
       push @body, $lines[$j];
     }
-    my $say = join ' ', map {
-      my $x = $_;
+    my $body = join "\n", @body;
+    $body =~ s/<!--.*?-->//gs;
+    $body =~ s/<!--(?:(?!-->).)*\z//s;    # a comment left open runs to the end
+    my @said;
+    for my $x (split /\n/, $body) {
       $x =~ s/\A[ \t]*(?:[-*+]|\d+[.)])[ \t]+//;
-      $x
-    } @body;
-    $say =~ s/[*_`>#~]+//g;
-    $say =~ s/\s+/ /g;
-    $say =~ s/\A | \z//g;
-    $say =~ s/[.!]+\z//;
+      $x =~ s/[*_`>#~()"']+//g;
+      $x =~ s/$NO_WORD/ /g;
+      $x =~ s/\s+/ /g;
+      $x =~ s/\A | \z//g;
+      $x =~ s/[.!;,:]+\z//;
+      push @said, lc $x if $x =~ /[A-Za-z0-9\x80-\xff]/;
+    }
     my $where = '"What the checks would miss" (line ' . ($i + 1) . ')';
-    if ($say eq '') {
+    if (!@said) {
       push @problems, "$where has nothing under it";
-    } elsif ($SAYS_NOTHING{lc $say}) {
-      push @problems, "$where says only \"" . lc($say) . '"';
+    } elsif (!grep { !$SAYS_NOTHING{$_} } @said) {
+      my %seen;
+      push @problems, "$where says only \"" . join('", "', grep { !$seen{$_}++ } @said) . '"';
     }
   }
   push @problems, 'no "What the checks would miss" heading' unless $found;

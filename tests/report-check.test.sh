@@ -139,6 +139,13 @@ if wanted "marks around a number are not part of it"; then
   expect "marks around a number are not part of it" 0 'PASS - 8 numbers'
 fi
 
+if wanted "curly quotes, a bullet and an ellipsis cut a line"; then
+  report "$(printf 'We saw \342\200\23412\342\200\235, \342\200\23013\342\200\231, \342\200\24214 and 15\342\200\246')"
+  log a.log 'count 99'
+  rc r.md a.log
+  expect_listed "curly quotes, a bullet and an ellipsis cut a line" 12 13 14 15
+fi
+
 if wanted "a CRLF report reads the same"; then
   printf 'Checks: 12.\r\n\r\n## What the checks would miss\r\n\r\nThe colours.\r\n' >"$work/r.md"
   log a.log 'count 12'
@@ -169,10 +176,46 @@ if wanted "versions are not numbers"; then
 fi
 
 if wanted "dates and times are not numbers"; then
-  report 'Written 2026-11-22 at 10:30, on 22 November 2026, or November 22, 2026; until 1 December; Nov 3; 12/30.'
+  report 'Written 2026-11-22 at 10:30, on 22 November 2026, or November 22, 2026; until 1 December; Nov 3, 2026; March 2026; 22/11/2026, 2026/11/22 and 2026-11.'
   log a.log 'nothing'
   rc r.md a.log
   expect "dates and times are not numbers" 0 'PASS - 0 numbers'
+fi
+
+if wanted "a count after a month and a slash pair are numbers"; then
+  report 'In March 14 tests failed; on 12/30 we ran it.'
+  log a.log 'nothing'
+  rc r.md a.log
+  expect_listed "a count after a month and a slash pair are numbers" 14 12 30
+fi
+
+# --- numbers joined to numbers, and spaces that are not ASCII ---
+if wanted "numbers joined by a slash are read"; then
+  report 'Tests: 40/44 passed; total 5/5.'
+  log a.log 'tests 44 passed'
+  rc r.md a.log
+  expect_listed "numbers joined by a slash are read" 40 5 5
+fi
+
+if wanted "numbers joined by a hyphen are read"; then
+  report 'Ran 7-9 times, and -2-44 is a range.'
+  log a.log 'tests 44 passed'
+  rc r.md a.log
+  expect_listed "numbers joined by a hyphen are read" 7 9 -2
+fi
+
+if wanted "en and em dashes cut a line"; then
+  report "$(printf 'Ran 3\342\200\2235 times; 44\342\200\224all green.')"
+  log a.log 'tests 44 passed'
+  rc r.md a.log
+  expect_listed "en and em dashes cut a line" 3 5
+fi
+
+if wanted "a no-break space cuts a line"; then
+  report "$(printf 'Took 12\302\240s; 44\302\240tests; 6\342\200\257runs.')"
+  log a.log 'tests 44 passed'
+  rc r.md a.log
+  expect_listed "a no-break space cuts a line" 12 6
 fi
 
 if wanted "a number beside a word that is not a month is a number"; then
@@ -250,7 +293,7 @@ if wanted "the miss heading last with nothing under it is listed"; then
   expect "the miss heading last with nothing under it is listed" 1 '(line 3) has nothing under it'
 fi
 
-for body in 'nothing' 'None.' '- none' '*Nothing*' 'NOTHING!'; do
+for body in 'nothing' 'None.' '- none' '*Nothing*' 'NOTHING!' '(none)' '"none"' 'Nothing;' 'N/A' 'n/a.'; do
   if wanted "the miss heading saying only '$body' is listed"; then
     printf 'Status: ready.\n\n### What the checks would miss\n\n%s\n\n### Risks\n\nSome.\n' "$body" >"$work/r.md"
     log a.log 'nothing'
@@ -258,6 +301,41 @@ for body in 'nothing' 'None.' '- none' '*Nothing*' 'NOTHING!'; do
     expect "the miss heading saying only '$body' is listed" 1 '"What the checks would miss" (line 3) says only' 'FAIL - 1 listed'
   fi
 done
+
+if wanted "a miss part whose every line says nothing is listed"; then
+  printf 'Status: ready.\n\n## What the checks would miss\n\n- Nothing.\n- None.\n' >"$work/r.md"
+  log a.log 'nothing'
+  rc r.md a.log
+  expect "a miss part whose every line says nothing is listed" 1 '(line 3) says only "nothing", "none"' 'FAIL - 1 listed'
+fi
+
+if wanted "a miss part with one line that says something passes"; then
+  printf 'Status: ready.\n\n## What the checks would miss\n\n- None.\n- The printed invoice.\n' >"$work/r.md"
+  log a.log 'nothing'
+  rc r.md a.log
+  expect "a miss part with one line that says something passes" 0 'report-check: PASS'
+fi
+
+if wanted "a miss part holding only a comment has nothing under it"; then
+  printf 'Status: ready.\n\n## What the checks would miss\n\n<!-- none -->\n<!-- Write here what\nthe checks would miss. -->\n' >"$work/r.md"
+  log a.log 'nothing'
+  rc r.md a.log
+  expect "a miss part holding only a comment has nothing under it" 1 '(line 3) has nothing under it' 'FAIL - 1 listed'
+fi
+
+if wanted "a comment left open in the miss part runs to its end"; then
+  printf 'Status: ready.\n\n## What the checks would miss\n\n<!-- Write here what\nthe checks would miss.\n' >"$work/r.md"
+  log a.log 'nothing'
+  rc r.md a.log
+  expect "a comment left open in the miss part runs to its end" 1 '(line 3) has nothing under it' 'FAIL - 1 listed'
+fi
+
+if wanted "a miss part holding only a dash has nothing under it"; then
+  printf 'Status: ready.\n\n## What the checks would miss\n\n\342\200\224\n-\n' >"$work/r.md"
+  log a.log 'nothing'
+  rc r.md a.log
+  expect "a miss part holding only a dash has nothing under it" 1 '(line 3) has nothing under it' 'FAIL - 1 listed'
+fi
 
 if wanted "the miss heading with text passes in any case and with a colon"; then
   printf 'Status: ready.\n\n# what the checks would MISS:\n\nNothing about the printed invoice.\n' >"$work/r.md"
