@@ -515,7 +515,7 @@ sub push_rule {
   return "this push's destination is not a branch; $form" if $dst =~ m{\Arefs/} || $dst eq '' || $dst =~ /\A-/;
   # (refusals name no word of the push, the branch included; final review
   # of step 5)
-  return "pushing to main is refused: the owner merges into main on GitHub (until review receipts exist, step 6); push your task branch instead"
+  return "pushing to main is refused: the owner merges into main on GitHub; push your task branch instead"
     if main_names($dir)->{ lc $dst };
   my ($st, $out) = git_at($dir, 'config', '--get-regexp', '^remote\..*\.(push|mirror)$');
   return 'a remote.*.push or remote.*.mirror setting would change where this push goes; the owner must remove it first' if $st == 0 && $out ne '';

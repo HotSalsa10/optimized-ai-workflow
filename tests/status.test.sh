@@ -579,7 +579,7 @@ code=$?
 out=$(cat "$work/out")
 expect "a relative CLAUDE_CODE_EXECPATH is never run" 0 "claude-code: SKIPPED - CLAUDE_CODE_EXECPATH is not an absolute path"
 st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-21319" CLAUDE_CODE_EFFORT_LEVEL=high
-expect "CLAUDE_CODE_EFFORT_LEVEL set is a LOOK" 1 "effort: LOOK - CLAUDE_CODE_EFFORT_LEVEL is set; it overrides every per-role effort (DECISIONS A4)"
+expect "CLAUDE_CODE_EFFORT_LEVEL set is a LOOK" 1 "effort: LOOK - CLAUDE_CODE_EFFORT_LEVEL is set; it overrides every per-role effort, the checking agents' xhigh included; remove it where it is set"
 st "$rw" CLAUDE_CODE_EXECPATH="$work/cc/claude-21319" CLAUDE_CODE_EFFORT_LEVEL=
 expect "CLAUDE_CODE_EFFORT_LEVEL set but empty is a LOOK" 1 "effort: LOOK - CLAUDE_CODE_EFFORT_LEVEL is set"
 st "$rw" CLAUDE_CODE_EFFORT_LEVEL=low

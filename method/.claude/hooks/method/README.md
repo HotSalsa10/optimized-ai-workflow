@@ -110,7 +110,7 @@ A receipt says one of three words, with reason codes:
 
 **What it stops.** A cut-off review counted as an approval: a report without its first and last lines is sent back once (default mode) or its handback refused once (auto mode); still without them, the receipt says INCOMPLETE. A stale review, one made on uncommitted or changing files or on a packet built for other files. A gate run off the allowed models, below its effort, from another definition, or handing its work to another agent.
 
-**What it does not stop.** Whether the verdict is right. A receipt, mark or record changed by a program Claude writes and runs: they are local files (RISKS #2, #18). Until step 6 nothing reads receipts: done-check still reads the typed verdict line. Where the hooks do not run (above), no receipt is made.
+**What it does not stop.** Whether the verdict is right. A receipt, mark or record changed by a program Claude writes and runs: they are local files (RISKS #2, #18). done-check reads them before a merge: a review counts only through its receipt. Where the hooks do not run (above), no receipt is made.
 
 **What you will see.** One line per gate run in `.method/local/gates.log`: the time, the word, the gate, the tree, the model, the effort and the first reason (`none` for VALID). At the next session start, session-status says how many receipts for the files at HEAD do not say VALID. A gate sent back sees gate-receipt's reason, with the exact first and last lines, as its next message.
 

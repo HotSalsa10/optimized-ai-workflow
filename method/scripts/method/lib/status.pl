@@ -374,7 +374,7 @@ sub claude_code_lines {
 }
 
 sub effort_lines {
-  return ['effort', 'LOOK', 'CLAUDE_CODE_EFFORT_LEVEL is set; it overrides every per-role effort (DECISIONS A4);'
+  return ['effort', 'LOOK', 'CLAUDE_CODE_EFFORT_LEVEL is set; it overrides every per-role effort, the checking agents\' xhigh included;'
     . ' remove it where it is set and start a new session'] if exists $ENV{CLAUDE_CODE_EFFORT_LEVEL};
   return ['effort', 'SKIPPED', "not run inside Claude Code; its settings' variables are not visible here"]
     unless in_hook() || defined $ENV{CLAUDE_CODE_EXECPATH} && $ENV{CLAUDE_CODE_EXECPATH} ne '';

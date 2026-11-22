@@ -20,8 +20,8 @@
 #     carrier, npx and the like running @anthropic-ai/claude-code, and a
 #     call (or a program's text) that sets CLAUDE_CONFIG_DIR,
 #     CLAUDE_CODE_SIMPLE or CLAUDE_CODE_SAFE_MODE. A nested Claude runs
-#     without this project's hooks; the method's own nested runs come in
-#     step 6 through one wrapper the guard will know by name.
+#     without this project's hooks, and the method starts none: its
+#     checking agents run as Agent calls, which get receipts.
 #   MCP tools (D10): read-only tools pass by name (get_*, list_*,
 #     search_*, read_*, *_read), and so do the same-session tools
 #     (send_later, subscribe_pr_activity, unsubscribe_pr_activity); any
@@ -99,7 +99,7 @@ sub judge_bash {
     }
     next unless @w;
     if (lc $n eq 'claude') {
-      return ('G4', "starting another Claude is refused: it would run without this project's hooks (D11; the method's own nested runs come in step 6)$NO");
+      return ('G4', "starting another Claude is refused: it would run without this project's hooks$NO");
     }
     if ($n =~ /\A(?:npx|bunx|pnpx|npm|pnpm|yarn)\z/ && grep { m{\@anthropic-ai/claude-code\b|\Aclaude-code\z} } @w[1 .. $#w]) {
       return ('G4', "running the Claude Code package is refused: it starts another Claude without this project's hooks (D11)$NO");
