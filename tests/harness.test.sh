@@ -821,5 +821,98 @@ else
   fail "gates-background: the case could not be made, or the fake did not answer; the client was not started"
 fi
 
+# --- 18. the method's rules (step 6.1): the real rules files, laid out as
+# sync will (h_method_words), reach the main session's first request and a
+# gate's, exactly as tests/budget.test.sh counts them, and their rule ID
+# comments reach no request (h_words, h_words_holds) ---
+words_q() {
+  if h_words_holds "$1"; then pass "$2"; else fail "$2" "$H_WHY"; fi
+}
+if h_words "$root"; then
+  words_q reach "words: the method's rules files reach the main session's first request exactly as the budget counts them (each line holding only a comment dropped, every other byte kept)"
+  words_q gate "words: the method's rules files reach a gate's first request the same way"
+  words_q comments "words: no rule ID comment from the rules files reaches any request of the main session or the gate"
+  h_safe words
+else
+  fail "words: the case could not be made, or the fake did not answer; the client was not started"
+fi
+
+# --- 19. the gates (step 6.2): the method's own gate files, laid out as
+# sync will, each called by the main session in one message in the
+# foreground, once in default mode and once in auto mode (h_real_gates,
+# h_real_holds) ---
+real_q() {
+  if h_real_holds "$1"; then pass "$2"; else fail "$2" "$H_WHY"; fi
+}
+if h_real_gates "$root" default; then
+  real_q loads "real gates: each gate file in verdicts.txt loads (in the init event's agents), with no unknown-key, parse or not-loaded line in the client's debug log"
+  real_q valid "real gates (default mode): each gate's receipt is VALID with its word, its real body compared with what the client sent (B10)"
+  real_q record "real gates (default mode): each receipt took the fragment's model and effort xhigh from the gate's record"
+  real_q tools "real gates (default mode): each gate is offered its tools, Read and Bash among them, and no Agent, Task, Skill or SendMessage"
+  h_safe real-gates-default
+else
+  fail "real-gates-default: the case could not be made, or the fake did not answer; the client was not started"
+fi
+if h_real_gates "$root" auto; then
+  real_q handback "real gates (auto mode): with tools: set, each gate is still offered SubagentHandback"
+  real_q valid "real gates (auto mode): each gate's handback gets a VALID receipt with its word"
+  real_q tools "real gates (auto mode): each gate is offered no Agent, Task, Skill or SendMessage"
+  h_safe real-gates-auto
+else
+  fail "real-gates-auto: the case could not be made, or the fake did not answer; the client was not started"
+fi
+
+# --- 20. planning and design (step 6.4): the method's skills typed as the
+# owner's message (-p "/method-plan ..." and "/method-design ...", F6), and
+# the method's architect called by the main session in the foreground, once
+# in default mode and once in auto mode (h_design, h_design_holds) ---
+design_q() {
+  if h_design_holds "$1"; then pass "$2"; else fail "$2" "$H_WHY"; fi
+}
+if h_design "$root" default; then
+  design_q expands "design (default mode): -p \"/method-plan ...\" sends method-plan's SKILL.md body as written, with the typed arguments; its '# rules:' line reaches no request; every method skill is in init's slash_commands"
+  design_q loads "design: method-architect loads (in the init event's agents), with no unknown-key, parse or not-loaded line in the client's debug log"
+  design_q model "design (default mode): the architect's requests go out at the fragment's model and effort xhigh"
+  design_q tools "design (default mode): the architect is offered Read and WebFetch, and no Agent, Task, Skill, SendMessage, Bash, PowerShell, Monitor, Edit, Write, MultiEdit or NotebookEdit"
+  design_q receipt "design (default mode): the architect makes no receipt (gate-receipt does not run during its call; no receipt, no gates.log line, no METHOD-ACTIVE line for it)"
+  h_safe design-default
+else
+  fail "design-default: the case could not be made, or the fake did not answer; the client was not started"
+fi
+if h_design "$root" auto; then
+  design_q expands "design (auto mode): -p \"/method-design ...\" sends method-design's SKILL.md body as written, with the typed arguments"
+  design_q ends "design (auto mode): the architect is offered SubagentHandback, hands its design back in one turn, and the main session gets it"
+  design_q model "design (auto mode): the architect's requests go out at the fragment's model and effort xhigh"
+  design_q tools "design (auto mode): the architect is offered Read and WebFetch, and no delegation, command or writing tool"
+  design_q receipt "design (auto mode): the architect makes no receipt (gate-receipt runs once, on its handback, and lets it through)"
+  h_safe design-auto
+else
+  fail "design-auto: the case could not be made, or the fake did not answer; the client was not started"
+fi
+
+# --- 21. /method-start (step 6.5): the skill typed as the owner's message
+# (-p "/method-start", F6), with the method's fragment, once with the start
+# hook and the main session's two Bash calls, once without the start hook
+# (h_start, h_start_holds) ---
+start_q() {
+  if h_start_holds "$1"; then pass "$2"; else fail "$2" "$H_WHY"; fi
+}
+if h_start "$root" default; then
+  start_q expands "start: -p \"/method-start\" sends method-start's SKILL.md body, with no ARGUMENTS line; its '# rules:' line reaches no request; it is in init's slash_commands"
+  start_q effort "start: \${CLAUDE_EFFORT} in method-start is substituted with the session's effort (the fragment's effortLevel, which the main session's requests carry), and no \${...} reaches a request as written (F6)"
+  start_q guard "start: the skill's Bash calls reach the guard: status.sh in a call of its own passes and runs; status.sh && git commit is refused (G6) and commits nothing"
+  start_q active "start: with the start hook, its METHOD-ACTIVE line reaches the main session's first request"
+  h_safe start-default
+else
+  fail "start-default: the case could not be made, or the fake did not answer; the client was not started"
+fi
+if h_start "$root" nohook; then
+  start_q expands "start (no start hook): -p \"/method-start\" still sends method-start's SKILL.md body"
+  start_q named "start (no start hook): no METHOD-ACTIVE line comes, and the skill's text that names the missing METHOD-ACTIVE line reaches the main session (the text only; acting on it is convention)"
+  h_safe start-nohook
+else
+  fail "start-nohook: the case could not be made, or the fake did not answer; the client was not started"
+fi
+
 echo "harness: ${H_RUNS:-0} client runs took ${H_TOTAL_SECS:-0} s"
 finish

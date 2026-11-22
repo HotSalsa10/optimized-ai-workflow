@@ -34,21 +34,28 @@ git clone -q "$work/origin.git" "$work/projü" 2>/dev/null
 proj="$work/projü"
 (
   cd "$proj" || exit 1
-  mkdir -p .claude/hooks/method .claude/method-local .claude/skills/verify scripts/method src build sub
+  mkdir -p .claude/hooks/method .claude/method-local .claude/skills/verify .claude/skills/method-start .claude/skills/deploy scripts/method src build sub
   printf 'guard\n' >.claude/hooks/method/guard.sh
   printf '{}\n' >.claude/settings.json
   printf '#!/bin/sh\necho status\n' >scripts/method/status.sh
   printf 'skill\n' >.claude/skills/verify/SKILL.md
+  printf 'method skill\n' >.claude/skills/method-start/SKILL.md
+  printf 'project skill\n' >.claude/skills/deploy/SKILL.md
   printf 'notes\n' >notes.txt
   printf 'app\n' >src/app.py
   git add -A && git commit -qm one && git push -q origin main && git switch -qc task
   # a branch that changes the guard, and one that changes only the app
   git switch -qc evil && printf 'evil\n' >.claude/hooks/method/guard.sh && git commit -qam evil
   git switch -q task && git switch -qc app && printf 'app 2\n' >src/app.py && git commit -qam app
+  # (step 6.3) a branch whose method-start skill differs, and one that
+  # changes only a project skill
+  git switch -q task && git switch -qc skillv && printf 'other skill\n' >.claude/skills/method-start/SKILL.md && git commit -qam skillv
+  git switch -q task && git switch -qc deployv && printf 'project skill 2\n' >.claude/skills/deploy/SKILL.md && git commit -qam deployv
   git switch -q task
 ) || abort_sandbox
 evil=$(git -C "$proj" rev-parse evil)
 appc=$(git -C "$proj" rev-parse app)
+skillc=$(git -C "$proj" rev-parse skillv)
 
 # judge NAME CWD COMMAND WANT: guard.sh on a Bash call run in CWD; WANT is
 # "allow" or a rule ID (the refusal must start "guard RULE:" and exit 2)
@@ -164,6 +171,40 @@ judge "switching to a branch that changes only the app passes" "$proj" 'git swit
 (cd "$proj" && git switch -q main && printf 'main guard\n' >.claude/hooks/method/guard.sh && git commit -qam main-guard && git push -q origin main && git switch -q task && git fetch -q origin) || fail "setup: a guard change on main"
 judge "merging the remote's main, which changed the guard, passes" "$proj" 'git merge --no-edit --ff-only origin/main' allow
 judge "switching to main, whose guard is the remote main's, passes" "$proj" 'git switch main' allow
+
+# --- the method's skills (step 6.3, S10): G6 as for .claude/agents/method/
+# (protect.pl's @METHOD_SKILLS; method-start exists, method-plan and
+# method-design do not yet); a project's own skill stays editable ---
+(cd "$proj" && git switch -q task) || fail "setup: back to the task branch for the skill cases"
+for p in "$proj/.claude/skills/method-start/SKILL.md" "$proj/.claude/skills/method-plan/SKILL.md" "$proj/.claude/skills/method-design/notes.md"; do
+  tool "a method skill (6.3): Write to ${p#"$work"/} is refused" Write "$(jpath "$p")" G6
+done
+tool "a method skill (6.3): an Edit of method-start's SKILL.md is refused" Edit "$(jpath "$proj/.claude/skills/method-start/SKILL.md")" G6
+for c in 'sed -i s/a/b/ .claude/skills/method-start/SKILL.md' 'echo x > .claude/skills/method-start/SKILL.md' 'echo x >> .claude/skills/method-plan/SKILL.md' \
+  'cp notes.txt .claude/skills/method-start/SKILL.md' 'rm -rf .claude/skills/method-start' 'rm -rf .claude/skills' 'mv .claude/skills/method-start old-skill' \
+  'cp -r x .claude/skills/method-design'; do
+  judge "a method skill (6.3): a write is refused: $c" "$proj" "$c" G6
+done
+judge "a method skill (6.3): perl -e that writes method-start's SKILL.md is refused" "$proj" 'perl -e '"'"'open F, ">", ".claude/skills/method-start/SKILL.md"'"'"'' G0
+for c in 'cat .claude/skills/method-start/SKILL.md' 'sed -n 1,5p .claude/skills/method-start/SKILL.md' 'grep -rn method .claude/skills' \
+  'ls .claude/skills/method-start' "cp .claude/skills/method-start/SKILL.md $work/skill-copy.md"; do
+  judge "a method skill (6.3): a read passes: $c" "$proj" "$c" allow
+done
+tool "a project skill (6.3): an Edit of deploy's SKILL.md passes" Edit "$(jpath "$proj/.claude/skills/deploy/SKILL.md")" allow
+tool "a project skill (6.3): an Edit of a skill whose name only starts like a method skill's passes" Edit "$(jpath "$proj/.claude/skills/method-start-old/SKILL.md")" allow
+for c in 'sed -i s/a/b/ .claude/skills/deploy/SKILL.md' 'echo x > .claude/skills/deploy/SKILL.md' 'cp notes.txt .claude/skills/deploy/notes.md' \
+  'mkdir -p .claude/skills/release && echo x > .claude/skills/release/SKILL.md' 'echo x > .claude/skills/method-starter/SKILL.md'; do
+  judge "a project skill (6.3): a write passes: $c" "$proj" "$c" allow
+done
+judge "a method skill (6.3): switching to a branch whose method-start SKILL.md differs is refused" "$proj" 'git switch skillv' G6
+judge "a method skill (6.3): a cherry-pick of a commit that changes method-start is refused" "$proj" "git cherry-pick -x $skillc" G6
+judge "a project skill (6.3): switching to a branch that changes only deploy's skill passes" "$proj" 'git switch deployv' allow
+if wanted "a method skill (6.3): an interpreter's code naming"; then
+  printf '%s\n' "open('.claude/skills/method-start/SKILL.md', 'w')" "open(\".claude/skills/method-plan/x\", \"w\")" "p = '.claude/skills/method-design'" \
+    "open('.claude/skills/deploy/SKILL.md', 'w')" "open('.claude/skills/method-starter/SKILL.md', 'w')" >"$work/skill-forms.txt"
+  out=$(cd "$proj" && perl -e 'require $ARGV[0]; my $re = Protect::text_re(Protect::set($ARGV[1])); open my $h, "<", $ARGV[2] or die; while (my $t = <$h>) { chomp $t; print $t =~ $re ? "y" : "n" }' "$lib/protect.pl" "$proj" "$work/skill-forms.txt")
+  if [ "$out" = "yyynn" ]; then pass "a method skill (6.3): an interpreter's code naming .claude/skills/method-start, method-plan or method-design is found, a project skill's is not"; else fail "a method skill (6.3): an interpreter's code naming a method skill is found" "$out (wanted yyynn)"; fi
+fi
 
 # --- path forms and letter case, read by the resolver itself ---
 out=$(cd "$proj" && perl -e 'require $ARGV[0]; print Protect::resolve(q{C:\Users\a\.claude\settings.json}, "/x"), "\n", Protect::resolve("a/../b//c/./d", "/base"), "\n"' "$lib/protect.pl")

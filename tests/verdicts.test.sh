@@ -62,6 +62,12 @@ gates_in() {
   (cd "$1" && perl -e 'require "./method/scripts/method/lib/verdicts.pl"; print "$_->[0] $_->[1]\n" for Verdicts::gates(Verdicts::rows())' 2>&1)
 }
 
+# roles_in DIR: Verdicts::roles on DIR's vocabulary, one "ROLE=WORD" per
+# line in the reader's order, or the reader's message
+roles_in() {
+  (cd "$1" && perl -e 'require "./method/scripts/method/lib/verdicts.pl"; my @r = Verdicts::roles(Verdicts::rows()); while (@r) { my ($k, $v) = splice @r, 0, 2; print "$k=$v\n" }' 2>&1)
+}
+
 # 1. the file holds exactly the words of DECISIONS A10, A33 and A71 and the
 # key of AGENTS.md, in their order
 for kind in $kinds; do
@@ -80,6 +86,26 @@ if [ -n "$want" ] && [ "$got" = "$want" ]; then
   pass "Verdicts::gates gives each gate and the kind of word it opens with, as DECISIONS A71 lists them"
 else
   fail "Verdicts::gates gives each gate and the kind of word it opens with, as DECISIONS A71 lists them" "got: $got
+wanted: $want"
+fi
+
+# the lines read by their place (step 6.2; docs/plans/step6.md S4): the
+# roles are the records' words and gates by their place in the records'
+# lists: A10's first verdict word approves; A71's test-result words go
+# pass, fail, not run; its verdict gates go reviewer, security checker,
+# reporter; its one test-result gate is the tester
+roles_want() {
+  printf 'approving=%s\n' "$(expected verdict | sed -n 1p)"
+  expected test-result | awk 'NR == 1 { print "pass=" $0 } NR == 2 { print "fail=" $0 } NR == 3 { print "not-run=" $0 }'
+  expected gate-verdict | awk 'NR == 1 { print "reviewer=" $0 } NR == 2 { print "security-checker=" $0 } NR == 3 { print "reporter=" $0 }'
+  expected gate-test-result | awk 'NR == 1 { print "tester=" $0 }'
+}
+want=$(roles_want)
+got=$(roles_in "$root")
+if [ "$(printf '%s\n' "$want" | wc -l | tr -d ' ')" = 8 ] && [ "$got" = "$want" ]; then
+  pass "Verdicts::roles reads each role by its place, as DECISIONS A10 and A71 list them: the approving word, pass, fail and not run, the reviewer, the security checker, the reporter and the tester"
+else
+  fail "Verdicts::roles reads each role by its place, as DECISIONS A10 and A71 list them" "got: $got
 wanted: $want"
 fi
 
@@ -127,6 +153,23 @@ for plant in "two-fields" "four-fields" "unknown-kind" "two-keys" "no-verdict" "
   case "$code:$got" in
     2:*"verdicts.txt"*"$why"*) pass "a malformed vocabulary file ($plant) exits 2, names the file and says why" ;;
     *) fail "a malformed vocabulary file ($plant) exits 2, names the file and says why ($why): exit $code" "$got" ;;
+  esac
+done
+# a place the roles need, not filled as the header says: Verdicts::roles
+# stops with the file's name and the reason
+for plant in "two-test-results" "four-test-results" "two-verdict-gates" "four-verdict-gates" "two-test-result-gates"; do
+  cp "$sb/verdicts.orig" "$vfile"
+  case "$plant" in
+    two-test-results) why="expected exactly three test-result lines"; perl -i -ne 'print unless /^test-result\t/ && ++$n == 3' "$vfile" ;;
+    four-test-results) why="expected exactly three test-result lines"; printf 'test-result%sTESTS SKIPPED%sa fourth result\n' "$tab" "$tab" >>"$vfile" ;;
+    two-verdict-gates) why="expected exactly three gate-verdict lines"; perl -i -ne 'print unless /^gate-verdict\t/ && ++$n == 3' "$vfile" ;;
+    four-verdict-gates) why="expected exactly three gate-verdict lines"; printf 'gate-verdict%smethod-planner%sa fourth verdict gate\n' "$tab" "$tab" >>"$vfile" ;;
+    two-test-result-gates) why="expected exactly one gate-test-result line"; printf 'gate-test-result%smethod-checker%sa second tester\n' "$tab" "$tab" >>"$vfile" ;;
+  esac
+  got=$(roles_in "$sb")
+  case "$got" in
+    *"verdicts.txt"*"$why"*) pass "Verdicts::roles stops when a place is not filled ($plant), naming the file and why" ;;
+    *) fail "Verdicts::roles stops when a place is not filled ($plant), naming the file and why ($why)" "$got" ;;
   esac
 done
 # the gates come in file order, whatever order their kinds are in

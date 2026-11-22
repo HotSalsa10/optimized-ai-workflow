@@ -161,5 +161,12 @@ PLANT_FILE=guard.pl plant "pushd with no folder read as cd home" "pushd with no 
 PLANT_FILE=guard.pl plant "cd's .. read through the link" "cd reads .. as written, before the link (as bash does)" 'if (!grep { /\A-[A-Za-z]*P/ } @w[1 .. $#w]) {' 'if (0) {'
 PLANT_FILE=guard.pl plant "NotebookEdit judged by file_path only" "NotebookEdit is judged by both its path fields" 'for my $k (qw(file_path notebook_path)) {' 'for my $k (qw(file_path)) {'
 
+# --- the method's skills (step 6.3, S10): each feed of @METHOD_SKILLS ---
+s="a method skill (6.3):"
+drop "the method's skills dropped from the set" "$s Write to projü/.claude/skills/method-start/SKILL.md is refused" '"$t/.claude/skills/$_"'
+plant "the method's skills dropped from the version check (@SPECS)" "$s switching to a branch whose method-start SKILL.md differs is refused" 'map { ".claude/skills/$_" } @METHOD_SKILLS);' '());'
+plant "the method's skills dropped from the text forms (text_re)" "$s an interpreter's code naming" '/! . skills_re()' '/(?!)!'
+PLANT_FILE=guard.pl plant "the method's skills dropped from the watched paths (\$WATCHED_PATH)" "$s perl -e that writes method-start's SKILL.md is refused" '|\.claude/skills/@{[ Protect::skills_re() ]}' ''
+
 echo "plants: protected files: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]

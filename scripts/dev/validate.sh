@@ -69,6 +69,7 @@ run_check portability bash scripts/dev/lint-portability.sh
 run_check secrets bash scripts/dev/scan-secrets.sh
 run_check rule-map bash scripts/dev/check-rule-map.sh
 run_check workflows bash scripts/dev/lint-workflows.sh
+run_check lint-prompts bash scripts/dev/lint-prompts.sh
 
 # perl syntax: every tracked .pl file under scripts/ and method/scripts/ must
 # compile. perl -c runs BEGIN blocks, so it is pointed only at this repo's

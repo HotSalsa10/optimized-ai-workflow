@@ -265,6 +265,14 @@ elsif (0) { }
     push @why, 'instructions-differ' if $same && !($m && trimmed($ev{prompt}) eq $m->{body});
 ---
     1;
+=== 6.2 instructions not compared, on the method's own gate files | method/scripts/method/lib/receipt.pl | a method gate file edited after the start makes it INVALID
+    push @why, 'instructions-differ' if $same && !($m && trimmed($ev{prompt}) eq $m->{body});
+---
+    1;
+=== 6.2 the frontmatter kept in the body, on the method's own gate files | method/scripts/method/lib/receipt.pl | a method gate file's own body makes it VALID
+? ($1, $2) : ('', $text);
+---
+? ($1, $text) : ('', $text);
 === 5b.2 the body compared untrimmed | method/scripts/method/lib/receipt.pl | its receipt is good, with its opening word
 sub trimmed { my ($s) = @_; $s =~ s/\A\s+//; $s =~ s/\s+\z//; return $s }
 ---

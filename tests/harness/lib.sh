@@ -58,6 +58,15 @@
 # and the hook runs during its call; h_used LETTER (step 5b.2) the models,
 # efforts and tokens its receipt took from the agent's record, and
 # h_req_effort CONV the efforts the requests of one conversation carried.
+# Step 6.1's case: h_method_words ROOT lays the method's agents, rules and
+# skills out; h_words ROOT runs the case and h_words_holds QUESTION judges
+# it (below).
+# Step 6.2's case: h_real_gates ROOT MODE runs the method's own gate files
+# (below); h_real_holds QUESTION judges it.
+# Step 6.4's case: h_design ROOT MODE types a method skill and runs the
+# method's architect (below); h_design_holds QUESTION judges it.
+# Step 6.5's case: h_start ROOT MODE types /method-start (below);
+# h_start_holds QUESTION judges it.
 # req-001 is h_fake's own alive probe.
 
 # settings a caller's environment must not carry into every case
@@ -419,6 +428,473 @@ h_gate_holds() {
       [ "$n" = 0 ] || H_WHY="$H_WHY $n running files left in git's folder;"
       ;;
     *) H_WHY="no such gate question: $1" ;;
+  esac
+  [ -z "$H_WHY" ]
+}
+
+# h_method_words ROOT (step 6.1): lays the method's own words out in the
+# project as sync will, from the repository at ROOT: method/.claude/agents/
+# method/, rules/method/ and every skills/method-*/ that exists, into the
+# project's .claude/; then commits. h_method is not changed, so the hook
+# cases keep the harness's stand-in gate.
+h_method_words() {
+  local d
+  for d in agents/method rules/method; do
+    if [ -d "$1/method/.claude/$d" ]; then
+      mkdir -p "$H_PROJ/.claude/$d" && cp -R "$1/method/.claude/$d/." "$H_PROJ/.claude/$d/" || return 1
+    fi
+  done
+  for d in "$1"/method/.claude/skills/method-*; do
+    [ -d "$d" ] || continue
+    mkdir -p "$H_PROJ/.claude/skills/${d##*/}" && cp -R "$d/." "$H_PROJ/.claude/skills/${d##*/}/" || return 1
+  done
+  (cd "$H_PROJ" && HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git add -A && HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git commit -q --allow-empty -m "the method's words")
+}
+
+# h_words ROOT (step 6.1): the case for the method's rules files, with the
+# method (h_method) and its words (h_method_words) from the repository at
+# ROOT (a planted copy in tests/plants/harness.sh): since step 6.2 the
+# method's own reviewer, and the harness's stand-in only for a copy that
+# has none. The main session calls the reviewer once, in the
+# foreground (conversation "gate"), then ends. Returns 1 when the case
+# could not be made or the fake did not answer.
+h_words() {
+  local t
+  { h_case words && h_method "$1" && h_method_words "$1"; } || return 1
+  if [ ! -f "$H_PROJ/.claude/agents/method/method-reviewer.md" ]; then
+    mkdir -p "$H_PROJ/.claude/agents/method" && cp "$HARNESS/agents/method/method-reviewer.md" "$H_PROJ/.claude/agents/method/" &&
+      (cd "$H_PROJ" && HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git add -A && HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git commit -q -m "the stand-in gate") || return 1
+  fi
+  t=$(HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git -C "$H_PROJ" rev-parse 'HEAD^{tree}') || return 1
+  perl -MJSON::PP -e 'my $t = shift; print JSON::PP->new->canonical->encode({convs => [
+      {name => "gate", match => "HARNESS-GATE-W", turns => [{text => "APPROVE\nSummary: the change is fine.\nEND-VERDICT $t"}]},
+      {name => "main", match => "^go\$", turns => [{tool => "Agent", input => {description => "harness gate W", prompt => "HARNESS-GATE-W: review the change",
+        subagent_type => "method-reviewer", run_in_background => JSON::PP::false}}, map { {text => "MAIN-DONE-$_"} } 1 .. 3]}],
+    fallback => {text => "FAKE-FALLBACK"}})' "$t" >"$H_DIR/words.json" || return 1
+  h_fake "$H_DIR/words.json" || return 1
+  h_client 90 -- --permission-mode default --allowedTools Bash
+  h_stop
+}
+# h_words_holds QUESTION: 0 when QUESTION holds for the case h_words ran
+# last; else 1, with H_WHY saying what was seen. The rules files are the
+# project's .claude/rules/**/*.md (at least one, or the case cannot tell).
+#   reach    each reaches the main conversation's first request exactly as
+#            tests/budget.test.sh counts it: its lines holding only a comment
+#            dropped, every other byte kept (read.pl rules)
+#   gate     the same, in the gate's first request
+#   comments no HTML comment from a rules file, alone on its line or not,
+#            reaches any request of the main conversation or the gate (and
+#            the files hold at least one, or the case cannot tell)
+h_words_holds() {
+  local f rel c n got line
+  H_WHY=""
+  find "$H_PROJ/.claude/rules" -type f -name '*.md' 2>/dev/null | sort >"$H_DIR/words-files.txt"
+  if [ ! -s "$H_DIR/words-files.txt" ]; then
+    H_WHY="no rules file in the project, so the case cannot tell"
+    return 1
+  fi
+  case $1 in
+    reach | gate)
+      c=main
+      [ "$1" = gate ] && c=gate
+      while IFS= read -r f; do
+        rel=${f#"$H_PROJ/"}
+        got=$(perl "$HARNESS/read.pl" rules "$c" "$rel" "$f" "$H_DIR/fake")
+        [ "$got" = same ] || H_WHY="$H_WHY $rel in $c's first request: $got;"
+      done <"$H_DIR/words-files.txt"
+      ;;
+    comments)
+      # shellcheck disable=SC2016 # perl code, expanded by perl
+      while IFS= read -r f; do perl -ne 'print "$1\n" while /(<!--(?:(?!-->).)*-->)/g' "$f"; done <"$H_DIR/words-files.txt" >"$H_DIR/words-comments.txt"
+      n=0
+      while IFS= read -r line; do
+        n=$((n + 1))
+        for c in main gate; do
+          ! perl "$HARNESS/read.pl" req "$c" "$line" "$H_DIR/fake" || H_WHY="$H_WHY the comment '$line' reached $c's requests;"
+        done
+      done <"$H_DIR/words-comments.txt"
+      [ "$n" -gt 0 ] || H_WHY="$H_WHY the rules files hold no comment, so the case cannot tell;"
+      ;;
+    *) H_WHY="no such words question: $1" ;;
+  esac
+  [ -z "$H_WHY" ]
+}
+
+# h_real_gates ROOT MODE (step 6.2): the method's own gate files, from the
+# repository at ROOT (a planted copy in tests/plants/harness.sh), laid out
+# as sync will (h_method, h_method_words: no stand-in), with the fragment as
+# the project's settings. The main session calls every gate verdicts.txt
+# names in one message, in the foreground (each told apart by its Agent
+# call's description, "harness gate <name>", and its conversation named
+# after it); each answers with the first word of its gate's kind and the
+# END-VERDICT line. MODE default: each answers as text, and the client's
+# debug log goes to $H_DIR/debug.log. MODE auto (the test-only allow hook
+# on Agent, as h_gates): each hands its report back. Sets H_GATES (one
+# "NAME<TAB>WORD" a gate) and H_MODEL (the fragment's model). Returns 1
+# when the case could not be made or the fake did not answer.
+h_real_gates() {
+  local mode=$2
+  H_TREE=""
+  H_GATES=$(cd "$1" && perl -e 'require "./method/scripts/method/lib/verdicts.pl"; my @r = Verdicts::rows(); print "$_->[0]\t", (Verdicts::words($_->[1], @r))[0], "\n" for Verdicts::gates(@r)') || return 1
+  H_MODEL=$(perl -MJSON::PP -0ne 'print JSON::PP->new->decode($_)->{model}' "$1/method/settings.fragment.json") || return 1
+  { h_case "real-gates-$mode" && h_method "$1"; } || return 1
+  if [ "$mode" = auto ]; then
+    mkdir -p "$H_PROJ/.claude/hooks/fixture" && cp "$HARNESS/hooks/allow.sh" "$H_PROJ/.claude/hooks/fixture/" || return 1
+    perl -MJSON::PP -e 'my $f = shift; open my $h, "<", $f or die; my $d = JSON::PP->new->decode(do { local $/; <$h> }); close $h;
+      push @{ $d->{hooks}{PreToolUse} }, {matcher => "Agent|Task", hooks => [{type => "command", command => q{bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fixture/allow.sh"}, timeout => 30}]};
+      open $h, ">", $f or die; print $h JSON::PP->new->canonical->pretty->encode($d); close $h or die' "$H_PROJ/.claude/settings.json" || return 1
+  fi
+  h_method_words "$1" || return 1
+  H_TREE=$(HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git -C "$H_PROJ" rev-parse 'HEAD^{tree}') || return 1
+  printf '%s\n' "$H_GATES" | perl -MJSON::PP -e '
+    my ($mode, $t) = @ARGV;
+    my (@convs, @calls);
+    while (my $l = <STDIN>) {
+      chomp $l;
+      my ($g, $w) = split /\t/, $l;
+      my $good = "$w\nSummary: the change is fine.\nEND-VERDICT $t";
+      my @turns = $mode eq "auto" ? ({tool => "SubagentHandback", input => {message => $good}}, map { {text => $good} } 1 .. 3) : ({text => $good});
+      push @convs, {name => $g, match => "HARNESS-GATE-\Q$g\E:", turns => \@turns};
+      push @calls, {type => "tool_use", name => "Agent", input => {description => "harness gate $g", prompt => "HARNESS-GATE-$g: check the change",
+        subagent_type => $g, run_in_background => JSON::PP::false}};
+    }
+    unshift @convs, {name => "classifier", match => "(?:^<transcript>|<user_claude_md>)", turns => [{text => "<block>no</block>"}]} if $mode eq "auto";
+    push @convs, {name => "main", match => "^go\$", turns => [{blocks => \@calls}, map { {text => "MAIN-DONE-$_"} } 1 .. 4]};
+    print JSON::PP->new->canonical->encode({convs => \@convs, fallback => {text => "FAKE-FALLBACK"}, usage => {input_tokens => 11, output_tokens => 7}})' "$mode" "$H_TREE" >"$H_DIR/real-gates.json" || return 1
+  h_fake "$H_DIR/real-gates.json" 80 || return 1
+  if [ "$mode" = auto ]; then
+    h_client 120 -- --permission-mode auto --debug-file "$H_DIR/debug.log"
+  else
+    h_client 120 -- --permission-mode default --allowedTools Bash --debug-file "$H_DIR/debug.log"
+  fi
+  h_stop
+}
+# h_real_holds QUESTION: 0 when QUESTION holds for every gate of the case
+# h_real_gates ran last; else 1, with H_WHY saying what was seen, gate by
+# gate. The questions:
+#   loads    each gate is in the init event's agents, and the client's
+#            debug log (not empty, or the case cannot tell) has no line
+#            naming the gate with "does not recognize or apply" (an unknown
+#            frontmatter key), "Failed to parse agent" or "not loaded"
+#   valid    each gate's receipt is VALID with its word, in one stop, not
+#            sent back or refused: its real body is what the client sent
+#            (B10), and its model and effort are allowed
+#   record   each receipt took the fragment's model and effort xhigh from
+#            the gate's record
+#   tools    each gate's first request offers tools, Read and Bash among
+#            them, and none of Agent, Task, Skill or SendMessage
+#   handback (MODE auto) each gate's first request offers SubagentHandback,
+#            though its tools: line does not list it
+h_real_holds() {
+  local g w got line t
+  H_WHY=""
+  [ -n "$H_GATES" ] || { H_WHY="no gate read from verdicts.txt, so the case cannot tell"; return 1; }
+  if [ "$1" = loads ] && [ ! -s "$H_DIR/debug.log" ]; then
+    H_WHY="the client wrote no debug log, so the case cannot tell"
+    return 1
+  fi
+  while IFS="$(printf '\t')" read -r g w; do
+    case $1 in
+      loads)
+        h_init agents | grep -q -x -F -- "$g" || H_WHY="$H_WHY $g is not in the init event's agents;"
+        line=$(LC_ALL=C grep -F -- "$g" "$H_DIR/debug.log" | LC_ALL=C grep -e 'does not recognize or apply' -e 'Failed to parse agent' -e 'not loaded' | head -1 | cut -c1-200)
+        [ -z "$line" ] || H_WHY="$H_WHY the debug log names $g: $line;"
+        ;;
+      valid)
+        got=$(h_receipt "$g")
+        [ "$got" = "VALID why=none open=$w stops=1 blocked=0 denied=0" ] || H_WHY="$H_WHY $g's receipt: $got;"
+        ;;
+      record)
+        got=$(h_used "$g")
+        case $got in "models=$H_MODEL efforts=xhigh "*) ;; *) H_WHY="$H_WHY $g's receipt holds $got;" ;; esac
+        ;;
+      tools)
+        got=$(perl "$HARNESS/read.pl" tools "$g" "$H_DIR/fake")
+        case ",$got," in ,none, | ,,) H_WHY="$H_WHY $g's first request offers no tools ($got);" ;; esac
+        for t in Agent Task Skill SendMessage; do
+          case ",$got," in *",$t,"*) H_WHY="$H_WHY $g's first request offers $t, a delegation tool: $got;" ;; esac
+        done
+        for t in Read Bash; do
+          case ",$got," in *",$t,"*) ;; *) H_WHY="$H_WHY $g's first request lacks $t: $got;" ;; esac
+        done
+        ;;
+      handback)
+        got=$(perl "$HARNESS/read.pl" tools "$g" "$H_DIR/fake")
+        case ",$got," in *,SubagentHandback,*) ;; *) H_WHY="$H_WHY $g's first request does not offer SubagentHandback: $got;" ;; esac
+        ;;
+      *) H_WHY="no such real-gates question: $1" ;;
+    esac
+  done <<EOF
+$H_GATES
+EOF
+  [ -z "$H_WHY" ]
+}
+
+# h_design ROOT MODE (step 6.4): the method's planning and design words,
+# from the repository at ROOT (a planted copy in tests/plants/harness.sh),
+# laid out as sync will (h_method, h_method_words), with the fragment as the
+# project's settings. The owner's message is a typed skill: MODE default,
+# "/method-plan harness-task HARNESS-ARGS"; MODE auto (the test-only allow
+# hook on Agent, as h_gates), "/method-design harness-design HARNESS-ARGS".
+# The main session (its conversation matched by the skill's command-name
+# line) calls the method-architect agent once, in the foreground ("harness
+# architect", conversation "architect"), which answers with a design (MODE
+# default: as text; MODE auto: handed back, HARNESS-DESIGN-HANDED-BACK in
+# its message), then ends. The client's debug log goes to $H_DIR/debug.log.
+# Sets H_DMODE (MODE), H_SKILL (the skill typed), H_ARGS (its arguments)
+# and H_MODEL (the fragment's model). Returns 1 when the case could not be
+# made or the fake did not answer.
+h_design() {
+  local mode=$2
+  H_DMODE=$mode
+  H_SKILL=method-plan
+  H_ARGS="harness-task HARNESS-ARGS"
+  if [ "$mode" = auto ]; then
+    H_SKILL=method-design
+    H_ARGS="harness-design HARNESS-ARGS"
+  fi
+  H_MODEL=$(perl -MJSON::PP -0ne 'print JSON::PP->new->decode($_)->{model}' "$1/method/settings.fragment.json") || return 1
+  { h_case "design-$mode" && h_method "$1"; } || return 1
+  if [ "$mode" = auto ]; then
+    mkdir -p "$H_PROJ/.claude/hooks/fixture" && cp "$HARNESS/hooks/allow.sh" "$H_PROJ/.claude/hooks/fixture/" || return 1
+    perl -MJSON::PP -e 'my $f = shift; open my $h, "<", $f or die; my $d = JSON::PP->new->decode(do { local $/; <$h> }); close $h;
+      push @{ $d->{hooks}{PreToolUse} }, {matcher => "Agent|Task", hooks => [{type => "command", command => q{bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fixture/allow.sh"}, timeout => 30}]};
+      open $h, ">", $f or die; print $h JSON::PP->new->canonical->pretty->encode($d); close $h or die' "$H_PROJ/.claude/settings.json" || return 1
+  fi
+  h_method_words "$1" || return 1
+  perl -MJSON::PP -e '
+    my ($mode, $skill) = @ARGV;
+    my $design = "HARNESS-DESIGN\nThe card: a walking skeleton first.";
+    my @turns = $mode eq "auto" ? ({tool => "SubagentHandback", input => {message => "$design\nHARNESS-DESIGN-HANDED-BACK"}}, map { {text => $design} } 1 .. 3) : ({text => $design});
+    my @convs = ({name => "architect", match => "HARNESS-ARCHITECT:", turns => \@turns},
+      {name => "main", match => "^<command-name>/\Q$skill\E</command-name>\$", turns => [{tool => "Agent", input => {description => "harness architect",
+        prompt => "HARNESS-ARCHITECT: draft a design for the brief", subagent_type => "method-architect", run_in_background => JSON::PP::false}},
+        map { {text => "MAIN-DONE-$_"} } 1 .. 3]});
+    unshift @convs, {name => "classifier", match => "(?:^<transcript>|<user_claude_md>)", turns => [{text => "<block>no</block>"}]} if $mode eq "auto";
+    print JSON::PP->new->canonical->encode({convs => \@convs, fallback => {text => "FAKE-FALLBACK"}, usage => {input_tokens => 11, output_tokens => 7}})' "$mode" "$H_SKILL" >"$H_DIR/design.json" || return 1
+  h_fake "$H_DIR/design.json" || return 1
+  if [ "$mode" = auto ]; then
+    H_PROMPT="/$H_SKILL $H_ARGS" h_client 90 -- --permission-mode auto --debug-file "$H_DIR/debug.log"
+  else
+    H_PROMPT="/$H_SKILL $H_ARGS" h_client 90 -- --permission-mode default --allowedTools Bash --debug-file "$H_DIR/debug.log"
+  fi
+  h_stop
+}
+# h_design_holds QUESTION: 0 when QUESTION holds for the case h_design ran
+# last; else 1, with H_WHY saying what was seen. The questions:
+#   expands  the typed skill's body (its SKILL.md after the frontmatter, as
+#            written) reached the main conversation's first request, with
+#            the typed arguments; its frontmatter's "# rules:" line reached
+#            no request; and init's slash_commands lists every method skill
+#            folder in the project
+#   loads    method-architect is in init's agents, and the client's debug
+#            log (not empty, or the case cannot tell) has no line naming it
+#            with "does not recognize or apply", "Failed to parse agent" or
+#            "not loaded"
+#   model    every request of the architect's conversation went out at the
+#            fragment's model and effort xhigh
+#   tools    its first request offers Read and WebFetch, and none of Agent,
+#            Task, Skill, SendMessage, Bash, PowerShell, Monitor, Edit,
+#            Write, MultiEdit or NotebookEdit
+#   receipt  it makes no receipt: gate-receipt ran no time during its call
+#            in MODE default, and once in MODE auto (the fragment runs it
+#            on every agent's handback, and it lets one that is not a
+#            gate's through; ends shows the handback was not refused) (the
+#            debug log shows the call's span, so the agent was found, or
+#            the case cannot tell), it has no receipt, gates.log names
+#            it nowhere, and no METHOD-ACTIVE line naming it reached its
+#            requests
+#   ends     (MODE auto) its first request offers SubagentHandback; it
+#            ended in one turn, handing back, and the handed-back message
+#            reached the main conversation
+h_design_holds() {
+  local got t f rules n want
+  H_WHY=""
+  case $1 in
+    expands)
+      f="$H_PROJ/.claude/skills/$H_SKILL/SKILL.md"
+      got=$(perl "$HARNESS/read.pl" skill main "$f" "$H_ARGS" "$H_DIR/fake")
+      [ "$got" = same ] || H_WHY="$H_WHY /$H_SKILL's body and arguments in main's first request: $got;"
+      rules=$(sed -n 's/^# rules: //p' "$f")
+      if [ -z "$rules" ]; then
+        H_WHY="$H_WHY $H_SKILL's SKILL.md has no '# rules:' line, so the case cannot tell;"
+      else
+        ! h_req_has "# rules: $rules" || H_WHY="$H_WHY $H_SKILL's '# rules:' line reached a request;"
+      fi
+      for f in "$H_PROJ"/.claude/skills/method-*; do
+        [ -d "$f" ] || continue
+        h_init slash_commands | grep -q -x -F -- "${f##*/}" || H_WHY="$H_WHY ${f##*/} is not in init's slash_commands;"
+      done
+      ;;
+    loads)
+      if [ ! -s "$H_DIR/debug.log" ]; then
+        H_WHY="the client wrote no debug log, so the case cannot tell"
+        return 1
+      fi
+      h_init agents | grep -q -x -F method-architect || H_WHY="$H_WHY method-architect is not in the init event's agents;"
+      got=$(LC_ALL=C grep -F method-architect "$H_DIR/debug.log" | LC_ALL=C grep -e 'does not recognize or apply' -e 'Failed to parse agent' -e 'not loaded' | head -1 | cut -c1-200)
+      [ -z "$got" ] || H_WHY="$H_WHY the debug log names method-architect: $got;"
+      ;;
+    model)
+      got=$(perl "$HARNESS/read.pl" model architect "$H_DIR/fake")
+      [ "$got" = "$H_MODEL" ] || H_WHY="$H_WHY the architect's requests went out at model $got, not $H_MODEL;"
+      got=$(h_req_effort architect)
+      [ "$got" = xhigh ] || H_WHY="$H_WHY the architect's requests went out at effort $got, not xhigh;"
+      ;;
+    tools)
+      got=$(perl "$HARNESS/read.pl" tools architect "$H_DIR/fake")
+      for t in Read WebFetch; do
+        case ",$got," in *",$t,"*) ;; *) H_WHY="$H_WHY the architect's first request lacks $t: $got;" ;; esac
+      done
+      for t in Agent Task Skill SendMessage Bash PowerShell Monitor Edit Write MultiEdit NotebookEdit; do
+        case ",$got," in *",$t,"*) H_WHY="$H_WHY the architect's first request offers $t: $got;" ;; esac
+      done
+      ;;
+    receipt)
+      want=0
+      [ "$H_DMODE" = auto ] && want=1
+      got=$(perl "$HARNESS/read.pl" hooks "harness architect" gate-receipt.sh "$H_DIR/home" "$H_DIR/debug.log")
+      [ "$got" = "$want" ] || H_WHY="$H_WHY gate-receipt ran $got times during the architect's call, not $want (none: the call or its span was not found, so the case cannot tell);"
+      got=$(perl "$HARNESS/read.pl" receipt "harness architect" "$H_DIR/home" "$H_PROJ/.git")
+      [ "$got" = none ] || H_WHY="$H_WHY the architect has a receipt: $got;"
+      n=0
+      [ ! -f "$H_PROJ/.method/local/gates.log" ] || n=$(LC_ALL=C grep -c -F method-architect "$H_PROJ/.method/local/gates.log")
+      [ "$n" = 0 ] || H_WHY="$H_WHY gates.log names method-architect $n times;"
+      ! h_req_in architect 'METHOD-ACTIVE gate=method-architect' || H_WHY="$H_WHY a METHOD-ACTIVE line naming it reached the architect's requests;"
+      ;;
+    ends)
+      got=$(perl "$HARNESS/read.pl" tools architect "$H_DIR/fake")
+      case ",$got," in *,SubagentHandback,*) ;; *) H_WHY="$H_WHY the architect's first request does not offer SubagentHandback: $got;" ;; esac
+      n=$(h_turns architect)
+      [ "$n" = 1 ] || H_WHY="$H_WHY the architect's turns: $n, not 1;"
+      h_req_in main HARNESS-DESIGN-HANDED-BACK || H_WHY="$H_WHY the handed-back design did not reach the main conversation;"
+      ;;
+    *) H_WHY="no such design question: $1" ;;
+  esac
+  [ -z "$H_WHY" ]
+}
+
+# h_start ROOT MODE (step 6.5): /method-start typed as the owner's message
+# (-p "/method-start", no arguments), with the method (h_method) and its
+# words (h_method_words) from the repository at ROOT (a planted copy in
+# tests/plants/harness.sh) and the fragment as the project's settings, in
+# default mode. The main session (its conversation matched by the skill's
+# command-name line) answers as the skill asks. MODE default: it runs
+# status.sh in a Bash call of its own, then status.sh chained to a git
+# commit (HARNESS-CHAINED), then ends; the client's debug log goes to
+# $H_DIR/debug.log. MODE nohook: the fragment without its SessionStart
+# hook, so no METHOD-ACTIVE line comes; the main session only answers.
+# Sets H_EFFORT (the fragment's effortLevel) and H_ACTIVE (the first line
+# session-status.sh prints, up to its version). Returns 1 when the case
+# could not be made or the fake did not answer.
+h_start() {
+  local mode=$2
+  H_EFFORT=$(perl -MJSON::PP -0ne 'print JSON::PP->new->decode($_)->{effortLevel}' "$1/method/settings.fragment.json") || return 1
+  H_ACTIVE="METHOD-ACTIVE v"
+  { h_case "start-$mode" && h_method "$1"; } || return 1
+  if [ "$mode" = nohook ]; then
+    perl -MJSON::PP -e 'my $f = shift; open my $h, "<", $f or die; my $d = JSON::PP->new->decode(do { local $/; <$h> }); close $h;
+      delete $d->{hooks}{SessionStart} or die "no SessionStart hook\n";
+      open $h, ">", $f or die; print $h JSON::PP->new->canonical->pretty->encode($d); close $h or die' "$H_PROJ/.claude/settings.json" || return 1
+  fi
+  h_method_words "$1" || return 1
+  perl -MJSON::PP -e '
+    my ($mode) = @ARGV;
+    my @turns = map { {text => "MAIN-DONE-$_"} } 1 .. 3;
+    unshift @turns, {tool => "Bash", input => {command => "bash scripts/method/status.sh", description => "HARNESS status alone"}},
+      {tool => "Bash", input => {command => "bash scripts/method/status.sh && git commit -q --allow-empty -m HARNESS-CHAINED", description => "HARNESS status chained"}}
+      if $mode eq "default";
+    print JSON::PP->new->canonical->encode({convs => [{name => "main", match => "^<command-name>/method-start</command-name>\$", turns => \@turns}],
+      fallback => {text => "FAKE-FALLBACK"}, usage => {input_tokens => 11, output_tokens => 7}})' "$mode" >"$H_DIR/start.json" || return 1
+  h_fake "$H_DIR/start.json" || return 1
+  H_PROMPT="/method-start" h_client 90 -- --permission-mode default --allowedTools Bash --debug-file "$H_DIR/debug.log"
+  h_stop
+}
+# h_start_holds QUESTION: 0 when QUESTION holds for the case h_start ran
+# last; else 1, with H_WHY saying what was seen. The questions:
+#   expands  method-start's body (its SKILL.md after the frontmatter, each
+#            ${CLAUDE_EFFORT} read as the fragment's effortLevel) reached the
+#            main conversation's first request, with no ARGUMENTS line (none
+#            was typed); its "# rules:" line reached no request; and init's
+#            slash_commands lists method-start
+#   effort   the SKILL.md holds ${CLAUDE_EFFORT} (or the case cannot tell);
+#            no ${...} written in it reached any request as written; the
+#            body that reached the main conversation holds the effort where
+#            the file has the variable; and the main conversation's requests
+#            went out at that effort, so the variable said the session's
+#            own effort (F6)
+#   guard    (MODE default) the client's debug log (not empty, or the case
+#            cannot tell) shows the method's guard run on a Bash call and
+#            let it through (status 0), and refuse one (status 2); status.sh
+#            in its own call ran (its last line, "status: ...", reached the
+#            main conversation); the call chaining it to git commit was
+#            refused by G6 (its reason reached the main conversation), and
+#            no HARNESS-CHAINED commit was made
+#   active   (MODE default) the start hook's METHOD-ACTIVE line reached the
+#            main conversation's first request (the control for named)
+#   named    (MODE nohook) no METHOD-ACTIVE line from the start hook reached
+#            any request of the main conversation, and every line of the
+#            SKILL.md that names METHOD-ACTIVE (at least one, or the skill
+#            does not name it) reached the main conversation's requests:
+#            the text only; whether Claude acts on it is convention
+h_start_holds() {
+  local f got v line n
+  H_WHY=""
+  f="$H_PROJ/.claude/skills/method-start/SKILL.md"
+  case $1 in
+    expands)
+      got=$(perl "$HARNESS/read.pl" skill main "$f" "" "$H_DIR/fake" "$H_EFFORT")
+      [ "$got" = same ] || H_WHY="$H_WHY /method-start's body in main's first request: $got;"
+      line=$(sed -n 's/^# rules: //p' "$f")
+      if [ -z "$line" ]; then
+        H_WHY="$H_WHY method-start's SKILL.md has no '# rules:' line, so the case cannot tell;"
+      else
+        ! h_req_has "# rules: $line" || H_WHY="$H_WHY method-start's '# rules:' line reached a request;"
+      fi
+      h_init slash_commands | grep -q -x -F method-start || H_WHY="$H_WHY method-start is not in init's slash_commands;"
+      ;;
+    effort)
+      # shellcheck disable=SC2016 # the variable as written in the skill, not expanded here
+      if ! grep -q -F '${CLAUDE_EFFORT}' "$f"; then
+        H_WHY="method-start's SKILL.md holds no \${CLAUDE_EFFORT}, so the case cannot tell"
+        return 1
+      fi
+      # shellcheck disable=SC2016 # perl code, expanded by perl
+      for v in $(perl -ne 'print "$1\n" while /(\$\{[A-Za-z0-9_]+\})/g' "$f" | sort -u); do
+        ! perl "$HARNESS/read.pl" req main "$v" "$H_DIR/fake" || H_WHY="$H_WHY the literal $v reached main's requests, not substituted;"
+      done
+      got=$(perl "$HARNESS/read.pl" skill main "$f" "" "$H_DIR/fake" "$H_EFFORT")
+      [ "$got" = same ] || H_WHY="$H_WHY the body with $H_EFFORT for \${CLAUDE_EFFORT} in main's first request: $got;"
+      got=$(h_req_effort main)
+      [ "$got" = "$H_EFFORT" ] || H_WHY="$H_WHY main's requests went out at effort $got, not $H_EFFORT;"
+      ;;
+    guard)
+      if [ ! -s "$H_DIR/debug.log" ]; then
+        H_WHY="the client wrote no debug log, so the case cannot tell"
+        return 1
+      fi
+      for v in 0 2; do
+        LC_ALL=C grep -F 'Hooks: PreToolUse:Bash [' "$H_DIR/debug.log" | LC_ALL=C grep -F '/.claude/hooks/method/guard.sh' | LC_ALL=C grep -q -F "finished with status $v " ||
+          H_WHY="$H_WHY the debug log shows no run of the method's guard on a Bash call ending with status $v;"
+      done
+      h_req_in main 'status: nothing needs a look' || h_req_in main ' areas need a look (' || H_WHY="$H_WHY status.sh's last line did not reach main: it did not run in its own call;"
+      h_req_in main "guard G6: this call names the method's scripts (scripts/method/)" || H_WHY="$H_WHY the chained call was not refused by G6;"
+      n=$(HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git -C "$H_PROJ" log --format=%s | LC_ALL=C grep -c -x HARNESS-CHAINED)
+      [ "$n" = 0 ] || H_WHY="$H_WHY the chained commit ran ($n HARNESS-CHAINED commits);"
+      ;;
+    active)
+      h_req_in main "$H_ACTIVE" || H_WHY="$H_WHY no start hook's METHOD-ACTIVE line reached main's requests;"
+      ;;
+    named)
+      ! h_req_in main "$H_ACTIVE" || H_WHY="$H_WHY a start hook's METHOD-ACTIVE line reached main's requests, so the case cannot tell;"
+      while IFS= read -r line; do
+        [ -z "$line" ] || perl "$HARNESS/read.pl" req main "$line" "$H_DIR/fake" || H_WHY="$H_WHY the skill's line naming METHOD-ACTIVE did not reach main: $line;"
+      done <<EOF
+$(LC_ALL=C grep -F METHOD-ACTIVE "$f")
+EOF
+      [ "$(LC_ALL=C grep -c -F METHOD-ACTIVE "$f")" -gt 0 ] || H_WHY="$H_WHY method-start's SKILL.md has no line naming METHOD-ACTIVE;"
+      ;;
+    *) H_WHY="no such start question: $1" ;;
   esac
   [ -z "$H_WHY" ]
 }

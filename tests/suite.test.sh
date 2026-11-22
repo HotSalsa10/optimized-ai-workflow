@@ -46,6 +46,15 @@ if [ "$both" = "$(ran plants)" ] && [ -n "$h0" ] && [ -n "$h1" ]; then
 else
   fail "the two halves run every plant file once" "0/2: $h0; 1/2: $h1"
 fi
+t0=$(ran plants 0/3)
+t1=$(ran plants 1/3)
+t2=$(ran plants 2/3)
+all3=$(printf '%s\n%s\n%s\n' "$t0" "$t1" "$t2" | sort)
+if [ "$all3" = "$(ran plants)" ] && [ -n "$t0" ] && [ -n "$t1" ] && [ -n "$t2" ]; then
+  pass "the three parts CI runs cover every plant file once"
+else
+  fail "the three parts CI runs cover every plant file once" "0/3: $t0; 1/3: $t1; 2/3: $t2"
+fi
 for a in "plants 2/2" "plants 0/0" "plants x" "plants 1/2 x" "tests 0/2" "all x" "other"; do
   # shellcheck disable=SC2086 # the words are meant to split
   out=$(bash "$stub/tests/run.sh" $a 2>&1)

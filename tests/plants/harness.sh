@@ -347,6 +347,238 @@ rp=scripts/method/lib/receipt.pl
     background "gate X's receipt: none; 1 running files left" "gates: receipts kept by the prompt id again (a background gate's stop after the owner's next message misses its run)"
 }
 
+# 16. step 6.1's case for the method's rules (h_words, h_words_holds):
+# with one defect planted in a copy of the method's rules files, the
+# questions it breaks turn red, and for that defect's reason.
+# words_plant PERL QUESTIONS SEEN TEXT: PERL, a perl -0pi script that
+# writes the mark HARNESS-PLANT with its change, changes method.md in a copy
+# of the repository; h_words runs there; each of QUESTIONS (space
+# separated) must fail with SEEN in its H_WHY
+words_plant() {
+  local q
+  sb=$(make_sandbox) || abort_sandbox
+  perl -0pi -e "$1" "$sb/method/.claude/rules/method/method.md"
+  if ! grep -q -F HARNESS-PLANT "$sb/method/.claude/rules/method/method.md"; then
+    fail "$4: the plant did not apply, so the check result would mean nothing"
+  elif ! h_words "$sb"; then
+    fail "$4: the case could not be made, or the fake did not answer"
+  else
+    # shellcheck disable=SC2086 # the questions are words on purpose
+    for q in $2; do
+      if h_words_holds "$q"; then
+        fail "$4: the words question '$q' stayed green"
+      else
+        case $H_WHY in
+          *"$3"*) pass "$4: the words question '$q' turns red ($H_WHY)" ;;
+          *) fail "$4: the words question '$q' turned red for another reason" "$H_WHY" ;;
+        esac
+      fi
+    done
+  fi
+  h_stop
+  drop_sandbox "$sb" || true
+}
+# shellcheck disable=SC2016 # perl code, expanded by perl
+{
+  words_plant 's/<!-- M079 -->\n(A cloud session[^\n]*)/$1 <!-- M079 HARNESS-PLANT -->/' \
+    comments "the comment '<!-- M079 HARNESS-PLANT -->' reached main's requests" "words: an ID comment moved onto its sentence's line"
+  # (a rules file with paths: loads only when Claude touches a matching
+  # file, so it is missing from the first requests)
+  words_plant 's/\A/---\npaths:\n  - "harness-plant\/**" # HARNESS-PLANT\n---\n/' \
+    "reach gate" "method.md in" "words: method.md loaded only for some paths"
+}
+
+# 17. step 6.2's case for the method's own gate files (h_real_gates,
+# h_real_holds): one copy of the repository with four defects, each
+# turning one question red for its own gate's reason, in one client run:
+# an unknown frontmatter key in the reviewer's file (loads), Agent in the
+# security checker's tools (tools), effort high in the reporter's file
+# (record), and receipt.pl reading the frontmatter as part of the body, so
+# no real body compares equal (valid)
+sb=$(make_sandbox) || abort_sandbox
+a="$sb/method/.claude/agents/method"
+# shellcheck disable=SC2016 # perl code, expanded by perl
+{
+  perl -0pi -e 's/^(effort: xhigh\n)/${1}bogus-key: 1\n/m' "$a/method-reviewer.md"
+  perl -0pi -e 's/^(tools: [^\n]*)/$1, Agent/m' "$a/method-security-checker.md"
+  perl -0pi -e 's/^effort: xhigh$/effort: high/m' "$a/method-reporter.md"
+  perl -pi -e 's/\? \(\$1, \$2\) : \(\x27\x27, \$text\);/? (\$1, \$text) : (\x27\x27, \$text); # HARNESS-PLANT/' "$sb/method/scripts/method/lib/receipt.pl"
+}
+if ! grep -q '^bogus-key: 1$' "$a/method-reviewer.md" || ! grep -q '^tools: .*, Agent$' "$a/method-security-checker.md" ||
+  ! grep -q '^effort: high$' "$a/method-reporter.md" || ! grep -q -F HARNESS-PLANT "$sb/method/scripts/method/lib/receipt.pl"; then
+  fail "real gates: the plants did not apply, so the check results would mean nothing"
+elif ! h_real_gates "$sb" default; then
+  fail "real gates: the case could not be made, or the fake did not answer"
+else
+  for qr in "loads|the debug log names method-reviewer: |an unknown frontmatter key in the reviewer's file" \
+    "tools|method-security-checker's first request offers Agent, a delegation tool|Agent in the security checker's tools" \
+    "record|method-reporter's receipt holds models=$H_MODEL efforts=high |effort high in the reporter's file" \
+    "valid|method-tester's receipt: INVALID why=instructions-differ|receipt.pl reading the frontmatter as part of a gate's body"; do
+    q=${qr%%|*}
+    rest=${qr#*|}
+    seen=${rest%%|*}
+    text=${rest#*|}
+    if h_real_holds "$q"; then
+      fail "real gates: $text: the question '$q' stayed green"
+    else
+      case $H_WHY in
+        *"$seen"*) pass "real gates: $text: the question '$q' turns red (${H_WHY%%;*})" ;;
+        *) fail "real gates: $text: the question '$q' turned red for another reason" "$H_WHY" ;;
+      esac
+    fi
+  done
+fi
+h_stop
+drop_sandbox "$sb" || true
+
+# 18. step 6.4's case for planning and design (h_design, h_design_holds).
+# design_plant MODE QUESTION|SEEN|TEXT...: with the plants already made in
+# the copy $sb, h_design runs there in MODE; each QUESTION must fail with
+# SEEN in its H_WHY
+design_plant() {
+  local mode=$1 qr q rest seen text
+  shift
+  if ! h_design "$sb" "$mode"; then
+    fail "design ($mode): the case could not be made, or the fake did not answer"
+    return
+  fi
+  for qr in "$@"; do
+    q=${qr%%|*}
+    rest=${qr#*|}
+    seen=${rest%%|*}
+    text=${rest#*|}
+    if h_design_holds "$q"; then
+      fail "design: $text: the question '$q' stayed green"
+    else
+      case $H_WHY in
+        *"$seen"*) pass "design: $text: the question '$q' turns red (${H_WHY%%;*})" ;;
+        *) fail "design: $text: the question '$q' turned red for another reason" "$H_WHY" ;;
+      esac
+    fi
+  done
+}
+# one copy with four defects in default mode, each turning one question red
+# for its own reason, in one client run: an unknown frontmatter key in the
+# architect's file (loads), Bash in its tools (tools), effort high (model),
+# and the architect added to the fragment's gate matchers (receipt)
+sb=$(make_sandbox) || abort_sandbox
+a="$sb/method/.claude/agents/method/method-architect.md"
+# shellcheck disable=SC2016 # perl code, expanded by perl
+{
+  perl -0pi -e 's/^(effort: xhigh\n)/${1}bogus-key: 1\n/m; s/^(tools: [^\n]*)/$1, Bash/m; s/^effort: xhigh$/effort: high/m' "$a"
+  perl -pi -e 's/\|method-tester\)\$"/|method-tester|method-architect)\$"/g' "$sb/method/settings.fragment.json"
+}
+if ! grep -q '^bogus-key: 1$' "$a" || ! grep -q '^tools: .*, Bash$' "$a" || ! grep -q '^effort: high$' "$a" || [ "$(grep -c 'method-tester|method-architect)\$"' "$sb/method/settings.fragment.json")" != 2 ]; then
+  fail "design: the plants did not apply, so the check results would mean nothing"
+else
+  design_plant default "loads|the debug log names method-architect: |an unknown frontmatter key in the architect's file" \
+    "tools|the architect's first request offers Bash|Bash in the architect's tools" \
+    "model|the architect's requests went out at effort high|effort high in the architect's file" \
+    "receipt|gate-receipt ran 2 times during the architect's call, not 0|the architect in the fragment's gate matchers (gate-receipt runs at its start and stop)"
+fi
+h_stop
+drop_sandbox "$sb" || true
+# the design skill made one the owner cannot type (expands)
+sb=$(make_sandbox) || abort_sandbox
+# shellcheck disable=SC2016 # perl code, expanded by perl
+perl -0pi -e 's/^(name: method-design\n)/${1}user-invocable: false\n/m' "$sb/method/.claude/skills/method-design/SKILL.md"
+if ! grep -q '^user-invocable: false$' "$sb/method/.claude/skills/method-design/SKILL.md"; then
+  fail "design: the plant did not apply, so the check result would mean nothing"
+else
+  design_plant auto "expands|/method-design's body and arguments in main's first request: no request|method-design made a skill only Claude can call"
+fi
+h_stop
+drop_sandbox "$sb" || true
+# (step 6.6, the review's F16) gate-receipt refusing every agent's
+# handback, the architect's too (ends: it takes more turns, and its design
+# never reaches the main session; measured at 2.1.319, the other questions
+# stay green)
+sb=$(make_sandbox) || abort_sandbox
+# shellcheck disable=SC2016 # perl code, expanded by perl
+perl -pi -e 's/^(\s*)(return 0 unless defined \$gate && !ref \$gate && exists \$w->\{gate\}\{\$gate\};)$/${1}return Hook::json({ hookSpecificOutput => { hookEventName => "PreToolUse", permissionDecision => "deny", permissionDecisionReason => "refused" } }) if (\$in->{tool_name} \/\/ "") eq "SubagentHandback"; # HARNESS-PLANT\n$1$2/' "$sb/method/scripts/method/lib/receipt.pl"
+if ! grep -q -F HARNESS-PLANT "$sb/method/scripts/method/lib/receipt.pl"; then
+  fail "design: the plant did not apply, so the check result would mean nothing"
+else
+  design_plant auto "ends|the handed-back design did not reach the main conversation|gate-receipt refuses every agent's handback, the architect's too"
+fi
+h_stop
+drop_sandbox "$sb" || true
+
+# 19. step 6.5's case for /method-start (h_start, h_start_holds).
+# start_plant MODE QUESTION|SEEN|TEXT...: with the plants already made in
+# the copy $sb, h_start runs there in MODE; each QUESTION must fail with
+# SEEN in its H_WHY
+start_plant() {
+  local mode=$1 qr q rest seen text
+  shift
+  if ! h_start "$sb" "$mode"; then
+    fail "start ($mode): the case could not be made, or the fake did not answer"
+    return
+  fi
+  for qr in "$@"; do
+    q=${qr%%|*}
+    rest=${qr#*|}
+    seen=${rest%%|*}
+    text=${rest#*|}
+    if h_start_holds "$q"; then
+      fail "start: $text: the question '$q' stayed green"
+    else
+      case $H_WHY in
+        *"$seen"*) pass "start: $text: the question '$q' turns red (${H_WHY%%;*})" ;;
+        *) fail "start: $text: the question '$q' turned red for another reason" "$H_WHY" ;;
+      esac
+    fi
+  done
+}
+# one copy with three defects in default mode, each turning one question
+# red for its own reason, in one client run: a variable the client does not
+# substitute added to method-start (effort), the guard taken off the
+# fragment's PreToolUse hook on Bash (guard), and the start hook taken off its
+# SessionStart (active)
+sb=$(make_sandbox) || abort_sandbox
+s="$sb/method/.claude/skills/method-start/SKILL.md"
+# shellcheck disable=SC2016 # the variable is written into the skill as text
+printf '\nPlanted: ${CLAUDE_EFFORTS}.\n' >>"$s"
+perl -MJSON::PP -e 'my $f = shift; open my $h, "<", $f or die; my $d = JSON::PP->new->decode(do { local $/; <$h> }); close $h;
+  delete $d->{hooks}{SessionStart};
+  $d->{hooks}{PreToolUse} = [grep { ($_->{matcher} // "") !~ /(?:\A|\|)Bash(?:\||\z)/ } @{ $d->{hooks}{PreToolUse} }];
+  open $h, ">", $f or die; print $h JSON::PP->new->canonical->pretty->encode($d); close $h or die' "$sb/method/settings.fragment.json"
+# shellcheck disable=SC2016 # the planted variable as written, not expanded here
+if ! grep -q -F 'Planted: ${CLAUDE_EFFORTS}.' "$s" || grep -q -F 'session-status.sh' "$sb/method/settings.fragment.json" ||
+  ! perl -MJSON::PP -0ne 'my $d = JSON::PP->new->decode($_); my @p = @{ $d->{hooks}{PreToolUse} || [] }; exit(@p && !(grep { ($_->{matcher} // "") =~ /(?:\A|\|)Bash(?:\||\z)/ } @p) ? 0 : 1)' "$sb/method/settings.fragment.json"; then
+  fail "start: the plants did not apply, so the check results would mean nothing"
+else
+  start_plant default "effort|the literal \${CLAUDE_EFFORTS} reached main's requests|a variable the client does not substitute in method-start" \
+    "guard|the chained call was not refused by G6|the guard taken off the fragment's PreToolUse hook on Bash" \
+    "active|no start hook's METHOD-ACTIVE line reached main's requests|the start hook taken off the fragment"
+fi
+h_stop
+drop_sandbox "$sb" || true
+# with no start hook: method-start's lines naming METHOD-ACTIVE removed
+# (named), and, in a second copy, method-start made a skill only Claude can
+# call (expands)
+sb=$(make_sandbox) || abort_sandbox
+s="$sb/method/.claude/skills/method-start/SKILL.md"
+perl -ni -e 'print unless /METHOD-ACTIVE/' "$s"
+if grep -q -F METHOD-ACTIVE "$s"; then
+  fail "start: the plant did not apply, so the check result would mean nothing"
+else
+  start_plant nohook "named|method-start's SKILL.md has no line naming METHOD-ACTIVE|method-start's text naming the METHOD-ACTIVE line removed"
+fi
+h_stop
+drop_sandbox "$sb" || true
+sb=$(make_sandbox) || abort_sandbox
+s="$sb/method/.claude/skills/method-start/SKILL.md"
+# shellcheck disable=SC2016 # perl code, expanded by perl
+perl -0pi -e 's/^(name: method-start\n)/${1}user-invocable: false\n/m' "$s"
+if ! grep -q '^user-invocable: false$' "$s"; then
+  fail "start: the plant did not apply, so the check result would mean nothing"
+else
+  start_plant nohook "expands|/method-start's body in main's first request: no request|method-start made a skill only Claude can call"
+fi
+h_stop
+drop_sandbox "$sb" || true
+
 # 13. get-client: a download that does not match the pinned checksum is refused
 reg="$H_WORK/registry/@anthropic-ai/claude-code-linux-x64/-"
 mkdir -p "$reg" "$H_WORK/pkg/package"
