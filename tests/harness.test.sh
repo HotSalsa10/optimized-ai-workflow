@@ -865,6 +865,16 @@ if h_real_gates "$root" auto; then
 else
   fail "real-gates-auto: the case could not be made, or the fake did not answer; the client was not started"
 fi
+# Deep review (step 6b.3, F12, item 31): three runs of the reviewer in one
+# message, each with its own match string, each leaving its own VALID receipt
+if h_real_gates "$root" deep; then
+  real_q own "real gates (deep): three method-reviewer runs launched in one message each leave a VALID receipt of their own, three for the tree"
+  real_q base "real gates (deep): each of the three runs reads the review packet first, and its receipt records the merge base"
+  real_q record "real gates (deep): each of the three runs took the fragment's model and effort xhigh"
+  h_safe real-gates-deep
+else
+  fail "real-gates-deep: the case could not be made, or the fake did not answer; the client was not started"
+fi
 
 # --- 20. planning and design (step 6.4): the method's skills typed as the
 # owner's message (-p "/method-plan ..." and "/method-design ...", F6), and

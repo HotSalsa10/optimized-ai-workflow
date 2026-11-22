@@ -453,6 +453,29 @@ fi
 h_stop
 drop_sandbox "$sb" || true
 
+# 17c. step 6b.3's Deep review case (h_real_gates MODE deep, question own):
+# with receipt.pl naming a receipt by the session alone, not by the session
+# and the agent, the three reviewer runs of one message share one run
+# number series and each stop lands on the newest run's receipt, so the runs
+# do not each leave a VALID receipt of their own
+sb=$(make_sandbox) || abort_sandbox
+# shellcheck disable=SC2016 # perl code, expanded by perl
+perl -pi -e 's/return substr\(sha\(\x27receipt\x27, \$sid, \$aid\), 0, 16\)/return substr(sha(\x27receipt\x27, \$sid), 0, 16) # HARNESS-PLANT/' "$sb/method/scripts/method/lib/receipt.pl"
+if ! grep -q -F HARNESS-PLANT "$sb/method/scripts/method/lib/receipt.pl"; then
+  fail "real gates (deep): the plant did not apply, so the check result would mean nothing"
+elif ! h_real_gates "$sb" deep; then
+  fail "real gates (deep): the case could not be made, or the fake did not answer"
+elif h_real_holds own; then
+  fail "real gates (deep): receipts named by the session alone: the question 'own' stayed green"
+else
+  case $H_WHY in
+    *"method-reviewer-1's receipt: "*) pass "real gates (deep): receipts named by the session alone: the question 'own' turns red (${H_WHY%%;*})" ;;
+    *) fail "real gates (deep): receipts named by the session alone: the question 'own' turned red for another reason" "$H_WHY" ;;
+  esac
+fi
+h_stop
+drop_sandbox "$sb" || true
+
 # 18. step 6.4's case for planning and design (h_design, h_design_holds).
 # design_plant MODE QUESTION|SEEN|TEXT...: with the plants already made in
 # the copy $sb, h_design runs there in MODE; each QUESTION must fail with

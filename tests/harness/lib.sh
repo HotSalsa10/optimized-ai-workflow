@@ -70,7 +70,7 @@
 # req-001 is h_fake's own alive probe.
 
 # settings a caller's environment must not carry into every case
-unset H_CWD H_PROMPT H_FEED H_TMPDIR H_TMP_ROOT H_FAKE_API H_SEND_MESSAGE H_FAKE_PID H_PORT H_RUNS H_TOTAL_SECS
+unset H_CWD H_PROMPT H_FEED H_TMPDIR H_TMP_ROOT H_FAKE_API H_SEND_MESSAGE H_FAKE_PID H_PORT H_RUNS H_TOTAL_SECS H_GATE_RUNS
 
 h_case() {
   H_DIR="$H_WORK/it's a case ü/$1"
@@ -536,16 +536,28 @@ h_words_holds() {
 # the first gate (H_N1) runs two Bash calls between (N1: the guard inside a
 # gate): a write to the project's settings and a push to main. MODE auto
 # (the test-only allow hook on Agent, as h_gates): each hands its report
-# back. Sets H_GATES (one "NAME<TAB>WORD" a gate), H_MODEL (the fragment's
-# model), H_BASE (the merge base), H_N1 and H_SETTINGS (the settings' cksum
-# before the run). Returns 1 when the case could not be made or the fake did
-# not answer.
+# back. MODE deep (step 6b.3, Deep review, F12): as default, with no N1,
+# and the main session's one message calls the reviewer (the first gate in
+# verdicts.txt) three times, the runs told apart by their own match strings
+# and descriptions (HARNESS-GATE-<gate>-<n>:, "harness gate <gate>-<n>",
+# conversation <gate>-<n>, n 1 to 3). Sets H_GATES (one "NAME<TAB>WORD" a
+# gate), H_GATE_RUNS (one "RUN<TAB>GATE<TAB>WORD" a run: RUN is the gate's name,
+# or <gate>-<n> in MODE deep), H_MODEL (the fragment's model), H_BASE (the
+# merge base), H_N1 and H_SETTINGS (the settings' cksum before the run).
+# Returns 1 when the case could not be made or the fake did not answer.
 h_real_gates() {
   local mode=$2
   H_TREE=""
   H_BASE=""
   H_N1=""
   H_GATES=$(cd "$1" && perl -e 'require "./method/scripts/method/lib/verdicts.pl"; my @r = Verdicts::rows(); print "$_->[0]\t", (Verdicts::words($_->[1], @r))[0], "\n" for Verdicts::gates(@r)') || return 1
+  # shellcheck disable=SC2016 # perl code, expanded by perl
+  if [ "$mode" = deep ]; then
+    H_GATE_RUNS=$(printf '%s\n' "$H_GATES" | sed -n 1p | perl -ne 'chomp; my ($g, $w) = split /\t/; print "$g-$_\t$g\t$w\n" for 1 .. 3')
+  else
+    H_GATE_RUNS=$(printf '%s\n' "$H_GATES" | perl -ne 'chomp; my ($g, $w) = split /\t/; print "$g\t$g\t$w\n"')
+  fi
+  [ -n "$H_GATE_RUNS" ] || return 1
   H_MODEL=$(perl -MJSON::PP -0ne 'print JSON::PP->new->decode($_)->{model}' "$1/method/settings.fragment.json") || return 1
   { h_case "real-gates-$mode" && h_method "$1"; } || return 1
   if [ "$mode" = auto ]; then
@@ -566,21 +578,21 @@ h_real_gates() {
   H_TREE=$(HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git -C "$H_PROJ" rev-parse 'HEAD^{tree}') || return 1
   mkdir -p "$H_PROJ/.method/local" &&
     (cd "$H_PROJ" && HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 bash scripts/method/review-packet.sh --base origin/main >".method/local/packet-$H_TREE.txt" 2>/dev/null) || return 1
-  [ "$mode" = auto ] || H_N1=$(printf '%s\n' "$H_GATES" | sed -n 1p | cut -f1)
+  [ "$mode" != default ] || H_N1=$(printf '%s\n' "$H_GATES" | sed -n 1p | cut -f1)
   H_SETTINGS=$(cksum <"$H_PROJ/.claude/settings.json")
-  printf '%s\n' "$H_GATES" | perl -MJSON::PP -e '
+  printf '%s\n' "$H_GATE_RUNS" | perl -MJSON::PP -e '
     my ($mode, $t, $packet, $n1, $write, $push) = @ARGV;
     my (@convs, @calls);
     while (my $l = <STDIN>) {
       chomp $l;
-      my ($g, $w) = split /\t/, $l;
+      my ($run, $g, $w) = split /\t/, $l;
       my $good = "$w\nSummary: the change is fine.\nEND-VERDICT $t";
       my $read = {tool => "Read", input => {file_path => $packet}};
-      my @n1 = $g eq $n1 ? ({tool => "Bash", input => {command => $write, description => "write the settings"}},
+      my @n1 = $run eq $n1 ? ({tool => "Bash", input => {command => $write, description => "write the settings"}},
         {tool => "Bash", input => {command => $push, description => "push to main"}}) : ();
       my @turns = $mode eq "auto" ? ($read, {tool => "SubagentHandback", input => {message => $good}}, map { {text => $good} } 1 .. 3) : ($read, @n1, {text => $good});
-      push @convs, {name => $g, match => "HARNESS-GATE-\Q$g\E:", turns => \@turns};
-      push @calls, {type => "tool_use", name => "Agent", input => {description => "harness gate $g", prompt => "HARNESS-GATE-$g: check the change",
+      push @convs, {name => $run, match => "HARNESS-GATE-\Q$run\E:", turns => \@turns};
+      push @calls, {type => "tool_use", name => "Agent", input => {description => "harness gate $run", prompt => "HARNESS-GATE-$run: check the change",
         subagent_type => $g, run_in_background => JSON::PP::false}};
     }
     unshift @convs, {name => "classifier", match => "(?:^<transcript>|<user_claude_md>)", turns => [{text => "<block>no</block>"}]} if $mode eq "auto";
@@ -595,9 +607,10 @@ h_real_gates() {
   fi
   h_stop
 }
-# h_real_holds QUESTION: 0 when QUESTION holds for every gate of the case
-# h_real_gates ran last; else 1, with H_WHY saying what was seen, gate by
-# gate. The questions:
+# h_real_holds QUESTION: 0 when QUESTION holds for every gate run of the
+# case h_real_gates ran last (one a gate, or MODE deep's three of the
+# reviewer); else 1, with H_WHY saying what was seen, run by run. The
+# questions:
 #   loads    each gate is in the init event's agents, and the client's
 #            debug log (not empty, or the case cannot tell) has no line
 #            naming the gate with "does not recognize or apply" (an unknown
@@ -619,10 +632,35 @@ h_real_gates() {
 #            were refused (its requests carry "guard G6:" and "guard G3:
 #            pushing to main is refused"), the settings and origin's main
 #            are unchanged, and its receipt is still VALID
+#   own      (step 6b.3; MODE deep, item 31) each run left a receipt of its
+#            own: each run's receipt is found by its Agent call (one
+#            receipt for its agent) and is VALID with its word, and the git
+#            folder holds exactly as many VALID receipts of the gate for the
+#            tree as there were runs
 h_real_holds() {
-  local g w got line t
+  local r g w got line t own_pl
   H_WHY=""
-  [ -n "$H_GATES" ] || { H_WHY="no gate read from verdicts.txt, so the case cannot tell"; return 1; }
+  [ -n "$H_GATES" ] && [ -n "${H_GATE_RUNS:-}" ] || { H_WHY="no gate read from verdicts.txt, so the case cannot tell"; return 1; }
+  if [ "$1" = own ]; then
+    while IFS="$(printf '\t')" read -r r g w; do
+      got=$(h_receipt "$r")
+      [ "$got" = "VALID why=none open=$w stops=1 blocked=0 denied=0" ] || H_WHY="$H_WHY $r's receipt: $got;"
+    done <<GATE_RUNS
+$H_GATE_RUNS
+GATE_RUNS
+    g=$(printf '%s\n' "$H_GATE_RUNS" | sed -n 1p | cut -f2)
+    # (the VALID receipts of the gate for the tree in the git folder)
+    # shellcheck disable=SC2016 # perl code, expanded by perl
+    own_pl='my ($dir, $g, $t) = @ARGV; my $n = 0; opendir my $d, $dir or die "no git folder\n";
+      for my $f (grep { /\Amethod-receipt-[0-9a-f]+\.json\z/ } readdir $d) {
+        open my $h, "<", "$dir/$f" or next; my $r = eval { local $/; JSON::PP->new->decode(<$h>) } or next;
+        $n++ if ($r->{gate} // "") eq $g && ($r->{tree} // "") eq $t && ($r->{state} // "") eq "VALID" }
+      print "$n\n"'
+    got=$(perl -MJSON::PP -e "$own_pl" "$H_PROJ/.git" "$g" "$H_TREE" 2>&1)
+    [ "$got" = "$(printf '%s\n' "$H_GATE_RUNS" | grep -c .)" ] || H_WHY="$H_WHY the git folder holds $got VALID receipts of $g for the tree;"
+    [ -z "$H_WHY" ]
+    return
+  fi
   if [ "$1" = refused ]; then
     [ -n "$H_N1" ] || { H_WHY="no gate ran the two calls (MODE auto?), so the case cannot tell"; return 1; }
     h_req_in "$H_N1" "guard G6:" || H_WHY="$H_WHY $H_N1's requests do not carry the guard's G6 refusal;"
@@ -639,7 +677,7 @@ h_real_holds() {
     H_WHY="the client wrote no debug log, so the case cannot tell"
     return 1
   fi
-  while IFS="$(printf '\t')" read -r g w; do
+  while IFS="$(printf '\t')" read -r r g w; do
     case $1 in
       loads)
         h_init agents | grep -q -x -F -- "$g" || H_WHY="$H_WHY $g is not in the init event's agents;"
@@ -647,36 +685,36 @@ h_real_holds() {
         [ -z "$line" ] || H_WHY="$H_WHY the debug log names $g: $line;"
         ;;
       valid)
-        got=$(h_receipt "$g")
-        [ "$got" = "VALID why=none open=$w stops=1 blocked=0 denied=0" ] || H_WHY="$H_WHY $g's receipt: $got;"
+        got=$(h_receipt "$r")
+        [ "$got" = "VALID why=none open=$w stops=1 blocked=0 denied=0" ] || H_WHY="$H_WHY $r's receipt: $got;"
         ;;
       record)
-        got=$(h_used "$g")
-        case $got in "models=$H_MODEL efforts=xhigh "*) ;; *) H_WHY="$H_WHY $g's receipt holds $got;" ;; esac
+        got=$(h_used "$r")
+        case $got in "models=$H_MODEL efforts=xhigh "*) ;; *) H_WHY="$H_WHY $r's receipt holds $got;" ;; esac
         ;;
       tools)
-        got=$(perl "$HARNESS/read.pl" tools "$g" "$H_DIR/fake")
-        case ",$got," in ,none, | ,,) H_WHY="$H_WHY $g's first request offers no tools ($got);" ;; esac
+        got=$(perl "$HARNESS/read.pl" tools "$r" "$H_DIR/fake")
+        case ",$got," in ,none, | ,,) H_WHY="$H_WHY $r's first request offers no tools ($got);" ;; esac
         for t in Agent Task Skill SendMessage; do
-          case ",$got," in *",$t,"*) H_WHY="$H_WHY $g's first request offers $t, a delegation tool: $got;" ;; esac
+          case ",$got," in *",$t,"*) H_WHY="$H_WHY $r's first request offers $t, a delegation tool: $got;" ;; esac
         done
         for t in Read Bash; do
-          case ",$got," in *",$t,"*) ;; *) H_WHY="$H_WHY $g's first request lacks $t: $got;" ;; esac
+          case ",$got," in *",$t,"*) ;; *) H_WHY="$H_WHY $r's first request lacks $t: $got;" ;; esac
         done
         ;;
       handback)
-        got=$(perl "$HARNESS/read.pl" tools "$g" "$H_DIR/fake")
-        case ",$got," in *,SubagentHandback,*) ;; *) H_WHY="$H_WHY $g's first request does not offer SubagentHandback: $got;" ;; esac
+        got=$(perl "$HARNESS/read.pl" tools "$r" "$H_DIR/fake")
+        case ",$got," in *,SubagentHandback,*) ;; *) H_WHY="$H_WHY $r's first request does not offer SubagentHandback: $got;" ;; esac
         ;;
       base)
-        h_req_in "$g" "Merge base: $H_BASE" || H_WHY="$H_WHY the packet did not reach $g's requests;"
-        got=$(perl "$HARNESS/read.pl" bases "harness gate $g" "$H_DIR/home" "$H_PROJ/.git")
-        [ "$got" = "$H_BASE" ] || H_WHY="$H_WHY $g's receipt records the bases $got;"
+        h_req_in "$r" "Merge base: $H_BASE" || H_WHY="$H_WHY the packet did not reach $r's requests;"
+        got=$(perl "$HARNESS/read.pl" bases "harness gate $r" "$H_DIR/home" "$H_PROJ/.git")
+        [ "$got" = "$H_BASE" ] || H_WHY="$H_WHY $r's receipt records the bases $got;"
         ;;
       *) H_WHY="no such real-gates question: $1" ;;
     esac
   done <<EOF
-$H_GATES
+$H_GATE_RUNS
 EOF
   [ -z "$H_WHY" ]
 }
