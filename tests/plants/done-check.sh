@@ -38,10 +38,22 @@ cat >"$work/plants.txt" <<'PLANTS-END'
   if ($n > $MAX_ROUNDS) {
 ---
   if ($n > $MAX_ROUNDS + 1) {
-=== the anchor taken as the last commit with the line | method/scripts/method/lib/done.pl | floor: a fourth round since the anchor
+=== the anchor taken as the last commit with the line | method/scripts/method/lib/done.pl | floor: an Approved line removed and added again does not move the anchor
       $anchor = $i if !defined $anchor && $l eq $app[0];
 ---
       $anchor = $i if $l eq $app[0];
+=== the rounds counted from the branch's commits only | method/scripts/method/lib/done.pl | floor: rounds survive a squash
+    for my $t (grep { !$on{$_} } sort keys %reviewed) {
+---
+    for my $t () {
+=== a reviewed version that cannot be read passed over in silence | method/scripts/method/lib/done.pl | floor: a reviewed version this clone cannot read is not counted, and the line says so
+      if (!defined $has) { $unread++; next }
+---
+      next unless defined $has;
+=== a task plan that is not a regular file passed over | method/scripts/method/lib/done.pl | floor: a second task plan that is a symbolic link
+  my @added = grep { !Tree::lookup($T{mb}, $_->[0]) } plan_paths($head);
+---
+  my @added = grep { !Tree::lookup($T{mb}, $_->[0]) && $_->[1] eq '' } plan_paths($head);
 === diagnose left out of the history | method/scripts/method/lib/done.pl | floor: a diagnose receipt shows in the history
 grep { $_->{tree} eq $c->[1] && exists $w->{gate}{ $_->{gate} } }
 ---

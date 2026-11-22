@@ -313,8 +313,11 @@ sub branch_commits {
   return @c;
 }
 
-# plan_paths COMMIT: the task plans COMMIT holds (docs/tasks/<id>/plan.md,
-# regular files)
+# plan_paths COMMIT: the task plans COMMIT holds, each [PATH, WHAT]: WHAT is
+# '' for a regular file docs/tasks/<id>/plan.md, else what stands there
+# instead (a symbolic link or a submodule as the task's folder, or as its
+# plan.md; a folder as its plan.md), which a check of plans would not read
+my %KIND = ('120000' => 'a symbolic link', '160000' => 'a submodule', '40000' => 'a folder');
 sub plan_paths {
   my ($commit) = @_;
   my $d = Tree::lookup($commit, 'docs/tasks');
@@ -322,9 +325,12 @@ sub plan_paths {
   my $e = Tree::tree_entries($d->[1]);
   my @p;
   for my $n (sort keys %$e) {
-    next unless $e->{$n}[0] eq '40000';
+    my $m = $e->{$n}[0];
+    if ($m eq '120000' || $m eq '160000') { push @p, ["docs/tasks/$n", $KIND{$m}]; next }
+    next unless $m eq '40000';
     my $f = Tree::tree_entries($e->{$n}[1])->{'plan.md'};
-    push @p, "docs/tasks/$n/plan.md" if $f && $f->[0] =~ /\A100(?:644|755)\z/;
+    next unless $f;
+    push @p, ["docs/tasks/$n/plan.md", $f->[0] =~ /\A100(?:644|755)\z/ ? '' : $KIND{ $f->[0] } || "mode $f->[0]"];
   }
   return @p;
 }
@@ -349,7 +355,12 @@ sub plan_condition {
     Git::no_main_action() . ', then run done-check again') unless defined $ref;
   return report($area, 0, "$ref and this branch share no history here, so the task this branch adds cannot be told",
     'this branch does not grow from main; start it from main') unless defined $T{mb};
-  my @plans = grep { !Tree::lookup($T{mb}, $_) } plan_paths($head);
+  my @added = grep { !Tree::lookup($T{mb}, $_->[0]) } plan_paths($head);
+  my @odd = grep { $_->[1] ne '' } @added;
+  return report($area, 0, 'this branch adds a task folder or plan that is not a plain folder and file: '
+    . names(map { "$_->[0] ($_->[1])" } @odd), 'make each task plan a regular file in its own folder, docs/tasks/<id>/plan.md;'
+    . ' one task, with one plan, a merge') if @odd;
+  my @plans = map { $_->[0] } @added;
   return report($area, 0, 'this branch adds no task plan (docs/tasks/<id>/plan.md)', $plan) unless @plans;
   return report($area, 0, 'this branch adds ' . scalar(@plans) . ' task plans (' . names(@plans) . '); one task goes in one merge',
     'split the work: one task, with one plan, a merge') if @plans > 1;
@@ -388,7 +399,7 @@ sub plan_condition {
     }
   }
   stop("the Approved line of $path is in no commit of this branch") unless defined $anchor;
-  @T{qw(id path anchor tier)} = ($id, $path, $anchor, $tier);
+  @T{qw(id path anchor tier approved)} = ($id, $path, $anchor, $tier, $app[0]);
   my $more = @had > 1 ? '; the plan was approved ' . scalar(@had) . ' times on this branch: ' . join('; ', map { substr($_, 10) } @had) : '';
   push @ready_notes, substr($more, 2) if $more ne '';
   return report($area, 1, "task $id ($path), Tier $tier; approved $date \"$quote\" in commit " . short($T{branch}[$anchor][0]) . $more);
@@ -458,26 +469,59 @@ sub gate_condition {
     . (defined $from ? 'the merge base ' . short($T{mb}) : short($ok->{bases}[0]) . ', which chains back to the merge base ' . short($T{mb})));
 }
 
-# rounds (M009): the trees since the plan's approval (the anchor's on)
-# that have a valid receipt of the reviewer; without an approved plan, the
-# whole branch's
+# tree_plan_has TREE PATH LINE: 1 when the file at PATH in the folder TREE
+# holds LINE (compared as plan_lines reads it), 0 when not; dies when TREE
+# or a part of it cannot be read
+sub tree_plan_has {
+  my ($tree, $path, $line) = @_;
+  die "not a tree id\n" unless $tree =~ /\A(?:[0-9a-f]{40}|[0-9a-f]{64})\z/;
+  my @parts = split m{/}, $path;
+  my $e = ['40000', $tree];
+  for my $p (@parts) {
+    return 0 unless $e->[0] eq '40000';
+    $e = Tree::tree_entries($e->[1])->{$p};
+    return 0 unless $e;
+  }
+  return 0 unless $e->[0] =~ /\A100(?:644|755)\z/;
+  my @l = split /\n/, Tree::blob($e->[1]);
+  s/[ \t\r]+\z// for @l;
+  return scalar grep { $_ eq $line } @l;
+}
+
+# rounds (M009): the versions reviewed since the plan's approval, each a
+# tree with a valid receipt of the reviewer: the trees of the branch's
+# commits from the anchor on, and every reviewed tree whose plan holds the
+# same Approved line, so a branch whose history was rewritten (squashed or
+# rebased) keeps its earlier rounds; without an approved plan, the whole
+# branch's trees. A reviewed tree this clone cannot read is not counted,
+# and the line says so
 sub rounds_condition {
   my %role = Verdicts::roles(Verdicts::rows());
   my $good = Receipt::words()->{good};
   my $from = defined $T{anchor} ? $T{anchor} : 0;
-  my (%seen, @trees);
-  for my $c (@{ $T{branch} }[$from .. $#{ $T{branch} }]) {
-    push @trees, $c->[1] unless $seen{ $c->[1] }++;
-  }
+  my %on;
+  $on{ $_->[1] } = 1 for @{ $T{branch} }[$from .. $#{ $T{branch} }];
   my %reviewed = map { ($_->{tree} => 1) } grep { $_->{gate} eq $role{reviewer} && $_->{state} eq $good } @{ $T{receipts} };
-  my $n = grep { $reviewed{$_} } @trees;
+  my @here = grep { $on{$_} } sort keys %reviewed;
+  my (@off, $unread);
+  if (defined $T{anchor}) {
+    for my $t (grep { !$on{$_} } sort keys %reviewed) {
+      my $has = eval { tree_plan_has($t, $T{path}, $T{approved}) };
+      if (!defined $has) { $unread++; next }
+      push @off, $t if $has;
+    }
+  }
+  my $n = @here + @off;
   my $since = defined $T{anchor} ? "since the plan's approval" : 'on this branch (no approved plan to count from)';
+  my $notes = @off ? ' (' . count(scalar(@off), 'of them is', 'of them are') . ' no longer on this branch: its history was rewritten)' : '';
+  $notes .= '; not counted: ' . count($unread, 'version', 'versions') . " that $role{reviewer} reviewed and this clone cannot read"
+    . ' (whether they hold this approval is not known)' if $unread;
   if ($n > $MAX_ROUNDS) {
-    return report('rounds', 0, "$n versions were reviewed $since; the limit is $MAX_ROUNDS rounds",
+    return report('rounds', 0, "$n versions were reviewed $since$notes; the limit is $MAX_ROUNDS rounds",
       "plan again: change the plan, and ask the owner for their go again (a new Approved line starts the count again)");
   }
   $T{ok}{rounds} = 1;
-  return report('rounds', 1, count($n, 'version', 'versions') . " reviewed $since, of at most $MAX_ROUNDS");
+  return report('rounds', 1, count($n, 'version', 'versions') . " reviewed $since, of at most $MAX_ROUNDS$notes");
 }
 
 # history: every gate's word on the branch's versions, in commit order (a

@@ -474,6 +474,97 @@ if wanted_any "floor: a fourth round since the anchor" "floor: three rounds sinc
     "; the plan was approved 2 times on this branch: 2026-11-22 \"approve t1\"; 2026-11-23 \"approve t1, with the new plan\""
 fi
 
+# a rewritten history keeps its rounds (M009): the versions reviewed under
+# the same Approved line count, on the branch or not
+if wanted_any "floor: rounds survive a squash" "floor: rounds survive a rebase" "floor: an Approved line removed and added again" \
+  "floor: a reviewed version this clone cannot read"; then
+  # next_round DIR TEXT WORD: a new version of src/a.txt, committed and
+  # reviewed by both gates with WORD
+  next_round() {
+    echo "$2" >"$1/src/a.txt"
+    (cd "$1" && git add -A)
+    msg "$1" 'Round\n\n%s\n' "$OK"
+    rc "$1"
+    forge "$1" "$R" "$3"
+    forge "$1" "$S" "$3"
+  }
+  f=$(floor_project) || abort_sandbox
+  mb=$(mbase "$f")
+  forge "$f" "$R" "REQUEST CHANGES"
+  forge "$f" "$S" "REQUEST CHANGES"
+  next_round "$f" 2 "REQUEST CHANGES"
+  next_round "$f" 3 "REQUEST CHANGES"
+  next_round "$f" 4 APPROVE
+  (cd "$f" && git reset -q --soft "$mb")
+  msg "$f" 'Squashed\n\n%s\n' "$OK"
+  rc "$f"
+  dc "$f"
+  expect "floor: rounds survive a squash: four versions reviewed, one commit left, NOT READY" 1 \
+    "done-check: rounds: FAIL - 4 versions were reviewed since the plan's approval (3 of them are no longer on this branch: its history was rewritten); the limit is 3 rounds" \
+    "done-check: reviewer: PASS" "done-check: NOT READY - 2 conditions failed (rounds, verdict)"
+
+  f=$(floor_project) || abort_sandbox
+  forge "$f" "$R" "REQUEST CHANGES"
+  forge "$f" "$S" "REQUEST CHANGES"
+  next_round "$f" 2 "REQUEST CHANGES"
+  next_round "$f" 3 "REQUEST CHANGES"
+  (cd "$f" && git checkout -q main && echo more >>README && git commit -q -a -m "Main moves" -m "$OK" && git push -q origin main 2>/dev/null &&
+    git checkout -q feat && git rebase -q main >/dev/null 2>&1)
+  next_round "$f" 4 APPROVE
+  dc "$f"
+  expect "floor: rounds survive a rebase onto a main that moved: NOT READY" 1 \
+    "done-check: up to date: PASS" \
+    "done-check: rounds: FAIL - 4 versions were reviewed since the plan's approval (3 of them are no longer on this branch: its history was rewritten); the limit is 3 rounds"
+
+  # the line is taken out and put back: the anchor stays at its first
+  # commit, so the version without the line still counts
+  f=$(floor_project) || abort_sandbox
+  forge "$f" "$R" "REQUEST CHANGES"
+  forge "$f" "$S" "REQUEST CHANGES"
+  printf '# Task t1\n\nTier: LIGHT\nPaths: src\n\nThe task.\n' >"$f/docs/tasks/t1/plan.md"
+  next_round "$f" 2 "REQUEST CHANGES"
+  add_task "$f"
+  next_round "$f" 3 "REQUEST CHANGES"
+  next_round "$f" 4 APPROVE
+  dc "$f"
+  expect "floor: an Approved line removed and added again does not move the anchor: a fourth round is NOT READY" 1 \
+    "done-check: rounds: FAIL - 4 versions were reviewed since the plan's approval; the limit is 3 rounds"
+
+  f=$(floor_project) || abort_sandbox
+  approve_head "$f"
+  forge "$f" "$R" "REQUEST CHANGES" tree=abababababababababababababababababababab
+  dc "$f"
+  expect "floor: a reviewed version this clone cannot read is not counted, and the line says so: READY" 0 \
+    "done-check: rounds: PASS - 1 version reviewed since the plan's approval, of at most 3; not counted: 1 version that method-reviewer reviewed and this clone cannot read (whether they hold this approval is not known)" \
+    "done-check: READY - "
+fi
+
+# a second task's plan, or its folder, as a symbolic link is still a second
+# task: one task goes in one merge
+if wanted_any "floor: a second task plan that is a symbolic link" "floor: a second task folder that is a symbolic link"; then
+  f=$(floor_project) || abort_sandbox
+  mkdir -p "$f/docs/tasks/t2"
+  if ! ln -s ../t1/plan.md "$f/docs/tasks/t2/plan.md" 2>/dev/null || ! [ -L "$f/docs/tasks/t2/plan.md" ]; then
+    skip "a second task plan or folder that is a symbolic link: this system cannot make symlinks"
+  else
+    (cd "$f" && git add -A)
+    msg "$f" 'Link\n\n%s\n' "$OK"
+    rc "$f"
+    approve_head "$f"
+    dc "$f"
+    expect "floor: a second task plan that is a symbolic link is NOT READY" 1 \
+      "done-check: plan: FAIL - this branch adds a task folder or plan that is not a plain folder and file: docs/tasks/t2/plan.md (a symbolic link)" \
+      "done-check: next: make each task plan a regular file in its own folder, docs/tasks/<id>/plan.md; one task, with one plan, a merge"
+    (cd "$f" && git rm -q -r docs/tasks/t2 && ln -s t1 docs/tasks/t2 && git add -A)
+    msg "$f" 'Folder link\n\n%s\n' "$OK"
+    rc "$f"
+    approve_head "$f"
+    dc "$f"
+    expect "floor: a second task folder that is a symbolic link is NOT READY" 1 \
+      "done-check: plan: FAIL - this branch adds a task folder or plan that is not a plain folder and file: docs/tasks/t2 (a symbolic link)"
+  fi
+fi
+
 if wanted_any "floor: a pruned receipt reads as missing"; then
   f=$(floor_project) || abort_sandbox
   approve_head "$f"

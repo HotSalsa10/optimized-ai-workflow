@@ -38,7 +38,7 @@ The hooks run in local sessions and in cloud sessions with one repository. Where
 | M044 | Mutation testing breaks the changed code on purpose | `scripts/method/mutate-changed.sh` |
 | M039 | Every script reads the verdict words from one file | `scripts/method/verdicts.txt` |
 | M072 | No hook log grows forever or stores secrets: each is cut to its newest lines, and its lines hold only fields of a fixed shape, never a command, a path or a message | `scripts/method/lib/log.pl` |
-| M009, M144, M146 | The task's plan with its approval; VALID approving receipts of the reviewer and the security checker for the exact files, reviewed from the merge base or chained back to it; no other word from either on those files; at most three review rounds since the approval; every gate's word on the branch listed | `scripts/method/done-check.sh` |
+| M009, M144, M146 | The task's plan with its approval; VALID approving receipts of the reviewer and the security checker for the exact files, reviewed from the merge base or chained back to it; no other word from either on those files; at most three review rounds since the approval, also when the branch's history is rewritten; every gate's word on the branch listed | `scripts/method/done-check.sh` |
 | M145, M146, M147 (step 6b) | The locked expected results and tier, a test run seen failing first and passing at the end, the reporter, three approving reviewers on high-risk paths | `scripts/method/done-check.sh` |
 | M126 (step 6b) | Every number in a report is in a log; "What the checks would miss" is not missing or empty | `scripts/method/report-check.sh` |
 | CI | The project's checks run on every change, outside the session | the project's CI (step 9) |
@@ -49,7 +49,7 @@ The hooks run in local sessions and in cloud sessions with one repository. Where
 |---|---|---|
 | M140, the start line | The hook adds `METHOD-ACTIVE` at every start | Whether Claude stops when it is missing |
 | Receipts | A gate's report has its first and last lines and was made the right way on the right files | Whether the verdict is right; a review cut off before its first word neither blocks nor counts, so its gate is run again |
-| The plan's approval (M144) | The Approved line's form, and that it quotes `approve <task>` for its own task | That you typed it |
+| The plan's approval (M144) | The Approved line's form, and that it quotes `approve <task>` for its own task | That you typed it, or what the rest of the reply says: a quote that holds `approve <task>` passes even when it refuses ("no, do not approve <task> yet") |
 | The tier (M147, step 6b) | A change on a high-risk path is judged FULL | Whether a change off those paths is really LIGHT |
 | Seen failing first (M145, step 6b) | A tester run said TESTS FAIL after the approval and before the code | Which tests failed, or why: the reviewer checks the tests (M090) |
 | The report check (M126, step 6b) | The reporter refuses a report whose check did not pass | A LIGHT change without a reporter: then only the skill runs the check |

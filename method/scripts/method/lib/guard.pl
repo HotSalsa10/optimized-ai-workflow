@@ -883,7 +883,7 @@ sub main {
     return refuse($rule, $text, $tool, $raw, $in) if $rule;
   }
   if ($tool eq 'SendMessage') {
-    return refuse('G4', "messages to other agents or sessions are refused in this method (step 5; D10): they can start work that runs without this project's hooks; tell the owner what you needed", $tool, $raw, $in);
+    return refuse('G4', "messages to other agents or sessions are refused in this method: they can start work that runs without this project's hooks; tell the owner what you needed", $tool, $raw, $in);
   }
   if ($tool eq 'ExitWorktree' && ref $input eq 'HASH' && $input->{discard_changes}) {
     return refuse('G3', 'leaving a worktree with discard_changes would delete its uncommitted work; commit it first, or keep the worktree and tell the owner', $tool, $raw, $in);
@@ -892,10 +892,10 @@ sub main {
   # starts work that runs without this project's hooks (D10, D11; final
   # review of step 5)
   if ($tool eq 'RemoteTrigger') {
-    return refuse('G4', "scheduled remote agents are refused in this method (D10, D11): they run without this project's hooks; tell the owner what you needed", $tool, $raw, $in);
+    return refuse('G4', "scheduled remote agents are refused in this method: they run without this project's hooks; tell the owner what you needed", $tool, $raw, $in);
   }
   if ($tool =~ /\A(?:Agent|Task)\z/ && ref $input eq 'HASH' && defined $input->{isolation} && !ref $input->{isolation} && $input->{isolation} eq 'remote') {
-    return refuse('G4', "an agent in a remote sandbox runs without this project's hooks (D10, D11), so it is refused; run it here, without isolation remote", $tool, $raw, $in);
+    return refuse('G4', "an agent in a remote sandbox runs without this project's hooks, so it is refused; run it here, without isolation remote", $tool, $raw, $in);
   }
   # G17: a skill or agent whose frontmatter declares hooks
   if ($tool =~ /\A(?:Skill|Agent|Task)\z/) {

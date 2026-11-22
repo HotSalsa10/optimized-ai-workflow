@@ -39,6 +39,8 @@
 #                  yet (step 9), so it never counts toward READY (M089)
 #   plan           the branch adds exactly one task plan,
 #                  docs/tasks/<id>/plan.md (not on main at the merge base),
+#                  a regular file in a plain folder (a symbolic link or a
+#                  submodule there fails),
 #                  whose Tier line is Tier: FULL or Tier: LIGHT and whose one
 #                  Approved line is Approved: <YYYY-MM-DD> "<the owner's
 #                  reply>", the reply holding the ready word and the task's
@@ -55,8 +57,12 @@
 #                  --since). Any receipt of the gate for HEAD's tree that
 #                  opened with another word fails it, whatever its state; a
 #                  receipt with no word neither fails nor counts (M146).
-#   rounds         at most three trees since the anchor have a valid
-#                  reviewer receipt; a fourth means plan again (M009)
+#   rounds         at most three trees have a valid reviewer receipt since
+#                  the plan's approval: the trees of the commits from the
+#                  anchor on, and any other reviewed tree whose plan holds
+#                  the same Approved line, so a squash or a rebase keeps the
+#                  rounds; a fourth means plan again (M009). A reviewed tree
+#                  this clone cannot read is not counted, and is named
 #   verdict        the head commit ends with a valid verdict line, and its
 #                  value is the one the receipts give: verdicts.txt's ready
 #                  word when the plan, both reviews and the rounds passed;

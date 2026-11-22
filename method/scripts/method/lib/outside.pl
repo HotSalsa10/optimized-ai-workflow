@@ -86,7 +86,7 @@ sub judge_bash {
       next unless $a =~ /\A([A-Za-z_][A-Za-z0-9_]*)\+?=/;
       $ghset = $1 if $GH_ENV{$1} && !($GH_PAGER{$1} && $a =~ /=(?:cat)?\z/);
       next unless $NESTED_ENV{$1};
-      return ('G4', "setting $1 is refused: it starts Claude without this project's hooks or rules (D11)$NO");
+      return ('G4', "setting $1 is refused: it starts Claude without this project's hooks or rules$NO");
     }
     # an inline program, or the text piped into an interpreter, that runs
     # claude or sets one of those names (a word that is only a path, such
@@ -94,7 +94,7 @@ sub judge_bash {
     if (grep { /\A(?:an inline program for|a pipe, here-document or here-string into|a program for \S+ from) / } @{ $c->{unread} || [] }) {
       my $code = join "\n", (grep { /[\s'"`()\[\];,|&=]/ } @w[1 .. $#w]), $c->{hbody} // '', $c->{pipe_from} // '';
       if ($code =~ $CLAUDE_TEXT) {
-        return ('G4', "this program runs another Claude, or sets what starts one without this project's hooks (D11)$NO");
+        return ('G4', "this program runs another Claude, or sets what starts one without this project's hooks$NO");
       }
     }
     next unless @w;
@@ -102,7 +102,7 @@ sub judge_bash {
       return ('G4', "starting another Claude is refused: it would run without this project's hooks$NO");
     }
     if ($n =~ /\A(?:npx|bunx|pnpx|npm|pnpm|yarn)\z/ && grep { m{\@anthropic-ai/claude-code\b|\Aclaude-code\z} } @w[1 .. $#w]) {
-      return ('G4', "running the Claude Code package is refused: it starts another Claude without this project's hooks (D11)$NO");
+      return ('G4', "running the Claude Code package is refused: it starts another Claude without this project's hooks$NO");
     }
     if ($n eq 'curl' || $n eq 'wget') {
       my $why = http_write($n, \@w, $c->{assigns} || []);
@@ -360,7 +360,7 @@ sub judge_mcp {
   my ($list, $errors) = load_mcp($project);
   return ('G4', "the MCP list cannot be read ($errors->[0]), so MCP tools that write are refused until it is fixed") if @$errors;
   my $entry = $list->{$name};
-  return ('G4', "the MCP tool " . shown($name) . " is not on the method's list of outside tools (D10: tools that merge, or start, message or schedule other sessions, stay with the owner); the owner can add a line to .claude/method-local/mcp-tools.txt$NO") unless $entry;
+  return ('G4', "the MCP tool " . shown($name) . " is not on the method's list of outside tools (tools that merge, or start, message or schedule other sessions, stay with the owner); the owner can add a line to .claude/method-local/mcp-tools.txt$NO") unless $entry;
   return () if $entry->{anywhere};
   $input = {} unless ref $input eq 'HASH';
   my ($o, $r) = origin($project);
