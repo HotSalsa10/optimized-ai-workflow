@@ -499,6 +499,8 @@ Each increment is reviewable on its own, has its tests and plants, and states a 
 
 ### Step 6b
 
+Superseded by docs/plans/step6b.md (the revised 6b plan, 22 November 2026), which is the plan to build from; this part stays as history.
+
 **6b.1 The R4 core: plan and receipts read by done-check.**
 - lib/receipt.pl's tree query and the packet base; the plan condition (exactly one `docs/tasks/*/plan.md` added on the branch, a well-formed Tier line, an Approved line quoting `approve <id>` for its folder); the reviewer and security conditions, the chain, the round count and the history (S14); the typed line must match; the stale texts (section 3, item 18).
 - Plants, one per floor element (R4's acceptance): no plan; an Approved line without `approve <id>`; one naming another task; no reviewer receipt; no security receipt; an INVALID receipt; an INCOMPLETE receipt; a REQUEST CHANGES beside an APPROVE on one tree; a receipt for another tree; a first review built with `--since` that does not chain; a fourth round; a typed `approve` with no receipts.

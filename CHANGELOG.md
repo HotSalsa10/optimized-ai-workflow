@@ -125,6 +125,11 @@ Nothing yet. Release 1 is being built.
 - Records before step 6's review (step 6.6): DECISIONS A73 holds step 6's settled choices as built and its known limits so far; RISKS gains #19 (the method's rules, agents and skills are text Claude can fail to follow; why.md says which are enforced), and #7, #11, #16 and #17 say what step 6 reduced; ROADMAP's step 6 line names what step 6 built, step 6b is added, `/setup` stays in step 7 and `/method-explain` goes to Track 4.
 - A shellcheck finding that turned CI red on step 6.5 (a harness variable set and never read, in tests/harness/lib.sh) is removed.
 
+### Changed (step 6b)
+
+- CI runs on pushes only (step 6b.0). A pull request no longer starts a second run of the same files: the push run already checks its head. tests/ci-config.test.sh turns red if a pull_request trigger comes back. Free CI minutes are scarce, so DECISIONS A76 also says when a push may skip CI (`[skip ci]`): only for a head that no review or merge reads; the tree that is reviewed and the tree that lands on main are always checked on Linux (A19).
+- Records: DECISIONS A75 (who decides what: Claude takes general and technical choices and tells you in one line; you decide merges, anything hard to undo, money, keys and accounts, anything touching your business projects, and a clash between Anthropic's advice and an earlier decision of yours) and A76; A74 reserved for step 6b's choices. The revised 6b plan is docs/plans/step6b.md. docs/research/README.md lists the twelve claude.dev posts read in full on 22 November, with the vendor's own figures marked as such.
+
 ### Changed (step 6)
 
 - From step 6's review (6.6, one repair loop): the prompt check and the description budget read a frontmatter value as Claude Code does. A `tools:` list wrapped onto the next line, written in quotes, or followed by a `# comment` no longer hides a tool such as Agent or Bash from the check, and `context: fork  # a note` in a skill is refused as `context: fork` is. A description wrapped onto the next line is counted whole, since Claude Code joins the lines and sends them all.
