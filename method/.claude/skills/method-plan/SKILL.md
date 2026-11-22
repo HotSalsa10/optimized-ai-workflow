@@ -16,7 +16,7 @@ Mark each claim in the plan VERIFIED (you read it or ran it, and say where) or I
 
 Say whether the task can be done as asked. When it cannot, or its requirements contradict each other, write "impossible or contradictory" and name the clash: that is an acceptable answer. Nothing in the plan makes a test pass by matching its inputs: no answers hard-coded to a test, no special cases for test inputs.
 
-The tier is FULL unless the task fits LIGHT, as the method's rules set it out; when unsure, FULL. A change that touches a path the project lists as high-risk is judged FULL at the merge, so plan it as FULL.
+The tier is FULL unless the task fits LIGHT, as the method's rules set it out; when unsure, FULL. The project lists its high-risk paths as `HIGH_RISK_PATHS` lines in `.claude/method.conf`, and done-check reads main's list and the branch's together, so a branch can add a path but never remove one. A change that touches a listed path, or a file under one, is judged FULL at the merge and needs three approving reviewers, so plan it as FULL.
 
 ## The task folder
 
@@ -59,3 +59,5 @@ After the approval's commit, and before any product code:
 2. Commit them, with no product code, in a commit of their own.
 3. Launch the method-tester agent with the Agent tool and `run_in_background: false`, in one call, its prompt naming the task's `expected.tsv` and the tests to run. Wait for its report.
 4. TESTS FAIL: the tests see the change missing; build it. TESTS PASS: stop, and tell the owner the tests do not test the change. TESTS NOT RUN: stop, and report why they could not run.
+
+After a re-approval, when code already exists, make the failing run again on the task's branch, after the new Approved line's commit: one commit that sets the product's files back to their content before the code, leaving `plan.md` and `expected.tsv` as approved; the tester there, as in step 3; then a commit that puts the code back. done-check counts only a TESTS FAIL on a commit between the approval and the finished files, on the branch itself.

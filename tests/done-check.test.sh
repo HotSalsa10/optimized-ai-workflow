@@ -123,12 +123,14 @@ add_task() {
     "${4:-Approved: 2026-11-22 \"approve $at_id\"}" >"$1/docs/tasks/$at_id/plan.md"
 }
 
-# new_project: prints a folder holding remote.git (bare) and w: main with one
-# commit, pushed, origin/HEAD set; then w on branch feat with a project check
-# (unit: fails while flaky.marker exists), .claude/method.conf
-# (PRODUCT_PATHS=src), src/a.txt and the approved plan of task t1 (add_task),
-# committed with an open verdict line
+# new_project [TIER]: prints a folder holding remote.git (bare) and w: main
+# with one commit, pushed, origin/HEAD set; then w on branch feat with a
+# project check (unit: fails while flaky.marker exists), .claude/method.conf
+# (PRODUCT_PATHS=src), src/a.txt and the approved plan of task t1 (add_task,
+# Tier TIER, default LIGHT; with FULL also its expected.tsv), committed with
+# an open verdict line
 new_project() {
+  np_tier=${1:-LIGHT}
   b=$(new_sandbox_dir) || return 1
   repos="$repos $b"
   (
@@ -148,7 +150,8 @@ new_project() {
     printf 'unit\tany\t-\t(\\d+) ok\ttest ! -e flaky.marker && echo 3 ok\n' >checks/project.tsv
     printf 'PRODUCT_PATHS=src\n' >.claude/method.conf
     printf 'x = 1\n' >src/a.txt
-    add_task .
+    add_task . t1 "$np_tier"
+    [ "$np_tier" != FULL ] || printf 'case\tinputs\texpected\tsource\none\tx=1\t2\tthe owner\n' >docs/tasks/t1/expected.tsv
     git add -A
     git commit -q -m "Add the feature" -m "$OPEN"
   ) || return 1
@@ -606,6 +609,330 @@ if wanted_any "floor: the history lists every gate's word" "floor: two receipts 
     "$(short "$c2"): method-reviewer APPROVE, method-tester TESTS PASS, method-security-checker APPROVE"
   lacks "floor: a receipt with no stopped time is not in the history" "method-security-checker no word"
 fi
+
+
+# --- the SPEC R6 set (step 6b.3): the tier and the high-risk paths, the
+# lock, the failing and the passing runs, the reporter, Deep review
+# (M145, M146, M147) ---
+P=method-reporter
+# full_project: sets f to a new project's working folder for a FULL task:
+# the plan of task t1 (Tier FULL, with expected.tsv) approved in the first
+# commit on feat (the anchor, its id in anchor), with src/a.txt as before
+# the code; a second commit adds the tests (tests/cases.txt, its id in
+# tcommit), where method-tester's receipt says TESTS FAIL; a third commit
+# is the code (src/a.txt), run-checks run, its verdict line approving; no
+# other receipt. Not in a subshell, so the receipts' count goes on.
+full_project() {
+  fl_p=$(new_project FULL) || return 1
+  f="$fl_p/w"
+  anchor=$(cd "$f" && git rev-parse HEAD)
+  mkdir -p "$f/tests" && printf 'case one\n' >"$f/tests/cases.txt"
+  (cd "$f" && git add -A)
+  msg "$f" 'Tests\n\n%s\n' "$OPEN"
+  tcommit=$(cd "$f" && git rev-parse HEAD)
+  forge "$f" "$T" "TESTS FAIL"
+  printf 'x = 2\n' >"$f/src/a.txt"
+  (cd "$f" && git add -A)
+  msg "$f" 'Code\n\n%s\n' "$OPEN"
+  rc "$f"
+  amend "$f" "$OK"
+}
+# finish DIR: the receipts of a finished FULL change on HEAD's tree, in
+# this order: the tester's pass, the reviewer, the security checker, the
+# reporter
+finish() {
+  forge "$1" "$T" "TESTS PASS"
+  forge "$1" "$R" APPROVE
+  forge "$1" "$S" APPROVE
+  forge "$1" "$P" APPROVE
+}
+# recommit DIR SUBJECT: commits every change in DIR, runs the checks and
+# approves the verdict line
+recommit() {
+  (cd "$1" && git add -A)
+  msg "$1" "$2"'\n\n%s\n' "$OPEN"
+  rc "$1"
+  amend "$1" "$OK"
+}
+
+if wanted_any "R6: a FULL change" "R6: no failing run" "R6: a failing run on HEAD's tree only" "R6: a failing run on HEAD's files" "R6: a failing run before the plan's approval" \
+  "R6: no passing run" "R6: the tester's newest word" "R6: no reporter" "R6: the reporter's newest word" \
+  "R6: an INCOMPLETE failing run"; then
+  full_project || abort_sandbox
+  finish "$f"
+  dc "$f"
+  expect "R6: a FULL change with the failing run after the approval, the passing run, the reporter and both reviews is READY" 0 \
+    "done-check: tier: PASS - Tier FULL, as the plan says; no changed path is high-risk (no HIGH_RISK_PATHS on main or in this change)" \
+    "done-check: lock: PASS - the plan's Tier and Paths lines and its expected.tsv are as approved in commit $(short "$anchor")" \
+    "done-check: failing run: PASS - method-tester opened with TESTS FAIL on commit $(short "$tcommit"), after the plan's approval in commit $(short "$anchor") and before these files" \
+    "done-check: passing run: PASS - the newest receipt of method-tester for these files (tree " ") opened with TESTS PASS, VALID" \
+    "done-check: reporter: PASS - the newest receipt of method-reporter for these files (tree " ") opened with APPROVE, VALID" \
+    "done-check: READY - "
+  lacks "R6: a FULL change off the high-risk paths has no deep review line" "done-check: deep review:"
+  # the tester's newest word decides, by the time it stopped
+  forge "$f" "$T" "TESTS FAIL" stopped=1700000000
+  dc "$f"
+  expect "R6: the tester's newest word decides: TESTS FAIL, then TESTS PASS on one tree is READY" 0 "done-check: passing run: PASS" "done-check: READY - "
+  forge "$f" "$T" "TESTS FAIL"
+  dc "$f"
+  expect "R6: the tester's newest word decides: TESTS PASS, then TESTS FAIL on one tree is NOT READY" 1 \
+    "done-check: passing run: FAIL - the newest receipt of method-tester for these files (tree " ") is TESTS FAIL (VALID), not TESTS PASS (VALID)" \
+    "done-check: next: run method-tester on these files, in the foreground, and fix what it finds"
+  forge "$f" "$T" "TESTS PASS" state=INVALID why=write-mark
+  dc "$f"
+  expect "R6: the tester's newest word decides: an INVALID TESTS PASS is not a pass" 1 "is TESTS PASS (INVALID), not TESTS PASS (VALID)"
+  forge "$f" "$T" "TESTS PASS" stopped=none
+  dc "$f"
+  expect "R6: the tester's newest word decides: a run with no stop time never decides" 1 "is TESTS PASS (INVALID), not TESTS PASS (VALID)"
+  forge "$f" "$T" "TESTS PASS"
+  forge "$f" "$P" "REQUEST CHANGES" stopped=1700000000
+  dc "$f"
+  expect "R6: the reporter's newest word decides: REQUEST CHANGES, then APPROVE on one tree is READY" 0 "done-check: reporter: PASS" "done-check: READY - "
+  forge "$f" "$P" "REQUEST CHANGES"
+  dc "$f"
+  expect "R6: the reporter's newest word decides: APPROVE, then REQUEST CHANGES on one tree is NOT READY" 1 \
+    "done-check: reporter: FAIL - the newest receipt of method-reporter for these files (tree " ") is REQUEST CHANGES (VALID), not APPROVE (VALID)"
+  # no passing run, no reporter
+  unforge "$f"
+  forge "$f" "$T" "TESTS FAIL" head="$tcommit" tree="$(cd "$f" && git rev-parse "$tcommit^{tree}")"
+  forge "$f" "$R" APPROVE
+  forge "$f" "$S" APPROVE
+  dc "$f"
+  expect "R6: no passing run at HEAD and no reporter on FULL: NOT READY" 1 \
+    "done-check: passing run: FAIL - no receipt of method-tester for these files (tree " \
+    "done-check: reporter: FAIL - no receipt of method-reporter for these files (tree " "a FULL change needs the reporter's word on its report" \
+    "done-check: NOT READY - 3 conditions failed (passing run, reporter, verdict)"
+  expect "R6: no reporter on FULL is NOT READY" 1 "done-check: reporter: FAIL - no receipt of method-reporter for these files"
+  expect "R6: no passing run at HEAD is NOT READY" 1 "done-check: passing run: FAIL - no receipt of method-tester for these files"
+  # no failing run; one on HEAD's tree only; one before the approval
+  unforge "$f"
+  finish "$f"
+  dc "$f"
+  expect "R6: no failing run after the approval is NOT READY" 1 \
+    "done-check: failing run: FAIL - no VALID receipt of method-tester that opened with TESTS FAIL on a commit from the plan's approval (commit $(short "$anchor")) to before HEAD, with other files than HEAD's" \
+    "done-check: next: run method-tester where the tests are in and the code is not" "done-check: NOT READY - 2 conditions failed (failing run, verdict)"
+  forge "$f" "$T" "TESTS FAIL" stopped=1700000000
+  dc "$f"
+  expect "R6: a failing run on HEAD's tree only is NOT READY" 1 "done-check: failing run: FAIL - no VALID receipt of method-tester" \
+    "; not counted: 1 on these files (a run on the finished files does not show the tests failing first)"
+  # (an empty commit on top: the run's commit is now before HEAD, its files still HEAD's)
+  msg "$f" 'Verdict\n\n%s\n' "$OK"
+  dc "$f"
+  expect "R6: a failing run on HEAD's files at an earlier commit (an empty commit on top) is NOT READY" 1 \
+    "done-check: failing run: FAIL - no VALID receipt of method-tester" "; not counted: 1 on these files"
+  base=$(mbase "$f")
+  forge "$f" "$T" "TESTS FAIL" head="$base" tree="$(cd "$f" && git rev-parse "$base^{tree}")"
+  dc "$f"
+  expect "R6: a failing run before the plan's approval is NOT READY" 1 "done-check: failing run: FAIL - no VALID receipt of method-tester" \
+    "1 on a commit outside this branch's history from the approval to HEAD"
+  forge "$f" "$T" "TESTS FAIL" head="$tcommit" tree="$(cd "$f" && git rev-parse "$tcommit^{tree}")" state=INCOMPLETE why=record-late
+  dc "$f"
+  expect "R6: an INCOMPLETE failing run does not count: NOT READY" 1 "done-check: failing run: FAIL - no VALID receipt of method-tester"
+fi
+
+# the lock (M145): Tier, Paths and expected.tsv as approved; a re-approval
+# moves the anchor, and the failing run is made again after it
+if wanted_any "R6: the lock" "R6: a re-approval" "R6: the code-removed commit" "R6: a failing run on a side branch" "R6: a failing run re-made with git switch -c" \
+  "R6: a FULL plan with no expected.tsv"; then
+  for what in tier paths expected readd; do
+    full_project || abort_sandbox
+    case $what in
+      tier) perl -pi -e 's/^Tier: FULL$/Tier: LIGHT/' "$f/docs/tasks/t1/plan.md" ;;
+      paths) perl -pi -e 's/^Paths: src$/Paths: src, lib/' "$f/docs/tasks/t1/plan.md" ;;
+      expected) printf 'case\tinputs\texpected\tsource\none\tx=1\t3\tthe owner\n' >"$f/docs/tasks/t1/expected.tsv" ;;
+      readd)
+        # the Approved line taken out with the change, and put back as it was
+        perl -ni -e 'print unless /^Approved:/' "$f/docs/tasks/t1/plan.md"
+        printf 'case\tinputs\texpected\tsource\none\tx=1\t3\tthe owner\n' >"$f/docs/tasks/t1/expected.tsv"
+        recommit "$f" Unapproved
+        add_task "$f" t1 FULL
+        ;;
+    esac
+    recommit "$f" Change
+    finish "$f"
+    dc "$f"
+    case $what in
+      tier) expect "R6: the lock: the Tier line changed after the approval is NOT READY" 1 \
+        "done-check: lock: FAIL - changed since the plan's approval in commit $(short "$anchor"): the Tier line" \
+        "done-check: next: a change to the tier, the paths or the expected results is a new plan: ask the owner for their go again, and replace the Approved line with the new reply" ;;
+      paths) expect "R6: the lock: the Paths line changed after the approval is NOT READY" 1 "done-check: lock: FAIL - changed since the plan's approval in commit $(short "$anchor"): the Paths line" ;;
+      expected) expect "R6: the lock: expected.tsv changed after the approval is NOT READY" 1 "done-check: lock: FAIL - changed since the plan's approval in commit $(short "$anchor"): expected.tsv" ;;
+      readd) expect "R6: the lock: the Approved line removed and added again does not move the anchor: expected.tsv changed meanwhile is NOT READY" 1 \
+        "done-check: lock: FAIL - changed since the plan's approval in commit $(short "$anchor"): expected.tsv" ;;
+    esac
+  done
+  # a FULL plan approved with no expected.tsv
+  fl_p=$(new_project) || abort_sandbox
+  f="$fl_p/w"
+  add_task "$f" t1 FULL 'Approved: 2026-11-23 "approve t1 as FULL"'
+  recommit "$f" Full
+  finish "$f"
+  dc "$f"
+  expect "R6: a FULL plan with no expected.tsv when it was approved is NOT READY" 1 \
+    "done-check: lock: FAIL - the task is FULL, but its plan had no expected.tsv when it was approved in commit " \
+    "done-check: next: write docs/tasks/t1/expected.tsv, and ask the owner for their go again"
+
+  # a re-approval: a wrong expected value found at the failing run, a new
+  # reply, so a new Approved line and a new anchor; the failing run before
+  # it no longer counts
+  full_project || abort_sandbox
+  printf 'case\tinputs\texpected\tsource\none\tx=1\t3\tthe owner\n' >"$f/docs/tasks/t1/expected.tsv"
+  add_task "$f" t1 FULL 'Approved: 2026-11-23 "approve t1 with the corrected case"'
+  recommit "$f" Reapproved
+  anchor2=$(cd "$f" && git rev-parse HEAD)
+  finish "$f"
+  dc "$f"
+  expect "R6: a re-approval moves the anchor: the lock holds, and the failing run before it does not count" 1 \
+    "done-check: lock: PASS - the plan's Tier and Paths lines and its expected.tsv are as approved in commit $(short "$anchor2")" \
+    "done-check: failing run: FAIL - no VALID receipt of method-tester that opened with TESTS FAIL on a commit from the plan's approval (commit $(short "$anchor2"))" \
+    "1 on a commit outside this branch's history from the approval to HEAD"
+  # a fail receipt on a side branch from the new anchor does not count
+  (cd "$f" && git switch -q -c side && printf 'x = 1\n' >src/a.txt && git commit -q -a -m "Side" -m "$OPEN")
+  forge "$f" "$T" "TESTS FAIL"
+  (cd "$f" && git switch -q feat)
+  dc "$f"
+  expect "R6: a failing run on a side branch does not count: NOT READY" 1 "done-check: failing run: FAIL - no VALID receipt of method-tester" \
+    "2 on a commit outside this branch's history from the approval to HEAD"
+  # the route: a commit that takes the code out (plan and expected.tsv kept),
+  # the tester there, then a commit that puts it back
+  printf 'x = 1\n' >"$f/src/a.txt"
+  recommit "$f" 'Code out'
+  out_commit=$(cd "$f" && git rev-parse HEAD)
+  forge "$f" "$T" "TESTS FAIL"
+  printf 'x = 2\n' >"$f/src/a.txt"
+  recommit "$f" 'Code back'
+  finish "$f"
+  dc "$f"
+  expect "R6: the code-removed commit after a re-approval gives the failing run: READY" 0 \
+    "done-check: failing run: PASS - method-tester opened with TESTS FAIL on commit $(short "$out_commit"), after the plan's approval in commit $(short "$anchor2") and before these files" \
+    "done-check: READY - "
+
+  # a lost failing receipt (a new clone) re-made at the commit before the
+  # code, on a branch made there with git switch -c
+  full_project || abort_sandbox
+  unforge "$f"
+  (cd "$f" && git switch -q -c redo "$tcommit")
+  forge "$f" "$T" "TESTS FAIL"
+  (cd "$f" && git switch -q feat && git branch -q -D redo)
+  finish "$f"
+  dc "$f"
+  expect "R6: a failing run re-made with git switch -c at the commit before the code, an ancestor of HEAD: READY" 0 \
+    "done-check: failing run: PASS - method-tester opened with TESTS FAIL on commit $(short "$tcommit")" "done-check: READY - "
+fi
+
+# the tier and the high-risk paths (M147, M146's Deep review)
+if wanted_any "R6: a LIGHT plan on a high-risk path" "R6: a branch that drops a high-risk path main lists" "R6: a rename out of a high-risk path" \
+  "R6: Deep review" "R6: two reviewers on a high-risk path" "R6: three reviewers, one asking for changes"; then
+  f=$(floor_project) || abort_sandbox
+  printf 'PRODUCT_PATHS=src\nHIGH_RISK_PATHS=src\n' >"$f/.claude/method.conf"
+  recommit "$f" 'High risk'
+  approve_head "$f"
+  dc "$f"
+  expect "R6: a LIGHT plan on a high-risk path is judged FULL: NOT READY" 1 \
+    "done-check: tier: FAIL - the plan says Tier LIGHT, but 1 changed path is high-risk: src/a.txt (HIGH_RISK_PATHS, main's and this change's together: src); judged FULL, and the plan was not made as FULL" \
+    "done-check: next: plan again as FULL (Tier: FULL, with expected.tsv), and ask the owner for their go again" \
+    "done-check: lock: FAIL - the task is FULL, but its plan had no expected.tsv" "done-check: deep review: FAIL"
+
+  # main lists src as high-risk; the branch's own list drops it
+  f=$(floor_project) || abort_sandbox
+  (cd "$f" && git checkout -q main && mkdir -p .claude && printf 'PRODUCT_PATHS=src\nHIGH_RISK_PATHS=src\n' >.claude/method.conf && git add -A &&
+    git commit -q -m "High-risk list" -m "$OK" && git push -q origin main 2>/dev/null && git checkout -q feat && git merge -q -s ours --no-edit main)
+  amend "$f" "$OK"
+  rc "$f"
+  approve_head "$f"
+  dc "$f"
+  expect "R6: a branch that drops a high-risk path main lists, Tier LIGHT: NOT READY (judged FULL)" 1 \
+    "done-check: up to date: PASS" \
+    "done-check: tier: FAIL - the plan says Tier LIGHT, but 1 changed path is high-risk: src/a.txt (HIGH_RISK_PATHS, main's and this change's together: src); judged FULL"
+
+  # a file moved out of a high-risk folder: its old path counts
+  f=$(floor_project) || abort_sandbox
+  (cd "$f" && git checkout -q main && mkdir -p keys && printf 'k\n' >keys/k.txt && git add -A && git commit -q -m "Keys" -m "$OK" &&
+    git push -q origin main 2>/dev/null && git checkout -q feat && git merge -q --no-edit main && mkdir -p pub && git mv keys/k.txt pub/k.txt)
+  printf 'PRODUCT_PATHS=src\nHIGH_RISK_PATHS=keys\n' >"$f/.claude/method.conf"
+  recommit "$f" Move
+  approve_head "$f"
+  dc "$f"
+  expect "R6: a rename out of a high-risk path is high-risk: Tier LIGHT is NOT READY" 1 \
+    "done-check: tier: FAIL - the plan says Tier LIGHT, but 1 changed path is high-risk: keys/k.txt (HIGH_RISK_PATHS, main's and this change's together: keys)"
+
+  # Deep review: three approving reviewers on a high-risk path
+  full_project || abort_sandbox
+  printf 'PRODUCT_PATHS=src\nHIGH_RISK_PATHS=src\n' >"$f/.claude/method.conf"
+  recommit "$f" 'High risk'
+  finish "$f"
+  forge "$f" "$R" APPROVE
+  dc "$f"
+  expect "R6: two reviewers on a high-risk path are NOT READY" 1 \
+    "done-check: tier: PASS - Tier FULL, as the plan says; 1 changed path is high-risk: src/a.txt (HIGH_RISK_PATHS, main's and this change's together: src), so Deep review applies" \
+    "done-check: deep review: FAIL - the change touches high-risk paths (src/a.txt), so it needs three receipts of method-reviewer that opened with APPROVE on these files (tree " "reviewed from the merge base or chained back to it: 2 do" \
+    "done-check: next: run method-reviewer three times on these files, launched in one message in the foreground (Deep review)" \
+    "done-check: NOT READY - 2 conditions failed (deep review, verdict)"
+  forge "$f" "$R" APPROVE bases=
+  dc "$f"
+  expect "R6: Deep review: a reviewer's approval with no base is not one of the three" 1 "done-check: deep review: FAIL" ": 2 do"
+  forge "$f" "$R" APPROVE
+  dc "$f"
+  expect "R6: Deep review: three approving reviewers on a high-risk path are READY" 0 \
+    "done-check: deep review: PASS - 3 receipts of method-reviewer opened with APPROVE on these files (tree " "the change touches high-risk paths (src/a.txt)" \
+    "done-check: rounds: PASS - 1 version reviewed since the plan's approval" "done-check: READY - "
+  forge "$f" "$R" "REQUEST CHANGES"
+  dc "$f"
+  expect "R6: three reviewers, one asking for changes, are NOT READY" 1 \
+    "done-check: reviewer: FAIL - 1 receipt of method-reviewer for these files" \
+    "done-check: deep review: FAIL - the change touches high-risk paths (src/a.txt)" ": 3 do, and 1 opened with another word (REQUEST CHANGES (VALID))"
+fi
+
+# a broken high-risk list fails closed, on main's side and on the branch's
+if wanted_any "R6: HIGH_RISK_PATHS"; then
+  for side in branch main; do
+    for line in 'HIGH_RISK_PATHS=../src' 'HIGH_RISK_PATH=src' 'HIGH_RISK_PATHS = src' 'MUTATION_CHECKS=Not An Id' lfs; do
+      f=$(floor_project) || abort_sandbox
+      if [ "$line" = lfs ]; then
+        text='version https://git-lfs.github.com/spec/v1\noid sha256:0000000000000000000000000000000000000000000000000000000000000000\nsize 40\n'
+      else
+        text="PRODUCT_PATHS=src\\n$line\\n"
+      fi
+      if [ "$side" = branch ]; then
+        # shellcheck disable=SC2059 # the text is a printf format on purpose
+        printf "$text" >"$f/.claude/method.conf"
+        recommit "$f" Conf
+        where='in this change'
+      else
+        # shellcheck disable=SC2059 # the text is a printf format on purpose
+        (cd "$f" && git checkout -q main && mkdir -p .claude && printf "$text" >.claude/method.conf && git add -A &&
+          git commit -q -m "Conf" -m "$OK" && git push -q origin main 2>/dev/null && git checkout -q feat && git merge -q -s ours --no-edit main)
+        amend "$f" "$OK"
+        rc "$f"
+        where='on main'
+      fi
+      approve_head "$f"
+      dc "$f"
+      case $line in
+        MUTATION_CHECKS=*)
+          expect "R6: HIGH_RISK_PATHS: a problem of another key ($side side) leaves the list readable" "$code" "done-check: tier: PASS"
+          ;;
+        lfs)
+          expect "R6: HIGH_RISK_PATHS: an unreadable method.conf ($side side, a Git LFS pointer) is NOT READY" 1 \
+            "done-check: tier: FAIL - the high-risk list cannot be read: .claude/method.conf $where (" "): the file is stored as a Git LFS pointer"
+          ;;
+        *)
+          case $line in
+            *=../*) why="HIGH_RISK_PATHS: a relative path" ;;
+            *_PATH=*) why="unknown key HIGH_RISK_PATH" ;;
+            *) why="is not KEY=VALUE" ;;
+          esac
+          expect "R6: HIGH_RISK_PATHS: $line on the $side side is NOT READY" 1 \
+            "done-check: tier: FAIL - the high-risk list cannot be read: .claude/method.conf $where (" ") line 2: $why"
+          # (on the branch's side run-checks refuses the file too, so its next: comes first)
+          [ "$side" = branch ] || expect "R6: HIGH_RISK_PATHS: $line on the main side names the fix" 1 \
+            "done-check: next: fix .claude/method.conf and keep it a plain file committed in this repository (on main, that fix is a small task of its own), then run done-check again"
+          ;;
+      esac
+    done
+  done
+fi
+
 
 # (the conditions before step 6b follow; a run that keeps only some cases
 # ends here)
@@ -1350,7 +1677,8 @@ rc_ok "setup: run-checks passes with the settings in a submodule"
 dca "$vs/sm"
 expect "a VERDICTS_FROM set in a .claude submodule, which the commit does not hold, fails verdicts start" 1 \
   "done-check: verdicts start: FAIL - VERDICTS_FROM is ${tipv%"${tipv#???????}"} in .claude/method.conf on disk, but unset in the file commit" \
-  "keep .claude/method.conf a plain file committed in this repository"
+  "done-check: tier: FAIL - the high-risk list cannot be read: .claude/method.conf in this change (" "): .claude is a submodule" \
+  "done-check: next: fix .claude/method.conf and keep it a plain file committed in this repository"
 (cd "$vs" && git clone -q remote.git lc 2>/dev/null && cd lc && git checkout -q -b feat)
 # a stand-in for git-lfs's clean filter: the pointer names the content's hash
 cat >"$vs/lc/.git/lfs-clean.sh" <<'EOS'
@@ -1602,7 +1930,13 @@ repos="$repos $vp"
 ) || abort_sandbox
 rc "$vp/w"
 dca "$vp/w"
-expect "a change that fixes a method.conf with a problem on main is READY" 0 "done-check: verdicts start: PASS - VERDICTS_FROM is unset both on main and in this change" "done-check: READY - "
+# (since step 6b.3 a problem on main that may touch HIGH_RISK_PATHS, as an unknown
+# key may, makes every branch NOT READY for the tier alone until main's file
+# is fixed: a broken high-risk list is never read as a shorter one)
+expect "a change that fixes a method.conf with a problem on main is NOT READY for the tier alone" 1 \
+  "done-check: verdicts start: PASS - VERDICTS_FROM is unset both on main and in this change" \
+  "done-check: tier: FAIL - the high-risk list cannot be read: .claude/method.conf on main (" ") line 2: unknown key BOGUS" \
+  "done-check: NOT READY - 2 conditions failed (tier, verdict)"
 
 # Git LFS: content on disk counts as the commit only where the commit asks for LFS
 lp=$(new_project) || abort_sandbox

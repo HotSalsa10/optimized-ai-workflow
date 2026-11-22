@@ -12,7 +12,8 @@
 # or the plan's Approved line (RISKS #2); the owner's merge stays the lock.
 #
 # One line per condition, "done-check: <area>: PASS|FAIL - <detail>", in the
-# order a change is finished (files, main, the checks, the plan, the review):
+# order a change is finished (files, main, the checks, the plan, the tests,
+# the review, the report):
 #   files          the files on disk are HEAD's commit and nothing untracked
 #                  is outside git's ignore rules: run-checks' fingerprint,
 #                  the one definition of a clean tree (lib/checks.pl). A CRLF
@@ -47,6 +48,26 @@
 #                  id (M144). The anchor is the first commit on the branch
 #                  whose plan carries that exact line; every Approved line
 #                  the branch has had is named.
+#   tier           the high-risk list is HIGH_RISK_PATHS in the committed
+#                  .claude/method.conf on main's tip and at HEAD together (a
+#                  branch can add a path, never remove one); a file that
+#                  cannot be read as stored (a submodule, Git LFS, a filter)
+#                  or a problem of that key or of a line tied to no key (a
+#                  misspelt key, a spaced =) fails it, on either side, so a
+#                  broken setting never reads as a shorter list. A path the
+#                  change touches from the merge base (a moved file at its
+#                  old path too) that is a listed path or under one makes
+#                  the change high-risk; a plan that says LIGHT is then
+#                  judged FULL and fails (M147).
+#   lock           HEAD's Tier and Paths lines and expected.tsv (next to the
+#                  plan) are the anchor's; a FULL task had expected.tsv at
+#                  the anchor (M145)
+#   failing run    (FULL) a valid receipt of the tester that opened with the
+#                  fail word, on a commit the anchor is an ancestor of and
+#                  that is a strict ancestor of HEAD, with a tree other than
+#                  HEAD's (M145)
+#   passing run    (FULL) the newest receipt of the tester for HEAD's tree,
+#                  by its stop time, is valid with the pass word (M145)
 #   reviewer       the reviewer gate's receipts for HEAD's tree (lib/
 #   security checker  receipt-read.pl; the gates by role, verdicts.txt):
 #                  one is valid, opened with the approving word, and one of
@@ -57,16 +78,24 @@
 #                  --since). Any receipt of the gate for HEAD's tree that
 #                  opened with another word fails it, whatever its state; a
 #                  receipt with no word neither fails nor counts (M146).
+#   deep review    (a high-risk change) three valid receipts of the reviewer
+#                  for HEAD's tree opened with the approving word, each with
+#                  a base that chains as above, and none with another word
+#                  (M146, Deep review)
 #   rounds         at most three trees have a valid reviewer receipt since
 #                  the plan's approval: the trees of the commits from the
 #                  anchor on, and any other reviewed tree whose plan holds
 #                  the same Approved line, so a squash or a rebase keeps the
 #                  rounds; a fourth means plan again (M009). A reviewed tree
 #                  this clone cannot read is not counted, and is named
+#   reporter       (FULL) the newest receipt of the reporter for HEAD's
+#                  tree, by its stop time, is valid with the approving word
+#                  (M146)
 #   verdict        the head commit ends with a valid verdict line, and its
 #                  value is the one the receipts give: verdicts.txt's ready
-#                  word when the plan, both reviews and the rounds passed;
-#                  otherwise no value lets the change merge (M008, SPEC R4).
+#                  word when the plan, both reviews, the rounds and each
+#                  condition above that applies passed; otherwise no value
+#                  lets the change merge (M008, SPEC R4).
 #                  When the receipts give it and the line is missing or
 #                  other, next: names the exact line to add.
 #   verdicts start what the change makes status stop judging: VERDICTS_FROM
@@ -99,10 +128,17 @@
 # - M108: a branch must be up to date with main before it merges.
 # - M144: a change is ready only when its task's plan carries a quoted
 #   approval naming the task.
-# - M146 (in part; the tester, the reporter and the high-risk reviews come
-#   with step 6b.3): approving receipts for the exact files, reviewed from
-#   the merge base; no other word from those gates on those files; the
-#   verdict line says what they say.
+# - M145: expected results, tier and paths are locked at the plan's
+#   approval; a test run is seen failing after approval and before the
+#   code, and passing at the end.
+# - M146: approving receipts for the exact files, reviewed from the merge
+#   base: the reviewer and the security checker always, the tester and the
+#   reporter for FULL, three reviewers on high-risk paths; no other word
+#   from the reviewer or the security checker on those files, and the
+#   newest word of the tester and the reporter; the verdict line says what
+#   they say.
+# - M147: LIGHT only when the plan says so and the change touches no
+#   high-risk path, as main or the branch lists them.
 set -u
 # perl reads bytes; these settings would change how it reads and writes
 # them, and the library paths would let modules from elsewhere run inside it

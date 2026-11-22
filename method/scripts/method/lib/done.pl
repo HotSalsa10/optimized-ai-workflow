@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 # Answers "is this change ready to merge?" from the commit, the files on
 # disk, main, the run-checks log, the task's plan, the gates' receipts and
-# the head commit's verdict line (M008, M009, M089, M108, M144, M146).
+# the head commit's verdict line (M008, M009, M089, M108, M144 to M147).
 # Started by done-check.sh, which documents the conditions, the output and
 # the exit codes. Read-only: it writes no file, and git runs through
 # lib/git.pl. The receipts are read through lib/receipt-read.pl, which loads
@@ -428,6 +428,19 @@ sub said {
     . (ref $_->{why} eq 'ARRAY' && @{ $_->{why} } && !ref $_->{why}[0] ? ": $_->{why}[0]" : '') . ')' } @_);
 }
 
+# on_tree GATE: the receipts of GATE for HEAD's tree
+sub on_tree {
+  my ($gate) = @_;
+  return grep { $_->{gate} eq $gate && $_->{tree} eq $T{tree} } @{ $T{receipts} };
+}
+
+# other_word YES RECEIPT...: the receipts that opened with a word other
+# than YES, whatever their state (one with no word is not among them)
+sub other_word {
+  my ($yes, @r) = @_;
+  return grep { defined $_->{open} && $_->{open} ne $yes } @r;
+}
+
 # gate_condition AREA ROLE: the reviewer or the security checker on HEAD's
 # tree. Any receipt of it on these files that opened with another word
 # blocks, whatever its state (a later approval of the same files does not
@@ -443,8 +456,8 @@ sub gate_condition {
   my $run = "run $gate on these files, in the foreground, with a review packet from the merge base (review-packet.sh --base"
     . ' <main>, or --since the last version it reviewed when that review was from the merge base)';
   return report($area, 0, "no merge base with main, so a review of the whole change cannot be told", $run) unless defined $T{mb};
-  my @on = grep { $_->{gate} eq $gate && $_->{tree} eq $T{tree} } @{ $T{receipts} };
-  my @other = grep { defined $_->{open} && $_->{open} ne $yes } @on;
+  my @on = on_tree($gate);
+  my @other = other_word($yes, @on);
   return report($area, 0, count(scalar(@other), "receipt of $gate for $files opens", "receipts of $gate for $files open")
     . ' with another word: ' . said(@other) . '; a later review of the same files does not clear it',
     "fix what $gate found, commit, and have the new version reviewed") if @other;
@@ -524,6 +537,201 @@ sub rounds_condition {
   return report('rounds', 1, count($n, 'version', 'versions') . " reviewed $since, of at most $MAX_ROUNDS$notes");
 }
 
+# --- the SPEC R6 set (step 6b.3): the tier and the high-risk paths (M147),
+# the lock and the tester's runs (M145), the reporter and Deep review
+# (M146). The conditions that apply to a change are named in @{$T{need}},
+# each passed one in $T{ok}, for the verdict ---
+
+# high_risk_list COMMIT WHERE: (the HIGH_RISK_PATHS COMMIT's
+# .claude/method.conf lists, undef) or (undef, what is wrong): a file that
+# cannot be read as it is stored, or a problem the parser tags
+# HIGH_RISK_PATHS or cannot tie to a key, fails closed, so a typo never
+# reads as a shorter list
+sub high_risk_list {
+  my ($commit, $where) = @_;
+  my $label = "$CONF $where (" . short($commit) . ')';
+  my $d = Tree::lookup($commit, '.claude');
+  return ([], undef) unless $d;
+  return (undef, "$label: .claude is " . ($d->[0] eq '160000' ? 'a submodule' : 'not a folder')) if $d->[0] ne '40000';
+  my $e = Tree::lookup($commit, $CONF);
+  return ([], undef) unless $e;
+  return (undef, "$label: not a regular file in the commit") unless $e->[0] =~ /\A100(?:644|755)\z/;
+  my $why = conf_unreadable($commit);
+  return (undef, "$label: $why") if defined $why;
+  my ($v, $problems, $tags) = Conf::read_text(Tree::blob($e->[1]), $label);
+  my @bad = map { $problems->[$_] } grep { !defined $tags->[$_] || $tags->[$_] eq 'HIGH_RISK_PATHS' } 0 .. $#$problems;
+  return (undef, names(@bad)) if @bad;
+  return ($v->{HIGH_RISK_PATHS} || [], undef);
+}
+
+# touched: the paths this change touches from the merge base, sorted; a
+# moved or copied file counts at its old path too
+sub touched {
+  my %p;
+  for my $f (Tree::changed($T{mb}, $T{head})) {
+    $p{ $f->{path} } = 1;
+    $p{ $f->{old} } = 1 if $f->{st} eq 'R' || $f->{st} eq 'C';
+  }
+  return sort keys %p;
+}
+
+sub tier_condition {
+  my ($ref, $tip) = @_;
+  my $area = 'tier';
+  push @{ $T{need} }, $area;
+  return report($area, 0, "no main branch to read main's high-risk list from", Git::no_main_action() . ', then run done-check again')
+    unless defined $ref;
+  return report($area, 0, "$ref and this branch share no history here, so the paths this change touches cannot be told",
+    'this branch does not grow from main; start it from main') unless defined $T{mb};
+  my $fix = "fix $CONF and keep it a plain file committed in this repository (on main, that fix is a small task of its own), then"
+    . ' run done-check again';
+  my ($main, $mwhy) = high_risk_list($tip, 'on main');
+  my ($mine, $hwhy) = high_risk_list($T{head}, 'in this change');
+  my @why = grep { defined } $mwhy, $hwhy;
+  return report($area, 0, 'the high-risk list cannot be read: ' . join('; ', @why) . '; a broken setting is not read as a shorter list', $fix)
+    if @why;
+  # main's list and the branch's together: a branch can add a path, never
+  # remove one
+  my %seen;
+  my @list = grep { !$seen{$_}++ } @$main, @$mine;
+  my @high = grep { Conf::under($_, \@list) } touched();
+  $T{high} = \@high;
+  my $lists = @list ? '(HIGH_RISK_PATHS, main\'s and this change\'s together: ' . names(@list) . ')'
+    : '(no HIGH_RISK_PATHS on main or in this change)';
+  my $which = @high ? count(scalar(@high), 'changed path is', 'changed paths are') . ' high-risk: ' . names(@high) . " $lists"
+    : "no changed path is high-risk $lists";
+  if (!$T{ok}{plan}) {
+    $T{ok}{$area} = 1;
+    return report($area, 1, "no approved plan to take the tier from (plan above); $which");
+  }
+  $T{full} = $T{tier} eq 'FULL' || @high ? 1 : 0;
+  return report($area, 0, "the plan says Tier LIGHT, but $which; judged FULL, and the plan was not made as FULL",
+    'plan again as FULL (Tier: FULL, with expected.tsv), and ask the owner for their go again') if $T{tier} eq 'LIGHT' && @high;
+  $T{ok}{$area} = 1;
+  return report($area, 1, "Tier $T{tier}, as the plan says" . (@high ? "; $which, so Deep review applies" : $T{tier} eq 'LIGHT' ? ": $which" : "; $which"));
+}
+
+# locked COMMIT: what the lock holds in COMMIT: the plan's Tier lines, its
+# Paths lines, and expected.tsv (its mode and blob, or undef when absent)
+sub locked {
+  my ($commit) = @_;
+  my @l = plan_lines($commit, $T{path});
+  (my $dir = $T{path}) =~ s{/plan\.md\z}{};
+  my $e = Tree::lookup($commit, "$dir/expected.tsv");
+  return { 'the Tier line' => join("\n", grep { /\ATier:/ } @l), 'the Paths line' => join("\n", grep { /\APaths:/ } @l),
+    'expected.tsv' => $e ? "$e->[0] $e->[1]" : undef };
+}
+
+# lock (M145): since the plan's approval, its Tier and Paths lines and its
+# expected.tsv are unchanged: HEAD's are the anchor's; a FULL task had
+# expected.tsv when it was approved
+sub lock_condition {
+  my $area = 'lock';
+  return unless $T{ok}{plan};
+  push @{ $T{need} }, $area;
+  my $at = $T{branch}[ $T{anchor} ][0];
+  my ($then, $now) = (locked($at), locked($T{head}));
+  my @moved = grep { (defined $then->{$_} ? $then->{$_} : '') ne (defined $now->{$_} ? $now->{$_} : '') }
+    'the Tier line', 'the Paths line', 'expected.tsv';
+  return report($area, 0, "changed since the plan's approval in commit " . short($at) . ': ' . join(', ', @moved),
+    'a change to the tier, the paths or the expected results is a new plan: ask the owner for their go again, and replace'
+    . ' the Approved line with the new reply') if @moved;
+  (my $dir = $T{path}) =~ s{/plan\.md\z}{};
+  return report($area, 0, "the task is FULL, but its plan had no expected.tsv when it was approved in commit " . short($at)
+    . ': a FULL plan locks its expected results', "write $dir/expected.tsv, and ask the owner for their go again")
+    if $T{full} && !defined $then->{'expected.tsv'};
+  $T{ok}{$area} = 1;
+  return report($area, 1, "the plan's Tier and Paths lines and its expected.tsv are as approved in commit " . short($at)
+    . (defined $then->{'expected.tsv'} ? '' : ' (no expected.tsv, as approved)'));
+}
+
+# failing run (M145): a valid tester receipt that opened with the fail word
+# on a commit from the anchor on (git ancestry, as trees repeat across
+# commits) and strictly before HEAD, with files other than HEAD's
+sub failing_condition {
+  my $area = 'failing run';
+  return unless $T{ok}{plan} && $T{full};
+  push @{ $T{need} }, $area;
+  my %role = Verdicts::roles(Verdicts::rows());
+  my $good = Receipt::words()->{good};
+  my $at = $T{branch}[ $T{anchor} ][0];
+  my (%not, $ok);
+  for my $r (grep { $_->{gate} eq $role{tester} && $_->{state} eq $good && defined $_->{open} && $_->{open} eq $role{fail} }
+    @{ $T{receipts} }) {
+    my $h = $r->{head};
+    if (!defined $h || $h !~ /\A(?:[0-9a-f]{40}|[0-9a-f]{64})\z/ || !defined((commit_info($h))[0])) { $not{gone}++; next }
+    if ($r->{tree} eq $T{tree}) { $not{here}++; next }
+    if (!ancestor($at, $h) || $h eq $T{head} || !ancestor($h, $T{head})) { $not{off}++; next }
+    $ok = $r;
+  }
+  if ($ok) {
+    $T{ok}{$area} = 1;
+    return report($area, 1, "$role{tester} opened with $role{fail} on commit " . short($ok->{head}) . ", after the plan's approval in commit "
+      . short($at) . ' and before these files');
+  }
+  my @notes;
+  push @notes, "$not{here} on these files (a run on the finished files does not show the tests failing first)" if $not{here};
+  push @notes, "$not{off} on a commit outside this branch's history from the approval to HEAD" if $not{off};
+  push @notes, "$not{gone} on a commit this clone does not have" if $not{gone};
+  return report($area, 0, "no $good receipt of $role{tester} that opened with $role{fail} on a commit from the plan's approval (commit "
+    . short($at) . ") to before HEAD, with other files than HEAD's" . (@notes ? '; not counted: ' . join('; ', @notes) : ''),
+    "run $role{tester} where the tests are in and the code is not: on this branch after the approval, a commit that takes the"
+    . " product's files back to before the code (plan.md and expected.tsv unchanged), $role{tester} there, then a commit that puts"
+    . ' the code back (the method-plan skill); a lost receipt of such a run: git switch -c <name> <that commit>, the tester there,'
+    . ' then switch back');
+}
+
+# newest AREA ROLE WORD WHY: the newest receipt (by its stop time) of the
+# gate in ROLE on HEAD's tree is valid and opened with WORD (the tester's
+# passing run, the reporter: M146)
+sub newest_condition {
+  my ($area, $role, $want, $why) = @_;
+  return unless $T{ok}{plan} && $T{full};
+  push @{ $T{need} }, $area;
+  my %role = Verdicts::roles(Verdicts::rows());
+  my ($gate, $word) = ($role{$role}, $role{$want});
+  my $good = Receipt::words()->{good};
+  my $files = 'these files (tree ' . short($T{tree}) . ')';
+  my @r = Receipt::by_stopped(on_tree($gate));
+  my $run = "run $gate on these files, in the foreground, and fix what it finds";
+  return report($area, 0, "no receipt of $gate for $files$why", $run) unless @r;
+  my $n = $r[-1];
+  my $said = (defined $n->{open} ? $n->{open} : 'no word') . " ($n->{state})";
+  return report($area, 0, "the newest receipt of $gate for $files is $said, not $word ($good)", $run)
+    unless $n->{state} eq $good && defined $n->{open} && $n->{open} eq $word;
+  $T{ok}{$area} = 1;
+  return report($area, 1, "the newest receipt of $gate for $files opened with $word, $good");
+}
+
+# deep review (M146, M087): a change that touches a high-risk path needs
+# three valid receipts of the reviewer on HEAD's tree that opened with the
+# approving word, each reviewed from the merge base or chained back to it,
+# and no receipt of it there with another word
+sub deep_condition {
+  my $area = 'deep review';
+  return unless $T{high} && @{ $T{high} };
+  push @{ $T{need} }, $area;
+  my %role = Verdicts::roles(Verdicts::rows());
+  my ($gate, $yes) = ($role{reviewer}, $role{approving});
+  my $good = Receipt::words()->{good};
+  my $files = 'these files (tree ' . short($T{tree}) . ')';
+  my @on = on_tree($gate);
+  my @other = other_word($yes, @on);
+  my @yes = grep { my $r = $_; $r->{state} eq $good && defined $r->{open} && $r->{open} eq $yes && defined $T{mb}
+    && grep { chains($gate, $_, {}) } @{ $r->{bases} } } @on;
+  my $paths = 'the change touches high-risk paths (' . names(@{ $T{high} }) . ')';
+  if (@yes >= 3 && !@other) {
+    $T{ok}{$area} = 1;
+    return report($area, 1, scalar(@yes) . " receipts of $gate opened with $yes on $files, $good, reviewed from the merge base or"
+      . " chained back to it; $paths");
+  }
+  return report($area, 0, "$paths, so it needs three receipts of $gate that opened with $yes on $files, $good and reviewed from"
+    . ' the merge base or chained back to it: ' . scalar(@yes) . (@yes == 1 ? ' does' : ' do')
+    . (@other ? ', and ' . scalar(@other) . ' opened with another word (' . said(@other) . ')' : ''),
+    "run $gate three times on these files, launched in one message in the foreground (Deep review), each with a review packet"
+    . ' from the merge base; every finding of any of them gets a disposition in the report');
+}
+
 # history: every gate's word on the branch's versions, in commit order (a
 # version by the first commit that has its tree), each version's receipts
 # by the time they stopped
@@ -541,8 +749,9 @@ sub history {
 }
 
 # --- 6. verdict (M008): the head commit ends with the verdict line the
-# receipts give (verdicts.txt, kind ready), when the plan, both reviews and
-# the rounds passed; otherwise no line lets it merge ---
+# receipts give (verdicts.txt, kind ready), when the plan, both reviews, the
+# rounds and every condition of the SPEC R6 set that applies passed;
+# otherwise no line lets it merge ---
 sub verdict_condition {
   my ($head) = @_;
   my @rows = Verdicts::rows();
@@ -552,7 +761,9 @@ sub verdict_condition {
   my $msg = Git::message($head);
   my $problem = Verdicts::trailer_problem($msg);
   my (undef, $parents) = commit_info($head);
-  my @behind = grep { !$T{ok}{$_} } 'plan', 'reviewer', 'security checker', 'rounds';
+  my %need = map { ($_ => 1) } 'plan', 'reviewer', 'security checker', 'rounds', @{ $T{need} };
+  my @behind = grep { $need{$_} && !$T{ok}{$_} } 'plan', 'tier', 'lock', 'failing run', 'passing run', 'reviewer',
+    'security checker', 'deep review', 'rounds', 'reporter';
   my $review = 'have this version reviewed, and end its commit with the verdict line the receipts give';
   my $add = "end the head commit's message with this line, as its last paragraph: $line (in an empty commit when the branch"
     . ' is pushed: the files stay the same)';
@@ -660,7 +871,7 @@ sub run {
   my ($here, $where) = Checks::place();
   my ($head_tree) = commit_info($head);
   stop('HEAD cannot be read') unless defined $head_tree;
-  %T = (head => $head, tree => $head_tree, branch => [], receipts => [], ok => {});
+  %T = (head => $head, tree => $head_tree, branch => [], receipts => [], ok => {}, need => []);
   if (defined $ref) {
     my ($mst, @mbs) = Git::merge_base($tip, $head);
     stop('git merge-base failed') if $mst eq 'error';
@@ -674,9 +885,15 @@ sub run {
   checks_condition($head, $where);
   elsewhere_condition($here);
   $T{ok}{plan} = plan_condition($head, $ref);
+  tier_condition($ref, $tip);
+  lock_condition();
+  failing_condition();
+  newest_condition('passing run', 'tester', 'pass', '');
   gate_condition('reviewer', 'reviewer');
   gate_condition('security checker', 'security-checker');
+  deep_condition();
   rounds_condition();
+  newest_condition('reporter', 'reporter', 'approving', '; a FULL change needs the reporter\'s word on its report');
   verdict_condition($head);
   verdicts_start_condition($head, $ref, $tip, $up);
   history();

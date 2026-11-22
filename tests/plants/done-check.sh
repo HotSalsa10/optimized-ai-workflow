@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Plants for done-check's reading of the plan and the receipts (step 6b.1;
-# docs/plans/step6b.md, section 1, item 16): each planted break in
+# docs/plans/step6b.md, section 1, item 16) and of the SPEC R6 set (step
+# 6b.3: the tier and the high-risk paths, the lock, the failing and passing
+# runs, the reporter, Deep review): each planted break in
 # lib/done.pl or lib/receipt-read.pl turns tests/done-check.test.sh red for
 # its stated reason, in a throwaway copy of the repo, with only the cases
 # kept for that reason (after they pass on the clean copy). The floor's
@@ -27,13 +29,13 @@ cat >"$work/plants.txt" <<'PLANTS-END'
 ---
   my ($ok) = @based;
 === the other-word filter limited to VALID | method/scripts/method/lib/done.pl | floor: a REQUEST CHANGES beside an APPROVE on one tree is NOT READY, whatever its state (INVALID)
-  my @other = grep { defined $_->{open} && $_->{open} ne $yes } @on;
+  return grep { defined $_->{open} && $_->{open} ne $yes } @r;
 ---
-  my @other = grep { $_->{state} eq $good && defined $_->{open} && $_->{open} ne $yes } @on;
+  return grep { $_->{state} eq Receipt::words()->{good} && defined $_->{open} && $_->{open} ne $yes } @r;
 === the other-word filter by state instead of the word | method/scripts/method/lib/done.pl | floor: a receipt with no word beside an APPROVE neither blocks nor counts
-  my @other = grep { defined $_->{open} && $_->{open} ne $yes } @on;
+  return grep { defined $_->{open} && $_->{open} ne $yes } @r;
 ---
-  my @other = grep { $_->{state} ne $good } @on;
+  return grep { $_->{state} ne Receipt::words()->{good} } @r;
 === the round limit off by one | method/scripts/method/lib/done.pl | floor: a fourth round since the anchor
   if ($n > $MAX_ROUNDS) {
 ---
@@ -63,9 +65,9 @@ grep { $_->{tree} eq $c->[1] && exists $w->{gate}{ $_->{gate} } && $w->{gate}{ $
 ---
     unless $quote =~ /(?i:\Q$ready\E)/;
 === the receipts matched by head instead of tree | method/scripts/method/lib/done.pl | floor: approving receipts at the parent, HEAD an empty trailer commit
-  my @on = grep { $_->{gate} eq $gate && $_->{tree} eq $T{tree} } @{ $T{receipts} };
+  return grep { $_->{gate} eq $gate && $_->{tree} eq $T{tree} } @{ $T{receipts} };
 ---
-  my @on = grep { $_->{gate} eq $gate && ($_->{head} // '') eq $T{head} } @{ $T{receipts} };
+  return grep { $_->{gate} eq $gate && ($_->{head} // '') eq $T{head} } @{ $T{receipts} };
 === the newest by file name instead of the stop time | method/scripts/method/lib/receipt-read.pl | floor: two receipts whose name order and stopped order disagree
   return sort { $a->{stopped} <=> $b->{stopped} || $a->{name} cmp $b->{name} } grep { defined $_->{stopped} } @_;
 ---
@@ -74,8 +76,127 @@ grep { $_->{tree} eq $c->[1] && exists $w->{gate}{ $_->{gate} } && $w->{gate}{ $
 qw(git.pl esc.pl conf.pl tree.pl verdicts.pl checks.pl receipt-read.pl)
 ---
 qw(git.pl esc.pl conf.pl tree.pl verdicts.pl checks.pl receipt.pl)
+=== the tier condition removed | method/scripts/method/lib/done.pl | R6: a LIGHT plan on a high-risk path is judged FULL
+  tier_condition($ref, $tip);
+
+---
+
+=== the lock condition removed | method/scripts/method/lib/done.pl | R6: the lock: the Tier line changed after the approval is NOT READY
+  lock_condition();
+
+---
+
+=== the failing run condition removed | method/scripts/method/lib/done.pl | R6: no failing run after the approval is NOT READY
+  failing_condition();
+
+---
+
+=== the passing run condition removed | method/scripts/method/lib/done.pl | R6: no passing run at HEAD is NOT READY
+  newest_condition('passing run', 'tester', 'pass', '');
+
+---
+
+=== the reporter condition removed | method/scripts/method/lib/done.pl | R6: no reporter on FULL is NOT READY
+  newest_condition('reporter', 'reporter', 'approving', '; a FULL change needs the reporter\'s word on its report');
+
+---
+
+=== the deep review condition removed | method/scripts/method/lib/done.pl | R6: two reviewers on a high-risk path are NOT READY
+  deep_condition();
+
+---
+
+=== a LIGHT tier on a high-risk path accepted | method/scripts/method/lib/done.pl | R6: a LIGHT plan on a high-risk path is judged FULL
+'plan again as FULL (Tier: FULL, with expected.tsv), and ask the owner for their go again') if $T{tier} eq 'LIGHT' && @high;
+---
+'plan again as FULL (Tier: FULL, with expected.tsv), and ask the owner for their go again') if 0;
+=== HIGH_RISK_PATHS shrunk in the same change judged LIGHT | method/scripts/method/lib/done.pl | R6: a branch that drops a high-risk path main lists
+  my @list = grep { !$seen{$_}++ } @$main, @$mine;
+---
+  my @list = grep { !$seen{$_}++ } @$mine;
+=== the lock compared with HEAD instead of the anchor | method/scripts/method/lib/done.pl | R6: the lock: expected.tsv changed after the approval is NOT READY
+  my ($then, $now) = (locked($at), locked($T{head}));
+---
+  my ($then, $now) = (locked($T{head}), locked($T{head}));
+=== a HIGH_RISK_PATHS-tagged problem ignored | method/scripts/method/lib/done.pl | R6: HIGH_RISK_PATHS: HIGH_RISK_PATHS=../src on the main side is NOT READY
+  my @bad = map { $problems->[$_] } grep { !defined $tags->[$_] || $tags->[$_] eq 'HIGH_RISK_PATHS' } 0 .. $#$problems;
+---
+  my @bad = map { $problems->[$_] } grep { !defined $tags->[$_] } 0 .. $#$problems;
+=== an untagged problem ignored | method/scripts/method/lib/done.pl | R6: HIGH_RISK_PATHS: HIGH_RISK_PATH=src on the main side is NOT READY
+  my @bad = map { $problems->[$_] } grep { !defined $tags->[$_] || $tags->[$_] eq 'HIGH_RISK_PATHS' } 0 .. $#$problems;
+---
+  my @bad = map { $problems->[$_] } grep { defined $tags->[$_] && $tags->[$_] eq 'HIGH_RISK_PATHS' } 0 .. $#$problems;
+=== a method.conf stored as a Git LFS pointer read as text | method/scripts/method/lib/done.pl | R6: HIGH_RISK_PATHS: an unreadable method.conf (main side, a Git LFS pointer) is NOT READY
+  return (undef, "$label: $why") if defined $why;
+---
+  return (undef, "$label: $why") if 0;
+=== the old path of a rename not matched | method/scripts/method/lib/done.pl | R6: a rename out of a high-risk path is high-risk
+    $p{ $f->{old} } = 1 if $f->{st} eq 'R' || $f->{st} eq 'C';
+---
+    $p{ $f->{old} } = 1 if 0;
+=== a failing run on HEAD's files counted | method/scripts/method/lib/done.pl | R6: a failing run on HEAD's files at an earlier commit (an empty commit on top) is NOT READY
+    if ($r->{tree} eq $T{tree}) { $not{here}++; next }
+---
+    if (0) { $not{here}++; next }
+=== a failing run off the branch's history counted | method/scripts/method/lib/done.pl | R6: a failing run on a side branch does not count: NOT READY
+    if (!ancestor($at, $h) || $h eq $T{head} || !ancestor($h, $T{head})) { $not{off}++; next }
+---
+    if (!ancestor($at, $h) || $h eq $T{head}) { $not{off}++; next }
+=== a failing run before the plan's approval counted | method/scripts/method/lib/done.pl | R6: a re-approval moves the anchor: the lock holds, and the failing run before it does not count
+    if (!ancestor($at, $h) || $h eq $T{head} || !ancestor($h, $T{head})) { $not{off}++; next }
+---
+    if ($h eq $T{head} || !ancestor($h, $T{head})) { $not{off}++; next }
+=== any passing word on the files taken instead of the newest | method/scripts/method/lib/done.pl | R6: the tester's newest word decides: TESTS PASS, then TESTS FAIL on one tree is NOT READY
+    unless $n->{state} eq $good && defined $n->{open} && $n->{open} eq $word;
+---
+    unless grep { $_->{state} eq $good && defined $_->{open} && $_->{open} eq $word } @r;
+=== Deep review satisfied by two reviewers | method/scripts/method/lib/done.pl | R6: two reviewers on a high-risk path are NOT READY
+  if (@yes >= 3 && !@other) {
+---
+  if (@yes >= 2 && !@other) {
+=== Deep review blind to another word | method/scripts/method/lib/done.pl | R6: three reviewers, one asking for changes, are NOT READY
+  if (@yes >= 3 && !@other) {
+---
+  if (@yes >= 3) {
+=== Deep review counting an approval that does not chain | method/scripts/method/lib/done.pl | R6: Deep review: a reviewer's approval with no base is not one of the three
+    && grep { chains($gate, $_, {}) } @{ $r->{bases} } } @on;
+---
+    } @on;
+=== a FULL plan's expected.tsv not required | method/scripts/method/lib/done.pl | R6: a FULL plan with no expected.tsv when it was approved is NOT READY
+    if $T{full} && !defined $then->{'expected.tsv'};
+---
+    if 0;
+=== the verdict blind to the R6 set | method/scripts/method/lib/done.pl | R6: no failing run after the approval is NOT READY
+  my %need = map { ($_ => 1) } 'plan', 'reviewer', 'security checker', 'rounds', @{ $T{need} };
+---
+  my %need = map { ($_ => 1) } 'plan', 'reviewer', 'security checker', 'rounds';
 PLANTS-END
 plant_data "$work/plants.txt" tests/done-check.test.sh only
+# the reader of method.conf: its HIGH_RISK_PATHS, its tags and under (step
+# 6b.3), each turning tests/conf.test.sh red (a fast file, run whole)
+cat >"$work/conf-plants.txt" <<'PLANTS-END'
+=== under matching a path that only starts like a listed one | method/scripts/method/lib/conf.pl | under: a path that only starts like a listed one is not under it
+  return scalar grep { $_ eq '.' || $p eq $_ || index($p, "$_/") == 0 } @$list;
+---
+  return scalar grep { $_ eq '.' || $p eq $_ || index($p, $_) == 0 } @$list;
+=== under not reading . as every path | method/scripts/method/lib/conf.pl | under: . holds every path
+  return scalar grep { $_ eq '.' || $p eq $_ || index($p, "$_/") == 0 } @$list;
+---
+  return scalar grep { $p eq $_ || index($p, "$_/") == 0 } @$list;
+=== problems not tagged with their key | method/scripts/method/lib/conf.pl | a bad HIGH_RISK_PATHS value is a problem tagged HIGH_RISK_PATHS
+    my $problem = sub { push @problems, "$label line $n: $_[0]"; push @tags, $_[1] };
+---
+    my $problem = sub { push @problems, "$label line $n: $_[0]"; push @tags, undef };
+=== an unknown key tagged as a key | method/scripts/method/lib/conf.pl | a misspelt key (HIGH_RISK_PATH=src) is a problem with no tag
+    if (!$kind) { $problem->("unknown key $k (a typo, or a key from a newer method version)"); next }
+---
+    if (!$kind) { $problem->("unknown key $k (a typo, or a key from a newer method version)", $k); next }
+=== HIGH_RISK_PATHS not read in PRODUCT_PATHS' syntax | method/scripts/method/lib/conf.pl | HIGH_RISK_PATHS is a list in PRODUCT_PATHS' syntax
+  if ($k eq 'PRODUCT_PATHS' || $k eq 'MUTATE_PATHS' || $k eq 'HIGH_RISK_PATHS') { return check_path($val, 1) }
+---
+  if ($k eq 'PRODUCT_PATHS' || $k eq 'MUTATE_PATHS') { return check_path($val, 1) }
+PLANTS-END
+plant_data "$work/conf-plants.txt" tests/conf.test.sh
 drop_sandbox "$work" || true
 echo "plants: done-check: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]
