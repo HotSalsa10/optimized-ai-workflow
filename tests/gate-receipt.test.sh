@@ -811,6 +811,37 @@ if wanted_any "a packet built for other files makes it INVALID" "a packet for th
   is "a packet for other files read with line numbers makes it INVALID (packet-other-tree)" "$(says k3 1)" "INVALID:packet-other-tree"
   git -C "$proj" checkout -q main
 fi
+# (step 6b.1: a receipt records the base of each packet its gate read, so
+# done-check can tell a review from the merge base from a slice that does
+# not chain back to one)
+if wanted_any "a packet from the merge base records the merge base as its base" "a packet since the last reviewed version records that version as its base" \
+  "two packets give two bases" "no packet, no base"; then
+  git -C "$proj" checkout -q -b bases
+  printf 'c\n' >"$proj/c.txt"
+  commit "the first round"
+  first=$(git -C "$proj" rev-parse HEAD)
+  printf 'c, fixed\n' >"$proj/c.txt"
+  commit "the fix"
+  mb=$(git -C "$proj" rev-parse main)
+  (cd "$proj" && bash "$root/method/scripts/method/review-packet.sh" --base main >"$work/whole.packet" 2>/dev/null) || abort_sandbox
+  (cd "$proj" && bash "$root/method/scripts/method/review-packet.sh" --base main --since "$first" >"$work/since.packet" 2>/dev/null) || abort_sandbox
+  if grep -q "^Last reviewed version: $first\$" "$work/since.packet"; then pass "setup: the --since packet names the last reviewed version"; else fail "setup: the --since packet names the last reviewed version" "$(head -8 "$work/since.packet")"; fi
+  t3=$(git -C "$proj" rev-parse 'HEAD^{tree}')
+  report "APPROVE" "END-VERDICT $t3"
+  start method-reviewer bs1 pb
+  stop method-reviewer bs1 pb default "user=file:$work/whole.packet"
+  is "a packet from the merge base records the merge base as its base" "$(says bs1 1):$(field bs1 1 bases)" "VALID::$mb"
+  start method-reviewer bs2 pb
+  stop method-reviewer bs2 pb default "read=$work/since.packet"
+  is "a packet since the last reviewed version records that version as its base, not the merge base" "$(says bs2 1):$(field bs2 1 bases)" "VALID::$first"
+  start method-reviewer bs3 pb
+  stop method-reviewer bs3 pb default "user=file:$work/whole.packet" "read=$work/since.packet"
+  is "two packets give two bases, in the order read" "$(says bs3 1):$(field bs3 1 bases)" "VALID::$mb,$first"
+  start method-reviewer bs4 pb
+  stop method-reviewer bs4 pb
+  is "no packet, no base (an empty list)" "$(says bs4 1):$(field bs4 1 bases)" "VALID::"
+  git -C "$proj" checkout -q main
+fi
 if wanted "tokens are counted once a message id"; then
   report "APPROVE" "END-VERDICT $tree"
   start method-reviewer u1 pu

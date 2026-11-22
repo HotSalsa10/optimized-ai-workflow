@@ -67,14 +67,10 @@ $text =~ s/\A\xEF\xBB\xBF//;
     push @lines, receipt_lines($top, $project);
 ---
 
-=== 5b.2 receipts of every tree counted | method/scripts/method/lib/receipt.pl | gate receipts for the files at HEAD that do not say VALID are named in one LOOK line, by word
-    next unless defined $text && index($text, qq("tree":"$tree")) >= 0;
-    my ($r) = Json::decode($text, 'plain');
-    next unless ref $r eq 'HASH' && ($r->{v} // 0) == 1 && ($r->{tree} // '') eq $tree && defined $r->{state} && !ref $r->{state};
+=== 5b.2 receipts of every tree counted | method/scripts/method/lib/receipt-read.pl | gate receipts for the files at HEAD that do not say VALID are named in one LOOK line, by word
+  $n{ $_->{state} }++ for grep { $_->{state} ne $w->{good} } query($store, $tree);
 ---
-    next unless defined $text;
-    my ($r) = Json::decode($text, 'plain');
-    next unless ref $r eq 'HASH' && ($r->{v} // 0) == 1 && defined $r->{state} && !ref $r->{state};
+  $n{ $_->{state} }++ for grep { $_->{state} ne $w->{good} } query($store);
 === the snapshot left outside the deadline | method/scripts/method/lib/session.pl | a snapshot that hangs is cut off at the deadline
     eval { require File::Spec->catfile($lib, 'watch.pl'); Watch::snapshot($in, $project) };
 ---

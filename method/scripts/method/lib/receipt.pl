@@ -43,8 +43,12 @@
 # exit 2 sends the gate back to work, and at the handback a refusal on
 # every crash would loop; only a deliberate block exits 3, which the
 # wrapper turns into 2.
-# Also loaded with require: Receipt::mark (the guard's write mark, B8) and
-# Receipt::counts (session-status's line on the receipts for HEAD's tree).
+# Since step 6b.1 the receipt also records the base of each review packet
+# the gate read (its "Last reviewed version" when the packet names one,
+# else its merge base), so done-check can follow a review back to the
+# merge base. Reading receipts is lib/receipt-read.pl's (the file names,
+# the tree query, session-status's count), which this file loads.
+# Also loaded with require: Receipt::mark (the guard's write mark, B8).
 # Known limits: a record, a receipt or a mark changed by a program Claude
 # writes and runs (RISKS #2), and the agent's record by any write, a plain
 # sed -i or Edit included (G6 does not protect ~/.claude/projects); a
@@ -75,13 +79,15 @@ require File::Spec->catfile($lib, 'hook.pl');
 require File::Spec->catfile($lib, 'git.pl');
 require File::Spec->catfile($lib, 'log.pl');
 require File::Spec->catfile($lib, 'verdicts.pl');
+# the reader half: the file names, words, store, tree_of, load, query and
+# counts (one reader, M048)
+require File::Spec->catfile($lib, 'receipt-read.pl');
 
 our $KEEP = 500;                          # receipts kept (B4)
 our $LOG = '.method/local/gates.log';      # one fixed-field line a gate run
 our $LOG_CAP = 1000;
 our $CONTEXT_MAX = 120;                    # the start's context line, in bytes (B3)
-our $MAX = 1024 * 1024;                    # a receipt is small
-our $PREFIX = 'method-receipt-';
+our $PREFIX;                               # set in lib/receipt-read.pl
 our $RUNNING = 'method-running-';          # a gate runs: one file a run (B8)
 our $MARKS = 'method-write-marks';         # the guard's write marks (B8)
 our $MARKS_CAP = 1000;
@@ -96,21 +102,6 @@ my %RANK = (low => 1, medium => 2, high => 3, xhigh => 4, max => 5);
 # thing or the wrong way); every other reason makes it the third
 my %WRONG = map { $_ => 1 } qw(unclean-start unclean-stop tree-changed write-mark instructions-differ
   effort-low model-off-list called-agent other-folder packet-other-tree);
-
-# the words, from verdicts.txt: the gates and the kind each opens with,
-# each kind's words, the end key, and the three receipt words in order
-my %W;
-sub words {
-  return \%W if %W;
-  my @rows = Verdicts::rows();
-  my %gate = map { $_->[0] => $_->[1] } Verdicts::gates(@rows);
-  my %open = map { $_ => [Verdicts::words($_, @rows)] } values %gate;
-  my ($end) = Verdicts::words('end-key', @rows);
-  my @state = Verdicts::words('receipt', @rows);
-  die "receipt: verdicts.txt lacks the receipt words\n" unless @state == 3 && defined $end;
-  %W = (gate => \%gate, open => \%open, end => $end, good => $state[0], wrong => $state[1], unchecked => $state[2]);
-  return \%W;
-}
 
 sub id_ok { my ($s) = @_; return defined $s && !ref $s && $s =~ /\A[A-Za-z0-9_.-]{1,128}\z/ }
 sub sha { return Digest::SHA::sha256_hex(Hook::bytes(join "\0", @_)) }
@@ -128,34 +119,6 @@ sub project {
 sub cwd_of {
   my ($in, $project) = @_;
   return defined $in->{cwd} && !ref $in->{cwd} && $in->{cwd} ne '' ? Hook::bytes($in->{cwd}) : $project;
-}
-
-# git's common folder of DIR, absolute, or undef outside a repository
-sub store {
-  my ($dir) = @_;
-  return undef unless defined $dir;
-  my ($st, $out) = Git::run('-C', $dir, 'rev-parse', '--git-common-dir');
-  return undef if $st;
-  my ($c) = split /\n/, $out;
-  return undef unless defined $c && $c ne '';
-  $c = File::Spec->rel2abs($c, $dir);
-  # (where .git links to a store elsewhere, the folder it names: the
-  # writer refuses to write through a link)
-  require Cwd;
-  my $real = Cwd::realpath($c);
-  return defined $real && -d $real ? $real : undef;
-}
-
-# HEAD and its tree in DIR: (HEAD, TREE), or ('none', 'none')
-sub tree_of {
-  my ($dir) = @_;
-  return ('none', 'none') unless defined $dir && $dir ne '' && -d $dir;
-  my ($st, $head) = Git::run('-C', $dir, 'rev-parse', '-q', '--verify', 'HEAD^{commit}');
-  return ('none', 'none') if $st || $head !~ /\A([0-9a-f]{40}|[0-9a-f]{64})\n\z/;
-  $head = $1;
-  my ($st2, $tree) = Git::run('-C', $dir, 'rev-parse', '-q', '--verify', "$head^{tree}");
-  return ($head, 'none') if $st2 || $tree !~ /\A([0-9a-f]{40}|[0-9a-f]{64})\n\z/;
-  return ($head, $1);
 }
 
 # G: the worktree at DIR. top: its top folder as device-inode (never a
@@ -250,19 +213,6 @@ sub newest {
   }
   closedir $d;
   return $n;
-}
-
-# a receipt: the hash, or undef when there is none or it cannot be read
-sub load {
-  my ($dir, $name) = @_;
-  my $path = File::Spec->catfile($dir, $name);
-  return undef if -l $path || !-f _ || -s _ > $MAX;
-  open my $h, '<:raw', $path or return undef;
-  local $/;
-  my $text = <$h>;
-  close $h;
-  my ($r) = Json::decode($text, 'plain');
-  return ref $r eq 'HASH' && ($r->{v} // 0) == 1 ? $r : undef;
 }
 
 sub save {
@@ -546,29 +496,33 @@ sub texts {
   return @t;
 }
 
-# the tree each review packet in TEXT names in its header (lib/packet.pl:
-# a "Tree: <id>" line between "=== PACKET HEADER <token> ===" and the
-# next marker with that token; a Read result's line numbers taken off),
-# "none" for a header without one
-sub packet_trees {
+# each review packet in TEXT, as [TREE, BASE]: the tree its header names
+# (lib/packet.pl: a "Tree: <id>" line between "=== PACKET HEADER <token>
+# ===" and the next marker with that token; a Read result's line numbers
+# taken off), "none" for a header without one; and its base (step 6b.1):
+# the "Last reviewed version: <id>" line when the header has one, else the
+# "Merge base: <id> (...)" line, undef for a header with neither
+sub packets {
   my ($text) = @_;
-  my (@t, $open, $seen);
+  my (@p, $open, $seen, $mb, $last);
   for my $x (split /\n/, $text) {
     $x =~ s/\r\z//;
     $x =~ s/\A[ \t]*[0-9]+(?:\t|\x{2192})//;
     if (!defined $open) {
-      ($open, $seen) = ($1, undef) if $x =~ /\A=== PACKET HEADER ([0-9a-f]{16}) ===\z/;
+      ($open, $seen, $mb, $last) = ($1, undef, undef, undef) if $x =~ /\A=== PACKET HEADER ([0-9a-f]{16}) ===\z/;
       next;
     }
     if ($x =~ /\A=== PACKET [A-Z]+ \Q$open\E ===\z/) {
-      push @t, $seen // 'none';
+      push @p, [$seen // 'none', $last // $mb];
       $open = undef;
       next;
     }
     $seen = $1 if !defined $seen && $x =~ /\ATree: ([0-9a-f]{40}|[0-9a-f]{64})\z/;
+    $mb = $1 if !defined $mb && $x =~ /\AMerge base: ([0-9a-f]{40}|[0-9a-f]{64}) \(/;
+    $last = $1 if !defined $last && $x =~ /\ALast reviewed version: ([0-9a-f]{40}|[0-9a-f]{64})\z/;
   }
-  push @t, $seen // 'none' if defined $open;
-  return @t;
+  push @p, [$seen // 'none', $last // $mb] if defined $open;
+  return @p;
 }
 
 sub on_assistant {
@@ -631,7 +585,10 @@ sub on_user {
   my $d;
   if (index($m, '=== PACKET HEADER ') >= 0) {
     $d = part($m);
-    push @{ $ev->{packets} }, packet_trees($_) for texts($d);
+    for my $p (map { packets($_) } texts($d)) {
+      push @{ $ev->{packets} }, $p->[0];
+      push @{ $ev->{bases} }, $p->[1] if defined $p->[1] && !grep { $_ eq $p->[1] } @{ $ev->{bases} };
+    }
   }
   if (defined $ctx->{hb} && index($m, qq("tool_use_id":"$ctx->{hb}")) >= 0) {
     $d = part($m) unless defined $d;
@@ -745,7 +702,7 @@ sub evidence {
   # R: the agent's record
   my $w = words();
   my %ev = (models => [], efforts => [], tokens => { input => 0, output => 0, cache_creation => 0, cache_read => 0, cache_read_first => undef },
-    counted => {}, bg => {}, packets => [], found => 0, bad => 0, lines => 0);
+    counted => {}, bg => {}, packets => [], bases => [], found => 0, bad => 0, lines => 0);
   my $hb = $r->{handback} && id_ok($r->{handback}{id}) ? $r->{handback}{id} : undef;
   my %ctx = (cwd => $r->{cwd}, wait => $ok ? 1 : 0, hb => $hb, end => defined $hb ? undef : "$w->{end} $r->{tree}");
   my $path = $in->{agent_transcript_path};
@@ -777,6 +734,7 @@ sub evidence {
     && !($ev{hb_ok} && defined $ev{hb_sha} && $ev{hb_sha} eq ($r->{handback}{sha} // ''));
   $r->{models} = [map { length $_ > 128 ? substr($_, 0, 128) : $_ } @{ $ev{models} }];
   $r->{efforts} = $ev{efforts};
+  $r->{bases} = $ev{bases};
   $r->{tokens} = $ev{tokens};
   $r->{cost} = { %{ $r->{cost} || {} }, files => secs($t1 - $t0), record => secs(Time::HiRes::time() - $t1), record_lines => $ev{lines} };
   return @why;
@@ -800,7 +758,7 @@ sub fresh {
   my ($in, $gate, $why, $run) = @_;
   return { v => 1, gate => $gate, agent => $in->{agent_id}, run => $run, prompt => (id_ok($in->{prompt_id}) ? $in->{prompt_id} : undef),
     started => undef, stopped => undef, head => 'none', tree => 'none', state => words()->{unchecked}, why => [$why], open => undef,
-    stops => 0, blocked => 0, denied => 0, handback => undef };
+    stops => 0, blocked => 0, denied => 0, handback => undef, bases => [] };
 }
 
 sub effort_of { my ($e) = @_; $e = $e->{level} if ref $e eq 'HASH'; return defined $e && !ref $e && $e =~ /\A(low|medium|high|xhigh|max)\z/ ? $1 : 'none' }
@@ -966,35 +924,6 @@ sub stop {
   # after a day)
   unlink File::Spec->catfile($dir, running_of($part, $run)) unless $nudged;
   return 0;
-}
-
-# session-status's count (step 5b.2): the receipts in the repository of
-# PROJECT for the tree of HEAD in DIR that do not say the first receipt
-# word: ([WORD, COUNT]...) for the second and the third word, those with a
-# count above 0
-sub counts {
-  my ($project, $dir) = @_;
-  my $store = store($project) or return ();
-  my (undef, $tree) = tree_of($dir);
-  return () if $tree eq 'none';
-  my $w = words();
-  opendir my $d, $store or return ();
-  my @names = grep { /\A\Q$PREFIX\E[0-9a-f]{24}\.json\z/ } readdir $d;
-  closedir $d;
-  my %n;
-  for my $name (@names) {
-    my $p = File::Spec->catfile($store, $name);
-    next if -l $p || !-f _ || -s _ > $MAX;
-    open my $h, '<:raw', $p or next;
-    my $text = do { local $/; <$h> };
-    close $h;
-    # (the receipts of other trees are not decoded)
-    next unless defined $text && index($text, qq("tree":"$tree")) >= 0;
-    my ($r) = Json::decode($text, 'plain');
-    next unless ref $r eq 'HASH' && ($r->{v} // 0) == 1 && ($r->{tree} // '') eq $tree && defined $r->{state} && !ref $r->{state};
-    $n{ $r->{state} }++ if $r->{state} ne $w->{good};
-  }
-  return map { [$_, $n{$_}] } grep { $n{$_} } $w->{wrong}, $w->{unchecked};
 }
 
 sub main {
