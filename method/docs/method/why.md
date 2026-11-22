@@ -40,7 +40,7 @@ The hooks run in local sessions and in cloud sessions with one repository. Where
 | M072 | No hook log grows forever or stores secrets: each is cut to its newest lines, and its lines hold only fields of a fixed shape, never a command, a path or a message | `scripts/method/lib/log.pl` |
 | M009, M144, M146 | The task's plan with its approval; VALID approving receipts of the reviewer and the security checker for the exact files, reviewed from the merge base or chained back to it; no other word from either on those files; at most three review rounds since the approval, also when the branch's history is rewritten; every gate's word on the branch listed | `scripts/method/done-check.sh` |
 | M145, M146, M147 (step 6b) | The locked expected results and tier, a test run seen failing first and passing at the end, the reporter, three approving reviewers on high-risk paths | `scripts/method/done-check.sh` |
-| M126 | Every number in the report to you is in a log the check read, exactly as written, with its sign, currency mark and percent; "What the checks would miss" is there and says more than "nothing" or "none" | `scripts/method/report-check.sh` |
+| M126 | Every number in the report to you is in a log the check read, exactly as written, with its sign, currency mark and percent, including numbers joined by a slash or a dash (40/44, 3-5); "What the checks would miss" is there and says more than "nothing", "none" or "n/a", in one line or in every line of a list | `scripts/method/report-check.sh` |
 | CI | The project's checks run on every change, outside the session | the project's CI (step 9) |
 
 ## Partly enforced
@@ -52,7 +52,7 @@ The hooks run in local sessions and in cloud sessions with one repository. Where
 | The plan's approval (M144) | The Approved line's form, and that it quotes `approve <task>` for its own task | That you typed it, or what the rest of the reply says: a quote that holds `approve <task>` passes even when it refuses ("no, do not approve <task> yet") |
 | The tier (M147, step 6b) | A change on a high-risk path is judged FULL | Whether a change off those paths is really LIGHT |
 | Seen failing first (M145, step 6b) | A tester run said TESTS FAIL after the approval and before the code | Which tests failed, or why: the reviewer checks the tests (M090) |
-| The report check (M126) | Every number written in digits is in a log, and the reporter refuses a report whose check did not pass | A LIGHT change without a reporter: then only the skill runs the check. A number written in words or with a unit stuck to it ("three", "5ms"), and whether a number means in the report what it means in its log |
+| The report check (M126) | Every number written in digits is in a log, and the reporter refuses a report whose check did not pass | A LIGHT change without a reporter: then only the skill runs the check. A number written in words or with a unit or word stuck to it ("three", "5ms", "44-all", "40/s"), a count read as a date beside a month's name ("14 March tests"), month names in other languages, and whether a number means in the report what it means in its log |
 | Predictions before a FULL merge (M124) | Nothing: done-check cannot see that you predicted | All of it |
 | High-risk work: Deep review | Three approving reviewers (step 6b) | The rest of Deep review: sign-off of expected results, a test copy, an undo plan, a human expert |
 | LIGHT's reporter for [EYES] or [CHECK] items | `/method-finish` runs it then (step 6b) | done-check does not require it |
