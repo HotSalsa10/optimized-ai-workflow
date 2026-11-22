@@ -1,9 +1,11 @@
 #!/usr/bin/env perl
 # Answers "is this change ready to merge?" from the commit, the files on
-# disk, main, the run-checks log and the head commit's verdict line (M008,
-# M089, M108). Started by done-check.sh, which documents the conditions, the
-# output and the exit codes. Read-only: it writes no file, and git runs
-# through lib/git.pl.
+# disk, main, the run-checks log, the task's plan, the gates' receipts and
+# the head commit's verdict line (M008, M009, M089, M108, M144, M146).
+# Started by done-check.sh, which documents the conditions, the output and
+# the exit codes. Read-only: it writes no file, and git runs through
+# lib/git.pl. The receipts are read through lib/receipt-read.pl, which loads
+# no hook library, so NOTHING TO MERGE keeps its exit 3.
 package Done;
 use strict;
 use warnings;
@@ -13,7 +15,7 @@ use File::Spec;
 my $lib = dirname(File::Spec->rel2abs(__FILE__));
 # a library that cannot load is "could not check" too (done-check.sh also
 # turns any other exit into that)
-if (!eval { require File::Spec->catfile($lib, $_) for qw(git.pl esc.pl conf.pl tree.pl verdicts.pl checks.pl); 1 }) {
+if (!eval { require File::Spec->catfile($lib, $_) for qw(git.pl esc.pl conf.pl tree.pl verdicts.pl checks.pl receipt-read.pl); 1 }) {
   (my $e = $@) =~ s/[^\x20-\x7e]+/ /g;
   print "done-check: NOT READY - could not check: a library of the method did not load: $e\n";
   exit 2;
@@ -21,6 +23,7 @@ if (!eval { require File::Spec->catfile($lib, $_) for qw(git.pl esc.pl conf.pl t
 
 my $CONF = '.claude/method.conf';
 my $MAX_NAMES = 3;
+my $MAX_ROUNDS = 3;    # review rounds since the plan's approval (M009)
 
 sub short { return substr($_[0], 0, 7) }
 
@@ -290,32 +293,246 @@ sub elsewhere_condition {
     . names(@other), 'these checks have not been seen to pass; until done-check reads their result, it cannot say READY here');
 }
 
-# --- 5. verdict (M008): the head commit ends with a verdict line whose value
-# lets a change merge (verdicts.txt, kind ready) ---
+# --- 5. the task: its plan, the gates' receipts, the rounds (M144, M146,
+# M009). %T holds what run() and these conditions find: the merge base,
+# the branch's commits and their trees, the receipts, the task and its
+# anchor, and which of these conditions passed ---
+my %T;
+
+# the branch: its commits that main does not hold, oldest first, each
+# [COMMIT, TREE]
+sub branch_commits {
+  my ($head, $tip) = @_;
+  my @c;
+  my $cur;
+  for my $l (split /\n/, Git::ok('rev-list', '--reverse', '--topo-order', '--format=%T', $head, '--not', $tip, '--')) {
+    if ($l =~ /\Acommit ([0-9a-f]+)\z/) { $cur = $1; next }
+    push @c, [$cur, $l] if defined $cur && $l =~ /\A[0-9a-f]+\z/;
+    undef $cur;
+  }
+  return @c;
+}
+
+# plan_paths COMMIT: the task plans COMMIT holds (docs/tasks/<id>/plan.md,
+# regular files)
+sub plan_paths {
+  my ($commit) = @_;
+  my $d = Tree::lookup($commit, 'docs/tasks');
+  return () unless $d && $d->[0] eq '40000';
+  my $e = Tree::tree_entries($d->[1]);
+  my @p;
+  for my $n (sort keys %$e) {
+    next unless $e->{$n}[0] eq '40000';
+    my $f = Tree::tree_entries($e->{$n}[1])->{'plan.md'};
+    push @p, "docs/tasks/$n/plan.md" if $f && $f->[0] =~ /\A100(?:644|755)\z/;
+  }
+  return @p;
+}
+
+# plan_lines COMMIT PATH: the lines of the plan at PATH in COMMIT, each
+# without its trailing blanks and CR; () when it is not a regular file there
+sub plan_lines {
+  my ($commit, $path) = @_;
+  my $e = Tree::lookup($commit, $path);
+  return () unless $e && $e->[0] =~ /\A100(?:644|755)\z/;
+  my @l = split /\n/, Tree::blob($e->[1]);
+  s/[ \t\r]+\z// for @l;
+  return @l;
+}
+
+sub plan_condition {
+  my ($head, $ref) = @_;
+  my $area = 'plan';
+  my ($ready) = Verdicts::words('ready', Verdicts::rows());
+  my $plan = 'plan the task on this branch in docs/tasks/<id>/plan.md (the method-plan skill) and ask the owner for their go on it';
+  return report($area, 0, 'no main branch to compare with, so the task this branch adds cannot be told',
+    Git::no_main_action() . ', then run done-check again') unless defined $ref;
+  return report($area, 0, "$ref and this branch share no history here, so the task this branch adds cannot be told",
+    'this branch does not grow from main; start it from main') unless defined $T{mb};
+  my @plans = grep { !Tree::lookup($T{mb}, $_) } plan_paths($head);
+  return report($area, 0, 'this branch adds no task plan (docs/tasks/<id>/plan.md)', $plan) unless @plans;
+  return report($area, 0, 'this branch adds ' . scalar(@plans) . ' task plans (' . names(@plans) . '); one task goes in one merge',
+    'split the work: one task, with one plan, a merge') if @plans > 1;
+  my $path = $plans[0];
+  my ($id) = $path =~ m{\Adocs/tasks/([^/]+)/plan\.md\z};
+  return report($area, 0, "the task's folder name is not an id (lower-case letters, digits and dashes): $path",
+    'rename the folder, and ask the owner again') unless $id =~ /\A[a-z0-9][a-z0-9-]*\z/;
+  my @lines = plan_lines($head, $path);
+  my @tier = grep { /\ATier:/ } @lines;
+  return report($area, 0, "$path has no Tier line (Tier: FULL or Tier: LIGHT)", "add the Tier line to $path, and ask the owner again")
+    unless @tier;
+  return report($area, 0, "$path has " . scalar(@tier) . ' Tier lines; it holds one', "keep one Tier line in $path, and ask the owner again")
+    if @tier > 1;
+  my ($tier) = $tier[0] =~ /\ATier: (FULL|LIGHT)\z/;
+  return report($area, 0, "${path}'s Tier line is not Tier: FULL or Tier: LIGHT: $tier[0]", "correct the Tier line, and ask the owner again")
+    unless defined $tier;
+  my $ask = "ask the owner for their go on the plan (their reply holds \"$ready $id\"), then add the Approved line quoting it";
+  my @app = grep { /\AApproved:/ } @lines;
+  return report($area, 0, "$path has no Approved line: the owner has not approved the plan", $ask) unless @app;
+  return report($area, 0, "$path has " . scalar(@app) . ' Approved lines; it holds one, the newest approval',
+    'keep only the newest Approved line') if @app > 1;
+  my ($date, $quote) = $app[0] =~ /\AApproved: ([0-9]{4}-[0-9]{2}-[0-9]{2}) "(.*)"\z/;
+  return report($area, 0, "${path}'s Approved line is not Approved: <YYYY-MM-DD> \"<the owner's reply>\": $app[0]", $ask)
+    unless defined $quote;
+  return report($area, 0, "the Approved line's quote does not hold \"$ready $id\" for this task: \"$quote\"", $ask)
+    unless $quote =~ /(?<![A-Za-z0-9-])(?i:\Q$ready\E)[ \t]+\Q$id\E(?![A-Za-z0-9-])/;
+  # the anchor: the first commit on the branch whose plan carries this exact
+  # line (a line removed and added again does not move it); and every
+  # Approved line the branch has had
+  my ($anchor, @had, %had);
+  for my $i (0 .. $#{ $T{branch} }) {
+    my $c = $T{branch}[$i][0];
+    for my $l (grep { /\AApproved:/ } plan_lines($c, $path)) {
+      push @had, $l unless $had{$l}++;
+      $anchor = $i if !defined $anchor && $l eq $app[0];
+    }
+  }
+  stop("the Approved line of $path is in no commit of this branch") unless defined $anchor;
+  @T{qw(id path anchor tier)} = ($id, $path, $anchor, $tier);
+  my $more = @had > 1 ? '; the plan was approved ' . scalar(@had) . ' times on this branch: ' . join('; ', map { substr($_, 10) } @had) : '';
+  push @ready_notes, substr($more, 2) if $more ne '';
+  return report($area, 1, "task $id ($path), Tier $tier; approved $date \"$quote\" in commit " . short($T{branch}[$anchor][0]) . $more);
+}
+
+# chains GATE BASE SEEN: 1 when BASE is the merge base, or a commit between
+# the merge base and HEAD whose tree has a valid receipt of GATE that
+# itself has a base that chains (a slice built with --since on a version
+# that was reviewed from the merge base)
+sub chains {
+  my ($gate, $base, $seen) = @_;
+  return 1 if $base eq $T{mb};
+  return 0 if $seen->{$base}++;
+  my ($tree) = commit_info($base);
+  return 0 unless defined $tree && ancestor($T{mb}, $base) && ancestor($base, $T{head});
+  my $good = Receipt::words()->{good};
+  for my $r (grep { $_->{gate} eq $gate && $_->{tree} eq $tree && $_->{state} eq $good } @{ $T{receipts} }) {
+    return 1 if grep { chains($gate, $_, $seen) } @{ $r->{bases} };
+  }
+  return 0;
+}
+
+# what each receipt in the list says, for a line
+sub said {
+  return join(', ', map { (defined $_->{open} ? $_->{open} : 'no word') . " ($_->{state}"
+    . (ref $_->{why} eq 'ARRAY' && @{ $_->{why} } && !ref $_->{why}[0] ? ": $_->{why}[0]" : '') . ')' } @_);
+}
+
+# gate_condition AREA ROLE: the reviewer or the security checker on HEAD's
+# tree. Any receipt of it on these files that opened with another word
+# blocks, whatever its state (a later approval of the same files does not
+# clear it); one with no word neither blocks nor counts; a valid one that
+# opened with the approving word counts when one of its bases chains back to
+# the merge base
+sub gate_condition {
+  my ($area, $role) = @_;
+  my %role = Verdicts::roles(Verdicts::rows());
+  my ($gate, $yes) = ($role{$role}, $role{approving});
+  my $good = Receipt::words()->{good};
+  my $files = 'these files (tree ' . short($T{tree}) . ')';
+  my $run = "run $gate on these files, in the foreground, with a review packet from the merge base (review-packet.sh --base"
+    . ' <main>, or --since the last version it reviewed when that review was from the merge base)';
+  return report($area, 0, "no merge base with main, so a review of the whole change cannot be told", $run) unless defined $T{mb};
+  my @on = grep { $_->{gate} eq $gate && $_->{tree} eq $T{tree} } @{ $T{receipts} };
+  my @other = grep { defined $_->{open} && $_->{open} ne $yes } @on;
+  return report($area, 0, count(scalar(@other), "receipt of $gate for $files opens", "receipts of $gate for $files open")
+    . ' with another word: ' . said(@other) . '; a later review of the same files does not clear it',
+    "fix what $gate found, commit, and have the new version reviewed") if @other;
+  if (!@on) {
+    my $elsewhere = grep { $_->{gate} eq $gate } @{ $T{receipts} };
+    return report($area, 0, "no receipt of $gate for $files" . ($elsewhere ? '; its receipts here are for other versions' : '')
+      . ' (receipts are kept in this clone only, the newest 500)', $run);
+  }
+  my @yes = grep { $_->{state} eq $good && defined $_->{open} && $_->{open} eq $yes } @on;
+  return report($area, 0, "no receipt of $gate for $files is $good with $yes: " . said(@on), $run) unless @yes;
+  my @based = grep { @{ $_->{bases} } } @yes;
+  return report($area, 0, "the receipt of $gate that approved $files records no review packet's base (the gate read no"
+    . ' packet, or an older gate-receipt made the receipt), so whether it reviewed the whole change cannot be told', $run)
+    unless @based;
+  my ($ok) = grep { my $r = $_; grep { chains($gate, $_, {}) } @{ $r->{bases} } } @based;
+  return report($area, 0, "the receipt of $gate that approved $files reviewed from " . short($based[0]{bases}[0])
+    . ', which does not chain back to the merge base ' . short($T{mb}) . ' (a packet built with --since counts only on a version'
+    . " that $gate reviewed from the merge base)", $run) unless $ok;
+  my ($from) = grep { $_ eq $T{mb} } @{ $ok->{bases} };
+  $T{ok}{$area} = 1;
+  return report($area, 1, "$gate opened with $yes on $files, $good, reviewed from "
+    . (defined $from ? 'the merge base ' . short($T{mb}) : short($ok->{bases}[0]) . ', which chains back to the merge base ' . short($T{mb})));
+}
+
+# rounds (M009): the trees since the plan's approval (the anchor's on)
+# that have a valid receipt of the reviewer; without an approved plan, the
+# whole branch's
+sub rounds_condition {
+  my %role = Verdicts::roles(Verdicts::rows());
+  my $good = Receipt::words()->{good};
+  my $from = defined $T{anchor} ? $T{anchor} : 0;
+  my (%seen, @trees);
+  for my $c (@{ $T{branch} }[$from .. $#{ $T{branch} }]) {
+    push @trees, $c->[1] unless $seen{ $c->[1] }++;
+  }
+  my %reviewed = map { ($_->{tree} => 1) } grep { $_->{gate} eq $role{reviewer} && $_->{state} eq $good } @{ $T{receipts} };
+  my $n = grep { $reviewed{$_} } @trees;
+  my $since = defined $T{anchor} ? "since the plan's approval" : 'on this branch (no approved plan to count from)';
+  if ($n > $MAX_ROUNDS) {
+    return report('rounds', 0, "$n versions were reviewed $since; the limit is $MAX_ROUNDS rounds",
+      "plan again: change the plan, and ask the owner for their go again (a new Approved line starts the count again)");
+  }
+  $T{ok}{rounds} = 1;
+  return report('rounds', 1, count($n, 'version', 'versions') . " reviewed $since, of at most $MAX_ROUNDS");
+}
+
+# history: every gate's word on the branch's versions, in commit order (a
+# version by the first commit that has its tree), each version's receipts
+# by the time they stopped
+sub history {
+  my $w = Receipt::words();
+  my (%seen, @parts);
+  for my $c (@{ $T{branch} }) {
+    next if $seen{ $c->[1] }++;
+    my @r = Receipt::by_stopped(grep { $_->{tree} eq $c->[1] && exists $w->{gate}{ $_->{gate} } } @{ $T{receipts} });
+    next unless @r;
+    push @parts, short($c->[0]) . ': ' . join(', ', map { "$_->{gate} " . (defined $_->{open} ? $_->{open} : 'no word')
+      . ($_->{state} eq $w->{good} ? '' : " ($_->{state})") } @r);
+  }
+  say_line('history - ' . (@parts ? join('; ', @parts) : 'no gate receipt for the versions on this branch'));
+}
+
+# --- 6. verdict (M008): the head commit ends with the verdict line the
+# receipts give (verdicts.txt, kind ready), when the plan, both reviews and
+# the rounds passed; otherwise no line lets it merge ---
 sub verdict_condition {
   my ($head) = @_;
   my @rows = Verdicts::rows();
-  my @ready = Verdicts::words('ready', @rows);
+  my ($ready) = Verdicts::words('ready', @rows);
+  my ($key) = Verdicts::words('trailer-key', @rows);
+  my $line = "$key: $ready";
   my $msg = Git::message($head);
   my $problem = Verdicts::trailer_problem($msg);
   my (undef, $parents) = commit_info($head);
-  my $review = 'have this version reviewed, and end its commit with the verdict line the review gives';
+  my @behind = grep { !$T{ok}{$_} } 'plan', 'reviewer', 'security checker', 'rounds';
+  my $review = 'have this version reviewed, and end its commit with the verdict line the receipts give';
+  my $add = "end the head commit's message with this line, as its last paragraph: $line (in an empty commit when the branch"
+    . ' is pushed: the files stay the same)';
+  my $next = @behind ? $review : $add;
   if (defined $problem) {
     return report('verdict', 0, 'the head commit merges ' . short($parents->[1]) . ' and has no valid verdict line,'
-      . " so the merged version needs its own: $problem", $review) if @$parents > 1;
-    return report('verdict', 0, "the head commit's verdict line: $problem", $review);
+      . " so the merged version needs its own: $problem", $next) if @$parents > 1;
+    return report('verdict', 0, "the head commit's verdict line: $problem", $next);
   }
   my $word = Verdicts::trailer_word($msg);
-  return report('verdict', 1, "$word, as typed in commit " . short($head) . '; not yet backed by a review receipt (step 5)')
-    if grep { $_ eq $word } @ready;
+  if ($word eq $ready) {
+    return report('verdict', 0, "the verdict line says $word, but the receipts do not give it (" . join(', ', @behind)
+      . ' above): a typed line is not a review', $review) if @behind;
+    return report('verdict', 1, "$word, as the receipts give it (commit " . short($head) . ')');
+  }
   my ($meaning) = map { $_->[2] } grep { $_->[1] eq $word && $_->[0] =~ /\Atrailer/ } @rows;
-  return report('verdict', 0, "the verdict line says $word (" . (defined $meaning ? $meaning : 'no meaning listed')
-    . '): no review approved this version (SPEC R4)' . (@ready ? '' : '; verdicts.txt names no value that lets a change merge'),
-    'fix and review again; after review round 3, re-plan or the owner decides (DECISIONS A7, A10); a person\'s'
-    . ' approval does not replace the review\'s, so done-check stays NOT READY');
+  my $says = "the verdict line says $word (" . (defined $meaning ? $meaning : 'no meaning listed') . ')';
+  return report('verdict', 0, "$says; the receipts give $ready", $add) unless @behind;
+  return report('verdict', 0, "$says: no review approved this version (SPEC R4)",
+    'fix and review again; after review round 3, plan again or the owner decides; a person\'s'
+    . ' go does not replace the review\'s, so done-check stays NOT READY');
 }
 
-# --- 6. verdicts start: what this change makes status stop judging ---
+# --- 7. verdicts start: what this change makes status stop judging ---
 sub verdicts_start_condition {
   my ($head, $ref, $tip, $up_to_date) = @_;
   my $area = 'verdicts start';
@@ -397,13 +614,28 @@ sub run {
     exit 3;
   }
   my ($here, $where) = Checks::place();
+  my ($head_tree) = commit_info($head);
+  stop('HEAD cannot be read') unless defined $head_tree;
+  %T = (head => $head, tree => $head_tree, branch => [], receipts => [], ok => {});
+  if (defined $ref) {
+    my ($mst, @mbs) = Git::merge_base($tip, $head);
+    stop('git merge-base failed') if $mst eq 'error';
+    $T{mb} = $mst eq 'ok' ? $mbs[0] : undef;
+    $T{branch} = [branch_commits($head, $tip)];
+  }
+  $T{receipts} = [Receipt::query(Receipt::store('.'))];
 
   files_condition($head);
   my $up = up_to_date_condition($head, $ref, $tip);
   checks_condition($head, $where);
   elsewhere_condition($here);
+  $T{ok}{plan} = plan_condition($head, $ref);
+  gate_condition('reviewer', 'reviewer');
+  gate_condition('security checker', 'security-checker');
+  rounds_condition();
   verdict_condition($head);
   verdicts_start_condition($head, $ref, $tip, $up);
+  history();
 
   my $against = defined $ref ? "$ref $tip" : 'no main branch';
   if (@failed) {
@@ -412,10 +644,11 @@ sub run {
       . "); $head against $against");
     exit 1;
   }
+  my %role = Verdicts::roles(Verdicts::rows());
   my ($word) = Verdicts::trailer_word(Git::message($head));
-  say_line("READY - $head is up to date with $against; verdict $word as typed in the commit (not yet backed by a"
-    . " review receipt, step 5); checks from the $where run-checks log of $ready_log, a local claim (RISKS #11)"
-    . join('', map {"; $_"} @ready_notes));
+  say_line("READY - $head is up to date with $against; verdict $word from the receipts ($role{reviewer} and"
+    . " $role{'security-checker'} on tree " . short($T{tree}) . ", task $T{id}); checks from the $where run-checks log of"
+    . " $ready_log, a local claim (RISKS #11)" . join('', map {"; $_"} @ready_notes));
   exit 0;
 }
 
