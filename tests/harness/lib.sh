@@ -523,18 +523,28 @@ h_words_holds() {
 # h_real_gates ROOT MODE (step 6.2): the method's own gate files, from the
 # repository at ROOT (a planted copy in tests/plants/harness.sh), laid out
 # as sync will (h_method, h_method_words: no stand-in), with the fragment as
-# the project's settings. The main session calls every gate verdicts.txt
-# names in one message, in the foreground (each told apart by its Agent
-# call's description, "harness gate <name>", and its conversation named
-# after it); each answers with the first word of its gate's kind and the
-# END-VERDICT line. MODE default: each answers as text, and the client's
-# debug log goes to $H_DIR/debug.log. MODE auto (the test-only allow hook
-# on Agent, as h_gates): each hands its report back. Sets H_GATES (one
-# "NAME<TAB>WORD" a gate) and H_MODEL (the fragment's model). Returns 1
-# when the case could not be made or the fake did not answer.
+# the project's settings. Since step 6b.1 the change the gates check is a
+# task branch: main is pushed to a bare origin ($H_DIR/origin.git), the
+# branch "task" adds one file, and its review packet is built from the merge
+# base (review-packet.sh --base origin/main) into
+# .method/local/packet-<tree>.txt. The main session calls every gate
+# verdicts.txt names in one message, in the foreground (each told apart by
+# its Agent call's description, "harness gate <name>", and its conversation
+# named after it); each first Reads the packet, then answers with the first
+# word of its gate's kind and the END-VERDICT line. MODE default: each
+# answers as text, and the client's debug log goes to $H_DIR/debug.log;
+# the first gate (H_N1) runs two Bash calls between (N1: the guard inside a
+# gate): a write to the project's settings and a push to main. MODE auto
+# (the test-only allow hook on Agent, as h_gates): each hands its report
+# back. Sets H_GATES (one "NAME<TAB>WORD" a gate), H_MODEL (the fragment's
+# model), H_BASE (the merge base), H_N1 and H_SETTINGS (the settings' cksum
+# before the run). Returns 1 when the case could not be made or the fake did
+# not answer.
 h_real_gates() {
   local mode=$2
   H_TREE=""
+  H_BASE=""
+  H_N1=""
   H_GATES=$(cd "$1" && perl -e 'require "./method/scripts/method/lib/verdicts.pl"; my @r = Verdicts::rows(); print "$_->[0]\t", (Verdicts::words($_->[1], @r))[0], "\n" for Verdicts::gates(@r)') || return 1
   H_MODEL=$(perl -MJSON::PP -0ne 'print JSON::PP->new->decode($_)->{model}' "$1/method/settings.fragment.json") || return 1
   { h_case "real-gates-$mode" && h_method "$1"; } || return 1
@@ -545,22 +555,38 @@ h_real_gates() {
       open $h, ">", $f or die; print $h JSON::PP->new->canonical->pretty->encode($d); close $h or die' "$H_PROJ/.claude/settings.json" || return 1
   fi
   h_method_words "$1" || return 1
+  git init -q --bare "$H_DIR/origin.git" || return 1
+  (
+    cd "$H_PROJ" || exit 1
+    rg_git() { HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git "$@"; }
+    rg_git remote add origin "$H_DIR/origin.git" && rg_git push -q origin main && rg_git switch -q -c task &&
+      printf 'the change\n' >change.txt && rg_git add change.txt && rg_git commit -q -m "the change"
+  ) || return 1
+  H_BASE=$(git -C "$H_DIR/origin.git" rev-parse refs/heads/main) || return 1
   H_TREE=$(HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git -C "$H_PROJ" rev-parse 'HEAD^{tree}') || return 1
+  mkdir -p "$H_PROJ/.method/local" &&
+    (cd "$H_PROJ" && HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 bash scripts/method/review-packet.sh --base origin/main >".method/local/packet-$H_TREE.txt" 2>/dev/null) || return 1
+  [ "$mode" = auto ] || H_N1=$(printf '%s\n' "$H_GATES" | sed -n 1p | cut -f1)
+  H_SETTINGS=$(cksum <"$H_PROJ/.claude/settings.json")
   printf '%s\n' "$H_GATES" | perl -MJSON::PP -e '
-    my ($mode, $t) = @ARGV;
+    my ($mode, $t, $packet, $n1, $write, $push) = @ARGV;
     my (@convs, @calls);
     while (my $l = <STDIN>) {
       chomp $l;
       my ($g, $w) = split /\t/, $l;
       my $good = "$w\nSummary: the change is fine.\nEND-VERDICT $t";
-      my @turns = $mode eq "auto" ? ({tool => "SubagentHandback", input => {message => $good}}, map { {text => $good} } 1 .. 3) : ({text => $good});
+      my $read = {tool => "Read", input => {file_path => $packet}};
+      my @n1 = $g eq $n1 ? ({tool => "Bash", input => {command => $write, description => "write the settings"}},
+        {tool => "Bash", input => {command => $push, description => "push to main"}}) : ();
+      my @turns = $mode eq "auto" ? ($read, {tool => "SubagentHandback", input => {message => $good}}, map { {text => $good} } 1 .. 3) : ($read, @n1, {text => $good});
       push @convs, {name => $g, match => "HARNESS-GATE-\Q$g\E:", turns => \@turns};
       push @calls, {type => "tool_use", name => "Agent", input => {description => "harness gate $g", prompt => "HARNESS-GATE-$g: check the change",
         subagent_type => $g, run_in_background => JSON::PP::false}};
     }
     unshift @convs, {name => "classifier", match => "(?:^<transcript>|<user_claude_md>)", turns => [{text => "<block>no</block>"}]} if $mode eq "auto";
     push @convs, {name => "main", match => "^go\$", turns => [{blocks => \@calls}, map { {text => "MAIN-DONE-$_"} } 1 .. 4]};
-    print JSON::PP->new->canonical->encode({convs => \@convs, fallback => {text => "FAKE-FALLBACK"}, usage => {input_tokens => 11, output_tokens => 7}})' "$mode" "$H_TREE" >"$H_DIR/real-gates.json" || return 1
+    print JSON::PP->new->canonical->encode({convs => \@convs, fallback => {text => "FAKE-FALLBACK"}, usage => {input_tokens => 11, output_tokens => 7}})' \
+    "$mode" "$H_TREE" "$H_PROJ/.method/local/packet-$H_TREE.txt" "$H_N1" "printf '{}\\n' > .claude/settings.json" "git push origin HEAD:main" >"$H_DIR/real-gates.json" || return 1
   h_fake "$H_DIR/real-gates.json" 80 || return 1
   if [ "$mode" = auto ]; then
     h_client 120 -- --permission-mode auto --debug-file "$H_DIR/debug.log"
@@ -585,10 +611,30 @@ h_real_gates() {
 #            them, and none of Agent, Task, Skill or SendMessage
 #   handback (MODE auto) each gate's first request offers SubagentHandback,
 #            though its tools: line does not list it
+#   base     (step 6b.1) each gate read the packet (the Read result reached
+#            its requests, so the case can tell), and its receipt records
+#            the packet's base, the merge base, as its only base
+#   refused  (N1; MODE default) the guard holds inside a gate: the first
+#            gate's write to the project's settings and its push to main
+#            were refused (its requests carry "guard G6:" and "guard G3:
+#            pushing to main is refused"), the settings and origin's main
+#            are unchanged, and its receipt is still VALID
 h_real_holds() {
   local g w got line t
   H_WHY=""
   [ -n "$H_GATES" ] || { H_WHY="no gate read from verdicts.txt, so the case cannot tell"; return 1; }
+  if [ "$1" = refused ]; then
+    [ -n "$H_N1" ] || { H_WHY="no gate ran the two calls (MODE auto?), so the case cannot tell"; return 1; }
+    h_req_in "$H_N1" "guard G6:" || H_WHY="$H_WHY $H_N1's requests do not carry the guard's G6 refusal;"
+    h_req_in "$H_N1" "guard G3: pushing to main is refused" || H_WHY="$H_WHY $H_N1's requests do not carry the guard's G3 refusal;"
+    [ "$(cksum <"$H_PROJ/.claude/settings.json")" = "$H_SETTINGS" ] || H_WHY="$H_WHY the project's settings changed;"
+    got=$(git -C "$H_DIR/origin.git" rev-parse refs/heads/main 2>/dev/null)
+    [ "$got" = "$H_BASE" ] || H_WHY="$H_WHY origin's main moved to $got;"
+    got=$(h_receipt "$H_N1")
+    case $got in "VALID why=none "*) ;; *) H_WHY="$H_WHY $H_N1's receipt: $got;" ;; esac
+    [ -z "$H_WHY" ]
+    return
+  fi
   if [ "$1" = loads ] && [ ! -s "$H_DIR/debug.log" ]; then
     H_WHY="the client wrote no debug log, so the case cannot tell"
     return 1
@@ -621,6 +667,11 @@ h_real_holds() {
       handback)
         got=$(perl "$HARNESS/read.pl" tools "$g" "$H_DIR/fake")
         case ",$got," in *,SubagentHandback,*) ;; *) H_WHY="$H_WHY $g's first request does not offer SubagentHandback: $got;" ;; esac
+        ;;
+      base)
+        h_req_in "$g" "Merge base: $H_BASE" || H_WHY="$H_WHY the packet did not reach $g's requests;"
+        got=$(perl "$HARNESS/read.pl" bases "harness gate $g" "$H_DIR/home" "$H_PROJ/.git")
+        [ "$got" = "$H_BASE" ] || H_WHY="$H_WHY $g's receipt records the bases $got;"
         ;;
       *) H_WHY="no such real-gates question: $1" ;;
     esac

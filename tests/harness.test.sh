@@ -840,7 +840,8 @@ fi
 # --- 19. the gates (step 6.2): the method's own gate files, laid out as
 # sync will, each called by the main session in one message in the
 # foreground, once in default mode and once in auto mode (h_real_gates,
-# h_real_holds) ---
+# h_real_holds); since step 6b.1 each reads the review packet first, and in
+# default mode one gate's calls meet the guard (N1) ---
 real_q() {
   if h_real_holds "$1"; then pass "$2"; else fail "$2" "$H_WHY"; fi
 }
@@ -849,6 +850,8 @@ if h_real_gates "$root" default; then
   real_q valid "real gates (default mode): each gate's receipt is VALID with its word, its real body compared with what the client sent (B10)"
   real_q record "real gates (default mode): each receipt took the fragment's model and effort xhigh from the gate's record"
   real_q tools "real gates (default mode): each gate is offered its tools, Read and Bash among them, and no Agent, Task, Skill or SendMessage"
+  real_q base "real gates (default mode): each gate reads the review packet first, and its VALID receipt records the packet's base, the merge base"
+  real_q refused "real gates (default mode, N1): inside a gate the guard still refuses a write to the project's settings (G6) and a push to main (G3); nothing changed, and the receipt stays VALID"
   h_safe real-gates-default
 else
   fail "real-gates-default: the case could not be made, or the fake did not answer; the client was not started"
@@ -857,6 +860,7 @@ if h_real_gates "$root" auto; then
   real_q handback "real gates (auto mode): with tools: set, each gate is still offered SubagentHandback"
   real_q valid "real gates (auto mode): each gate's handback gets a VALID receipt with its word"
   real_q tools "real gates (auto mode): each gate is offered no Agent, Task, Skill or SendMessage"
+  real_q base "real gates (auto mode): each gate reads the review packet first, and its VALID receipt records the packet's base, the merge base"
   h_safe real-gates-auto
 else
   fail "real-gates-auto: the case could not be made, or the fake did not answer; the client was not started"

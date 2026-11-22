@@ -431,6 +431,28 @@ fi
 h_stop
 drop_sandbox "$sb" || true
 
+# 17b. step 6b.1's N1 case (h_real_gates, question refused): with the
+# guard taken off the fragment's PreToolUse hook for Bash, a gate's write
+# to the project's settings and its push to main are not refused, and the
+# question turns red
+sb=$(make_sandbox) || abort_sandbox
+# shellcheck disable=SC2016 # perl code, expanded by perl
+perl -0pi -e 's/"matcher": "Bash\|PowerShell\|/"matcher": "PowerShell|/' "$sb/method/settings.fragment.json"
+if ! grep -q '"matcher": "PowerShell|Monitor|' "$sb/method/settings.fragment.json"; then
+  fail "real gates (N1): the plant did not apply, so the check result would mean nothing"
+elif ! h_real_gates "$sb" default; then
+  fail "real gates (N1): the case could not be made, or the fake did not answer"
+elif h_real_holds refused; then
+  fail "real gates (N1): the guard taken off the fragment's PreToolUse Bash hook: the question 'refused' stayed green"
+else
+  case $H_WHY in
+    *"requests do not carry the guard's G6 refusal"*) pass "real gates (N1): the guard taken off the fragment's PreToolUse Bash hook: the question 'refused' turns red (${H_WHY%%;*})" ;;
+    *) fail "real gates (N1): the guard taken off the fragment's PreToolUse Bash hook: the question 'refused' turned red for another reason" "$H_WHY" ;;
+  esac
+fi
+h_stop
+drop_sandbox "$sb" || true
+
 # 18. step 6.4's case for planning and design (h_design, h_design_holds).
 # design_plant MODE QUESTION|SEEN|TEXT...: with the plants already made in
 # the copy $sb, h_design runs there in MODE; each QUESTION must fail with
