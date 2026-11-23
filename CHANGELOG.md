@@ -6,7 +6,7 @@ Each release has a "What changes for you" section in plain words.
 
 ### What changes for you
 
-Nothing yet. Release 1 is being built.
+Nothing yet. Release 1 is being built. Release 1 will ship no ready-made packs for one field (such as ERPNext): the method fits any project, and each project can make its own pack (DECISIONS A77).
 
 ### Added
 
