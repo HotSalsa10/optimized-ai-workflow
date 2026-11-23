@@ -1,6 +1,6 @@
 ---
 name: method-start
-description: Starts a session. Reads status, the branch against main, the open pull requests and GitHub's squash setting, then tells the owner where things stand, what is blocked, what waits for their merge and the one next thing, and waits for their go.
+description: Starts a session. Tells the owner the one next thing and why, then where things stand, what is blocked and what waits for their merge, from status, the branch against main, the pull requests and GitHub's squash setting. Then waits for their go.
 # rules: M004 M005 M127
 ---
 # Where things stand
@@ -20,7 +20,7 @@ Run each command below in a Bash call of its own, with nothing chained to it: th
 1. `bash scripts/method/status.sh`, the full run (not `--quick`): it reads the work in every repository, the verdicts, the records, the Claude Code version, the effort setting and the CI runs. Exit 1 means something needs a look, not that it failed.
 2. `git fetch origin`. Then `git config --get-all remote.origin.fetch`: when it names one branch and not `+refs/heads/*:refs/remotes/origin/*`, this is a single-branch clone. Say so: git fetch moves only that branch, so origin/<main> can be missing or old. Widening the clone is the owner's to do, since the guard refuses `git remote set-branches`: `git remote set-branches --add origin <main>`, then `git fetch origin`.
 3. `git rev-list --count origin/<main>..HEAD`, then `git diff --stat origin/<main>...HEAD`: the commits and files on this branch that <main> does not have. Then `git diff --quiet origin/<main> HEAD`: exit 0 means every file on this branch is on <main> already, as after a squash merge, which leaves the branch's own commits off <main>. The branch is then merged, and nothing on it waits for a merge. Exit 1 means they differ.
-4. `gh pr list`: the open pull requests.
+4. `gh pr list`: the open pull requests. Then `gh pr list --state merged --head <branch>`, `<branch>` being the branch this session is on: a pull request listed there means the branch is merged, whatever step 3 says: after a squash merge, the branch and <main> differ again once <main> moves on. When this read fails, whether the branch is merged is "could not read".
 5. `gh api repos/{owner}/{repo} --jq .squash_merge_commit_message` (gh fills in the owner and the repository from origin): GitHub's squash setting. It is right when it prints `PR_BODY`. Otherwise the verdict line does not survive a squash merge: name what it printed, and the owner's one-time fix, in GitHub's Settings, General, Pull Requests, "Allow squash merging", default message "Pull request title and description".
 
 A read that fails, or prints nothing or `null` where a value belongs, is "could not read", with what it said; never "nothing found" or "none open". Run the other reads all the same.

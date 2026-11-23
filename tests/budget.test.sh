@@ -12,11 +12,13 @@
 #   each at most 300 bytes, all together at most 3,000, counted from the
 #   file as YAML reads the value (the text after "description:", trimmed,
 #   and each indented line after it, as YAML continues a value onto them,
-#   joined by single spaces: a block value's lines, a plain or quoted value
-#   wrapped onto the next lines, or one that starts there; a " #" comment
-#   dropped from a value not in quotes; a quoted value counted with its
-#   quotes). Step 6.6 added the wrapped forms: the client joins them and
-#   sends the whole text (the review's F1, measured at 2.1.319).
+#   joined by single spaces: a plain or quoted value wrapped onto the next
+#   lines, or one that starts there; a " #" comment dropped from a value
+#   not in quotes; a quoted value counted with its quotes). Step 6.6 added
+#   the wrapped forms: the client joins them and sends the whole text (the
+#   review's F1, measured at 2.1.319). A block value (| or >) is counted at
+#   or over YAML's count: each of its lines, blank ones too, with the
+#   block's indent taken off and its line break kept (step 6b.4).
 # With no agent or skill file yet, the description budget says SKIPPED.
 # A budget is raised only by the owner; text over it is cut. The counter is
 # tested here on small cases at and one byte over each budget;
@@ -65,8 +67,17 @@ budget_read() {
             # empty line after it, up to the next key, trimmed
             my @more;
             for my $j ($i + 1 .. $#l) { last unless $l[$j] =~ /\A(?:[ \t]|\z)/; push @more, $1 if $l[$j] =~ /\A[ \t]*(\S.*?)[ \t]*\z/ }
-            if ($v =~ /\A[|>][-+0-9]*(?:[ \t]+#.*)?\z/) {
-              $v = join " ", @more;
+            if ($v =~ /\A[|>]([-+0-9]*)(?:[ \t]+#.*)?\z/) {
+              # a block value: each of its lines, blank ones too, with the
+              # block'"'"'s indent taken off (its number, else the first
+              # line with text), and a line break after each: at or over
+              # what YAML keeps (L24)
+              my ($ind) = $1 =~ /([1-9])/;
+              my @b;
+              for my $j ($i + 1 .. $#l) { last unless $l[$j] =~ /\A(?:[ \t]|\z)/; push @b, $l[$j] }
+              if (!defined $ind) { for (@b) { if (/\A([ \t]*)\S/) { $ind = length $1; last } } }
+              $ind = 0 unless defined $ind;
+              $v = join "", map { (my $x = $_) =~ s/\A[ \t]{0,$ind}//; "$x\n" } @b;
             } elsif ($v =~ /\A[\x22\x27]/) {
               $v = join " ", $v, @more;
             } else {
@@ -206,8 +217,8 @@ printf -- '---\nname: b\ndescription: >\n  one two\n  three\nmodel: x\n---\n' >"
 printf -- '---\nname: n\n---\ndescription: in the body, not counted\n' >"$d/method/.claude/agents/method/n.md"
 mkdir -p "$d/method/.claude/skills/method-s" && printf -- '---\nname: s\ndescription: a skill\n---\n' >"$d/method/.claude/skills/method-s/SKILL.md"
 mkdir -p "$d/method/.claude/skills/method-s/more" && printf -- '---\ndescription: a support file, not a skill\n---\n' >"$d/method/.claude/skills/method-s/more/notes.md"
-if counted "$d" "DESC 14 method/.claude/agents/method/q.md" && counted "$d" "DESC 13 method/.claude/agents/method/b.md" && counted "$d" "DESC 0 method/.claude/agents/method/n.md" && counted "$d" "DESC 7 method/.claude/skills/method-s/SKILL.md" && counted "$d" "DESCS 34 4"; then
-  pass "the counter: a quoted value as written, a block value's lines joined, a body line not counted, a skill's SKILL.md only"
+if counted "$d" "DESC 14 method/.claude/agents/method/q.md" && counted "$d" "DESC 14 method/.claude/agents/method/b.md" && counted "$d" "DESC 0 method/.claude/agents/method/n.md" && counted "$d" "DESC 7 method/.claude/skills/method-s/SKILL.md" && counted "$d" "DESCS 35 4"; then
+  pass "the counter: a quoted value as written, a block value's lines each with its line break (14, as YAML folds it), a body line not counted, a skill's SKILL.md only"
 else
   fail "the counter: description forms" "$(budget_read "$d")"
 fi
@@ -223,8 +234,8 @@ printf -- '---\nname: n\ndescription:\n  on the next line\n---\n' >"$d/method/.c
 printf -- '---\nname: h\ndescription: words  # a comment, not sent\n---\n' >"$d/method/.claude/agents/method/h.md"
 printf -- '---\nname: b\ndescription: > # a comment\n  one\n  two\n---\n' >"$d/method/.claude/agents/method/b.md"
 if counted "$d" "DESC 23 method/.claude/agents/method/c.md" && counted "$d" "DESC 9 method/.claude/agents/method/q.md" && counted "$d" "DESC 16 method/.claude/agents/method/n.md" &&
-  counted "$d" "DESC 5 method/.claude/agents/method/h.md" && counted "$d" "DESC 7 method/.claude/agents/method/b.md"; then
-  pass "the counter: continued lines joined by one space, a value on the next line, a comment dropped from a plain value (as YAML reads them)"
+  counted "$d" "DESC 5 method/.claude/agents/method/h.md" && counted "$d" "DESC 8 method/.claude/agents/method/b.md"; then
+  pass "the counter: continued lines joined by one space, a value on the next line, a comment dropped from a plain value, a > block with its final line break, 8 (as YAML reads them)"
 else
   fail "the counter: continued lines joined by one space, a value on the next line, a comment dropped from a plain value (as YAML reads them)" "$(budget_read "$d")"
 fi
@@ -232,6 +243,36 @@ d=$(case_dir desc-wrapped) || abort_sandbox
 printf 'r\n' >"$d/method/.claude/rules/method/r.md"
 mkdir -p "$d/method/.claude/skills/method-w" && printf -- '---\nname: w\ndescription: %s\n  %s\n---\n' "$(xs 200)" "$(xs 100)" >"$d/method/.claude/skills/method-w/SKILL.md"
 want "the counter: a description wrapped onto an indented line, 301 bytes as YAML joins it, fails" "$d" FAIL "descriptions: a description over the budget of 300 bytes"
+# (step 6b.4, L24) a block value (| or >) is counted at or over what YAML
+# reads: each of its lines with the block's indent taken off and its line
+# break kept, blank lines too. YAML keeps the same bytes for | with its
+# final break (clip), fewer when it folds blank lines (>), drops the final
+# break (|-) or the trailing blank lines (clip); the values below are
+# PyYAML's for the same text, where they are equal
+d=$(case_dir desc-block) || abort_sandbox
+printf 'r\n' >"$d/method/.claude/rules/method/r.md"
+printf -- '---\nname: l\ndescription: |\n  a\n\n  b\n---\n' >"$d/method/.claude/agents/method/l.md"
+printf -- '---\nname: i\ndescription: |\n  a\n    b\nmodel: x\n---\n' >"$d/method/.claude/agents/method/i.md"
+printf -- '---\nname: k\ndescription: |+\n  a\n\n---\n' >"$d/method/.claude/agents/method/k.md"
+printf -- '---\nname: e\ndescription: |1\n   a\n---\n' >"$d/method/.claude/agents/method/e.md"
+printf -- '---\nname: s\ndescription: |-\n  a\n  b\n---\n' >"$d/method/.claude/agents/method/s.md"
+printf -- '---\nname: f\ndescription: >\n  a\n\n  b\n---\n' >"$d/method/.claude/agents/method/f.md"
+printf -- '---\nname: t\ndescription: |\n  a\n\n\n---\n' >"$d/method/.claude/agents/method/t.md"
+if counted "$d" "DESC 5 method/.claude/agents/method/l.md" && counted "$d" "DESC 6 method/.claude/agents/method/i.md" && counted "$d" "DESC 3 method/.claude/agents/method/k.md" &&
+  counted "$d" "DESC 4 method/.claude/agents/method/e.md"; then
+  pass "the counter: a | block as YAML reads it: a blank line inside (5), deeper indent kept (6), kept trailing breaks (|+, 3), an indent given by its number (|1, 4)"
+else
+  fail "the counter: a | block as YAML reads it: a blank line inside (5), deeper indent kept (6), kept trailing breaks (|+, 3), an indent given by its number (|1, 4)" "$(budget_read "$d")"
+fi
+if counted "$d" "DESC 4 method/.claude/agents/method/s.md" && counted "$d" "DESC 5 method/.claude/agents/method/f.md" && counted "$d" "DESC 4 method/.claude/agents/method/t.md"; then
+  pass "the counter: where YAML keeps fewer bytes, a block is counted over, never under: |- (4, YAML 3), a > block's blank line (5, YAML 4), two trailing blank lines (4, YAML 2)"
+else
+  fail "the counter: where YAML keeps fewer bytes, a block is counted over, never under: |- (4, YAML 3), a > block's blank line (5, YAML 4), two trailing blank lines (4, YAML 2)" "$(budget_read "$d")"
+fi
+d=$(case_dir desc-block-over) || abort_sandbox
+printf 'r\n' >"$d/method/.claude/rules/method/r.md"
+mkdir -p "$d/method/.claude/skills/method-b" && printf -- '---\nname: b\ndescription: |\n  %s\n\n  %s\n---\n' "$(xs 149)" "$(xs 149)" >"$d/method/.claude/skills/method-b/SKILL.md"
+want "the counter: a | block of two lines of 149 bytes and a blank line between, 301 bytes as YAML reads it, fails" "$d" FAIL "descriptions: a description over the budget of 300 bytes"
 
 echo "tests: budget: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]
