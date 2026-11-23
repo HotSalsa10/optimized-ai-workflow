@@ -6,7 +6,7 @@
 #
 # Usage: bash scripts/method/done-check.sh --ready
 #
-# Until CI runs the checks (step 9), the log and the receipts are local
+# done-check reads no CI result, so the log and the receipts are local
 # records written in this clone: READY means the local records agree, not
 # proof (RISKS #11). A program Claude writes and runs could forge a receipt
 # or the plan's Approved line (RISKS #2); the owner's merge stays the lock.
@@ -36,18 +36,21 @@
 #                  log without END fails. Earlier runs of the same files
 #                  that failed are named, and the READY line carries them.
 #   elsewhere      every check in checks/*.tsv runs here: a check that runs
-#                  only in the other place has no result done-check can read
-#                  yet (step 9), so it never counts toward READY (M089)
+#                  only in the other place has no result done-check reads,
+#                  so it never counts toward READY (M089)
 #   plan           the branch adds exactly one task plan,
 #                  docs/tasks/<id>/plan.md (not on main at the merge base),
 #                  a regular file in a plain folder (a symbolic link or a
 #                  submodule there fails),
 #                  whose Tier line is Tier: FULL or Tier: LIGHT and whose one
-#                  Approved line is Approved: <YYYY-MM-DD> "<the owner's
-#                  reply>", the reply holding the ready word and the task's
-#                  id (M144). The anchor is the first commit on the branch
-#                  whose plan carries that exact line; every Approved line
-#                  the branch has had is named.
+#                  Approved line is Approved: <YYYY-MM-DD> <HH:MM> "<the
+#                  owner's reply>" (the time, on a 24-hour clock, may be
+#                  left out), the reply holding the ready word and the
+#                  task's id (M144). The anchor is the first commit on the
+#                  branch whose plan carries that exact line (the same line
+#                  removed and added back keeps it; a new approval with its
+#                  time is a new line); every Approved line the branch has
+#                  had is named.
 #   tier           the high-risk list is HIGH_RISK_PATHS in the committed
 #                  .claude/method.conf on main's tip and at HEAD together (a
 #                  branch can add a path, never remove one); a file that
@@ -58,14 +61,20 @@
 #                  change touches from the merge base (a moved file at its
 #                  old path too) that is a listed path or under one makes
 #                  the change high-risk; a plan that says LIGHT is then
-#                  judged FULL and fails (M147).
+#                  judged FULL and fails (M147). An entry the change adds to
+#                  main's list that names no path in its files or among the
+#                  paths it touches (a misspelt or deleted path, a comment
+#                  on the line) fails it.
 #   lock           HEAD's Tier and Paths lines and expected.tsv (next to the
 #                  plan) are the anchor's; a FULL task had expected.tsv at
-#                  the anchor (M145)
+#                  the anchor; expected.tsv, where it is, is a regular file
+#                  at the anchor and at HEAD (a symbolic link, a submodule
+#                  or a folder there fails) (M145)
 #   failing run    (FULL) a valid receipt of the tester that opened with the
 #                  fail word, on a commit the anchor is an ancestor of and
 #                  that is a strict ancestor of HEAD, with a tree other than
-#                  HEAD's (M145)
+#                  HEAD's, and the lock's lines and a regular expected.tsv
+#                  there as at the anchor (M145)
 #   passing run    (FULL) the newest receipt of the tester for HEAD's tree,
 #                  by its stop time, is valid with the pass word (M145)
 #   reviewer       the reviewer gate's receipts for HEAD's tree (lib/
@@ -83,19 +92,25 @@
 #                  a base that chains as above, and none with another word
 #                  (M146, Deep review)
 #   rounds         at most three trees have a valid reviewer receipt since
-#                  the plan's approval: the trees of the commits from the
-#                  anchor on, and any other reviewed tree whose plan holds
-#                  the same Approved line, so a squash or a rebase keeps the
-#                  rounds; a fourth means plan again (M009). A reviewed tree
-#                  this clone cannot read is not counted, and is named
+#                  the plan's approval: the trees of the anchor and of the
+#                  branch's commits it is an ancestor of (by git ancestry,
+#                  so a side line made before the approval and merged after
+#                  it is not counted), and any other reviewed tree whose
+#                  plan holds the same Approved line, so a squash or a
+#                  rebase keeps the rounds; a fourth means plan again
+#                  (M009). A reviewed tree this clone cannot read is not
+#                  counted, and is named
 #   reporter       (FULL) the newest receipt of the reporter for HEAD's
 #                  tree, by its stop time, is valid with the approving word
 #                  (M146)
 #   verdict        the head commit ends with a valid verdict line, and its
 #                  value is the one the receipts give: verdicts.txt's ready
-#                  word when the plan, both reviews, the rounds and each
-#                  condition above that applies passed; otherwise no value
-#                  lets the change merge (M008, SPEC R4).
+#                  word when the plan, both reviews, the rounds and every
+#                  condition of the SPEC R6 set that applies (tier, lock,
+#                  failing run, passing run, deep review, reporter) passed;
+#                  otherwise no value lets the change merge (M008). Files,
+#                  up to date, checks and elsewhere fail on their own lines
+#                  and do not change it.
 #                  When the receipts give it and the line is missing or
 #                  other, next: names the exact line to add.
 #   verdicts start what the change makes status stop judging: VERDICTS_FROM

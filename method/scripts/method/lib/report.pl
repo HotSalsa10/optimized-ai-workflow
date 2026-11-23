@@ -5,15 +5,20 @@
 # Report::numbers(TEXT) is the one reading of what a number is, used for
 # the report and for every log alike (M048): a list of [LINE, NUMBER], the
 # number exactly as written. Each line is cut into pieces at spaces and at
-# the marks ( ) [ ] { } < > " ` * = | ; and at the no-break, thin and
-# other wide spaces, the en and em dashes, curly quotes, the bullet and
-# the ellipsis; then the marks ' _ ~ that
-# open a piece and ' _ . , : ! ? that close it are dropped. A piece is a
-# number only when all of it is one ($NUMBER), so a digit inside an ID, a
-# hash, a path, a version or a date is never one. A piece made only of
-# numbers joined by / or - (40/44, 3-5) is those numbers, unless it is a
-# date written so: a four-digit year first or last (2026-11-22, 22/11/2026,
-# 2026-11); 12/30 is two numbers. Beside a month's name, a date is a day
+# the marks ( ) [ ] { } < > " ` * = | ; and at the no-break, thin,
+# ideographic, medium mathematical and other wide spaces, the en and em
+# dashes, curly quotes, the guillemets << >> < >, the bullet and the
+# ellipsis; then the marks ' _ ~ that open a piece and ' _ . , : ! ? + ~
+# that close it are dropped (45+ and ~~45~~ are 45). A piece is a number
+# only when all of it is one ($NUMBER; .45 is one), so a digit inside an
+# ID, a hash, a path, a version or a date is never one. A piece made only
+# of numbers joined by /, - or the hyphens U+2010 and U+2011 (40/44, 3-5)
+# is those numbers, each part keeping its own sign (+120/-4 is +120 and
+# -4), unless it is a date written so, with the same mark throughout: a
+# year (1900 to 2099) first, then a month (1 to 12) and maybe a day (1 to
+# 31): 2026-11, 2026/11/22; or a year last, after a month (11/2026) or
+# after a day and a month in either order (22/11/2026, 11/22/2026). So
+# 12/30, 1024/12 and 2026/13 are numbers. Beside a month's name, a date is a day
 # (1 to 31) before it (22 November), a day after it followed by a comma or
 # a year (November 22, 2026), or a year after it or after its day (March
 # 2026, 22 November 2026); so "March 14 tests" is a number. The first
@@ -22,9 +27,10 @@
 #
 # Report::miss_problems(TEXT): what is wrong with the "What the checks
 # would miss" part, one plain line each; none when it is there and says
-# something. HTML comments are not text; a part whose every line says
-# only "nothing", "none" or "n/a" (brackets, quotes, emphasis, list marks
-# and closing . ! ; , : dropped) says nothing.
+# something. HTML comments are not text: a heading inside one is no
+# heading. A part whose every line says only "nothing", "none" or "n/a"
+# (round, square and curly brackets, straight and curly quotes, emphasis,
+# list marks and closing . ! ; , : dropped) says nothing.
 package Report;
 use strict;
 use warnings;
@@ -45,18 +51,26 @@ my %SAYS_NOTHING = map { $_ => 1 } qw(nothing none n/a);
 # the marks a number may carry, as UTF-8 bytes
 my $SIGN = qr/(?:[+-]|\xE2\x88\x92)/;                   # + - U+2212
 my $CUR = qr/(?:\$|\xE2\x82\xAC|\xC2\xA3|\xC2\xA5)/;    # $ EUR GBP JPY signs
-our $NUMBER = qr/\A$SIGN?$CUR?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:%|$CUR)?\z/;
+our $NUMBER = qr/\A$SIGN?$CUR?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)(?:%|$CUR)?\z/;
 my $MONTH = qr/\A(?:January|February|March|April|May|June|July|August|September|October|November|December
   |Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\z/x;
 my $DAY = qr/\A(?:0?[1-9]|[12]\d|3[01])\z/;
 my $YEAR = qr/\A(?:19|20)\d\d\z/;
-# what joins numbers into one piece, and a date written with it
-my $JOIN = qr{[/-]};
-my $JOINED_DATE = qr{\A(?:\d{4}([/-])\d{1,2}(?:\1\d{1,2})?|\d{1,2}([/-])\d{1,2}\2\d{4})\z};
-# where a line is cut: spaces and marks; U+00A0, U+2000 to U+200A and
-# U+202F (spaces); U+2012 to U+2015 (dashes); U+2018 to U+201F, U+2022 and
-# U+2026 (quotes, the bullet, the ellipsis)
-my $CUT = qr/(?:[ \t\r\f\x0B()\[\]{}<>"`*=|;]|\xC2\xA0|\xE2\x80[\x80-\x8A\xAF]|\xE2\x80[\x92-\x95]|\xE2\x80[\x98-\x9F\xA2\xA6])+/;
+# what joins numbers into one piece: / and - and the hyphens U+2010 and
+# U+2011; a join with no join before it splits a piece, so a sign right
+# after a join is the next part's (5/-3)
+my $JOIN = qr{(?:[/-]|\xE2\x80[\x90\x91])};
+my $JOIN_AT = qr{(?<![/-])(?<!\xE2\x80[\x90\x91])$JOIN};
+# a date written with joins: a year, a month and a day as bounded below
+my $Y = qr/(?:19|20)\d\d/;
+my $M = qr/(?:0?[1-9]|1[0-2])/;
+my $D = qr/(?:0?[1-9]|[12]\d|3[01])/;
+my $JOINED_DATE = qr{\A(?:$Y($JOIN)$M(?:\1$D)?|$M$JOIN$Y|$D($JOIN)$M\2$Y|$M($JOIN)$D\3$Y)\z};
+# where a line is cut: spaces and marks; U+00A0, U+2000 to U+200A, U+202F,
+# U+3000 and U+205F (spaces); U+2012 to U+2015 (dashes); U+2018 to U+201F,
+# U+2022 and U+2026 (quotes, the bullet, the ellipsis); U+00AB, U+00BB,
+# U+2039 and U+203A (guillemets)
+my $CUT = qr/(?:[ \t\r\f\x0B()\[\]{}<>"`*=|;]|\xC2\xA0|\xE2\x80[\x80-\x8A\xAF]|\xE3\x80\x80|\xE2\x81\x9F|\xE2\x80[\x92-\x95]|\xE2\x80[\x98-\x9F\xA2\xA6]|\xC2[\xAB\xBB]|\xE2\x80[\xB9\xBA])+/;
 # dashes and spaces that are no word in the miss part
 my $NO_WORD = qr/(?:\xC2\xA0|\xE2\x80[\x80-\x8A\xAF\x92-\x95])+/;
 my $LIST_MARK = qr/\A[ \t]*(?:(?:#{1,6}|>)[ \t]+)*\d+[.)][ \t]/;
@@ -75,13 +89,13 @@ sub usage {
 }
 
 # joined PIECE: the numbers of a piece made only of numbers joined by / or
-# - (40/44 is 40 and 44, -2-44 is -2 and 44); none for any other piece and
-# for a date written so
+# - (40/44 is 40 and 44, -2-44 is -2 and 44, +120/-4 is +120 and -4); none
+# for any other piece and for a date written so
 sub joined {
   my ($x) = @_;
   my $sign = $x =~ s/\A($SIGN)// ? $1 : '';
   return () unless $x =~ $JOIN;
-  my @parts = split $JOIN, $x, -1;
+  my @parts = split $JOIN_AT, $x, -1;
   return () if grep { $_ !~ $NUMBER } @parts;
   return () if $x =~ $JOINED_DATE;
   $parts[0] = $sign . $parts[0];
@@ -110,7 +124,7 @@ sub numbers {
     for (split $CUT, $line) {
       my $x = $_;
       $x =~ s/\A['_~]+//;
-      my $close = $x =~ s/(['_.,:!?]+)\z// ? $1 : '';
+      my $close = $x =~ s/(['_.,:!?+~]+)\z// ? $1 : '';
       next unless length $x;
       push @p, $x;
       push @comma, index($close, ',') >= 0;
@@ -143,20 +157,33 @@ sub miss_problems {
   my ($text) = @_;
   my @lines = split /\n/, $text, -1;
   s/\r\z// for @lines;
-  # which lines are inside a code block
-  my (@code, $fence);
+  # which lines are inside a code block, and which start inside an HTML
+  # comment (a heading on either is no heading)
+  my (@code, @comment, $fence, $open);
   for my $i (0 .. $#lines) {
     if (defined $fence) {
       $code[$i] = 1;
       undef $fence if $lines[$i] =~ /\A {0,3}(`{3,}|~{3,})[ \t]*\z/ && substr($1, 0, 1) eq substr($fence, 0, 1) && length $1 >= length $fence;
-    } elsif ($lines[$i] =~ /\A {0,3}(`{3,}|~{3,})/) {
+      next;
+    }
+    if (!$open && $lines[$i] =~ /\A {0,3}(`{3,}|~{3,})/) {
       $fence = $1;
       $code[$i] = 1;
+      next;
+    }
+    $comment[$i] = $open;
+    my $at = 0;
+    while (1) {
+      my $k = index($lines[$i], $open ? '-->' : '<!--', $at);
+      last if $k < 0;
+      $at = $k + ($open ? 3 : 4);
+      $open = !$open;
     }
   }
   my (@problems, $found);
   for my $i (0 .. $#lines) {
     next if $code[$i];
+    next if $comment[$i];
     my ($level, $t) = heading($lines[$i]);
     next unless defined $level;
     $t =~ s/\A[*_ \t]+|[*_ \t]+\z//g;
@@ -167,6 +194,7 @@ sub miss_problems {
     my @body;
     for my $j ($i + 1 .. $#lines) {
       my ($l) = $code[$j] ? () : heading($lines[$j]);
+      ($l) = () if $comment[$j];    # a heading inside a comment
       last if defined $l && $l <= $level;
       push @body, $lines[$j];
     }
@@ -176,7 +204,8 @@ sub miss_problems {
     my @said;
     for my $x (split /\n/, $body) {
       $x =~ s/\A[ \t]*(?:[-*+]|\d+[.)])[ \t]+//;
-      $x =~ s/[*_`>#~()"']+//g;
+      $x =~ s/[*_`>#~()\[\]{}"']+//g;
+      $x =~ s/\xE2\x80[\x98-\x9F]//g;    # curly quotes
       $x =~ s/$NO_WORD/ /g;
       $x =~ s/\s+/ /g;
       $x =~ s/\A | \z//g;

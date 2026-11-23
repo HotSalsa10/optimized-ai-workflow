@@ -640,7 +640,10 @@ h_real_gates() {
 h_real_holds() {
   local r g w got line t own_pl
   H_WHY=""
-  [ -n "$H_GATES" ] && [ -n "${H_GATE_RUNS:-}" ] || { H_WHY="no gate read from verdicts.txt, so the case cannot tell"; return 1; }
+  if [ -z "$H_GATES" ] || [ -z "${H_GATE_RUNS:-}" ]; then
+    H_WHY="no gate read from verdicts.txt, so the case cannot tell"
+    return 1
+  fi
   if [ "$1" = own ]; then
     while IFS="$(printf '\t')" read -r r g w; do
       got=$(h_receipt "$r")

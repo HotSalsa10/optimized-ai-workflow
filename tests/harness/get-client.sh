@@ -16,7 +16,9 @@ die() {
   echo "get-client: $1" >&2
   exit 1
 }
-[ -n "$which" ] && [ -n "$dest" ] || die "usage: get-client.sh floor|tested DEST"
+if [ -z "$which" ] || [ -z "$dest" ]; then
+  die "usage: get-client.sh floor|tested DEST"
+fi
 case "$which" in
   floor) version=$(sed -n 's/^claude_code_min=//p' "$root/method/scripts/method/REQUIRES") ;;
   tested) version=$(sed -n 's/^tested	//p' "$here/VERSIONS") ;;

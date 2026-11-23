@@ -187,7 +187,7 @@ wanted:
 $3"; fi
 }
 tag_is "a bad HIGH_RISK_PATHS value is a problem tagged HIGH_RISK_PATHS" 'HIGH_RISK_PATHS=src\nHIGH_RISK_PATHS=../x\n' \
-  'HIGH_RISK_PATHS .claude/method.conf line 2: HIGH_RISK_PATHS: a relative path with no ., .. or empty part, no leading : or -, and none of * ? [ \'
+  "HIGH_RISK_PATHS .claude/method.conf line 2: HIGH_RISK_PATHS: a relative path with no ., .. or empty part, no leading : or -, and none of * ? [ \\"
 tag_is "an empty HIGH_RISK_PATHS value is a problem tagged HIGH_RISK_PATHS" 'HIGH_RISK_PATHS=\n' 'HIGH_RISK_PATHS .claude/method.conf line 1: HIGH_RISK_PATHS has no value'
 tag_is "a misspelt key (HIGH_RISK_PATH=src) is a problem with no tag" 'HIGH_RISK_PATH=src\n' \
   '- .claude/method.conf line 1: unknown key HIGH_RISK_PATH (a typo, or a key from a newer method version)'

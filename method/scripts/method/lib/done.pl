@@ -273,7 +273,7 @@ sub checks_condition {
     push @ready_notes, $note;
   }
   $ready_log = $log->{started};
-  return report('checks', 1, "$where run-checks log of $log->{started} at $at; a local claim (RISKS #11)"
+  return report('checks', 1, "$where run-checks log of $log->{started} at $at; a local claim: a record written in this clone, not proof"
     . join('', map {"; $_"} @ready_notes));
 }
 
@@ -286,7 +286,7 @@ sub elsewhere_condition {
   my @other = map { $_->{id} } grep { $_->{runs_in} ne 'any' && $_->{runs_in} ne $here } @$checks;
   return report('elsewhere', 1, @$checks ? 'every check in checks/*.tsv runs here (' . scalar(@$checks) . ')'
     : 'checks/*.tsv lists no check that runs only elsewhere') unless @other;
-  return report('elsewhere', 0, count(scalar(@other), 'check runs', 'checks run') . ' only in CI and done-check reads no CI result yet (step 9): '
+  return report('elsewhere', 0, count(scalar(@other), 'check runs', 'checks run') . ' only in CI, and done-check does not read CI results: '
     . names(@other), 'these checks have not been seen to pass; until done-check reads their result, it cannot say READY here')
     if $here eq 'local';
   return report('elsewhere', 0, count(scalar(@other), 'check runs', 'checks run') . ' only locally, and no record of a local run is read yet: '
@@ -382,9 +382,12 @@ sub plan_condition {
   return report($area, 0, "$path has no Approved line: the owner has not approved the plan", $ask) unless @app;
   return report($area, 0, "$path has " . scalar(@app) . ' Approved lines; it holds one, the newest approval',
     'keep only the newest Approved line') if @app > 1;
-  my ($date, $quote) = $app[0] =~ /\AApproved: ([0-9]{4}-[0-9]{2}-[0-9]{2}) "(.*)"\z/;
-  return report($area, 0, "${path}'s Approved line is not Approved: <YYYY-MM-DD> \"<the owner's reply>\": $app[0]", $ask)
-    unless defined $quote;
+  # the time after the date (24-hour clock) is optional; with it, a second
+  # approval on the same day gives a new line, so a new anchor
+  my ($date, $time, $quote) = $app[0] =~ /\AApproved: ([0-9]{4}-[0-9]{2}-[0-9]{2})(?: ((?:[01][0-9]|2[0-3]):[0-5][0-9]))? "(.*)"\z/;
+  return report($area, 0, "${path}'s Approved line is not Approved: <YYYY-MM-DD> <HH:MM> \"<the owner's reply>\" (the time,"
+    . " on a 24-hour clock, may be left out): $app[0]", $ask) unless defined $quote;
+  $date .= " $time" if defined $time;
   return report($area, 0, "the Approved line's quote does not hold \"$ready $id\" for this task: \"$quote\"", $ask)
     unless $quote =~ /(?<![A-Za-z0-9-])(?i:\Q$ready\E)[ \t]+\Q$id\E(?![A-Za-z0-9-])/;
   # the anchor: the first commit on the branch whose plan carries this exact
@@ -502,18 +505,26 @@ sub tree_plan_has {
 }
 
 # rounds (M009): the versions reviewed since the plan's approval, each a
-# tree with a valid receipt of the reviewer: the trees of the branch's
-# commits from the anchor on, and every reviewed tree whose plan holds the
-# same Approved line, so a branch whose history was rewritten (squashed or
-# rebased) keeps its earlier rounds; without an approved plan, the whole
-# branch's trees. A reviewed tree this clone cannot read is not counted,
-# and the line says so
+# tree with a valid receipt of the reviewer: the trees of the anchor and
+# of the branch's commits it is an ancestor of, and every reviewed tree
+# whose plan holds the same Approved line, so a branch whose history was
+# rewritten (squashed or rebased) keeps its earlier rounds; without an
+# approved plan, the whole branch's trees. A reviewed tree this clone
+# cannot read is not counted, and the line says so
 sub rounds_condition {
   my %role = Verdicts::roles(Verdicts::rows());
   my $good = Receipt::words()->{good};
-  my $from = defined $T{anchor} ? $T{anchor} : 0;
+  # the commits since the anchor by git ancestry, the anchor and the
+  # branch's commits it is an ancestor of, not by place in the list (a side
+  # line made before the approval and merged after it is listed after it)
   my %on;
-  $on{ $_->[1] } = 1 for @{ $T{branch} }[$from .. $#{ $T{branch} }];
+  if (defined $T{anchor}) {
+    my $at = $T{branch}[ $T{anchor} ][0];
+    my %since = map { ($_ => 1) } $at, split /\n/, Git::ok('rev-list', '--ancestry-path', "$at..$T{head}", '--');
+    $on{ $_->[1] } = 1 for grep { $since{ $_->[0] } } @{ $T{branch} };
+  } else {
+    $on{ $_->[1] } = 1 for @{ $T{branch} };
+  }
   my %reviewed = map { ($_->{tree} => 1) } grep { $_->{gate} eq $role{reviewer} && $_->{state} eq $good } @{ $T{receipts} };
   my @here = grep { $on{$_} } sort keys %reviewed;
   my (@off, $unread);
@@ -531,7 +542,8 @@ sub rounds_condition {
     . ' (whether they hold this approval is not known)' if $unread;
   if ($n > $MAX_ROUNDS) {
     return report('rounds', 0, "$n versions were reviewed $since$notes; the limit is $MAX_ROUNDS rounds",
-      "plan again: change the plan, and ask the owner for their go again (a new Approved line starts the count again)");
+      "plan again: change the plan, ask the owner for their go again, and replace the Approved line with their new reply,"
+      . " with today's date and the time (Approved: YYYY-MM-DD HH:MM \"<the reply>\"); the new line starts the count again");
   }
   $T{ok}{rounds} = 1;
   return report('rounds', 1, count($n, 'version', 'versions') . " reviewed $since, of at most $MAX_ROUNDS$notes");
@@ -588,13 +600,17 @@ sub tier_condition {
   my ($main, $mwhy) = high_risk_list($tip, 'on main');
   my ($mine, $hwhy) = high_risk_list($T{head}, 'in this change');
   my @why = grep { defined } $mwhy, $hwhy;
-  # an entry of this change's list that names no path in its files or among
-  # the paths it touches (an inline comment, a misspelt path) protects
-  # nothing it was meant to: it fails closed, as a problem the parser finds
+  # an entry this change adds to the list that names no path in its files
+  # or among the paths it touches (an inline comment, a misspelt path)
+  # protects nothing it was meant to: it fails closed, as a problem the
+  # parser finds. Main's entries were checked when their change added them,
+  # so a listed path a later change deleted blocks no other branch
   my @touched = touched();
-  my @none = grep { my $e = $_; $e ne '.' && !Tree::lookup($T{head}, $e) && !grep { Conf::under($_, [$e]) } @touched } @{ $mine || [] };
-  push @why, "$CONF in this change (" . short($T{head}) . '): HIGH_RISK_PATHS names no path in its files: ' . names(@none)
-    . ' (a misspelt path, or a comment on the line, which the file does not allow)' if @none;
+  my %on_main = map { ($_ => 1) } @{ $main || [] };
+  my @none = grep { my $e = $_; !$on_main{$e} && $e ne '.' && !Tree::lookup($T{head}, $e) && !grep { Conf::under($_, [$e]) } @touched }
+    @{ $mine || [] };
+  push @why, "$CONF in this change (" . short($T{head}) . '): HIGH_RISK_PATHS adds an entry that names no path in its files: '
+    . names(@none) . ' (the path may be misspelt or deleted, or the line may hold a comment, which the file does not allow)' if @none;
   return report($area, 0, 'the high-risk list cannot be read: ' . join('; ', @why) . '; a broken setting is not read as a shorter list', $fix)
     if @why;
   # main's list and the branch's together: a branch can add a path, never
@@ -619,14 +635,18 @@ sub tier_condition {
 }
 
 # locked COMMIT: what the lock holds in COMMIT: the plan's Tier lines, its
-# Paths lines, and expected.tsv (its mode and blob, or undef when absent)
+# Paths lines, and expected.tsv (its mode and blob, or undef when absent);
+# odd, when expected.tsv is there but is not a regular file, says what it
+# is (a symbolic link's blob is only its target's path, so the values it
+# leads to could change and the lock would not see it)
 sub locked {
   my ($commit) = @_;
   my @l = plan_lines($commit, $T{path});
   (my $dir = $T{path}) =~ s{/plan\.md\z}{};
   my $e = Tree::lookup($commit, "$dir/expected.tsv");
   return { 'the Tier line' => join("\n", grep { /\ATier:/ } @l), 'the Paths line' => join("\n", grep { /\APaths:/ } @l),
-    'expected.tsv' => $e ? "$e->[0] $e->[1]" : undef };
+    'expected.tsv' => $e ? "$e->[0] $e->[1]" : undef,
+    odd => $e && $e->[0] !~ /\A100(?:644|755)\z/ ? $KIND{ $e->[0] } || "mode $e->[0]" : undef };
 }
 
 # lock_moved THEN NOW: what the lock holds that differs between two
@@ -646,11 +666,17 @@ sub lock_condition {
   push @{ $T{need} }, $area;
   my $at = $T{branch}[ $T{anchor} ][0];
   my ($then, $now) = (locked($at), locked($T{head}));
+  (my $dir = $T{path}) =~ s{/plan\.md\z}{};
+  for ([$then, "when the plan was approved in commit " . short($at)], [$now, 'at HEAD']) {
+    my ($l, $when) = @$_;
+    return report($area, 0, "$dir/expected.tsv is $l->{odd} $when, so the values the lock compares are not the ones read"
+      . ' through it: expected.tsv must be a regular file', "make $dir/expected.tsv a regular file, and ask the owner for their go"
+      . " again (replace the Approved line with their new reply, with today's date and the time)") if defined $l->{odd};
+  }
   my @moved = lock_moved($then, $now);
   return report($area, 0, "changed since the plan's approval in commit " . short($at) . ': ' . join(', ', @moved),
     'a change to the tier, the paths or the expected results is a new plan: ask the owner for their go again, and replace'
-    . ' the Approved line with the new reply') if @moved;
-  (my $dir = $T{path}) =~ s{/plan\.md\z}{};
+    . " the Approved line with their new reply, with today's date and the time (Approved: YYYY-MM-DD HH:MM \"<the reply>\")") if @moved;
   return report($area, 0, "the task is FULL, but its plan had no expected.tsv when it was approved in commit " . short($at)
     . ': a FULL plan locks its expected results', "write $dir/expected.tsv, and ask the owner for their go again")
     if $T{full} && !defined $then->{'expected.tsv'};
@@ -662,9 +688,10 @@ sub lock_condition {
 # failing run (M145): a valid tester receipt that opened with the fail word
 # on a commit from the anchor on (git ancestry, as trees repeat across
 # commits) and strictly before HEAD, with files other than HEAD's, and
-# with the plan's Tier and Paths lines and expected.tsv as approved there
-# (the lock compares HEAD with the anchor only, so a run on a value changed
-# and changed back in between would otherwise count)
+# with the plan's Tier and Paths lines and expected.tsv as approved there,
+# expected.tsv a regular file there and at the anchor (the lock compares
+# HEAD with the anchor only, so a run on a value changed and changed back
+# in between would otherwise count)
 sub failing_condition {
   my $area = 'failing run';
   return unless $T{ok}{plan} && $T{full};
@@ -680,7 +707,9 @@ sub failing_condition {
     if (!defined $h || $h !~ /\A(?:[0-9a-f]{40}|[0-9a-f]{64})\z/ || !defined((commit_info($h))[0])) { $not{gone}++; next }
     if ($r->{tree} eq $T{tree}) { $not{here}++; next }
     if (!ancestor($at, $h) || $h eq $T{head} || !ancestor($h, $T{head})) { $not{off}++; next }
-    if (lock_moved($then, locked($h))) { $not{moved}++; next }
+    my $l = locked($h);
+    if (defined $then->{odd} || defined $l->{odd}) { $not{odd}++; next }
+    if (lock_moved($then, $l)) { $not{moved}++; next }
     $ok = $r;
   }
   if ($ok) {
@@ -693,6 +722,7 @@ sub failing_condition {
   push @notes, "$not{off} on a commit outside this branch's history from the approval to HEAD" if $not{off};
   push @notes, "$not{gone} on a commit this clone does not have" if $not{gone};
   push @notes, "$not{moved} on a commit whose plan Tier or Paths line or expected.tsv differs from the approved one" if $not{moved};
+  push @notes, "$not{odd} on a commit where expected.tsv, or the approved one, is not a regular file" if $not{odd};
   return report($area, 0, "no $good receipt of $role{tester} that opened with $role{fail} on a commit from the plan's approval (commit "
     . short($at) . ") to before HEAD, with other files than HEAD's" . (@notes ? '; not counted: ' . join('; ', @notes) : ''),
     "run $role{tester} where the tests are in and the code is not: on this branch after the approval, a commit that takes the"
@@ -802,7 +832,7 @@ sub verdict_condition {
   my ($meaning) = map { $_->[2] } grep { $_->[1] eq $word && $_->[0] =~ /\Atrailer/ } @rows;
   my $says = "the verdict line says $word (" . (defined $meaning ? $meaning : 'no meaning listed') . ')';
   return report('verdict', 0, "$says; the receipts give $ready", $add) unless @behind;
-  return report('verdict', 0, "$says: no review approved this version (SPEC R4)",
+  return report('verdict', 0, "$says: no review approved this version",
     'fix and review again; after review round 3, plan again or the owner decides; a person\'s'
     . ' go does not replace the review\'s, so done-check stays NOT READY');
 }
@@ -929,7 +959,7 @@ sub run {
   my ($word) = Verdicts::trailer_word(Git::message($head));
   say_line("READY - $head is up to date with $against; verdict $word from the receipts ($role{reviewer} and"
     . " $role{'security-checker'} on tree " . short($T{tree}) . ", task $T{id}); checks from the $where run-checks log of"
-    . " $ready_log, a local claim (RISKS #11)" . join('', map {"; $_"} @ready_notes));
+    . " $ready_log, a local claim: a record written in this clone, not proof" . join('', map {"; $_"} @ready_notes));
   exit 0;
 }
 

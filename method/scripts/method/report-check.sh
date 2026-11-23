@@ -16,19 +16,25 @@
 #                 a number in the report that no LOG holds. A number is a
 #                 run of digits with an optional sign (+, -, U+2212), a
 #                 currency mark before or after ($, EUR, GBP, JPY signs),
-#                 thousands separators (1,200), a decimal part and a
-#                 percent mark, standing alone between spaces or marks
-#                 such as ( ) * ` " = | ; the no-break and other wide
-#                 spaces, the en and em dashes, curly quotes, and closing
-#                 punctuation. Numbers joined by / or - are each read
-#                 (40/44, 3-5, 12/30). It must be in a log exactly as
-#                 written: 1,200 is not 1200, -3 is not 3, $5 is not 5,
-#                 90% is not 90 (M074). Not numbers: IDs and hashes (M126,
-#                 A66, #4, b776281, 6b), paths and line numbers
-#                 (file.pl:12, a/7), versions (2.1.316), dates and times
-#                 (2026-11-22, 22/11/2026, 10:30, 22 November 2026,
-#                 November 22, 2026, March 2026; but "March 14 tests" is a
-#                 number), and a numbered list's or heading's marker (1.
+#                 thousands separators (1,200), a decimal part (.45 too)
+#                 and a percent mark, standing alone between spaces or
+#                 marks such as ( ) * ` " = | ; the no-break, ideographic
+#                 and other wide spaces, the en and em dashes, curly
+#                 quotes, guillemets, and closing punctuation (a closing +
+#                 or ~ too: 45+ and ~~45~~ are 45). Numbers joined by /,
+#                 - or the hyphens U+2010 and U+2011 are each read, each
+#                 with its own sign (40/44, 3-5, 12/30, +120/-4). It must
+#                 be in a log exactly as written: 1,200 is not 1200, -3
+#                 is not 3, $5 is not 5, 90% is not 90 (M074). Not
+#                 numbers: IDs and hashes (M126, A66, #4, b776281, 6b),
+#                 paths and line numbers (file.pl:12, a/7), versions
+#                 (2.1.316), dates and times (10:30, 22 November 2026,
+#                 November 22, 2026, March 2026; but "March 14 tests" is
+#                 a number), a date joined by one of the marks above,
+#                 with a year from 1900 to 2099, a month from 1 to 12 and
+#                 a day from 1 to 31 (2026-11, 2026-11-22, 11/2026,
+#                 22/11/2026, 11/22/2026; but 1024/12 and 2026/13 are
+#                 numbers), and a numbered list's or heading's marker (1.
 #                 or 2) at the start of a line). The logs are read the
 #                 same way, after terminal colour codes are taken out.
 #   report-check: no "What the checks would miss" heading
@@ -37,10 +43,11 @@
 #                 the heading is a markdown heading (#, ##, ...) with that
 #                 text in any case, a colon allowed; its part runs to the
 #                 next heading of its level or higher; headings inside a
-#                 code block do not count. HTML comments are not text. A
-#                 part whose every line says only "nothing", "none" or
-#                 "n/a" (brackets, quotes and closing marks aside), or
-#                 holds no word at all, is listed.
+#                 code block or an HTML comment do not count. HTML
+#                 comments are not text. A part whose every line says
+#                 only "nothing", "none" or "n/a" (round, square and
+#                 curly brackets, straight and curly quotes and closing
+#                 marks aside), or holds no word at all, is listed.
 # Then "report-check: PASS - ..." when nothing was listed, or
 # "report-check: FAIL - N listed".
 #
@@ -53,9 +60,12 @@
 #   refuses a report whose "What the checks would miss" part is missing,
 #   empty, "nothing" or "none" (SPEC R8).
 # Who makes it count: /method-finish runs it, and the reporter answers that
-# changes are needed when it did not exit 0. A number written in words, or
-# with a unit or word stuck to it (5ms, 44-all, 40/s), is not read as a
-# number.
+# changes are needed when it did not exit 0. Not read as numbers, so not
+# checked: a number written in words, or with a unit or word stuck to it
+# (5ms, 44-all, 40/s); a decimal comma (3,4 or 9,5%; 1.200,50); grouping
+# other than 1,200 (Indian 1,00,000, or 1'200); digits other than ASCII
+# 0 to 9 (fullwidth digits); and a currency sign other than $, EUR, GBP
+# and JPY (5 INR written with its sign, for one).
 set -u
 # perl reads bytes; these settings would change how it reads and writes
 # them, and the library paths would let modules from elsewhere run inside it

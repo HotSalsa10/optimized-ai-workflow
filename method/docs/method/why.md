@@ -72,4 +72,4 @@ These rules are text the model reads. A review can notice a broken one; nothing 
 | `.claude/hooks/method/README.md` | M073: each hook documented with what it stops, what it costs and how it was seen to fire |
 | The checking agents, `.claude/agents/method/` (step 6) | reviewer M024, M083, M084, M086, M090, M102; security checker M030; tester M029; diagnose M142; reporter M031, M046, M069, M092, M124 |
 | The architect (step 6) | M141 |
-| The skills you type (step 6 and 6b) | `/method-start` M004, M005, M127; `/method-plan` M006, M021, M091, M125; `/method-design` M099; `/method-finish` M007, M011, M070, M087, M148, M149, M150, and its reporter for a LIGHT task with [EYES] or [CHECK] items (A11's clause: a convention, which done-check does not require) |
+| The skills you type (step 6 and 6b) | `/method-start` M004, M005, M127; `/method-plan` M006, M021, M091, M125; `/method-design` M099; `/method-finish` M007, M011, M070, M087, M148, M149, M150, and its reporter for a LIGHT task with [EYES] or [CHECK] items (a convention, which done-check does not require) |

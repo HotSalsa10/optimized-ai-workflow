@@ -26,9 +26,9 @@ done-check reads this format, so keep to it.
 - `plan.md` is written for people. Its first lines after the title are these, each at the start of its line:
   - `Tier: FULL` or `Tier: LIGHT`;
   - `Paths: ` and the files and folders the change will touch, separated by commas;
-  - `Approved: <date> "<the owner's reply>"`, added only once the owner has replied: the date as YYYY-MM-DD, and the reply quoted exactly as typed, which holds `approve <id>` with this folder's id.
+  - `Approved: YYYY-MM-DD HH:MM "<the owner's reply>"`, added only once the owner has replied: the date and time as `date '+%Y-%m-%d %H:%M'` prints them when you add it, and the reply quoted exactly as typed, which holds `approve <id>` with this folder's id.
 - `expected.tsv`, for FULL only: the expected results, tab-separated, its first line the header `case`, `inputs`, `expected`, `source`. One row per case: a short name; the inputs as `name=value;name=value`; the expected result; and its source, the requirement, document or person (by role) outside the model that gives the value. For a high-risk change, the person with authority signs the expected results, and the source names them. A value you assumed has a source that starts `INFERRED:` and is a question in the plan until someone gives it.
-- Once approved, the Tier line, the Paths line and expected.tsv stay as approved. A change to any of them is a new plan: change it, ask again, and replace the Approved line with the new reply.
+- Once approved, the Tier line, the Paths line and expected.tsv stay as approved. A change to any of them is a new plan: change it, ask again, and replace the Approved line with one holding the new reply, date and time.
 
 ## A FULL plan
 
@@ -50,7 +50,7 @@ End the plan with this one question, and stop:
 
 Reply `approve <id>` to approve this plan.
 
-When the owner replies with `approve <id>` for this task's id, add the Approved line, quoting the reply, and commit the task folder in a commit of its own. Any other reply is not an approval: change the plan as it asks, and ask the question again. A general "go" or "ok" does not approve a plan.
+When the owner replies with `approve <id>` for this task's id, add the Approved line, quoting the reply, and commit the task folder in a commit of its own. A re-approval replaces the Approved line with the new reply, date and time, so the plan keeps one Approved line and the new one differs from the old. Any other reply is not an approval: change the plan as it asks, and ask the question again. A general "go" or "ok" does not approve a plan.
 
 ## FULL: the tests first
 

@@ -174,7 +174,12 @@ plant "method-finish dropped from the method's skills" "a method skill (6b.4): a
 plant "dev-mods dropped from the home folders" "$s Write to home/.claude/dev-mods/s1/m/index.ts is refused" "['dev-mods', 'mods'], " ''
 plant "plugins dropped from the home folders" "$s Write to home/.claude/plugins/x is refused" ", ['plugins', 'plugins']" ''
 plant "CLAUDE_CONFIG_DIR not added" "$s Write to a mod under CLAUDE_CONFIG_DIR is refused" 'push @cfg, $ENV{CLAUDE_CONFIG_DIR} if' '0 && push @cfg, $ENV{CLAUDE_CONFIG_DIR} if'
-plant "dev-mods dropped from the text forms" "the text forms" "/\\.claude/! . home_re() . q!" "/\\.claude/(?:agents|skills|commands|plugins)\\b"
+# (step 6b's review, R21) one defect each: dev-mods dropped with the
+# whole-name end kept, and the whole-name end dropped with dev-mods kept
+plant "dev-mods dropped from the text forms" "the text forms: an interpreter's code naming" '. home_re() . q!' ". '(?:agents|skills|commands|plugins)[. ]*(?![A-Za-z0-9_.-])' . q!"
+plant "the whole-name end dropped from the text forms (home_re)" "the text forms: a folder whose name only starts like one" ")[. ]*(?![A-Za-z0-9_.-])' }" ")' }"
+# (step 6b's review, R18) a folder's name with dots or spaces after it
+plant "trailing dots and spaces not read in the text forms (home_re)" "the text forms: a folder's name with dots or spaces after it" ")[. ]*(?![A-Za-z0-9_.-])' }" ")(?![A-Za-z0-9_.-])' }"
 
 echo "plants: protected files: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]

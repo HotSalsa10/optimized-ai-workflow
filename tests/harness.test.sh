@@ -93,8 +93,15 @@ if h_fake "$H_DIR/script.json"; then
   else
     fail "startup: the client's version '$version' is not at or above the floor $floor" "$(tail -3 "$H_DIR/err.txt")"
   fi
-  if [ -n "${METHOD_HARNESS_VERSION:-}" ]; then
-    if [ "$version" = "$METHOD_HARNESS_VERSION" ]; then pass "startup: the client is the version asked for ($METHOD_HARNESS_VERSION)"; else fail "startup: the client reports '$version', not the version asked for ($METHOD_HARNESS_VERSION)"; fi
+  # (step 6b's review, R20) the case is always counted: with no version
+  # asked for it says SKIPPED, so a run without METHOD_HARNESS_VERSION
+  # shows the same number of cases as CI's
+  if [ -z "${METHOD_HARNESS_VERSION:-}" ]; then
+    skip "startup: no version asked for (METHOD_HARNESS_VERSION is not set), so the client's version is not compared with one"
+  elif [ "$version" = "$METHOD_HARNESS_VERSION" ]; then
+    pass "startup: the client is the version asked for ($METHOD_HARNESS_VERSION)"
+  else
+    fail "startup: the client reports '$version', not the version asked for ($METHOD_HARNESS_VERSION)"
   fi
   tools=$(h_init tools)
   missing=""

@@ -266,7 +266,8 @@ fi
 
 if wanted_any "floor: no plan" "floor: two task plans" "floor: a plan with no Tier line" "floor: a plan with a Tier line that is neither" \
   "floor: a plan with no Approved line" "floor: an Approved line without" "floor: an Approved line that names another task" \
-  "floor: an Approved line not in its form" "floor: a plan that main already holds"; then
+  "floor: an Approved line not in its form" "floor: a plan that main already holds" "floor: a plan with two" \
+  "floor: an Approved line whose quote only ends" "floor: an Approved line with"; then
   f=$(floor_project) || abort_sandbox
   approve_head "$f"
   # plan PLAN-TEXT: the task's plan becomes PLAN-TEXT, committed, approved
@@ -305,6 +306,28 @@ if wanted_any "floor: no plan" "floor: two task plans" "floor: a plan with no Ti
   plan '# Task t1\n\nTier: SMALL\nPaths: src\nApproved: 2026-11-22 "approve t1"\n'
   dc "$f"
   expect "floor: a plan with a Tier line that is neither FULL nor LIGHT is NOT READY" 1 "done-check: plan: FAIL - docs/tasks/t1/plan.md's Tier line is not Tier: FULL or Tier: LIGHT: Tier: SMALL"
+  plan '# Task t1\n\nTier: LIGHT\nTier: FULL\nPaths: src\nApproved: 2026-11-22 "approve t1"\n'
+  dc "$f"
+  expect "floor: a plan with two Tier lines is NOT READY" 1 "done-check: plan: FAIL - docs/tasks/t1/plan.md has 2 Tier lines; it holds one" \
+    "done-check: next: keep one Tier line in docs/tasks/t1/plan.md, and ask the owner again"
+  plan '# Task t1\n\nTier: LIGHT\nPaths: src\nApproved: 2026-11-22 "approve t1"\nApproved: 2026-11-23 "approve t1 again"\n'
+  dc "$f"
+  expect "floor: a plan with two Approved lines is NOT READY" 1 "done-check: plan: FAIL - docs/tasks/t1/plan.md has 2 Approved lines; it holds one, the newest approval" \
+    "done-check: next: keep only the newest Approved line"
+  plan '# Task t1\n\nTier: LIGHT\nPaths: src\nApproved: 2026-11-22 "I disapprove t1"\n'
+  dc "$f"
+  expect "floor: an Approved line whose quote only ends in the ready word (\"I disapprove t1\") is NOT READY" 1 \
+    "done-check: plan: FAIL - the Approved line's quote does not hold \"approve t1\" for this task: \"I disapprove t1\""
+  for tm in 25:00 9:30 12:60 '12:30:00' T12:30; do
+    plan "# Task t1\n\nTier: LIGHT\nPaths: src\nApproved: 2026-11-22 $tm \"approve t1\"\n"
+    dc "$f"
+    expect "floor: an Approved line with a malformed time ($tm) is NOT READY" 1 \
+      "done-check: plan: FAIL - docs/tasks/t1/plan.md's Approved line is not Approved: <YYYY-MM-DD> <HH:MM> \"<the owner's reply>\" (the time, on a 24-hour clock, may be left out): Approved: 2026-11-22 $tm \"approve t1\""
+  done
+  plan '# Task t1\n\nTier: LIGHT\nPaths: src\nApproved: 2026-11-22 23:59 "approve t1"\n'
+  dc "$f"
+  expect "floor: an Approved line with a time after the date is READY" 0 \
+    "done-check: plan: PASS - task t1 (docs/tasks/t1/plan.md), Tier LIGHT; approved 2026-11-22 23:59 \"approve t1\" in commit " "done-check: READY - "
   plan '# Task t1\n\nTier: LIGHT\nPaths: src\nApproved: 2026-11-22 "Approve t1, thanks"\n'
   dc "$f"
   expect "setup: an approval that quotes \"Approve t1\" in capitals is READY" 0 "done-check: plan: PASS - task t1 (docs/tasks/t1/plan.md), Tier LIGHT; approved 2026-11-22 \"Approve t1, thanks\"" "done-check: READY - "
@@ -462,7 +485,7 @@ if wanted_any "floor: a fourth round since the anchor" "floor: three rounds sinc
   dc "$f"
   expect "floor: a fourth round since the anchor is NOT READY: plan again" 1 \
     "done-check: rounds: FAIL - 4 versions were reviewed since the plan's approval; the limit is 3 rounds" \
-    "done-check: next: plan again: change the plan, and ask the owner for their go again (a new Approved line starts the count again)" \
+    "done-check: next: plan again: change the plan, ask the owner for their go again, and replace the Approved line with their new reply, with today's date and the time (Approved: YYYY-MM-DD HH:MM \"<the reply>\"); the new line starts the count again" \
     "done-check: NOT READY - 2 conditions failed (rounds, verdict)"
   # a new approval moves the anchor; the rounds before it are not counted
   add_task "$f" t1 LIGHT 'Approved: 2026-11-23 "approve t1, with the new plan"'
@@ -565,6 +588,123 @@ if wanted_any "floor: a second task plan that is a symbolic link" "floor: a seco
     dc "$f"
     expect "floor: a second task folder that is a symbolic link is NOT READY" 1 \
       "done-check: plan: FAIL - this branch adds a task folder or plan that is not a plain folder and file: docs/tasks/t2 (a symbolic link)"
+  fi
+fi
+
+# a task folder whose name is not an id, or one stored as a submodule
+if wanted_any "floor: a task folder whose name is not an id"; then
+  f=$(floor_project) || abort_sandbox
+  (cd "$f" && git mv docs/tasks/t1 docs/tasks/T_1)
+  add_task "$f" T_1
+  (cd "$f" && git add -A)
+  msg "$f" 'Rename\n\n%s\n' "$OK"
+  rc "$f"
+  approve_head "$f"
+  dc "$f"
+  expect "floor: a task folder whose name is not an id (T_1) is NOT READY" 1 \
+    "done-check: plan: FAIL - the task's folder name is not an id (lower-case letters, digits and dashes): docs/tasks/T_1/plan.md" \
+    "done-check: next: rename the folder, and ask the owner again"
+fi
+if wanted_any "floor: a second task folder stored as a submodule"; then
+  f=$(floor_project) || abort_sandbox
+  mkdir -p "$f/docs/tasks/t2"
+  (cd "$f" && git update-index --add --cacheinfo "160000,$(git rev-parse HEAD),docs/tasks/t2")
+  msg "$f" 'Submodule\n\n%s\n' "$OK"
+  rc "$f"
+  approve_head "$f"
+  dc "$f"
+  expect "floor: a second task folder stored as a submodule (a gitlink) is NOT READY" 1 \
+    "done-check: plan: FAIL - this branch adds a task folder or plan that is not a plain folder and file: docs/tasks/t2 (a submodule)"
+fi
+
+# the rounds since the anchor are the anchor and the branch's commits it is
+# an ancestor of: a side line made before the approval, reviewed there and
+# merged after it, is listed after the anchor but is not counted
+if wanted_any "floor: a side line reviewed before the approval and merged after it"; then
+  f=$(floor_project) || abort_sandbox
+  printf '# Task t1\n\nTier: LIGHT\nPaths: src\n\nThe task.\n' >"$f/docs/tasks/t1/plan.md"
+  (cd "$f" && git add -A)
+  msg "$f" 'Not approved\n\n%s\n' "$OPEN"
+  (cd "$f" && git switch -q -c side)
+  for n in 1 2 3; do
+    echo "side $n" >"$f/src/a.txt"
+    (cd "$f" && git add -A)
+    msg "$f" 'Side\n\n%s\n' "$OPEN"
+    forge "$f" "$R" "REQUEST CHANGES"
+  done
+  (cd "$f" && git switch -q feat)
+  add_task "$f" t1 LIGHT 'Approved: 2026-11-23 "approve t1"'
+  (cd "$f" && git add -A)
+  msg "$f" 'Approved\n\n%s\n' "$OPEN"
+  anchor=$(cd "$f" && git rev-parse HEAD)
+  (cd "$f" && git merge -q --no-edit side >/dev/null 2>&1)
+  amend "$f" "$OK"
+  rc "$f"
+  forge "$f" "$R" APPROVE
+  forge "$f" "$S" APPROVE
+  dc "$f"
+  expect "floor: a side line reviewed before the approval and merged after it is not counted: READY" 0 \
+    "done-check: plan: PASS - task t1 (docs/tasks/t1/plan.md), Tier LIGHT; approved 2026-11-23 \"approve t1\" in commit $(short "$anchor")" \
+    "done-check: rounds: PASS - 1 version reviewed since the plan's approval, of at most 3" "done-check: READY - "
+fi
+
+# a re-approval on the same day: the time after the date makes it a new
+# line, so a new anchor, and the rounds start again
+if wanted_any "floor: a same-day re-approval with a time moves the anchor"; then
+  f=$(floor_project) || abort_sandbox
+  # again DIR TEXT WORD: a new version of src/a.txt, committed and reviewed
+  # by both gates with WORD
+  again() {
+    echo "$2" >"$1/src/a.txt"
+    (cd "$1" && git add -A)
+    msg "$1" 'Round\n\n%s\n' "$OK"
+    rc "$1"
+    forge "$1" "$R" "$3"
+    forge "$1" "$S" "$3"
+  }
+  add_task "$f" t1 LIGHT 'Approved: 2026-11-22 09:15 "approve t1"'
+  again "$f" 1 "REQUEST CHANGES"
+  again "$f" 2 "REQUEST CHANGES"
+  again "$f" 3 "REQUEST CHANGES"
+  again "$f" 4 "REQUEST CHANGES"
+  dc "$f"
+  expect "setup: four rounds since a 09:15 approval are NOT READY" 1 \
+    "done-check: rounds: FAIL - 4 versions were reviewed since the plan's approval; the limit is 3 rounds"
+  add_task "$f" t1 LIGHT 'Approved: 2026-11-22 16:30 "approve t1"'
+  (cd "$f" && git add -A)
+  msg "$f" 'Plan again\n\n%s\n' "$OK"
+  anchor=$(cd "$f" && git rev-parse HEAD)
+  again "$f" 5 APPROVE
+  dc "$f"
+  expect "floor: a same-day re-approval with a time moves the anchor: the rounds start again, READY" 0 \
+    "done-check: plan: PASS - task t1 (docs/tasks/t1/plan.md), Tier LIGHT; approved 2026-11-22 16:30 \"approve t1\" in commit $(short "$anchor"); the plan was approved 3 times on this branch: 2026-11-22 \"approve t1\"; 2026-11-22 09:15 \"approve t1\"; 2026-11-22 16:30 \"approve t1\"" \
+    "done-check: rounds: PASS - 1 version reviewed since the plan's approval, of at most 3" "done-check: READY - "
+fi
+
+# shipped output names no record of the method's own repository (its risk,
+# requirement or decision numbers) and promises no later step of it
+if wanted_any "floor: done-check's lines name no record of the method's own repository"; then
+  f=$(floor_project) || abort_sandbox
+  approve_head "$f"
+  dc "$f"
+  expect "setup: a reviewed change is READY" 0 "done-check: checks: PASS" "done-check: READY - "
+  all=$out
+  printf 'integ\tci\t-\t(\\d+) ok\techo 0 ok; exit 1\n' >>"$f/checks/project.tsv"
+  (cd "$f" && git add -A)
+  amend "$f" "$OPEN"
+  rc "$f"
+  unforge "$f"
+  dc "$f"
+  expect "setup: a CI-only check and an open verdict line with no review are NOT READY" 1 "done-check: elsewhere: FAIL - " \
+    "done-check: verdict: FAIL - the verdict line says request-changes-open" "no review approved this version"
+  all="$all
+$out"
+  # shellcheck disable=SC2016 # perl code, expanded by perl
+  ids=$(printf '%s\n' "$all" | perl -ne 'print if /RISKS #[0-9]|SPEC R[0-9]|\(step [0-9]|DECISIONS A[0-9]|(?<![A-Za-z0-9_-])A[0-9]{1,3}(?![A-Za-z0-9_])/')
+  if [ -z "$ids" ]; then
+    pass "floor: done-check's lines name no record of the method's own repository and promise no later step"
+  else
+    fail "floor: done-check's lines name no record of the method's own repository and promise no later step" "$ids"
   fi
 fi
 
@@ -754,7 +894,7 @@ if wanted_any "R6: the lock" "R6: a re-approval" "R6: the code-removed commit" "
     case $what in
       tier) expect "R6: the lock: the Tier line changed after the approval is NOT READY" 1 \
         "done-check: lock: FAIL - changed since the plan's approval in commit $(short "$anchor"): the Tier line" \
-        "done-check: next: a change to the tier, the paths or the expected results is a new plan: ask the owner for their go again, and replace the Approved line with the new reply" ;;
+        "done-check: next: a change to the tier, the paths or the expected results is a new plan: ask the owner for their go again, and replace the Approved line with their new reply, with today's date and the time (Approved: YYYY-MM-DD HH:MM \"<the reply>\")" ;;
       paths) expect "R6: the lock: the Paths line changed after the approval is NOT READY" 1 "done-check: lock: FAIL - changed since the plan's approval in commit $(short "$anchor"): the Paths line" ;;
       expected) expect "R6: the lock: expected.tsv changed after the approval is NOT READY" 1 "done-check: lock: FAIL - changed since the plan's approval in commit $(short "$anchor"): expected.tsv" ;;
       readd) expect "R6: the lock: the Approved line removed and added again does not move the anchor: expected.tsv changed meanwhile is NOT READY" 1 \
@@ -959,7 +1099,7 @@ if wanted_any "R6: HIGH_RISK_PATHS"; then
     dc "$f"
     expect "R6: HIGH_RISK_PATHS: an entry that names no path ($v) is NOT READY" 1 \
       "done-check: tier: FAIL - the high-risk list cannot be read: .claude/method.conf in this change (" \
-      "): HIGH_RISK_PATHS names no path in its files: $v (a misspelt path, or a comment on the line, which the file does not allow)"
+      "): HIGH_RISK_PATHS adds an entry that names no path in its files: $v (the path may be misspelt or deleted, or the line may hold a comment, which the file does not allow)"
   done
   f=$(floor_project) || abort_sandbox
   (cd "$f" && git checkout -q main && mkdir -p keys && printf 'k\n' >keys/k.txt && git add -A && git commit -q -m "Keys" -m "$OK" &&
@@ -1000,6 +1140,107 @@ if wanted_any "R6: HIGH_RISK_PATHS"; then
 fi
 
 
+# expected.tsv that is not a regular file at the anchor (a symbolic link
+# leads to values the lock cannot see change; a submodule or a folder holds
+# no values): the lock fails, naming it, and a failing run there does not
+# count
+if wanted_any "R6: the lock: expected.tsv as" "R6: the failing run: expected.tsv as"; then
+  for kind in 'a symbolic link' 'a submodule' 'a folder'; do
+    fl_p=$(new_project) || abort_sandbox
+    f="$fl_p/w"
+    add_task "$f" t1 FULL 'Approved: 2026-11-23 "approve t1 as FULL"'
+    printf 'case\tinputs\texpected\tsource\none\tx=1\t2\tthe owner\n' >"$f/docs/values.tsv"
+    xp="$f/docs/tasks/t1/expected.tsv"
+    case $kind in
+      'a symbolic link')
+        if ! ln -s ../../values.tsv "$xp" 2>/dev/null || ! [ -L "$xp" ]; then
+          skip "expected.tsv as a symbolic link: this system cannot make symlinks"
+          continue
+        fi
+        ;;
+      'a submodule') mkdir -p "$xp" && (cd "$f" && git update-index --add --cacheinfo "160000,$(git rev-parse HEAD),docs/tasks/t1/expected.tsv") ;;
+      *) mkdir -p "$xp" && cp "$f/docs/values.tsv" "$xp/values.tsv" ;;
+    esac
+    (cd "$f" && git add -A)
+    msg "$f" 'Full\n\n%s\n' "$OPEN"
+    anchor=$(cd "$f" && git rev-parse HEAD)
+    mkdir -p "$f/tests" && printf 'case one\n' >"$f/tests/cases.txt"
+    (cd "$f" && git add -A)
+    msg "$f" 'Tests\n\n%s\n' "$OPEN"
+    forge "$f" "$T" "TESTS FAIL"
+    # the value the link leads to changes with the code
+    printf 'case\tinputs\texpected\tsource\none\tx=1\t999\tthe owner\n' >"$f/docs/values.tsv"
+    printf 'x = 2\n' >"$f/src/a.txt"
+    recommit "$f" Code
+    finish "$f"
+    dc "$f"
+    expect "R6: the lock: expected.tsv as $kind when the plan was approved is NOT READY" 1 \
+      "done-check: lock: FAIL - docs/tasks/t1/expected.tsv is $kind when the plan was approved in commit $(short "$anchor"), so the values the lock compares are not the ones read through it: expected.tsv must be a regular file" \
+      "done-check: next: make docs/tasks/t1/expected.tsv a regular file, and ask the owner for their go again"
+    expect "R6: the failing run: expected.tsv as $kind at the anchor does not count: NOT READY" 1 \
+      "done-check: failing run: FAIL - no VALID receipt of method-tester" \
+      "; not counted: 1 on a commit where expected.tsv, or the approved one, is not a regular file"
+  done
+fi
+
+# a re-approval on the same day: the time after the date makes a new line,
+# so a new anchor: the lock compares with it, and the failing run follows it
+if wanted_any "R6: a same-day re-approval with a time"; then
+  fl_p=$(new_project) || abort_sandbox
+  f="$fl_p/w"
+  add_task "$f" t1 FULL 'Approved: 2026-11-22 09:15 "approve t1"'
+  printf 'case\tinputs\texpected\tsource\none\tx=1\t2\tthe owner\n' >"$f/docs/tasks/t1/expected.tsv"
+  (cd "$f" && git add -A)
+  msg "$f" 'Full\n\n%s\n' "$OPEN"
+  mkdir -p "$f/tests" && printf 'case one\n' >"$f/tests/cases.txt"
+  (cd "$f" && git add -A)
+  msg "$f" 'Tests\n\n%s\n' "$OPEN"
+  forge "$f" "$T" "TESTS FAIL"
+  printf 'x = 2\n' >"$f/src/a.txt"
+  recommit "$f" Code
+  # a wrong expected value found, the owner's new reply the same day
+  printf 'case\tinputs\texpected\tsource\none\tx=1\t3\tthe owner\n' >"$f/docs/tasks/t1/expected.tsv"
+  add_task "$f" t1 FULL 'Approved: 2026-11-22 16:30 "approve t1"'
+  recommit "$f" Reapproved
+  anchor2=$(cd "$f" && git rev-parse HEAD)
+  finish "$f"
+  dc "$f"
+  expect "R6: a same-day re-approval with a time moves the lock's anchor, and the failing run before it does not count" 1 \
+    "done-check: plan: PASS - task t1 (docs/tasks/t1/plan.md), Tier FULL; approved 2026-11-22 16:30 \"approve t1\" in commit $(short "$anchor2")" \
+    "done-check: lock: PASS - the plan's Tier and Paths lines and its expected.tsv are as approved in commit $(short "$anchor2")" \
+    "done-check: failing run: FAIL - no VALID receipt of method-tester that opened with TESTS FAIL on a commit from the plan's approval (commit $(short "$anchor2"))" \
+    "1 on a commit outside this branch's history from the approval to HEAD"
+  printf 'x = 1\n' >"$f/src/a.txt"
+  recommit "$f" 'Code out'
+  out_commit=$(cd "$f" && git rev-parse HEAD)
+  forge "$f" "$T" "TESTS FAIL"
+  printf 'x = 2\n' >"$f/src/a.txt"
+  recommit "$f" 'Code back'
+  finish "$f"
+  dc "$f"
+  expect "R6: a same-day re-approval with a time: the failing run after the new anchor counts, READY" 0 \
+    "done-check: failing run: PASS - method-tester opened with TESTS FAIL on commit $(short "$out_commit"), after the plan's approval in commit $(short "$anchor2") and before these files" \
+    "done-check: READY - "
+fi
+
+# main lists a path that a merged change deleted: main's entries were
+# checked when their change added them, so a later branch that keeps the
+# list as it is not blocked
+if wanted_any "R6: HIGH_RISK_PATHS: an entry main lists whose path"; then
+  f=$(floor_project) || abort_sandbox
+  (cd "$f" && git checkout -q main && mkdir -p .claude keys && printf 'PRODUCT_PATHS=src\nHIGH_RISK_PATHS=keys\n' >.claude/method.conf &&
+    printf 'k\n' >keys/k.txt && git add -A && git commit -q -m "Keys" -m "$OK" && git rm -q -r keys &&
+    git commit -q -m "Keys deleted" -m "$OK" && git push -q origin main 2>/dev/null && git checkout -q feat && git merge -q -s ours --no-edit main)
+  printf 'PRODUCT_PATHS=src\nHIGH_RISK_PATHS=keys\n' >"$f/.claude/method.conf"
+  recommit "$f" 'Main list'
+  approve_head "$f"
+  dc "$f"
+  expect "R6: HIGH_RISK_PATHS: an entry main lists whose path a merged change deleted blocks no other branch: READY" 0 \
+    "done-check: tier: PASS - Tier LIGHT, as the plan says: no changed path is high-risk (HIGH_RISK_PATHS, main's and this change's together: keys)" \
+    "done-check: READY - "
+fi
+
+
 # (the conditions before step 6b follow; a run that keeps only some cases
 # ends here)
 if [ -n "${TEST_ONLY:-}" ]; then
@@ -1028,7 +1269,7 @@ after=$(manifest "$w")
 expect "READY after run-checks and an amend that only adds the verdict line, with no new run (exit 0)" 0 \
   "done-check: files: PASS - the tracked files on disk are commit $h7, byte for byte; nothing untracked that git lists outside its ignore rules" \
   "done-check: up to date: PASS - main is refs/remotes/origin/main ${main%"${main#???????}"} (as of the last fetch; done-check does not fetch)" \
-  "done-check: checks: PASS - local run-checks log of " "the same files as HEAD; a local claim (RISKS #11)" \
+  "done-check: checks: PASS - local run-checks log of " "the same files as HEAD; a local claim: a record written in this clone, not proof" \
   "done-check: elsewhere: PASS - every check in checks/*.tsv runs here (1)" \
   "done-check: plan: PASS - task t1 (docs/tasks/t1/plan.md), Tier LIGHT; approved 2026-11-22 \"approve t1\" in commit $h7" \
   "done-check: reviewer: PASS - method-reviewer opened with APPROVE on these files (tree $t7), VALID, reviewed from the merge base ${main%"${main#???????}"}" \
@@ -1552,7 +1793,7 @@ rc "$v"
 rc_ok "setup: a CI-only check is not for here, so run-checks passes locally"
 dca "$v"
 expect "a CI-only check has no result here, so it is not READY" 1 "done-check: checks: PASS" \
-  "done-check: elsewhere: FAIL - 1 check runs only in CI and done-check reads no CI result yet (step 9): integ"
+  "done-check: elsewhere: FAIL - 1 check runs only in CI, and done-check does not read CI results: integ"
 printf 'unit\tany\t-\t(\\d+) ok\ttest ! -e flaky.marker && echo 3 ok\npriv\tlocal\t-\t(\\d+) ok\techo 0 ok; exit 1\n' >"$v/checks/project.tsv"
 (cd "$v" && git add -A)
 amend "$v" "$OK"
@@ -1578,7 +1819,7 @@ forge "$v" "$R" "REQUEST CHANGES"
 forge "$v" "$S" APPROVE
 dc "$v"
 expect "an open verdict line with no approving review is not READY, and names the owner's way forward" 1 \
-  "done-check: verdict: FAIL - the verdict line says request-changes-open (changes are still open; the reason names them): no review approved this version (SPEC R4)" \
+  "done-check: verdict: FAIL - the verdict line says request-changes-open (changes are still open; the reason names them): no review approved this version" \
   "done-check: next: fix what method-reviewer found, commit, and have the new version reviewed" "done-check: NOT READY - 2 conditions failed (reviewer, verdict)"
 amend "$v" 'Review-Verdict: request-changes-resolved'
 dca "$v"

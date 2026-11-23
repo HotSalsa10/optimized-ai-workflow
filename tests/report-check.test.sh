@@ -139,11 +139,39 @@ if wanted "marks around a number are not part of it"; then
   expect "marks around a number are not part of it" 0 'PASS - 8 numbers'
 fi
 
+if wanted "a closing plus is dropped"; then
+  report 'We saw 45+ checks pass.'
+  log a.log 'count 99'
+  rc r.md a.log
+  expect_listed "a closing plus is dropped" 45
+fi
+
+if wanted "a struck-through number is read"; then
+  report 'We saw ~~46~~ and 47~ checks.'
+  log a.log 'count 99'
+  rc r.md a.log
+  expect_listed "a struck-through number is read" 46 47
+fi
+
+if wanted "a decimal with no leading digit is read"; then
+  report 'A share of .45 passed.'
+  log a.log 'share 0.45'
+  rc r.md a.log
+  expect_listed "a decimal with no leading digit is read" .45
+fi
+
 if wanted "curly quotes, a bullet and an ellipsis cut a line"; then
   report "$(printf 'We saw \342\200\23412\342\200\235, \342\200\23013\342\200\231, \342\200\24214 and 15\342\200\246')"
   log a.log 'count 99'
   rc r.md a.log
   expect_listed "curly quotes, a bullet and an ellipsis cut a line" 12 13 14 15
+fi
+
+if wanted "guillemets cut a line"; then
+  report "$(printf 'We saw \302\25312\302\273 and \342\200\27113\342\200\272.')"
+  log a.log 'count 99'
+  rc r.md a.log
+  expect_listed "guillemets cut a line" 12 13
 fi
 
 if wanted "a CRLF report reads the same"; then
@@ -189,6 +217,27 @@ if wanted "a count after a month and a slash pair are numbers"; then
   expect_listed "a count after a month and a slash pair are numbers" 14 12 30
 fi
 
+if wanted "a joined pair without a year from 1900 to 2099 is numbers"; then
+  report 'Ran 1024/12 and 4096-3.'
+  log a.log 'nothing'
+  rc r.md a.log
+  expect_listed "a joined pair without a year from 1900 to 2099 is numbers" 1024 12 4096 3
+fi
+
+if wanted "a joined piece whose month or day is out of range is numbers"; then
+  report 'Ran 2026/13, 13-2026 and 2026-11-32.'
+  log a.log 'nothing'
+  rc r.md a.log
+  expect_listed "a joined piece whose month or day is out of range is numbers" 2026 13 13 2026 2026 11 32
+fi
+
+if wanted "a year last after a month, or after a month and a day, is a date"; then
+  report 'Released 11/2026, 03-2026 and 11/22/2026.'
+  log a.log 'nothing'
+  rc r.md a.log
+  expect "a year last after a month, or after a month and a day, is a date" 0 'PASS - 0 numbers'
+fi
+
 # --- numbers joined to numbers, and spaces that are not ASCII ---
 if wanted "numbers joined by a slash are read"; then
   report 'Tests: 40/44 passed; total 5/5.'
@@ -204,6 +253,27 @@ if wanted "numbers joined by a hyphen are read"; then
   expect_listed "numbers joined by a hyphen are read" 7 9 -2
 fi
 
+if wanted "a sign after a join is read with its part"; then
+  report 'Changes: +120/-4 lines; delta 5/-3; then -1/-2 and 5/+3.'
+  log a.log 'nothing'
+  rc r.md a.log
+  expect_listed "a sign after a join is read with its part" +120 -4 5 -3 -1 -2 5 +3
+fi
+
+if wanted "a sign after a join must be in a log as written"; then
+  report 'Changes: +120/-4 lines.'
+  log a.log 'changes +120 and 4'
+  rc r.md a.log
+  expect_listed "a sign after a join must be in a log as written" -4
+fi
+
+if wanted "the hyphens U+2010 and U+2011 join numbers"; then
+  report "$(printf 'Ran 3\342\200\2205 and 7\342\200\2219 times, on 2026\342\200\22011\342\200\22022.')"
+  log a.log 'nothing'
+  rc r.md a.log
+  expect_listed "the hyphens U+2010 and U+2011 join numbers" 3 5 7 9
+fi
+
 if wanted "en and em dashes cut a line"; then
   report "$(printf 'Ran 3\342\200\2235 times; 44\342\200\224all green.')"
   log a.log 'tests 44 passed'
@@ -216,6 +286,13 @@ if wanted "a no-break space cuts a line"; then
   log a.log 'tests 44 passed'
   rc r.md a.log
   expect_listed "a no-break space cuts a line" 12 6
+fi
+
+if wanted "an ideographic and a medium mathematical space cut a line"; then
+  report "$(printf 'Ran 12\343\200\200tests and 6\342\201\237runs.')"
+  log a.log 'nothing'
+  rc r.md a.log
+  expect_listed "an ideographic and a medium mathematical space cut a line" 12 6
 fi
 
 if wanted "a number beside a word that is not a month is a number"; then
@@ -293,7 +370,7 @@ if wanted "the miss heading last with nothing under it is listed"; then
   expect "the miss heading last with nothing under it is listed" 1 '(line 3) has nothing under it'
 fi
 
-for body in 'nothing' 'None.' '- none' '*Nothing*' 'NOTHING!' '(none)' '"none"' 'Nothing;' 'N/A' 'n/a.'; do
+for body in 'nothing' 'None.' '- none' '*Nothing*' 'NOTHING!' '(none)' '"none"' 'Nothing;' 'N/A' 'n/a.' '[none]' '{n/a}'; do
   if wanted "the miss heading saying only '$body' is listed"; then
     printf 'Status: ready.\n\n### What the checks would miss\n\n%s\n\n### Risks\n\nSome.\n' "$body" >"$work/r.md"
     log a.log 'nothing'
@@ -307,6 +384,13 @@ if wanted "a miss part whose every line says nothing is listed"; then
   log a.log 'nothing'
   rc r.md a.log
   expect "a miss part whose every line says nothing is listed" 1 '(line 3) says only "nothing", "none"' 'FAIL - 1 listed'
+fi
+
+if wanted "a miss part saying only curly-quoted words is listed"; then
+  printf 'Status: ready.\n\n## What the checks would miss\n\n\342\200\234None\342\200\235\n\342\200\230n/a\342\200\231\n' >"$work/r.md"
+  log a.log 'nothing'
+  rc r.md a.log
+  expect "a miss part saying only curly-quoted words is listed" 1 '(line 3) says only "none", "n/a"' 'FAIL - 1 listed'
 fi
 
 if wanted "a miss part with one line that says something passes"; then
@@ -377,6 +461,20 @@ if wanted "a heading inside a code block does not end the miss part"; then
   log a.log 'nothing'
   rc r.md a.log
   expect "a heading inside a code block does not end the miss part" 0 'report-check: PASS'
+fi
+
+if wanted "a heading inside an HTML comment is not the miss heading"; then
+  printf '# Report\n\n<!--\n## What the checks would miss\n\nWhat only a person sees.\n-->\nDone.\n' >"$work/r.md"
+  log a.log 'nothing'
+  rc r.md a.log
+  expect "a heading inside an HTML comment is not the miss heading" 1 'no "What the checks would miss" heading' 'FAIL - 1 listed'
+fi
+
+if wanted "a heading inside an HTML comment does not end the miss part"; then
+  printf '## What the checks would miss\n\n<!--\n## Example\n-->\nThe printed invoice layout.\n' >"$work/r.md"
+  log a.log 'nothing'
+  rc r.md a.log
+  expect "a heading inside an HTML comment does not end the miss part" 0 'report-check: PASS'
 fi
 
 if wanted "every problem is listed and exits 1"; then

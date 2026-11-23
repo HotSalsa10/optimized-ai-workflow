@@ -476,6 +476,28 @@ fi
 h_stop
 drop_sandbox "$sb" || true
 
+# 17d. step 6b.1's question base (h_real_gates, h_real_holds base; step
+# 6b's review, R22): with receipt.pl recording no bases, each gate still
+# reads the packet and its receipt stays VALID, but records none of the
+# packet's bases, so the question turns red
+sb=$(make_sandbox) || abort_sandbox
+# shellcheck disable=SC2016 # perl code, expanded by perl
+perl -pi -e 's/\$r->\{bases\} = \$ev\{bases\};/\$r->{bases} = []; # HARNESS-PLANT/' "$sb/method/scripts/method/lib/receipt.pl"
+if ! grep -q -F HARNESS-PLANT "$sb/method/scripts/method/lib/receipt.pl"; then
+  fail "real gates (base): the plant did not apply, so the check result would mean nothing"
+elif ! h_real_gates "$sb" default; then
+  fail "real gates (base): the case could not be made, or the fake did not answer"
+elif h_real_holds base; then
+  fail "real gates (base): receipt.pl recording no bases: the question 'base' stayed green"
+else
+  case $H_WHY in
+    *"'s receipt records the bases none;"*) pass "real gates (base): receipt.pl recording no bases: the question 'base' turns red (${H_WHY%%;*})" ;;
+    *) fail "real gates (base): receipt.pl recording no bases: the question 'base' turned red for another reason" "$H_WHY" ;;
+  esac
+fi
+h_stop
+drop_sandbox "$sb" || true
+
 # 18. step 6.4's case for planning and design (h_design, h_design_holds).
 # design_plant MODE QUESTION|SEEN|TEXT...: with the plants already made in
 # the copy $sb, h_design runs there in MODE; each QUESTION must fail with

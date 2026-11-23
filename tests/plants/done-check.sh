@@ -167,17 +167,69 @@ qw(git.pl esc.pl conf.pl tree.pl verdicts.pl checks.pl receipt.pl)
 ---
     if 0;
 === a failing run on values changed and changed back counted | method/scripts/method/lib/done.pl | R6: a failing run on an expected value changed and changed back does not count: NOT READY
-    if (lock_moved($then, locked($h))) { $not{moved}++; next }
+    if (lock_moved($then, $l)) { $not{moved}++; next }
 ---
     if (0) { $not{moved}++; next }
 === a HIGH_RISK_PATHS entry that names no path read as a path | method/scripts/method/lib/done.pl | R6: HIGH_RISK_PATHS: an entry that names no path (scr) is NOT READY
-  my @none = grep { my $e = $_; $e ne '.' && !Tree::lookup($T{head}, $e) && !grep { Conf::under($_, [$e]) } @touched } @{ $mine || [] };
+  my @none = grep { my $e = $_; !$on_main{$e} && $e ne '.' && !Tree::lookup($T{head}, $e) && !grep { Conf::under($_, [$e]) } @touched }
+    @{ $mine || [] };
 ---
   my @none = ();
 === an entry whose files the change deletes read as naming nothing | method/scripts/method/lib/done.pl | R6: HIGH_RISK_PATHS: an entry whose files this change deletes is read
-  my @none = grep { my $e = $_; $e ne '.' && !Tree::lookup($T{head}, $e) && !grep { Conf::under($_, [$e]) } @touched } @{ $mine || [] };
+&& !Tree::lookup($T{head}, $e) && !grep { Conf::under($_, [$e]) } @touched }
 ---
-  my @none = grep { my $e = $_; $e ne '.' && !Tree::lookup($T{head}, $e) } @{ $mine || [] };
+&& !Tree::lookup($T{head}, $e) }
+=== an entry main lists checked for a path again | method/scripts/method/lib/done.pl | R6: HIGH_RISK_PATHS: an entry main lists whose path a merged change deleted blocks no other branch
+  my @none = grep { my $e = $_; !$on_main{$e} && $e ne '.'
+---
+  my @none = grep { my $e = $_; $e ne '.'
+=== expected.tsv that is not a regular file read as locked | method/scripts/method/lib/done.pl | R6: the lock: expected.tsv as a submodule when the plan was approved is NOT READY
+      . " again (replace the Approved line with their new reply, with today's date and the time)") if defined $l->{odd};
+---
+      . " again (replace the Approved line with their new reply, with today's date and the time)") if 0;
+=== a failing run where expected.tsv is not a regular file counted | method/scripts/method/lib/done.pl | R6: the failing run: expected.tsv as a submodule at the anchor does not count
+    if (defined $then->{odd} || defined $l->{odd}) { $not{odd}++; next }
+---
+    if (0) { $not{odd}++; next }
+=== the time after the date not read | method/scripts/method/lib/done.pl | floor: a same-day re-approval with a time moves the anchor
+(?: ((?:[01][0-9]|2[0-3]):[0-5][0-9]))? "(.*)"\z/;
+---
+(?: ((?!)))? "(.*)"\z/;
+=== a malformed time read as a time | method/scripts/method/lib/done.pl | floor: an Approved line with a malformed time (25:00) is NOT READY
+(?: ((?:[01][0-9]|2[0-3]):[0-5][0-9]))? "(.*)"\z/;
+---
+(?: ([0-9]{1,2}:[0-9]{2}))? "(.*)"\z/;
+=== two Tier lines read as one | method/scripts/method/lib/done.pl | floor: a plan with two Tier lines is NOT READY
+"keep one Tier line in $path, and ask the owner again")
+    if @tier > 1;
+---
+"keep one Tier line in $path, and ask the owner again")
+    if 0;
+=== two Approved lines read as one | method/scripts/method/lib/done.pl | floor: a plan with two Approved lines is NOT READY
+    'keep only the newest Approved line') if @app > 1;
+---
+    'keep only the newest Approved line') if 0;
+=== a task folder name that is not an id accepted | method/scripts/method/lib/done.pl | floor: a task folder whose name is not an id (T_1) is NOT READY
+    'rename the folder, and ask the owner again') unless $id =~ /\A[a-z0-9][a-z0-9-]*\z/;
+---
+    'rename the folder, and ask the owner again') unless 1;
+=== a task folder stored as a submodule passed over | method/scripts/method/lib/done.pl | floor: a second task folder stored as a submodule (a gitlink) is NOT READY
+    if ($m eq '120000' || $m eq '160000') { push @p, ["docs/tasks/$n", $KIND{$m}]; next }
+---
+    if ($m eq '120000') { push @p, ["docs/tasks/$n", $KIND{$m}]; next }
+=== the quote's leading word bound removed | method/scripts/method/lib/done.pl | floor: an Approved line whose quote only ends in the ready word
+    unless $quote =~ /(?<![A-Za-z0-9-])(?i:\Q$ready\E)[ \t]+\Q$id\E(?![A-Za-z0-9-])/;
+---
+    unless $quote =~ /(?i:\Q$ready\E)[ \t]+\Q$id\E(?![A-Za-z0-9-])/;
+=== the rounds since the anchor taken by place in the list | method/scripts/method/lib/done.pl | floor: a side line reviewed before the approval and merged after it
+    my %since = map { ($_ => 1) } $at, split /\n/, Git::ok('rev-list', '--ancestry-path', "$at..$T{head}", '--');
+    $on{ $_->[1] } = 1 for grep { $since{ $_->[0] } } @{ $T{branch} };
+---
+    $on{ $_->[1] } = 1 for @{ $T{branch} }[ $T{anchor} .. $#{ $T{branch} } ];
+=== a later step promised in the elsewhere line | method/scripts/method/lib/done.pl | floor: done-check's lines name no record of the method's own repository
+' only in CI, and done-check does not read CI results: '
+---
+' only in CI and done-check reads no CI result yet (step 9): '
 === a .claude that is not a folder read as no list | method/scripts/method/lib/done.pl | R6: HIGH_RISK_PATHS: main's method.conf unreadable (file) is NOT READY
   return (undef, "$label: .claude is " . ($d->[0] eq '160000' ? 'a submodule' : 'not a folder')) if $d->[0] ne '40000';
 ---

@@ -17,5 +17,5 @@ Five steps, in order:
 
    Reply `approve <id>` to approve this plan.
 
-   On that reply, add the Approved line to `plan.md`, after the Paths line: `Approved: <date> "<the owner's reply>"`, the date as YYYY-MM-DD and the reply quoted exactly as typed. Then commit. /method-finish then takes the task to the merge.
+   On that reply, add the Approved line to `plan.md`, after the Paths line: `Approved: YYYY-MM-DD HH:MM "<the owner's reply>"`, the date and time as `date '+%Y-%m-%d %H:%M'` prints them and the reply quoted exactly as typed. Then commit. A re-approval replaces the line with the new reply, date and time. /method-finish then takes the task to the merge.
 5. **The walking skeleton comes first.** Once the design is merged, the first task is its walking skeleton: plan it with /method-plan, build it, and let the tasks after it grow it.

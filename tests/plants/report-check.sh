@@ -39,9 +39,13 @@ my $CUT = qr/(?:[ \t\r
 ---
 my $CUT = qr/(?:[:\/ \t\r
 === a version read as a decimal | method/scripts/method/lib/report.pl | versions are not numbers
-(?:\.\d+)?(?:%|$CUR)?\z/;
+(?:\.\d+)?|\.\d+)
 ---
-(?:\.\d+)*(?:%|$CUR)?\z/;
+(?:\.\d+)*|\.\d+)
+=== a decimal with no leading digit not read | method/scripts/method/lib/report.pl | a decimal with no leading digit is read
+|\.\d+)(?:%
+---
+)(?:%
 === no day before a month | method/scripts/method/lib/report.pl | dates and times are not numbers
   return 1 if $x =~ $DAY && $after =~ $MONTH;
 ---
@@ -67,17 +71,49 @@ $before =~ $MONTH;
 ---
 
 === a slash pair taken for a date | method/scripts/method/lib/report.pl | a count after a month and a slash pair are numbers
-\d{1,2}([/-])\d{1,2}\2\d{4})\z};
+$M($JOIN)$D\3$Y)\z};
 ---
-\d{1,2}([/-])\d{1,2}(?:\2\d{4})?)\z};
+$M($JOIN)$D(?:\3$Y)?)\z};
+=== any four digits taken for a joined date's year | method/scripts/method/lib/report.pl | a joined pair without a year from 1900 to 2099 is numbers
+my $Y = qr/(?:19|20)\d\d/;
+---
+my $Y = qr/\d{4}/;
+=== any two digits taken for a joined date's month | method/scripts/method/lib/report.pl | a joined piece whose month or day is out of range is numbers
+my $M = qr/(?:0?[1-9]|1[0-2])/;
+---
+my $M = qr/\d{1,2}/;
+=== any two digits taken for a joined date's day | method/scripts/method/lib/report.pl | a joined piece whose month or day is out of range is numbers
+my $D = qr/(?:0?[1-9]|[12]\d|3[01])/;
+---
+my $D = qr/\d{1,2}/;
+=== a month and a year joined read as numbers | method/scripts/method/lib/report.pl | a year last after a month, or after a month and a day, is a date
+|$M$JOIN$Y
+---
+
+=== a month, a day and a year joined read as numbers | method/scripts/method/lib/report.pl | a year last after a month, or after a month and a day, is a date
+|$M($JOIN)$D\3$Y)
+---
+)
 === joined numbers not read | method/scripts/method/lib/report.pl | numbers joined by a slash are read
 my @nums = $p[$i] =~ $NUMBER ? ($p[$i]) : joined($p[$i]);
 ---
 my @nums = $p[$i] =~ $NUMBER ? ($p[$i]) : ();
 === only a slash joins numbers | method/scripts/method/lib/report.pl | numbers joined by a hyphen are read
-my $JOIN = qr{[/-]};
+my $JOIN = qr{(?:[/-]|
 ---
-my $JOIN = qr{/};
+my $JOIN = qr{(?:/|
+=== the hyphens U+2010 and U+2011 not a join | method/scripts/method/lib/report.pl | the hyphens U+2010 and U+2011 join numbers
+|\xE2\x80[\x90\x91])};
+---
+)};
+=== a sign after a join taken for a join | method/scripts/method/lib/report.pl | a sign after a join is read with its part
+(?<![/-])(?<!\xE2\x80[\x90\x91])$JOIN
+---
+$JOIN
+=== the sign of a later joined part dropped | method/scripts/method/lib/report.pl | a sign after a join must be in a log as written
+  my @parts = split $JOIN_AT, $x, -1;
+---
+  my @parts = map { (my $p = $_) =~ s/\A$SIGN//; $p } split $JOIN_AT, $x, -1;
 === the sign of joined numbers dropped | method/scripts/method/lib/report.pl | numbers joined by a hyphen are read
   $parts[0] = $sign . $parts[0];
 ---
@@ -91,9 +127,17 @@ my $JOIN = qr{/};
 ---
 |
 === curly quotes not a cut | method/scripts/method/lib/report.pl | curly quotes, a bullet and an ellipsis cut a line
-|\xE2\x80[\x98-\x9F\xA2\xA6])+/;
+|\xE2\x80[\x98-\x9F\xA2\xA6]|
 ---
-)+/;
+|
+=== the ideographic and medium mathematical spaces not a cut | method/scripts/method/lib/report.pl | an ideographic and a medium mathematical space cut a line
+|\xE3\x80\x80|\xE2\x81\x9F|
+---
+|
+=== guillemets not a cut | method/scripts/method/lib/report.pl | guillemets cut a line
+|\xC2[\xAB\xBB]|\xE2\x80[\xB9\xBA]
+---
+
 === a month's name in any case | method/scripts/method/lib/report.pl | a number beside a word that is not a month is a number
   |Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\z/x;
 ---
@@ -115,17 +159,25 @@ our $NUMBER = qr/\A$SIGN?$CUR?
 ---
 our $NUMBER = qr/\A$CUR?
 === the percent mark not read | method/scripts/method/lib/report.pl | the percent mark is kept
-(?:\.\d+)?(?:%|$CUR)?\z/;
+|\.\d+)(?:%|$CUR)?\z/;
 ---
-(?:\.\d+)?(?:$CUR)?\z/;
+|\.\d+)(?:$CUR)?\z/;
 === thousands separators not read | method/scripts/method/lib/report.pl | thousands separators and decimals are kept
 (?:\d{1,3}(?:,\d{3})+|\d+)
 ---
 (?:\d+)
 === the closing marks kept on a number | method/scripts/method/lib/report.pl | marks around a number are not part of it
-      my $close = $x =~ s/(['_.,:!?]+)\z// ? $1 : '';
+      my $close = $x =~ s/(['_.,:!?+~]+)\z// ? $1 : '';
 ---
       my $close = '';
+=== a closing plus kept on a number | method/scripts/method/lib/report.pl | a closing plus is dropped
+s/(['_.,:!?+~]+)\z//
+---
+s/(['_.,:!?~]+)\z//
+=== a closing tilde kept on a number | method/scripts/method/lib/report.pl | a struck-through number is read
+s/(['_.,:!?+~]+)\z//
+---
+s/(['_.,:!?+]+)\z//
 === a CR kept on a number | method/scripts/method/lib/report.pl | a CRLF report reads the same
 my $CUT = qr/(?:[ \t\r\f
 ---
@@ -159,9 +211,17 @@ my %SAYS_NOTHING = map { $_ => 1 } qw(nothing none n/a);
 ---
 my %SAYS_NOTHING = map { $_ => 1 } qw(nothing none);
 === brackets and quotes kept in the miss part | method/scripts/method/lib/report.pl | the miss heading saying only '(none)' is listed
-      $x =~ s/[*_`>#~()"']+//g;
+      $x =~ s/[*_`>#~()\[\]{}"']+//g;
 ---
-      $x =~ s/[*_`>#~]+//g;
+      $x =~ s/[*_`>#~\[\]{}]+//g;
+=== square and curly brackets kept in the miss part | method/scripts/method/lib/report.pl | the miss heading saying only '[none]' is listed
+()\[\]{}"']+//g;
+---
+()"']+//g;
+=== curly quotes kept in the miss part | method/scripts/method/lib/report.pl | a miss part saying only curly-quoted words is listed
+      $x =~ s/\xE2\x80[\x98-\x9F]//g;    # curly quotes
+---
+
 === a closing semicolon kept in the miss part | method/scripts/method/lib/report.pl | the miss heading saying only 'Nothing;' is listed
       $x =~ s/[.!;,:]+\z//;
 ---
@@ -210,6 +270,14 @@ my %SAYS_NOTHING = map { $_ => 1 } qw(nothing none);
       my ($l) = $code[$j] ? () : heading($lines[$j]);
 ---
       my ($l) = heading($lines[$j]);
+=== a heading in an HTML comment taken | method/scripts/method/lib/report.pl | a heading inside an HTML comment is not the miss heading
+    next if $comment[$i];
+---
+
+=== an HTML comment's heading ends the miss part | method/scripts/method/lib/report.pl | a heading inside an HTML comment does not end the miss part
+      ($l) = () if $comment[$j];    # a heading inside a comment
+---
+
 === a report with no LOG accepted | method/scripts/method/lib/report.pl | a report with no LOG is a usage error
 the numbers come from') unless @logs;
 ---

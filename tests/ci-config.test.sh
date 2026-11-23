@@ -21,9 +21,31 @@ ci_problems() {
     my @l = map { s/\r?\n\z//r } <$f>;
     my $group = 0;
     my $on = 0;    # inside the top-level on: block
+    # nocomment LINE: LINE without its comment, a # at the start or after a
+    # space that is not inside quotes; a quote opens only where a value can
+    # start (step 6b'"'"'s review, R17: a quoted " #" before pull_request in
+    # a flow-form on: hid the trigger)
+    my $nocomment = sub {
+      my ($s) = @_;
+      my $q = "";
+      for (my $k = 0; $k < length $s; $k++) {
+        my $c = substr $s, $k, 1;
+        my $prev = $k ? substr($s, $k - 1, 1) : " ";
+        if ($q eq "\x22") {
+          if ($c eq "\\") { $k++ } elsif ($c eq "\x22") { $q = "" }
+        } elsif ($q eq "\x27") {
+          $q = "" if $c eq "\x27";
+        } elsif (($c eq "\x22" || $c eq "\x27") && $prev =~ /[\s\[\{,:]/) {
+          $q = $c;
+        } elsif ($c eq "#" && $prev =~ /\s/) {
+          return substr $s, 0, $k;
+        }
+      }
+      return $s;
+    };
     for my $i (0 .. $#l) {
       my $n = $i + 1;
-      (my $t = $l[$i]) =~ s/(?:^|\s)#.*//;    # comments do not count
+      my $t = $nocomment->($l[$i]);    # comments do not count
       if ($t =~ /^["\x27]?on["\x27]?\s*:\s*(.*)$/) {
         $on = 1;
         print "line $n: a pull_request event starts a run\n" if $1 =~ /\bpull_request/;
@@ -93,6 +115,27 @@ for case in stop-commands event_name persist-credentials pull_request; do
     fail "the test goes red $what"
   fi
 done
+# 6. (step 6b's review, R17) the on: block in flow form on one line, with a
+# quoted " #" before a pull_request trigger: the # is inside quotes, not a
+# comment, so the trigger is still read
+perl -0pe 's/^on:\n  push:\n    branches: \["\*\*"\]\n    tags: \["v\*"\]\n  workflow_dispatch:\n/on: {push: {branches: ["**", "skip #"], tags: ["v*"]}, pull_request: {}, workflow_dispatch: {}}\n/m' "$ci" >"$sb/ci.yml"
+if cmp -s "$ci" "$sb/ci.yml"; then
+  fail "the flow-form plant did not apply, so the result would mean nothing"
+elif ci_problems "$sb/ci.yml" | grep -q -F -- "a pull_request event starts a run"; then
+  pass "the test goes red with a pull_request trigger after a quoted \" #\" in a one-line flow-form on:"
+else
+  fail "the test goes red with a pull_request trigger after a quoted \" #\" in a one-line flow-form on:" "$(ci_problems "$sb/ci.yml")"
+fi
+# 7. a comment after a quoted value is still a comment: pull_request named
+# only there is no trigger
+perl -0pe 's/^on:\n  push:\n    branches: \["\*\*"\]\n    tags: \["v\*"\]\n  workflow_dispatch:\n/on: {push: {branches: ["**", "a#b"], tags: [\x27v*\x27]}, workflow_dispatch: {}} # no pull_request\n/m' "$ci" >"$sb/ci.yml"
+if cmp -s "$ci" "$sb/ci.yml"; then
+  fail "the flow-form comment case did not apply, so the result would mean nothing"
+elif problems=$(ci_problems "$sb/ci.yml") && [ -z "$problems" ]; then
+  pass "a comment after quoted values in a flow-form on: is not read: pull_request named only there is no trigger"
+else
+  fail "a comment after quoted values in a flow-form on: is not read: pull_request named only there is no trigger" "$problems"
+fi
 drop_sandbox "$sb"
 
 echo "tests: CI settings: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
