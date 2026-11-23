@@ -733,7 +733,7 @@ fi
 # the lock (M145): Tier, Paths and expected.tsv as approved; a re-approval
 # moves the anchor, and the failing run is made again after it
 if wanted_any "R6: the lock" "R6: a re-approval" "R6: the code-removed commit" "R6: a failing run on a side branch" "R6: a failing run re-made with git switch -c" \
-  "R6: a FULL plan with no expected.tsv"; then
+  "R6: a FULL plan with no expected.tsv" "R6: a failing run on an expected value changed and changed back"; then
   for what in tier paths expected readd; do
     full_project || abort_sandbox
     case $what in
@@ -806,6 +806,22 @@ if wanted_any "R6: the lock" "R6: a re-approval" "R6: the code-removed commit" "
   expect "R6: the code-removed commit after a re-approval gives the failing run: READY" 0 \
     "done-check: failing run: PASS - method-tester opened with TESTS FAIL on commit $(short "$out_commit"), after the plan's approval in commit $(short "$anchor2") and before these files" \
     "done-check: READY - "
+
+  # the lock compares HEAD with the anchor only: a failing run made while
+  # expected.tsv held another value, put back before HEAD, does not count
+  full_project || abort_sandbox
+  unforge "$f"
+  printf 'case\tinputs\texpected\tsource\none\tx=1\t999\tthe owner\n' >"$f/docs/tasks/t1/expected.tsv"
+  recommit "$f" 'Wrong expected'
+  forge "$f" "$T" "TESTS FAIL"
+  printf 'case\tinputs\texpected\tsource\none\tx=1\t2\tthe owner\n' >"$f/docs/tasks/t1/expected.tsv"
+  recommit "$f" 'Expected back'
+  finish "$f"
+  dc "$f"
+  expect "R6: a failing run on an expected value changed and changed back does not count: NOT READY" 1 \
+    "done-check: lock: PASS - the plan's Tier and Paths lines and its expected.tsv are as approved in commit $(short "$anchor")" \
+    "done-check: failing run: FAIL - no VALID receipt of method-tester" \
+    "; not counted: 1 on a commit whose plan Tier or Paths line or expected.tsv differs from the approved one"
 
   # a lost failing receipt (a new clone) re-made at the commit before the
   # code, on a branch made there with git switch -c
@@ -930,6 +946,56 @@ if wanted_any "R6: HIGH_RISK_PATHS"; then
           ;;
       esac
     done
+  done
+
+  # an entry that names no path in the change's files protects nothing it
+  # was meant to (a comment on the line, a misspelt path): it fails closed;
+  # an entry whose files this change deletes still names them
+  for v in 'src # money code' scr; do
+    f=$(floor_project) || abort_sandbox
+    printf 'PRODUCT_PATHS=src\nHIGH_RISK_PATHS=%s\n' "$v" >"$f/.claude/method.conf"
+    recommit "$f" 'High risk'
+    approve_head "$f"
+    dc "$f"
+    expect "R6: HIGH_RISK_PATHS: an entry that names no path ($v) is NOT READY" 1 \
+      "done-check: tier: FAIL - the high-risk list cannot be read: .claude/method.conf in this change (" \
+      "): HIGH_RISK_PATHS names no path in its files: $v (a misspelt path, or a comment on the line, which the file does not allow)"
+  done
+  f=$(floor_project) || abort_sandbox
+  (cd "$f" && git checkout -q main && mkdir -p keys && printf 'k\n' >keys/k.txt && git add -A && git commit -q -m "Keys" -m "$OK" &&
+    git push -q origin main 2>/dev/null && git checkout -q feat && git merge -q --no-edit main && git rm -q -r keys)
+  printf 'PRODUCT_PATHS=src\nHIGH_RISK_PATHS=keys\n' >"$f/.claude/method.conf"
+  recommit "$f" Delete
+  approve_head "$f"
+  dc "$f"
+  expect "R6: HIGH_RISK_PATHS: an entry whose files this change deletes is read: Tier LIGHT is NOT READY (judged FULL)" 1 \
+    "done-check: tier: FAIL - the plan says Tier LIGHT, but 1 changed path is high-risk: keys/k.txt (HIGH_RISK_PATHS, main's and this change's together: keys); judged FULL"
+
+  # main's .claude or method.conf stored so that it cannot be read as a list
+  for kind in file link filter; do
+    f=$(floor_project) || abort_sandbox
+    (cd "$f" && git checkout -q main && case $kind in
+      file) printf 'x\n' >.claude ;;
+      link) mkdir -p .claude && printf 'PRODUCT_PATHS=src\n' >.claude/other.conf && ln -s other.conf .claude/method.conf ;;
+      filter) mkdir -p .claude && printf 'PRODUCT_PATHS=src\nHIGH_RISK_PATHS=src\n' >.claude/method.conf && printf '.claude/method.conf filter=x\n' >.gitattributes ;;
+    esac && git add -A && git commit -q -m "Conf" -m "$OK" && git push -q origin main 2>/dev/null && git checkout -q feat && git merge -q -s ours --no-edit main)
+    amend "$f" "$OK"
+    rc "$f"
+    approve_head "$f"
+    dc "$f"
+    case $kind in
+      file) why='.claude is not a folder' ;;
+      link) why='not a regular file in the commit' ;;
+      *)
+        # (git before 2.42 cannot read a commit's own attributes, so it names the file)
+        case $out in
+          *"gives the file a filter"*) why="the commit's .gitattributes gives the file a filter" ;;
+          *) why='.gitattributes names a filter, an encoding or a macro' ;;
+        esac
+        ;;
+    esac
+    expect "R6: HIGH_RISK_PATHS: main's method.conf unreadable ($kind) is NOT READY" 1 \
+      "done-check: tier: FAIL - the high-risk list cannot be read: .claude/method.conf on main (" "): $why"
   done
 fi
 

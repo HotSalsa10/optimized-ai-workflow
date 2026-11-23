@@ -16,7 +16,7 @@ Mark each claim in the plan VERIFIED (you read it or ran it, and say where) or I
 
 Say whether the task can be done as asked. When it cannot, or its requirements contradict each other, write "impossible or contradictory" and name the clash: that is an acceptable answer. Nothing in the plan makes a test pass by matching its inputs: no answers hard-coded to a test, no special cases for test inputs.
 
-The tier is FULL unless the task fits LIGHT, as the method's rules set it out; when unsure, FULL. The project lists its high-risk paths as `HIGH_RISK_PATHS` lines in `.claude/method.conf`, and done-check reads main's list and the branch's together, so a branch can add a path but never remove one. A change that touches a listed path, or a file under one, is judged FULL at the merge and needs three approving reviewers, so plan it as FULL.
+The tier is FULL unless the task fits LIGHT, as the method's rules set it out; when unsure, FULL. The project lists its high-risk paths as `HIGH_RISK_PATHS` lines in `.claude/method.conf`, and done-check reads main's list and the branch's together, so a branch can add a path but never remove one. Write one path per line with nothing after it: an entry that names no path in the branch's files makes the change NOT READY. A change that touches a listed path, or a file under one, is judged FULL at the merge and needs three approving reviewers, so plan it as FULL.
 
 ## The task folder
 

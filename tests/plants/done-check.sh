@@ -166,6 +166,26 @@ qw(git.pl esc.pl conf.pl tree.pl verdicts.pl checks.pl receipt.pl)
     if $T{full} && !defined $then->{'expected.tsv'};
 ---
     if 0;
+=== a failing run on values changed and changed back counted | method/scripts/method/lib/done.pl | R6: a failing run on an expected value changed and changed back does not count: NOT READY
+    if (lock_moved($then, locked($h))) { $not{moved}++; next }
+---
+    if (0) { $not{moved}++; next }
+=== a HIGH_RISK_PATHS entry that names no path read as a path | method/scripts/method/lib/done.pl | R6: HIGH_RISK_PATHS: an entry that names no path (scr) is NOT READY
+  my @none = grep { my $e = $_; $e ne '.' && !Tree::lookup($T{head}, $e) && !grep { Conf::under($_, [$e]) } @touched } @{ $mine || [] };
+---
+  my @none = ();
+=== an entry whose files the change deletes read as naming nothing | method/scripts/method/lib/done.pl | R6: HIGH_RISK_PATHS: an entry whose files this change deletes is read
+  my @none = grep { my $e = $_; $e ne '.' && !Tree::lookup($T{head}, $e) && !grep { Conf::under($_, [$e]) } @touched } @{ $mine || [] };
+---
+  my @none = grep { my $e = $_; $e ne '.' && !Tree::lookup($T{head}, $e) } @{ $mine || [] };
+=== a .claude that is not a folder read as no list | method/scripts/method/lib/done.pl | R6: HIGH_RISK_PATHS: main's method.conf unreadable (file) is NOT READY
+  return (undef, "$label: .claude is " . ($d->[0] eq '160000' ? 'a submodule' : 'not a folder')) if $d->[0] ne '40000';
+---
+  return (undef, "$label: .claude is a submodule") if $d->[0] eq '160000';
+=== a method.conf that is not a regular file read as text | method/scripts/method/lib/done.pl | R6: HIGH_RISK_PATHS: main's method.conf unreadable (link) is NOT READY
+  return (undef, "$label: not a regular file in the commit") unless $e->[0] =~ /\A100(?:644|755)\z/;
+---
+  return (undef, "$label: not a regular file in the commit") if 0;
 === the verdict blind to the R6 set | method/scripts/method/lib/done.pl | R6: no failing run after the approval is NOT READY
   my %need = map { ($_ => 1) } 'plan', 'reviewer', 'security checker', 'rounds', @{ $T{need} };
 ---

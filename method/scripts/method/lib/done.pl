@@ -588,13 +588,20 @@ sub tier_condition {
   my ($main, $mwhy) = high_risk_list($tip, 'on main');
   my ($mine, $hwhy) = high_risk_list($T{head}, 'in this change');
   my @why = grep { defined } $mwhy, $hwhy;
+  # an entry of this change's list that names no path in its files or among
+  # the paths it touches (an inline comment, a misspelt path) protects
+  # nothing it was meant to: it fails closed, as a problem the parser finds
+  my @touched = touched();
+  my @none = grep { my $e = $_; $e ne '.' && !Tree::lookup($T{head}, $e) && !grep { Conf::under($_, [$e]) } @touched } @{ $mine || [] };
+  push @why, "$CONF in this change (" . short($T{head}) . '): HIGH_RISK_PATHS names no path in its files: ' . names(@none)
+    . ' (a misspelt path, or a comment on the line, which the file does not allow)' if @none;
   return report($area, 0, 'the high-risk list cannot be read: ' . join('; ', @why) . '; a broken setting is not read as a shorter list', $fix)
     if @why;
   # main's list and the branch's together: a branch can add a path, never
   # remove one
   my %seen;
   my @list = grep { !$seen{$_}++ } @$main, @$mine;
-  my @high = grep { Conf::under($_, \@list) } touched();
+  my @high = grep { Conf::under($_, \@list) } @touched;
   $T{high} = \@high;
   my $lists = @list ? '(HIGH_RISK_PATHS, main\'s and this change\'s together: ' . names(@list) . ')'
     : '(no HIGH_RISK_PATHS on main or in this change)';
@@ -622,6 +629,14 @@ sub locked {
     'expected.tsv' => $e ? "$e->[0] $e->[1]" : undef };
 }
 
+# lock_moved THEN NOW: what the lock holds that differs between two
+# locked() readings
+sub lock_moved {
+  my ($then, $now) = @_;
+  return grep { (defined $then->{$_} ? $then->{$_} : '') ne (defined $now->{$_} ? $now->{$_} : '') }
+    'the Tier line', 'the Paths line', 'expected.tsv';
+}
+
 # lock (M145): since the plan's approval, its Tier and Paths lines and its
 # expected.tsv are unchanged: HEAD's are the anchor's; a FULL task had
 # expected.tsv when it was approved
@@ -631,8 +646,7 @@ sub lock_condition {
   push @{ $T{need} }, $area;
   my $at = $T{branch}[ $T{anchor} ][0];
   my ($then, $now) = (locked($at), locked($T{head}));
-  my @moved = grep { (defined $then->{$_} ? $then->{$_} : '') ne (defined $now->{$_} ? $now->{$_} : '') }
-    'the Tier line', 'the Paths line', 'expected.tsv';
+  my @moved = lock_moved($then, $now);
   return report($area, 0, "changed since the plan's approval in commit " . short($at) . ': ' . join(', ', @moved),
     'a change to the tier, the paths or the expected results is a new plan: ask the owner for their go again, and replace'
     . ' the Approved line with the new reply') if @moved;
@@ -647,7 +661,10 @@ sub lock_condition {
 
 # failing run (M145): a valid tester receipt that opened with the fail word
 # on a commit from the anchor on (git ancestry, as trees repeat across
-# commits) and strictly before HEAD, with files other than HEAD's
+# commits) and strictly before HEAD, with files other than HEAD's, and
+# with the plan's Tier and Paths lines and expected.tsv as approved there
+# (the lock compares HEAD with the anchor only, so a run on a value changed
+# and changed back in between would otherwise count)
 sub failing_condition {
   my $area = 'failing run';
   return unless $T{ok}{plan} && $T{full};
@@ -655,6 +672,7 @@ sub failing_condition {
   my %role = Verdicts::roles(Verdicts::rows());
   my $good = Receipt::words()->{good};
   my $at = $T{branch}[ $T{anchor} ][0];
+  my $then = locked($at);
   my (%not, $ok);
   for my $r (grep { $_->{gate} eq $role{tester} && $_->{state} eq $good && defined $_->{open} && $_->{open} eq $role{fail} }
     @{ $T{receipts} }) {
@@ -662,6 +680,7 @@ sub failing_condition {
     if (!defined $h || $h !~ /\A(?:[0-9a-f]{40}|[0-9a-f]{64})\z/ || !defined((commit_info($h))[0])) { $not{gone}++; next }
     if ($r->{tree} eq $T{tree}) { $not{here}++; next }
     if (!ancestor($at, $h) || $h eq $T{head} || !ancestor($h, $T{head})) { $not{off}++; next }
+    if (lock_moved($then, locked($h))) { $not{moved}++; next }
     $ok = $r;
   }
   if ($ok) {
@@ -673,6 +692,7 @@ sub failing_condition {
   push @notes, "$not{here} on these files (a run on the finished files does not show the tests failing first)" if $not{here};
   push @notes, "$not{off} on a commit outside this branch's history from the approval to HEAD" if $not{off};
   push @notes, "$not{gone} on a commit this clone does not have" if $not{gone};
+  push @notes, "$not{moved} on a commit whose plan Tier or Paths line or expected.tsv differs from the approved one" if $not{moved};
   return report($area, 0, "no $good receipt of $role{tester} that opened with $role{fail} on a commit from the plan's approval (commit "
     . short($at) . ") to before HEAD, with other files than HEAD's" . (@notes ? '; not counted: ' . join('; ', @notes) : ''),
     "run $role{tester} where the tests are in and the code is not: on this branch after the approval, a commit that takes the"
