@@ -6,6 +6,7 @@ The method's rules are text, and Claude can fail to follow one. This page says h
 
 - A person is accountable for every change that ships (M109). Claude never merges: your merge on GitHub is the approval for the exact version merged, and the only lock outside the session.
 - People who read code add a review layer; they never replace the reviewer agents (M088). Look at intent, business rules, design and risky paths first, and at the agents' findings after: people shown an AI review mostly check what it flagged.
+- If Claude Code asks whether to turn on hot reloading for mods, answer "Not now". A mod runs inside Claude Code, outside the method's checks, and method work uses none (M105). The guard keeps Claude from writing one; one you install or load yourself (/plugin, --plugin-dir) it cannot stop.
 - Give the whole task in one message, with the finish line and the stops (M119). Claude then keeps going without asking, unless it needs input or a step is destructive; its half of the rule is in `.claude/rules/method/method.md`.
 
 ## Enforced by a hook
@@ -18,7 +19,7 @@ The hooks run in local sessions and in cloud sessions with one repository. Where
 | G2 powershell (M129) | Every PowerShell call | guard.sh |
 | G3 git-shapes (M130) | A git command not on the list of allowed shapes, such as a push to main | guard.sh, `git-shapes.txt` |
 | G4 outside (M131) | gh, MCP tools, curl or wget to GitHub, another Claude, SendMessage and remote agents, unless on a list | guard.sh, `gh-shapes.txt`, `mcp-tools.txt` |
-| G6 protected (M132) | A write to the method's files, its settings, or git's config and hooks | guard.sh |
+| G6 protected (M132) | A write to the method's files and skills, its settings, git's config and hooks, or the folders Claude Code loads mods and plugins from (`~/.claude/dev-mods/`, `~/.claude/plugins/`) | guard.sh |
 | G8 mutant-commit (M133) | A commit while a mutation run, or what one left behind, is in the repository | guard.sh |
 | G12 effort (M134) | Nothing: a warning at the first call of a session below xhigh | guard.sh |
 | G16 settings-change (M136) | A settings change mid-session that switches off or weakens the hooks | guard.sh |
@@ -58,7 +59,6 @@ The hooks run in local sessions and in cloud sessions with one repository. Where
 | Predictions before a FULL merge (M124) | Nothing: done-check cannot see that you predicted | All of it |
 | Deep review (M087, M146): three independent method-reviewer runs, launched in one message, all approving; every finding of any of them gets a disposition in the report | Three VALID approving receipts of the reviewer for the exact files | That the three were launched together and worked apart, and that every finding got a disposition |
 | High-risk work beyond Deep review | Nothing | The person with authority signing the expected results (the `source` column names them), a test copy, an undo plan, a human expert: convention, in the plan's [AUTHORITY] items and the review |
-| LIGHT's reporter for [EYES] or [CHECK] items | `/method-finish` runs it then (step 6b) | done-check does not require it |
 | M075 | `/code-review` is kept to you by the settings | That nothing else is treated as a gate |
 
 ## Written down only
@@ -72,4 +72,4 @@ These rules are text the model reads. A review can notice a broken one; nothing 
 | `.claude/hooks/method/README.md` | M073: each hook documented with what it stops, what it costs and how it was seen to fire |
 | The checking agents, `.claude/agents/method/` (step 6) | reviewer M024, M083, M084, M086, M090, M102; security checker M030; tester M029; diagnose M142; reporter M031, M046, M069, M092, M124 |
 | The architect (step 6) | M141 |
-| The skills you type (step 6 and 6b) | `/method-start` M004, M005, M127; `/method-plan` M006, M021, M091, M125; `/method-design` M099; `/method-finish` M007, M011, M070, M087 |
+| The skills you type (step 6 and 6b) | `/method-start` M004, M005, M127; `/method-plan` M006, M021, M091, M125; `/method-design` M099; `/method-finish` M007, M011, M070, M087, M148, M149, M150, and its reporter for a LIGHT task with [EYES] or [CHECK] items (A11's clause: a convention, which done-check does not require) |
