@@ -47,6 +47,12 @@
 #   Lock::load(ROOT) (LOCK, PROBLEMS): LOCK {version, source, profile,
 #     settings, files => [[sha256, path], ...]}, or undef when the lock is
 #     absent (PROBLEMS empty) or cannot be read (PROBLEMS say why).
+#     Lock::parse(TEXT) the same for a lock's text in hand (setup-write's).
+#   Lock::format_lock(LOCK) the lock's text from such a hash (setup-write
+#     changes only its profile and settings lines with it, step 7.4).
+#   Lock::settings_json(DATA) .claude/settings.json's one layout: UTF-8,
+#     two-space indent, sorted keys, "key": value, exact numbers (step7.md
+#     S6), written by the release's sync and by setup-write alike.
 #   Lock::files(ROOT) (PATHS, PROBLEMS, BLOCKED): every file under the
 #     method's paths, hidden ones too, sorted, the lock left out; PROBLEMS
 #     are [KIND, TEXT]: a link under them (link), an entry that is not a
@@ -139,7 +145,11 @@ sub load {
   open my $fh, '<:raw', $path or return (undef, ["$LOCK cannot be read"]);
   my $t = do { local $/; <$fh> };
   close $fh;
-  $t = '' unless defined $t;
+  return parse(defined $t ? $t : '');
+}
+
+sub parse {
+  my ($t) = @_;
   return (undef, ["$LOCK holds a CR; it must have LF line ends (the .gitattributes method block is missing)"]) if $t =~ /\r/;
   return (undef, ["$LOCK does not end with a line end, so it may be cut off"]) unless $t =~ /\n\z/;
   my @lines = split /\n/, $t;
@@ -360,6 +370,12 @@ sub refused {
   }
   push @r, map { [$_, $_] } grep { exists $s->{$_} } @KEEP_KEYS, do { no warnings 'once'; @Watch::RUNS };
   return @r;
+}
+
+sub settings_json {
+  my ($d) = @_;
+  require JSON::PP;
+  return JSON::PP->new->utf8->canonical->pretty->indent_length(2)->space_before(0)->allow_bignum->encode($d);
 }
 
 sub k_hash {

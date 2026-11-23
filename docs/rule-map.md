@@ -105,7 +105,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M097 | Every change states how it was tested, its risk, how to undo it and what the checks would miss | research: Claude Code team | method/scripts/method/templates/pull_request_template.md.tmpl | done |
 | M098 | Changes to live systems go to a test copy first, with a backup and a one-step undo | research: Claude Code team | method/.claude/rules/method/method.md | done |
 | M099 | New projects and big features start with a design stage; versions are checked against live registries; a walking skeleton is built first | research: harness post, Titus | method/.claude/skills/method-design/SKILL.md | done |
-| M100 | Setup answers never lower the floor | decision A14 | method/scripts/method/lib/setup.pl | step 7 |
+| M100 | Setup answers never lower the floor | decision A14 | method/scripts/method/lib/setup.pl | done |
 | M101 | Each project has a REVIEW.md: what failure looks like, a nit cap, paths to skip, file-and-line evidence, a count-first summary | research: Claude Code team | method/scripts/method/templates/REVIEW.md.tmpl | done |
 | M102 | The reviewer flags changes that leave CLAUDE.md, AGENTS.md or the architecture document out of date | research: Claude Code team | method/.claude/agents/method/method-reviewer.md | done |
 | M103 | A change to the reviewer is kept only if its score on past incidents rises; re-score on any prompt, tool or model change | research: Claude Code team | bench/README.md | R2 |
@@ -161,7 +161,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M153 | Changes to the files that steer the method (method.conf, checks, the project's pack, CI workflows, the incident checklist, REVIEW.md, CLAUDE.md, AGENTS.md) are high-risk whatever method.conf says | step 5 plan's touches-method route, in its cheap form (step 7 plan, S12) | method/scripts/method/lib/conf.pl | step 7 |
 | M154 | A flaky check: find the cause; never skip, retry or re-run it until it passes | step 6b plan, section 6 (P4) | method/.claude/rules/method/method.md | step 7 |
 | M155 | Sync replaces nothing changed since the lock and writes nothing until its whole plan holds | SPEC R1 (step 7 plan, S3) | scripts/release/sync.sh | done |
-| M156 | Setup writes only through setup-write from an answers file and never overwrites a project file outside its block | SPEC R3 (step 7 plan, S9, S10) | method/scripts/method/lib/setup.pl | step 7 |
+| M156 | Setup writes only through setup-write from an answers file and never overwrites a project file outside its block | SPEC R3 (step 7 plan, S9, S10) | method/scripts/method/lib/setup.pl | done |
 | M157 | The review packet carries the project's REVIEW.md as it stands at the merge base | step 6b plan, section 6 (P3) | method/scripts/method/lib/packet.pl | step 7 |
 | M158 | The reviewer checks every item of the project's incident checklist and says so | step 6b plan, section 6 (P8 part 3) | method/.claude/agents/method/method-reviewer.md | step 7 |
 | M159 | The plan names the current version's outputs at a named commit as an outside source of expected results | step 6b plan, section 6 (P9) | method/.claude/skills/method-plan/SKILL.md | step 7 |

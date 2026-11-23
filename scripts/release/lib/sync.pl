@@ -322,9 +322,8 @@ if ($cur && $first) {
 }
 my $new_settings;
 if ($cur) {
-  my $m = JSON::PP->new->utf8->canonical->pretty->indent_length(2)->space_before(0)->allow_bignum;
   my $merged = merge($cur, $frag, $k, $old_k);
-  $new_settings = $m->encode($merged);
+  $new_settings = Lock::settings_json($merged);
   my @w = Lock::compare($k, (Json::decode($new_settings, 'plain'))[0]);
   refuse_now("the merged settings would not hold the method keys (@w); this is a defect in sync") if @w;
   if (!defined $cur_bytes) { push @plan, ['install', $settings_rel, "the method keys for the profile $profile"] }
