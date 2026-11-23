@@ -411,7 +411,7 @@ Plan: docs/plans/step6b.md (the revised 6b plan, 22 November 2026; it supersedes
 
 ## Step 7: templates, setup, sync, the pack format, three example projects
 
-Plan: docs/plans/step7.md (written 23 November 2026 on 551ae63; scope as A77 reworded ROADMAP step 7). The plan was reviewed once (reviewer and security check) and repaired once (20 findings fixed); one decision waits for the owner with its approval (the plan's section 7: the first-install fallback). Building starts from main after 6b merges. Process: A66 (one review and one repair loop, at 7.9).
+Plan: docs/plans/step7.md (written 23 November 2026 on 551ae63; scope as A77 reworded ROADMAP step 7). The plan was reviewed once (reviewer and security check) and repaired once (20 findings fixed); the owner decided its one question on 23 November 2026: yes, a first install whose review session cannot start may be merged on its card and check output alone, once per project, as a recorded exception (RISKS #21), with status naming it. Building starts now on its own branch, claude/step7, from 702d871 (the owner's leave, 23 November 2026), so 6b's branch and its CI push C stay as reviewed; once 6b merges, main is merged into claude/step7. Process: A66 (one review and one repair loop, at 7.9).
 
 - [ ] 7.0 Measure (F1 to F6 at both pins) and record (A78; rule-map homes and statuses).
 - [ ] 7.1 Templates (`method/scripts/method/templates/*.tmpl`), with tests/templates.test.sh and its plants.
