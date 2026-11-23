@@ -138,6 +138,10 @@ Nothing yet. Release 1 is being built. Release 1 will ship no ready-made packs f
 - The guard keeps Claude from writing into the folders Claude Code loads mods and plugins from, `~/.claude/dev-mods/` and `~/.claude/plugins/` (also under `CLAUDE_CONFIG_DIR`), as it already did for your agents, skills and commands there (step 6b.4, M132). In code a program runs, a name counts only whole: `~/.claude/dev-mods-old` is not the mods folder. A mod or plugin runs inside Claude Code, outside the method's checks. One you install or load yourself is not stopped; if Claude Code offers to turn on hot reloading for mods, answer "Not now" (why.md).
 - Tests: tests/guard-protect.test.sh, 11 new cases and the text forms widened (9 seen failing first); a `claude plugin install` case in tests/guard-cases/outside.txt (G4 already refused it); tests/plants/protect.sh, 5 new plants and 2 re-aimed (101 in all). In the harness, `/method-finish` typed as your message expands and its steps reach the session, and `/method-start`'s merged pull request read, with its comparison of HEAD, reaches it; 4 new harness plants.
 
+### Added (step 7.1)
+
+- Templates for a project's nine records, REVIEW.md (what a review looks for), the pull request text (how it was tested, the risk, how to undo it, what the checks would miss), the incident checklist, the checks file (a smoke row and four dependency-scanner rows, all off until turned on), the list of accepted secret-scan findings and method.conf, in `method/scripts/method/templates/`. They are short and free of any one field of work; setup (step 7.4) will copy each into a project once. `tests/templates.test.sh` (8 cases) and `tests/plants/templates.sh` (10 plants).
+
 ### Changed (step 6b)
 
 - CI runs on pushes only (step 6b.0). A pull request no longer starts a second run of the same files: the push run already checks its head. tests/ci-config.test.sh turns red if a pull_request trigger comes back. Free CI minutes are scarce, so DECISIONS A76 also says when a push may skip CI (`[skip ci]`): only for a head that no review or merge reads; the tree that is reviewed and the tree that lands on main are always checked on Linux (A19).

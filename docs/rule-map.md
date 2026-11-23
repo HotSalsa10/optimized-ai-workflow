@@ -19,12 +19,12 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M011 | Commit with the verdict trailer, push, show status | incident | method/.claude/skills/method-finish/SKILL.md | done |
 | M012 | Reports open with status and next step, then what changed, what is left, risks, what is uncertain, checks | incident | method/.claude/rules/method/owner.md | done |
 | M013 | If a new session cannot orient from the files, fix the files, not the handoff | incident | method/.claude/rules/method/method.md | done |
-| M014 | CLAUDE.md imports AGENTS.md; AGENTS.md is authoritative for the project | incident | method/scripts/method/templates/CLAUDE.md.tmpl @@AGENTS.md | step 7 |
-| M015 | SPEC holds numbered requirements with observable acceptance criteria | incident | method/scripts/method/templates/SPEC.md.tmpl | step 7 |
+| M014 | CLAUDE.md imports AGENTS.md; AGENTS.md is authoritative for the project | incident | method/scripts/method/templates/CLAUDE.md.tmpl @@AGENTS.md | done |
+| M015 | SPEC holds numbered requirements with observable acceptance criteria | incident | method/scripts/method/templates/SPEC.md.tmpl | done |
 | M016 | Build nothing that no requirement covers; say so and stop | incident | method/.claude/rules/method/method.md | done |
-| M017 | Each roadmap track has one exit criterion and one named blocker | incident | method/scripts/method/templates/ROADMAP.md.tmpl | step 7 |
-| M018 | Settled decisions are not reopened | incident | method/scripts/method/templates/DECISIONS.md.tmpl | step 7 |
-| M019 | TESTS lists every check and what runs it; what exists is not what runs | incident | method/scripts/method/templates/TESTS.md.tmpl | step 7 |
+| M017 | Each roadmap track has one exit criterion and one named blocker | incident | method/scripts/method/templates/ROADMAP.md.tmpl | done |
+| M018 | Settled decisions are not reopened | incident | method/scripts/method/templates/DECISIONS.md.tmpl | done |
+| M019 | TESTS lists every check and what runs it; what exists is not what runs | incident | method/scripts/method/templates/TESTS.md.tmpl | done |
 | M020 | No role approves its own work | incident | method/.claude/rules/method/method.md | done |
 | M021 | The planner separates known from assumed and never invents scope | incident | method/.claude/skills/method-plan/SKILL.md | done |
 | M022 | The reviewer works in a fresh context and must give a verdict | incident | method/.claude/rules/method/method.md | done |
@@ -99,14 +99,14 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M091 | The planner checks feasibility; "impossible or contradictory" is an acceptable answer; no hard-coding to tests | research: reward hacking studies | method/.claude/skills/method-plan/SKILL.md | done |
 | M092 | A fresh agent writes an acceptance check after the build, from the spec, and runs it through the real user path | research: harness post | method/.claude/agents/method/method-reporter.md | done |
 | M093 | Never mix restructuring and behaviour changes in one commit | research: Beck, DORA | method/.claude/rules/method/method.md | done |
-| M094 | A non-AI security scanner runs alongside the security-checker | research: Anthropic security team | method/scripts/method/templates/checks/project.tsv.tmpl | step 7 |
+| M094 | A non-AI security scanner runs alongside the security-checker | research: Anthropic security team | method/scripts/method/templates/checks/project.tsv.tmpl | done |
 | M095 | Method prompts carry no "think carefully" lines, no fixed-format reasoning requests and no shouting | research: claude.dev, docs | scripts/dev/lint-prompts.sh | done |
 | M096 | Checking agents have static instructions, task text last, and a fixed tool list | research: Cloudflare | scripts/dev/lint-prompts.sh | done |
-| M097 | Every change states how it was tested, its risk, how to undo it and what the checks would miss | research: Claude Code team | method/scripts/method/templates/pull_request_template.md.tmpl | step 7 |
+| M097 | Every change states how it was tested, its risk, how to undo it and what the checks would miss | research: Claude Code team | method/scripts/method/templates/pull_request_template.md.tmpl | done |
 | M098 | Changes to live systems go to a test copy first, with a backup and a one-step undo | research: Claude Code team | method/.claude/rules/method/method.md | done |
 | M099 | New projects and big features start with a design stage; versions are checked against live registries; a walking skeleton is built first | research: harness post, Titus | method/.claude/skills/method-design/SKILL.md | done |
 | M100 | Setup answers never lower the floor | decision A14 | method/scripts/method/lib/setup.pl | step 7 |
-| M101 | Each project has a REVIEW.md: what failure looks like, a nit cap, paths to skip, file-and-line evidence, a count-first summary | research: Claude Code team | method/scripts/method/templates/REVIEW.md.tmpl | step 7 |
+| M101 | Each project has a REVIEW.md: what failure looks like, a nit cap, paths to skip, file-and-line evidence, a count-first summary | research: Claude Code team | method/scripts/method/templates/REVIEW.md.tmpl | done |
 | M102 | The reviewer flags changes that leave CLAUDE.md, AGENTS.md or the architecture document out of date | research: Claude Code team | method/.claude/agents/method/method-reviewer.md | done |
 | M103 | A change to the reviewer is kept only if its score on past incidents rises; re-score on any prompt, tool or model change | research: Claude Code team | bench/README.md | R2 |
 | M104 | Auto memory is off in method projects; lessons go into the repo through /lesson | research: docs; decision A1 | method/settings.fragment.json @autoMemoryEnabled | done |

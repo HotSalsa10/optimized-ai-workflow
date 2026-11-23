@@ -60,6 +60,8 @@ The hooks run in local sessions and in cloud sessions with one repository. Where
 | Deep review (M087, M146): three independent method-reviewer runs, launched in one message, all approving; every finding of any of them gets a disposition in the report | Three VALID approving receipts of the reviewer for the exact files | That the three were launched together and worked apart, and that every finding got a disposition |
 | High-risk work beyond Deep review | Nothing | The person with authority signing the expected results (the `source` column names them), a test copy, an undo plan, a human expert: convention, in the plan's [AUTHORITY] items and the review |
 | M075 | `/code-review` is kept to you by the settings | That nothing else is treated as a gate |
+| M094, a scanner that is not AI | The built-in `secrets` check reads every tracked file whenever the checks run | Known security problems in the libraries the project uses: `checks/project.tsv` offers rows for four common scanners (Python, Node, Go, Rust), each off until you install its tool and turn its row on |
+| The records (M014, M019) | status says when a record is missing, when CLAUDE.md does not load AGENTS.md, and when TESTS.md does not name a check listed in `checks/*.tsv` | Whether the records are up to date, and whether TESTS.md names the built-in checks |
 
 ## Written down only
 
@@ -73,3 +75,4 @@ These rules are text the model reads. A review can notice a broken one; nothing 
 | The checking agents, `.claude/agents/method/` (step 6) | reviewer M024, M083, M084, M086, M090, M102; security checker M030; tester M029; diagnose M142; reporter M031, M046, M069, M092, M124 |
 | The architect (step 6) | M141 |
 | The skills you type (step 6 and 6b) | `/method-start` M004, M005, M127; `/method-plan` M006, M021, M091, M125; `/method-design` M099; `/method-finish` M007, M011, M070, M087, M148, M149, M150, and its reporter for a LIGHT task with [EYES] or [CHECK] items (a convention, which done-check does not require) |
+| The records, REVIEW.md and the pull request text as setup first writes them, from `scripts/method/templates/` | SPEC M015, ROADMAP M017, DECISIONS M018, REVIEW.md M101, the pull request text M097 |
