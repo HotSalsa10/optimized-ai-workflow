@@ -29,9 +29,20 @@
 # whole; each of its permissions.deny entries present (the project's own
 # entries are kept and never compared); any other permissions key equal;
 # and the hook entries whose command names .claude/hooks/method/, the same
-# set on the same events with the same matchers. Profiles other than best
-# come with profiles.tsv (step 7.3); until then best is the fragment as it
-# is.
+# set on the same events with the same matchers. The profile's row in
+# scripts/method/profiles.tsv (step 7.3; step7.md S7) gives model,
+# effortLevel and availableModels in place of the fragment's.
+#
+# profiles.tsv: # lines and blank lines skipped; each other line is a
+# profile's name, a TAB, and one JSON object that sets exactly model,
+# effortLevel and availableModels (the main session's only: the checking
+# agents' own model and effort hold while claude-opus-5-5 is on the list,
+# DECISIONS A78 F3). Its lint (Lock::profiles) refuses any other key, a
+# list without claude-opus-5-5 (the gates would take the main session's
+# model), a model missing from its own row's list (the session would fall
+# back to Opus without a word), an effort other than low, medium, high or
+# xhigh, and a
+# best row that differs from settings.method.json.
 #
 #   Lock::load(ROOT) (LOCK, PROBLEMS): LOCK {version, source, profile,
 #     settings, files => [[sha256, path], ...]}, or undef when the lock is
@@ -41,7 +52,21 @@
 #     are [KIND, TEXT]: a link under them (link), an entry that is not a
 #     regular file or a folder that cannot be read (odd); a link on the way
 #     to them is a link too, and then no file is listed (BLOCKED).
-#   Lock::expected(ROOT, PROFILE) (K, PROBLEM): the method keys.
+#   Lock::expected(ROOT, PROFILE) (K, PROBLEM): the method keys, from
+#     ROOT's settings.method.json and profiles.tsv;
+#     Lock::expected_from(FRAGMENT, PROFILES_TEXT, PROFILE) the same from
+#     data in hand (the release's sync).
+#   Lock::profiles(TEXT, FRAGMENT) (ROWS, NAMES, PROBLEMS): profiles.tsv
+#     read and linted (above); FRAGMENT undef skips the best row's
+#     comparison. Lock::profile(ROOT) (NAME, ROW): the project's profile,
+#     from the lock's profile line and its row; (undef, undef) with no
+#     lock, (NAME or '', undef) when either cannot be read.
+#   Lock::refused(SETTINGS) ([KEY, TEXT], ...): what in a project's
+#     settings a first install refuses unless it is named with --keep KEY
+#     (step7.md S3): a hook of the project's own on PreToolUse,
+#     PermissionRequest, ConfigChange or SessionStart (it runs beside the
+#     guard), claudeMdExcludes, enabledPlugins, and each key that runs a
+#     program (@Watch::RUNS, their one home). session-status names them.
 #   Lock::k_hash(K): their SHA-256.
 #   Lock::make(ROOT, VERSION, SOURCE, PROFILE) (TEXT, PROBLEM): a lock for
 #     the method files now under ROOT; Lock::save(ROOT, TEXT) writes it
@@ -69,7 +94,19 @@ our ($SKILLS, $SKILL_PREFIX) = ('.claude/skills', 'method-');
 our $HOOK_MARK = '.claude/hooks/method/';
 # a tag, at most 23 characters, of the characters session-status accepts
 our $VERSION_RE = qr/\Av[0-9][0-9A-Za-z.+-]{0,21}\z/;
-my @PROFILES = qw(best);
+our $PROFILES = 'scripts/method/profiles.tsv';
+our $PROFILE_RE = qr/\A[a-z][a-z0-9-]{0,30}\z/;
+our @PROFILE_KEYS = qw(availableModels effortLevel model);
+# the client's effort levels, lowest first (G12 compares by this order)
+our @EFFORTS = qw(low medium high xhigh max);
+# the checking agents' model, which every profile's list must hold
+our $GATE_MODEL = 'claude-opus-5-5';
+# a first install refuses these in the project's settings unless kept
+# the hook events a first install refuses unless kept: those that run
+# beside the guard or before it, and those whose output reaches the
+# checking agents or every prompt (DECISIONS A79)
+our @KEEP_EVENTS = qw(PreToolUse PermissionRequest ConfigChange SessionStart SubagentStart SubagentStop UserPromptSubmit);
+our @KEEP_KEYS = qw(claudeMdExcludes enabledPlugins);
 
 sub sha_file {
   my ($path) = @_;
@@ -109,7 +146,7 @@ sub load {
   my (%l, @p, %seen);
   $l{files} = [];
   my @head = (['version', $VERSION_RE], ['source', qr/\A(?:[0-9a-f]{40}|[0-9a-f]{64})\z/],
-    ['profile', qr/\A[a-z][a-z0-9-]{0,30}\z/], ['settings', qr/\A[0-9a-f]{64}\z/]);
+    ['profile', $PROFILE_RE], ['settings', qr/\A[0-9a-f]{64}\z/]);
   for my $i (0 .. $#head) {
     my ($k, $re) = @{ $head[$i] };
     my ($kk, $v) = split /\t/, ($lines[$i] // ''), 2;
@@ -206,17 +243,123 @@ sub deny_of {
   return [sort keys %u];
 }
 
-sub expected {
-  my ($root, $profile) = @_;
-  my ($f, $e) = read_json(File::Spec->catfile($root, $FRAGMENT), $FRAGMENT);
-  return (undef, $e) if $e;
-  return (undef, "the profile $profile is not one this release knows (@PROFILES)") unless grep { $_ eq $profile } @PROFILES;
+# read_text PATH LABEL: (TEXT, PROBLEM); only a regular file is read
+sub read_text {
+  my ($path, $label) = @_;
+  return (undef, "$label is missing") unless -e $path || -l $path;
+  return (undef, "$label is a link or not a regular file") if -l $path || !-f _;
+  open my $fh, '<:raw', $path or return (undef, "$label cannot be read");
+  my $t = do { local $/; <$fh> };
+  close $fh;
+  return (defined $t ? $t : '', undef);
+}
+
+sub profiles {
+  my ($text, $f) = @_;
+  my (%rows, @names, @p);
+  return ({}, [], ["$PROFILES holds a CR; it must have LF line ends"]) if $text =~ /\r/;
+  my $n = 0;
+  my %allowed = map { ($_ => 1) } @PROFILE_KEYS;
+  # (a profile sets at most xhigh, so G12 reads no lock at xhigh or max)
+  my %effort = map { ($_ => 1) } grep { $_ ne 'max' } @EFFORTS;
+  for my $line (split /\n/, $text) {
+    $n++;
+    next if $line =~ /\A\s*(?:#|\z)/;
+    my $at = "$PROFILES line $n";
+    my ($name, $json) = split /\t/, $line, 2;
+    if (!defined $json || $name !~ $PROFILE_RE) { push @p, "$at: not a profile line (a name, a TAB, a JSON object)"; next }
+    if ($rows{$name}) { push @p, "$at: the profile $name is listed twice"; next }
+    my ($d, $e) = Json::decode($json, 'plain');
+    if (defined $e || ref $d ne 'HASH') { push @p, "$at: the profile $name is not one JSON object"; next }
+    my @bad = grep { !$allowed{$_} } sort keys %$d;
+    my @lacks = grep { !exists $d->{$_} } @PROFILE_KEYS;
+    push @p, "$at: the profile $name sets " . join(', ', map { Esc::line($_) } @bad) . ', which a profile may not set (only ' . join(', ', @PROFILE_KEYS) . ')' if @bad;
+    push @p, "$at: the profile $name does not set " . join(', ', @lacks) if @lacks;
+    next if @bad || @lacks;
+    my ($m, $ef, $list) = @$d{qw(model effortLevel availableModels)};
+    my $ok = 1;
+    if (!defined $m || ref $m || $m !~ /\Aclaude-[a-z0-9.-]{1,60}\z/) { push @p, "$at: the profile ${name}'s model is not a model id"; $ok = 0 }
+    if (!defined $ef || ref $ef || !$effort{$ef}) { push @p, "$at: the profile ${name}'s effortLevel is not one of " . join(' ', grep { $effort{$_} } @EFFORTS); $ok = 0 }
+    if (ref $list ne 'ARRAY' || grep { !defined || ref } @$list) { push @p, "$at: the profile ${name}'s availableModels is not a list of model ids"; next }
+    if (!grep { $_ eq $GATE_MODEL } @$list) {
+      push @p, "$at: the profile ${name}'s availableModels lacks $GATE_MODEL, so the checking agents would take the main session's model";
+      $ok = 0;
+    }
+    if (defined $m && !ref $m && !grep { $_ eq $m } @$list) {
+      push @p, "$at: the profile ${name}'s model is not on its own availableModels, so the session would fall back to Opus without a word";
+      $ok = 0;
+    }
+    next unless $ok;
+    $rows{$name} = $d;
+    push @names, $name;
+  }
+  push @p, "$PROFILES has no best row" unless @p || $rows{best};
+  if (ref $f eq 'HASH' && $rows{best}) {
+    for my $k (@PROFILE_KEYS) {
+      push @p, "$PROFILES: the best row's $k differs from ${FRAGMENT}'s"
+        if !exists $f->{$k} || Json::encode([$f->{$k}]) ne Json::encode([$rows{best}{$k}]);
+    }
+  }
+  return (\%rows, \@names, \@p);
+}
+
+sub expected_from {
+  my ($f, $ptext, $profile) = @_;
+  my ($rows, $names, $p) = profiles($ptext, $f);
+  return (undef, $p->[0]) if @$p;
+  return (undef, 'the profile ' . Esc::line($profile) . " is not one this release knows (@$names)") unless $rows->{$profile};
   my %k = (keys => {}, permissions => {}, deny => deny_of($f), hooks => method_hooks($f));
   $k{keys}{$_} = $f->{$_} for grep { $_ ne 'hooks' && $_ ne 'permissions' && $_ ne '$schema' } keys %$f;
+  $k{keys}{$_} = $rows->{$profile}{$_} for @PROFILE_KEYS;
   if (ref $f->{permissions} eq 'HASH') {
     $k{permissions}{$_} = $f->{permissions}{$_} for grep { $_ ne 'deny' } keys %{ $f->{permissions} };
   }
   return (\%k, undef);
+}
+
+sub expected {
+  my ($root, $profile) = @_;
+  my ($f, $e) = read_json(File::Spec->catfile($root, $FRAGMENT), $FRAGMENT);
+  return (undef, $e) if $e;
+  my ($t, $te) = read_text(File::Spec->catfile($root, $PROFILES), $PROFILES);
+  return (undef, $te) if $te;
+  return expected_from($f, $t, $profile);
+}
+
+sub profile {
+  my ($root) = @_;
+  my $path = File::Spec->catfile($root, $LOCK);
+  return (undef, undef) unless -e $path || -l $path;
+  return ('', undef) if -l $path || !-f _;
+  open my $fh, '<:raw', $path or return ('', undef);
+  my @head;
+  while (@head < 3 && defined(my $l = <$fh>)) { push @head, $l }
+  close $fh;
+  my ($name) = ($head[2] // '') =~ /\Aprofile\t([^\t\n]*)\n\z/;
+  return ('', undef) unless defined $name && $name =~ $PROFILE_RE;
+  my ($t, $te) = read_text(File::Spec->catfile($root, $PROFILES), $PROFILES);
+  return ($name, undef) if $te;
+  my ($rows, undef, $p) = profiles($t, undef);
+  return ($name, @$p ? undef : $rows->{$name});
+}
+
+sub refused {
+  my ($s) = @_;
+  return () unless ref $s eq 'HASH';
+  require File::Spec->catfile($lib, 'watch.pl');
+  my @r;
+  my $hooks = ref $s->{hooks} eq 'HASH' ? $s->{hooks} : {};
+  for my $ev (@KEEP_EVENTS) {
+    next unless ref $hooks->{$ev} eq 'ARRAY';
+    my $n = 0;
+    for my $g (@{ $hooks->{$ev} }) {
+      next unless ref $g eq 'HASH' && ref $g->{hooks} eq 'ARRAY';
+      $n += grep { !(ref $_ eq 'HASH' && defined $_->{command} && !ref $_->{command} && index($_->{command}, $HOOK_MARK) >= 0) } @{ $g->{hooks} };
+    }
+    push @r, [$ev, "$n $ev hook" . ($n == 1 ? '' : 's') . " of the project's own"] if $n;
+  }
+  push @r, map { [$_, $_] } grep { exists $s->{$_} } @KEEP_KEYS, do { no warnings 'once'; @Watch::RUNS };
+  return @r;
 }
 
 sub k_hash {

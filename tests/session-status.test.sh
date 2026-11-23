@@ -127,6 +127,26 @@ hook "$p" "$(printf '{"source":"startup","cwd":"%s","model":"claude-sonnet-5-5"}
 has "a session on another model is a LOOK" "this session runs claude-sonnet-5-5, not claude-opus-5-5"
 hook "$p" "$(printf '{"source":"startup","cwd":"%s","model":"claude-opus-5-5"}' "$p")"
 lacks "a session on claude-opus-5-5 is not" "this session runs"
+
+# (step 7.3) the model is the one the project's profile sets: the lock's
+# profile line and its row in scripts/method/profiles.tsv
+bp=$(project budget) || abort_sandbox
+printf 'version\tv0.7.0\nsource\t%s\nprofile\tbudget\nsettings\t%s\n' "$(printf '%040d' 0)" "$(printf '%064d' 0)" >"$bp/scripts/method/method.lock"
+hook "$bp" "$(printf '{"source":"startup","cwd":"%s","model":"claude-sonnet-5-5"}' "$bp")"
+lacks "a Budget project's session on its own model, claude-sonnet-5-5, is not a LOOK" "this session runs"
+hook "$bp" "$(printf '{"source":"startup","cwd":"%s","model":"claude-opus-5-5"}' "$bp")"
+has "a Budget project's session on another model is a LOOK naming the profile's model" "this session runs claude-opus-5-5, not claude-sonnet-5-5, the model the project's profile (budget) sets"
+
+# (step 7.3) what a first install refuses unless kept, in the project's own
+# settings: named (kept with --keep, or added later), never its value
+perl -MJSON::PP -i -0pe 'my $d = JSON::PP->new->decode($_); push @{ $d->{hooks}{PreToolUse} }, {matcher => "Bash", hooks => [{type => "command", command => "bash tools/check-secret-token.sh"}]};
+  $d->{claudeMdExcludes} = ["docs/**"]; $_ = JSON::PP->new->canonical->pretty->encode($d)' "$bp/.claude/settings.json"
+hook "$bp"
+has "a kept PreToolUse hook and claudeMdExcludes in the project's settings are named in a LOOK line" \
+  "session-status: LOOK - .claude/settings.json keeps 1 PreToolUse hook of the project's own; claudeMdExcludes, which run or load beside the method's hooks"
+lacks "the kept hook's command is not shown" "check-secret-token"
+hook "$p"
+lacks "the method's own hooks in the project's settings are not named" ".claude/settings.json keeps"
 hook "$p" "" CLAUDE_CODE_EFFORT_LEVEL=low
 has "CLAUDE_CODE_EFFORT_LEVEL set is status's effort LOOK, also inside a hook" "effort: LOOK - CLAUDE_CODE_EFFORT_LEVEL is set"
 

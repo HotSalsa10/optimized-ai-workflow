@@ -411,6 +411,28 @@ if wanted G12; then
   if [ "$(wc -l <"$proj/.method/local/effort-warned")" -eq 3 ]; then pass "G12: its note has one line per warned session"; else fail "G12: its note has one line per warned session" "$(cat "$proj/.method/local/effort-warned")"; fi
   for n in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do effort "f$n" high ''; done
   if [ "$(wc -l <"$proj/.method/local/effort-warned")" -eq 20 ]; then pass "G12: its note keeps the last 20 sessions"; else fail "G12: its note keeps the last 20 sessions" "$(wc -l <"$proj/.method/local/effort-warned") lines"; fi
+  # (step 7.3) the threshold is the profile's effort: the lock's profile
+  # line and its row in profiles.tsv; xhigh with no lock (above) or an
+  # unknown profile
+  cp "$root/method/scripts/method/profiles.tsv" "$proj/scripts/method/profiles.tsv"
+  g12_lock() { printf 'version\tv0.7.0\nsource\t%040d\nprofile\t%s\nsettings\t%064d\n' 0 "$1" 0 >"$proj/scripts/method/method.lock"; }
+  g12_lock balanced
+  effort p1 medium ''
+  if [ ! -s "$work/out.txt" ] && [ "$code" -eq 0 ]; then pass "G12: silent at Balanced's own effort (medium)"; else fail "G12: silent at Balanced's own effort (medium)" "$(cat "$work/out.txt")"; fi
+  effort p2 low ''
+  case "$(cat "$work/out.txt")" in *"effort low, below the medium that the project's profile (balanced) sets"*"switch with /effort medium"*) pass "G12: below Balanced's effort, a warning naming the profile's effort" ;; *) fail "G12: below Balanced's effort, a warning naming the profile's effort" "$(cat "$work/out.txt")" ;; esac
+  g12_lock budget
+  effort p3 medium ''
+  if [ ! -s "$work/out.txt" ]; then pass "G12: silent at Budget's own effort (medium)"; else fail "G12: silent at Budget's own effort (medium)" "$(cat "$work/out.txt")"; fi
+  effort p4 low ''
+  case "$(cat "$work/out.txt")" in *"below the medium that the project's profile (budget) sets"*) pass "G12: below Budget's effort, a warning" ;; *) fail "G12: below Budget's effort, a warning" "$(cat "$work/out.txt")" ;; esac
+  g12_lock best
+  effort p5 high ''
+  case "$(cat "$work/out.txt")" in *"below the xhigh that the project's profile (best) sets"*) pass "G12: below Best results' effort (xhigh), a warning" ;; *) fail "G12: below Best results' effort (xhigh), a warning" "$(cat "$work/out.txt")" ;; esac
+  g12_lock turbo
+  effort p6 high ''
+  case "$(cat "$work/out.txt")" in *"below the method's xhigh"*) pass "G12: a profile the release does not know is held to xhigh" ;; *) fail "G12: a profile the release does not know is held to xhigh" "$(cat "$work/out.txt")" ;; esac
+  rm -f "$proj/scripts/method/method.lock" "$proj/scripts/method/profiles.tsv"
 
 fi
 # --- speed ---

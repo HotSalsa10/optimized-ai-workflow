@@ -53,7 +53,11 @@
 #     would leave a protected file at a version that is neither HEAD's nor
 #     the remote main's.
 #   Protect::effort(IN, PROJECT) TEXT or undef (G12): the session's first
-#     main-session tool call at an effort below xhigh gets one warning.
+#     main-session tool call at an effort below the one the project's
+#     profile sets gets one warning: the lock's profile line and that row's
+#     effortLevel in scripts/method/profiles.tsv (lib/lock.pl; step 7.3,
+#     step7.md S7); xhigh when there is no lock, or when the lock or the
+#     row cannot be read.
 #   Protect::resolve(WORD, BASE) the path WORD names, as above, or undef.
 #   @Protect::METHOD_SKILLS the method's skill folders, by name;
 #     Protect::skills_re() the names of .claude/skills/ entries G6 keeps,
@@ -1108,7 +1112,8 @@ sub git_versions {
   return ();
 }
 
-# G12: the warning for the session's first main-session call below xhigh
+# G12: the warning for the session's first main-session call below the
+# profile's effort
 sub effort {
   my ($in, $project) = @_;
   return undef unless ref $in eq 'HASH';
@@ -1116,7 +1121,20 @@ sub effort {
   my $e = $in->{effort};
   my $level = ref $e eq 'HASH' ? $e->{level} : $e;
   return undef unless defined $level && !ref $level && $level ne '';
+  # (no profile sets more than xhigh, Lock::profiles, so xhigh and max
+  # need no lock read)
   return undef if $level =~ /\A(?:xhigh|max)\z/;
+  my ($want, $name, $below) = ('xhigh', undef, 1);
+  if (defined $project && $project ne '' && eval { require File::Spec->catfile($lib, 'lock.pl'); 1 }) {
+    my ($n, $row) = eval { Lock::profile($project) };
+    if ($row) {
+      my %rank;
+      @rank{@Lock::EFFORTS} = 0 .. $#Lock::EFFORTS;
+      ($want, $name) = ($row->{effortLevel}, $n);
+      $below = !defined $rank{$level} || $rank{$level} < $rank{$want};
+    }
+  }
+  return undef unless $below;
   my $shown = $level =~ /\A(?:low|medium|high)\z/ ? $level : 'not one the method knows';
   my $sid = defined $in->{session_id} && !ref $in->{session_id} ? $in->{session_id} : '';
   require Digest::SHA;
@@ -1130,7 +1148,8 @@ sub effort {
     # once; 5.7 repair loop 1)
     eval { Log::append($root, '.method/local/effort-warned', 20, rule => 'G12', tool => 'effort', hash => $hash) };
   }
-  return "this session runs at effort $shown, below the method's xhigh, so its work may be shallower than the method assumes; switch with /effort xhigh";
+  my $under = defined $name ? "the $want that the project's profile ($name) sets" : "the method's xhigh";
+  return "this session runs at effort $shown, below $under, so its work may be shallower than the method assumes; switch with /effort $want";
 }
 
 1;

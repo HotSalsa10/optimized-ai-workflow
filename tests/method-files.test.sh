@@ -194,7 +194,7 @@ mcase "no lock beside the method's files is red" 1 "rm scripts/method/method.loc
 mcase "a lock with a bad version line is red" 1 "perl -pi -e 's/\Aversion\t.*/version\tlatest/ if \$. == 1' scripts/method/method.lock" \
   "scripts/method/method.lock line 1: not a version line"
 mcase "a lock with an unknown profile is red" 1 "perl -pi -e 's/\Aprofile\t.*/profile\tturbo/' scripts/method/method.lock" \
-  "the method keys cannot be worked out: the profile turbo is not one this release knows (best)"
+  "the method keys cannot be worked out: the profile turbo is not one this release knows (best balanced budget)"
 mcase "a lock line naming a path outside the method's is red" 1 "printf 'file\t%s\tsrc/a.txt\n' \"\$(printf '%064d' 0)\" >>scripts/method/method.lock" \
   "scripts/method/method.lock line" "the path is not one of the method's paths"
 

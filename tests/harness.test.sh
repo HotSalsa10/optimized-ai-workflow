@@ -401,7 +401,7 @@ if h_fake "$H_WORK/ss.json"; then
   # shellcheck disable=SC2086
   h_client 60 -- $D
   sid=$(h_init session_id)
-  if h_req_has 'METHOD-ACTIVE vunreleased' && { h_req_has 'status: nothing needs a look' || h_req_has ' areas need a look ('; }; then pass "session-status: METHOD-ACTIVE and status's summary reach the first request"; else fail "session-status: METHOD-ACTIVE and status's summary reach the first request" "$(LC_ALL=C grep -h -o 'METHOD-ACTIVE[^"]*' "$H_DIR"/fake/req-*.json | head -3)"; fi
+  if h_req_has "METHOD-ACTIVE $H_TAG" && { h_req_has 'status: nothing needs a look' || h_req_has ' areas need a look ('; }; then pass "session-status: METHOD-ACTIVE, naming the release sync installed (method.lock), and status's summary reach the first request"; else fail "session-status: METHOD-ACTIVE and status's summary reach the first request" "$(LC_ALL=C grep -h -o 'METHOD-ACTIVE[^"]*' "$H_DIR"/fake/req-*.json | head -3)"; fi
   rm -f "$H_DIR"/fake/req-*.json
   # the resumed request also holds the first session's text, and the client
   # does not add output identical to what it already has: so the tree is
@@ -410,7 +410,7 @@ if h_fake "$H_WORK/ss.json"; then
   # shellcheck disable=SC2086
   H_PROMPT=again h_client 60 -- $D --resume "$sid"
   h_stop
-  if h_req_has 'SessionStart:resume hook success: METHOD-ACTIVE vunreleased' && h_req_has 'work: LOOK - 1 uncommitted'; then pass "session-status: a resumed session gets METHOD-ACTIVE and its own status again"; else fail "session-status: a resumed session gets METHOD-ACTIVE and its own status again" "$(LC_ALL=C grep -h -o 'SessionStart:[a-z]* hook success: [^"]\{0,80\}' "$H_DIR"/fake/req-*.json | sort -u | head -4)"; fi
+  if h_req_has "SessionStart:resume hook success: METHOD-ACTIVE $H_TAG" && h_req_has 'work: LOOK - 1 uncommitted'; then pass "session-status: a resumed session gets METHOD-ACTIVE and its own status again"; else fail "session-status: a resumed session gets METHOD-ACTIVE and its own status again" "$(LC_ALL=C grep -h -o 'SessionStart:[a-z]* hook success: [^"]\{0,80\}' "$H_DIR"/fake/req-*.json | sort -u | head -4)"; fi
   h_safe session-status
 else
   fail "session-status: the fake did not answer; the client was not started"
@@ -422,7 +422,7 @@ if h_fake "$H_WORK/ss.json"; then
   # shellcheck disable=SC2086
   h_client 60 -- $D
   h_stop
-  if h_req_has 'METHOD-ACTIVE vunreleased' && h_req_has 'work: LOOK - ' && h_req_has 'status: 1 areas need a look (work)'; then pass "session-status: with a dirty tree (status exits 1) the line and the LOOK still reach Claude"; else fail "session-status: with a dirty tree the line and the LOOK still reach Claude"; fi
+  if h_req_has "METHOD-ACTIVE $H_TAG" && h_req_has 'work: LOOK - ' && h_req_has 'status: 1 areas need a look (work)'; then pass "session-status: with a dirty tree (status exits 1) the line and the LOOK still reach Claude"; else fail "session-status: with a dirty tree the line and the LOOK still reach Claude"; fi
   h_safe session-status-dirty
 else
   fail "session-status-dirty: the fake did not answer; the client was not started"
@@ -437,7 +437,7 @@ if h_fake "$H_WORK/ss.json"; then
   # shellcheck disable=SC2086
   h_client 60 PATH="$H_DIR/bin" -- $D
   h_stop
-  if h_req_has 'METHOD-ACTIVE vunreleased' && h_req_has 'perl or its JSON::PP module is missing'; then pass "session-status: without perl on PATH, METHOD-ACTIVE and a LOOK saying so still reach Claude"; else fail "session-status: without perl on PATH, METHOD-ACTIVE and a LOOK saying so still reach Claude" "$(tail -3 "$H_DIR/err.txt")"; fi
+  if h_req_has "METHOD-ACTIVE $H_TAG" && h_req_has 'perl or its JSON::PP module is missing'; then pass "session-status: without perl on PATH, METHOD-ACTIVE and a LOOK saying so still reach Claude"; else fail "session-status: without perl on PATH, METHOD-ACTIVE and a LOOK saying so still reach Claude" "$(tail -3 "$H_DIR/err.txt")"; fi
   h_safe session-status-noperl
 else
   fail "session-status-noperl: the fake did not answer; the client was not started"
@@ -448,7 +448,7 @@ if h_fake "$H_WORK/ss.json"; then
   # shellcheck disable=SC2086
   h_client 60 METHOD_NESTED=1 -- $D
   h_stop
-  if h_req_has 'METHOD-ACTIVE vunreleased (nested: status skipped)'; then pass "session-status: a nested run (METHOD_NESTED=1) gets METHOD-ACTIVE without status"; else fail "session-status: a nested run gets the one short line"; fi
+  if h_req_has "METHOD-ACTIVE $H_TAG (nested: status skipped)"; then pass "session-status: a nested run (METHOD_NESTED=1) gets METHOD-ACTIVE without status"; else fail "session-status: a nested run gets the one short line"; fi
   h_safe session-status-nested
 else
   fail "session-status-nested: the fake did not answer; the client was not started"

@@ -1,0 +1,13 @@
+# The method's profiles (step7.md S7): each sets only the main session's
+# model, effortLevel and availableModels in .claude/settings.json. The
+# checking agents keep claude-opus-5-5 at xhigh in every profile, because
+# each list holds claude-opus-5-5. scripts/method/lib/lock.pl reads and
+# lints this file. A profile change takes effect from the next session.
+# best: Best results, the default (the settings fragment as released).
+# balanced: Anthropic's defaults (Opus 5.5 at medium effort); cheaper,
+#   slower to catch subtle bugs.
+# budget: Sonnet 5.5 at medium effort; cheaper again, weaker on long or
+#   subtle work. When a check misses something, step up a profile.
+best	{"availableModels":["claude-opus-5-5"],"effortLevel":"xhigh","model":"claude-opus-5-5"}
+balanced	{"availableModels":["claude-opus-5-5"],"effortLevel":"medium","model":"claude-opus-5-5"}
+budget	{"availableModels":["claude-opus-5-5","claude-sonnet-5-5"],"effortLevel":"medium","model":"claude-sonnet-5-5"}

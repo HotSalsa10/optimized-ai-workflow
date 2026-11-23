@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Tests for method/settings.fragment.json, the settings every method
 # project gets (step 5.3; docs/plans/step5.md, section 5; M076, M104,
-# M138), and for every committed settings file of this repo. Static and
+# M138), its profiles in method/scripts/method/profiles.tsv (step 7.3),
+# and for every committed settings file of this repo. Static and
 # fast: it reads the files, it runs no client (the harness shows the
 # client loading the fragment).
 #
@@ -229,6 +230,39 @@ if (!defined $hooks) {
     check("$name.sh on $event" . (defined $matcher ? " for $matcher" : "") . " has a $timeout s time limit, written as a number", (@t && !grep { !defined $_ || ref $_ || Json::encode($_) ne $timeout } @t) ? undef : 'its timeout is ' . join(', ', map { defined $_ ? Json::encode($_) : 'not set' } @t));
   }
 }
+# the profiles (step 7.3; step7.md S7; SPEC R5): profiles.tsv passes its
+# lint (lib/lock.pl), each profile gives the main session's model, effort
+# and list the plan names, and every other method key is the same in all
+# three, the checking agents' floor among them
+require "$root/method/scripts/method/lib/lock.pl";
+my $ptext;
+if (open my $ph, '<:raw', 'method/scripts/method/profiles.tsv') { local $/; $ptext = <$ph> }
+if (!defined $ptext) {
+  bad("profiles.tsv passes its lint", "method/scripts/method/profiles.tsv cannot be read");
+} else {
+  my ($rows, $names, $pp) = Lock::profiles($ptext, $f);
+  check("profiles.tsv passes its lint (only model, effortLevel and availableModels; claude-opus-5-5 on every list; each model on its own list; best as the fragment)",
+    @$pp ? join('; ', @$pp) : undef);
+  check("the profiles are best, balanced and budget, in that order", "@$names" eq 'best balanced budget' ? undef : "they are: @$names");
+  my %wp = (best => ['claude-opus-5-5', 'xhigh', ['claude-opus-5-5']], balanced => ['claude-opus-5-5', 'medium', ['claude-opus-5-5']],
+    budget => ['claude-sonnet-5-5', 'medium', ['claude-opus-5-5', 'claude-sonnet-5-5']]);
+  my %floor;
+  for my $p (qw(best balanced budget)) {
+    my ($k, $e) = Lock::expected_from($f, $ptext, $p);
+    my ($m, $ef, $l) = @{ $wp{$p} };
+    my $name = "the profile ${p}'s merged keys: model $m, effortLevel $ef, availableModels " . join(',', @$l);
+    if ($e) { bad($name, $e); next }
+    my $got = Json::encode([@{ $k->{keys} }{qw(model effortLevel availableModels)}]);
+    check($name, $got eq Json::encode([$m, $ef, $l]) ? undef : "they are $got");
+    my %rest = %$k;
+    $rest{keys} = { %{ $k->{keys} } };
+    delete @{ $rest{keys} }{qw(model effortLevel availableModels)};
+    $floor{$p} = Json::encode(\%rest);
+  }
+  check("every method key but model, effortLevel and availableModels is the same in all three profiles (hooks, deny list, enforceAvailableModels, disableAllHooks and the rest)",
+    (3 == keys %floor && $floor{best} eq $floor{balanced} && $floor{best} eq $floor{budget}) ? undef : 'they differ');
+}
+
 # the hooks folder holds only the three scripts' .sh files
 my $hd = 'method/.claude/hooks/method';
 if (-d $hd) {

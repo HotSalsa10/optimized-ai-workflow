@@ -149,6 +149,34 @@ file_plant "a never-set key in a nested folder's committed settings" "sub/.claud
 file_plant "a registered script missing from the hooks folder" "missing: gate-receipt" 'rm method/.claude/hooks/method/gate-receipt.sh'
 file_plant "a gate in verdicts.txt that the fragment does not run gate-receipt for" "FAIL  the fragment runs gate-receipt.sh on SubagentStart for ^(method-reviewer|method-security-checker|method-reporter|method-diagnose|method-tester|method-planner)$" 'printf "gate-verdict\tmethod-planner\tthe planner; its report opens with a verdict word\n" >>method/scripts/method/verdicts.txt'
 file_plant "a never-set env variable in lower case in this repo's settings" "it sets env.claude_code_effort_level" 'perl -MJSON::PP -i -0pe "my \$d = decode_json(\$_); \$d->{env}{claude_code_effort_level} = q(low); \$_ = JSON::PP->new->canonical->pretty->encode(\$d)" .claude/settings.json && git add .claude/settings.json'
+# profile_plant NAME REASON CODE (step 7.3): perl CODE, a substitution on
+# each line ($_) of method/scripts/method/profiles.tsv, in a fresh copy,
+# must change a line; the settings test must then go red with REASON
+profile_plant() {
+  sb=$(make_sandbox) || abort_sandbox
+  if ! (cd "$sb" && C="$3" perl -i -pe 'BEGIN { $n = 0 } $n++ if eval $ENV{C}; END { $? = $n ? 0 : 1 }' method/scripts/method/profiles.tsv); then
+    fail "$1: the plant did not apply"
+  else
+    out=$(cd "$sb" && bash tests/settings.test.sh 2>&1)
+    rc=$?
+    if [ "$rc" -eq 0 ]; then
+      fail "$1: the settings test stayed green" "$(printf '%s\n' "$out" | tail -2)"
+    elif ! printf '%s\n' "$out" | grep -F -q -- "$2"; then
+      fail "$1: went red, but not for the stated reason ('$2')" "$(printf '%s\n' "$out" | grep FAIL | head -3)"
+    else
+      pass "$1"
+    fi
+  fi
+  drop_sandbox "$sb" || true
+}
+profile_plant "a profile row touching hooks" "the profile budget sets hooks, which a profile may not set" 's/^budget\t\{/budget\t{"hooks":{},/'
+profile_plant "an availableModels without Opus" "the profile budget's availableModels lacks claude-opus-5-5" 's/^(budget\t.*)"claude-opus-5-5",/$1/'
+profile_plant "a profile model missing from its own availableModels" "the profile balanced's model is not on its own availableModels" 's/^(balanced\t.*"model":)"claude-opus-5-5"/$1"claude-sonnet-5-5"/'
+profile_plant "the best row's effort not the fragment's" "the best row's effortLevel differs from" 's/^(best\t.*"effortLevel":)"xhigh"/$1"high"/'
+# (lib/lock.pl's overlay, planted to lower a floor key for one profile)
+file_plant "a profile that changes a floor key through the overlay" "FAIL  every method key but model, effortLevel and availableModels is the same in all three profiles" \
+  'perl -0pi -e '"'"'s/(\$k\{keys\}\{\$_\} = \$rows->\{\$profile\}\{\$_\} for \@PROFILE_KEYS;\n)/$1  \$k{keys}{disableAllHooks} = 1 if \$profile eq q(budget);\n/ or die'"'"' method/scripts/method/lib/lock.pl'
+profile_plant "Budget's effort raised (the floor keys still hold, so only its own check sees it)" "FAIL  the profile budget's merged keys: model claude-sonnet-5-5, effortLevel medium" 's/^(budget\t.*"effortLevel":)"medium"/$1"high"/'
 
 echo "plants: settings: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]

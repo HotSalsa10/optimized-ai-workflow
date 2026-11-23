@@ -105,14 +105,46 @@ h_settings() {
   fi
 }
 
-# h_method ROOT: lays the method out in the project as sync will (scripts/
-# method/, .claude/hooks/method/, the fragment as .claude/settings.json,
-# the project records), from the repository at ROOT, and commits it all
+# h_release ROOT (step 7.3): a tagged throwaway release of the method from
+# the repository at ROOT (a planted copy in tests/plants/harness.sh), its
+# method/ and scripts/release/ as they are on disk, committed and tagged
+# $H_TAG, in H_REL; made once per ROOT in a run
+H_TAG=v0.0.0-harness
+h_release() {
+  if [ "${H_REL_FROM:-}" = "$1" ] && [ -d "${H_REL:-}/.git" ]; then return 0; fi
+  H_REL_N=$((${H_REL_N:-0} + 1))
+  H_REL="$H_WORK/release-$H_REL_N"
+  rm -rf "$H_REL"
+  mkdir -p "$H_REL/scripts" &&
+    cp -R "$1/method" "$H_REL/method" &&
+    cp -R "$1/scripts/release" "$H_REL/scripts/release" || return 1
+  # (git with a home of its own, so no setting of the caller's reaches it)
+  h_rel_git() { HOME="$H_REL/.home" GIT_CONFIG_NOSYSTEM=1 git -C "$H_REL" "$@"; }
+  h_rel_git init -q && h_rel_git config core.autocrlf false && h_rel_git config user.name Harness &&
+    h_rel_git config user.email harness@example.invalid && h_rel_git config commit.gpgsign false &&
+    printf '.home/\n' >>"$H_REL/.git/info/exclude" &&
+    h_rel_git add -A && h_rel_git commit -q -m release && h_rel_git tag "$H_TAG" || return 1
+  H_REL_FROM=$1
+}
+
+# h_method ROOT: lays the method out in the project as sync lays it out:
+# the release's sync (from h_release ROOT) installs it in a folder of the
+# case, from which scripts/method/ (method.lock among them), .claude/
+# hooks/method/ and .claude/settings.json are copied (h_method_words copies
+# the agents, rules and skills); then the project records, all committed.
+# So the layout has one definition, sync's (step7.md 7.3)
 h_method() {
+  h_release "$1" || return 1
+  rm -rf "$H_DIR/install"
+  mkdir -p "$H_DIR/install" || return 1
+  if ! HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 bash "$H_REL/scripts/release/sync.sh" --to "$H_DIR/install" --write >"$H_DIR/sync.txt" 2>&1; then
+    fail "h_method: the release's sync did not install the method" "$(tail -5 "$H_DIR/sync.txt")"
+    return 1
+  fi
   mkdir -p "$H_PROJ/scripts" "$H_PROJ/.claude/hooks" &&
-    cp -R "$1/method/scripts/method" "$H_PROJ/scripts/method" &&
-    cp -R "$1/method/.claude/hooks/method" "$H_PROJ/.claude/hooks/method" &&
-    cp "$1/method/settings.fragment.json" "$H_PROJ/.claude/settings.json" || return 1
+    cp -R "$H_DIR/install/scripts/method" "$H_PROJ/scripts/method" &&
+    cp -R "$H_DIR/install/.claude/hooks/method" "$H_PROJ/.claude/hooks/method" &&
+    cp "$H_DIR/install/.claude/settings.json" "$H_PROJ/.claude/settings.json" || return 1
   for r in AGENTS.md SPEC.md TASKS.md DECISIONS.md ROADMAP.md RISKS.md CHANGELOG.md TESTS.md; do printf '# %s\n' "$r" >"$H_PROJ/$r"; done
   printf '@AGENTS.md\n' >"$H_PROJ/CLAUDE.md"
   (cd "$H_PROJ" && HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git add -A && HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git commit -q -m "the method")
@@ -433,18 +465,20 @@ h_gate_holds() {
 }
 
 # h_method_words ROOT (step 6.1): lays the method's own words out in the
-# project as sync will, from the repository at ROOT: method/.claude/agents/
-# method/, rules/method/ and every skills/method-*/ that exists, into the
-# project's .claude/; then commits. h_method is not changed, so the hook
-# cases keep the harness's stand-in gate.
+# project as sync laid them out for h_method ROOT (called first, with the
+# same ROOT): .claude/agents/method/, rules/method/ and every skills/
+# method-*/ of that install, into the project's .claude/; then commits.
+# h_method alone copies none of them, so the hook cases keep the harness's
+# stand-in gate.
 h_method_words() {
   local d
+  [ -d "$H_DIR/install/.claude" ] || return 1
   for d in agents/method rules/method; do
-    if [ -d "$1/method/.claude/$d" ]; then
-      mkdir -p "$H_PROJ/.claude/$d" && cp -R "$1/method/.claude/$d/." "$H_PROJ/.claude/$d/" || return 1
+    if [ -d "$H_DIR/install/.claude/$d" ]; then
+      mkdir -p "$H_PROJ/.claude/$d" && cp -R "$H_DIR/install/.claude/$d/." "$H_PROJ/.claude/$d/" || return 1
     fi
   done
-  for d in "$1"/method/.claude/skills/method-*; do
+  for d in "$H_DIR"/install/.claude/skills/method-*; do
     [ -d "$d" ] || continue
     mkdir -p "$H_PROJ/.claude/skills/${d##*/}" && cp -R "$d/." "$H_PROJ/.claude/skills/${d##*/}/" || return 1
   done

@@ -139,7 +139,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M131 | Claude never lands a change; gh, HTTP calls to GitHub, MCP tools and other Claude runs pass only from a list | incident; research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | done |
 | M132 | Claude only reads the method's installed files (its hooks, scripts, agents, rules and skills), its settings, git's own config and hooks, and the folders Claude Code loads mods and plugins from; it never writes them | research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | done |
 | M133 | No commit while a mutation run or its journal exists | research: decision A41 | method/.claude/hooks/method/guard.sh | done |
-| M134 | Effort below xhigh is announced at a session's first tool call | research: decision A3 | method/.claude/hooks/method/guard.sh | done |
+| M134 | Effort below the one the project's profile sets (xhigh for Best results and with no lock) is announced at a session's first tool call (reworded in step 7.3, step 7 plan S7) | research: decision A3 | method/.claude/hooks/method/guard.sh | done |
 | M135 | Secrets, personal data and Claude attribution are stopped before they leave the machine: a push, gh text and MCP writes are scanned | incident | method/.claude/hooks/method/guard.sh | R2 |
 | M136 | A settings change that switches off or weakens the hooks is refused mid-session | research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | done |
 | M137 | A skill or agent that declares its own hooks is refused (the method's own declare none) | research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | done |
@@ -160,7 +160,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M152 | status says when the project's own always-loaded text (rules outside `.claude/rules/method/` without `paths:`, CLAUDE.md, AGENTS.md) passes 8,000 bytes | SPEC R12, applied to the project's own text (step 7 plan, S11) | method/scripts/method/lib/status.pl | step 7 |
 | M153 | Changes to the files that steer the method (method.conf, checks, the project's pack, CI workflows, the incident checklist, REVIEW.md, CLAUDE.md, AGENTS.md) are high-risk whatever method.conf says | step 5 plan's touches-method route, in its cheap form (step 7 plan, S12) | method/scripts/method/lib/conf.pl | step 7 |
 | M154 | A flaky check: find the cause; never skip, retry or re-run it until it passes | step 6b plan, section 6 (P4) | method/.claude/rules/method/method.md | step 7 |
-| M155 | Sync replaces nothing changed since the lock and writes nothing until its whole plan holds | SPEC R1 (step 7 plan, S3) | scripts/release/sync.sh | step 7 |
+| M155 | Sync replaces nothing changed since the lock and writes nothing until its whole plan holds | SPEC R1 (step 7 plan, S3) | scripts/release/sync.sh | done |
 | M156 | Setup writes only through setup-write from an answers file and never overwrites a project file outside its block | SPEC R3 (step 7 plan, S9, S10) | method/scripts/method/lib/setup.pl | step 7 |
 | M157 | The review packet carries the project's REVIEW.md as it stands at the merge base | step 6b plan, section 6 (P3) | method/scripts/method/lib/packet.pl | step 7 |
 | M158 | The reviewer checks every item of the project's incident checklist and says so | step 6b plan, section 6 (P8 part 3) | method/.claude/agents/method/method-reviewer.md | step 7 |
