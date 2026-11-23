@@ -328,8 +328,16 @@ if wanted "readers of a log that hooks are trimming never die with a false alarm
   done
   wait
   died=$(cat "$work"/reader.[1-4] 2>/dev/null | perl -ne '$n += $_; END { print $n + 0 }')
-  if [ "$died" = "0" ] && [ "$(cat "$work"/reader.[1-4] | wc -l | tr -d ' ')" = "4" ]; then pass "readers of a log that hooks are trimming never die with a false alarm"; else fail "readers of a log that hooks are trimming never die with a false alarm" "$died died: $(head -c 300 "$work/reader-err.1")"; fi
+  if [ "$died" = "0" ] && [ "$(cat "$work"/reader.[1-4] | wc -l | tr -d ' ')" = "4" ]; then pass "readers of a log that hooks are trimming never die with a false alarm"; else fail "readers of a log that hooks are trimming never die with a false alarm" "$died died; $(for i in 1 2 3 4; do printf "reader %s: %s; " "$i" "$(head -c 300 "$work/reader-err.$i")"; done)"; fi
 fi
+# Linux drops the old log's link count to 0 a moment before a trim's
+# rename moves its name to the new log, so a reader can open a file of no
+# name that the name still shows; the case above saw it once in hundreds of
+# runs. Here stat on an open file reports 0 links the first Z times, as in
+# that moment.
+zero_stat='BEGIN { $main::Z = 0; *CORE::GLOBAL::stat = sub (;*) { my @s = CORE::stat(@_ ? $_[0] : $_); if ($main::Z > 0 && @s && ref $_[0]) { $main::Z--; $s[3] = 0 } @s } } Log::append($ENV{ROOT}, "zero.log", undef, rule => "G1", tool => "Bash", hash => $ENV{H}) for 1 .. 2;'
+pl "a reader that opens the old log as a trim's rename takes its last name (0 links, the name still showing it) opens the new one, not a false hard-link alarm" "$zero_stat"' $main::Z = 1; my ($ok, $bad) = eval { Log::lines($ENV{ROOT}, "zero.log") }; print($ok && @$ok == 2 && !$bad && $main::Z == 0 ? "ok" : "died: $@")'
+pl "a log that keeps showing 0 links is refused as changed, not as a hard link" "$zero_stat"' $main::Z = 99; eval { Log::lines($ENV{ROOT}, "zero.log") }; print($@ =~ /changed while it was opened/ ? "ok" : "died: $@")'
 
 # --- log.pl, step 5b: gates.log's fields; a file written whole; the
 # newest files kept (receipts and settings snapshots in git's folder) ---

@@ -145,8 +145,11 @@ sub open_plain {
   die "log: $path is not a regular file\n" unless -f $fh;
   # replaced (a trim renamed a new log over it) since it was opened: the
   # name now holds another file (the opened one, kept open, keeps its inode
-  # number, so no new file can have it)
-  die "log: $path changed while it was opened\n" unless @ps && $ps[0] == $fs[0] && $ps[1] == $fs[1];
+  # number, so no new file can have it). Linux drops the old file's link
+  # count to 0 before its name moves to the new one, so a file opened in
+  # that moment has no name left while the name still shows it: replaced
+  # too, not a hard link
+  die "log: $path changed while it was opened\n" unless @ps && $ps[0] == $fs[0] && $ps[1] == $fs[1] && $fs[3] > 0;
   die "log: $path has another name (a hard link); the log is not used through it\n" if $fs[3] != 1;
   return $fh;
 }
