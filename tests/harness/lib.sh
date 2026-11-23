@@ -873,11 +873,15 @@ h_design_holds() {
 # commit (HARNESS-CHAINED), then ends; the client's debug log goes to
 # $H_DIR/debug.log. MODE nohook: the fragment without its SessionStart
 # hook, so no METHOD-ACTIVE line comes; the main session only answers.
-# Sets H_EFFORT (the fragment's effortLevel) and H_ACTIVE (the first line
-# session-status.sh prints, up to its version). Returns 1 when the case
-# could not be made or the fake did not answer.
+# MODE finish (step 6b.4): /method-finish typed in place of /method-start,
+# with the start hook; the main session only answers.
+# Sets H_SKILL (the skill typed), H_EFFORT (the fragment's effortLevel) and
+# H_ACTIVE (the first line session-status.sh prints, up to its version).
+# Returns 1 when the case could not be made or the fake did not answer.
 h_start() {
   local mode=$2
+  H_SKILL=method-start
+  [ "$mode" = finish ] && H_SKILL=method-finish
   H_EFFORT=$(perl -MJSON::PP -0ne 'print JSON::PP->new->decode($_)->{effortLevel}' "$1/method/settings.fragment.json") || return 1
   H_ACTIVE="METHOD-ACTIVE v"
   { h_case "start-$mode" && h_method "$1"; } || return 1
@@ -888,24 +892,24 @@ h_start() {
   fi
   h_method_words "$1" || return 1
   perl -MJSON::PP -e '
-    my ($mode) = @ARGV;
+    my ($mode, $skill) = @ARGV;
     my @turns = map { {text => "MAIN-DONE-$_"} } 1 .. 3;
     unshift @turns, {tool => "Bash", input => {command => "bash scripts/method/status.sh", description => "HARNESS status alone"}},
       {tool => "Bash", input => {command => "bash scripts/method/status.sh && git commit -q --allow-empty -m HARNESS-CHAINED", description => "HARNESS status chained"}}
       if $mode eq "default";
-    print JSON::PP->new->canonical->encode({convs => [{name => "main", match => "^<command-name>/method-start</command-name>\$", turns => \@turns}],
-      fallback => {text => "FAKE-FALLBACK"}, usage => {input_tokens => 11, output_tokens => 7}})' "$mode" >"$H_DIR/start.json" || return 1
+    print JSON::PP->new->canonical->encode({convs => [{name => "main", match => "^<command-name>/\Q$skill\E</command-name>\$", turns => \@turns}],
+      fallback => {text => "FAKE-FALLBACK"}, usage => {input_tokens => 11, output_tokens => 7}})' "$mode" "$H_SKILL" >"$H_DIR/start.json" || return 1
   h_fake "$H_DIR/start.json" || return 1
-  H_PROMPT="/method-start" h_client 90 -- --permission-mode default --allowedTools Bash --debug-file "$H_DIR/debug.log"
+  H_PROMPT="/$H_SKILL" h_client 90 -- --permission-mode default --allowedTools Bash --debug-file "$H_DIR/debug.log"
   h_stop
 }
 # h_start_holds QUESTION: 0 when QUESTION holds for the case h_start ran
 # last; else 1, with H_WHY saying what was seen. The questions:
-#   expands  method-start's body (its SKILL.md after the frontmatter, each
-#            ${CLAUDE_EFFORT} read as the fragment's effortLevel) reached the
-#            main conversation's first request, with no ARGUMENTS line (none
-#            was typed); its "# rules:" line reached no request; and init's
-#            slash_commands lists method-start
+#   expands  the typed skill's body (its SKILL.md after the frontmatter,
+#            each ${CLAUDE_EFFORT} read as the fragment's effortLevel)
+#            reached the main conversation's first request, with no
+#            ARGUMENTS line (none was typed); its "# rules:" line reached no
+#            request; and init's slash_commands lists the skill
 #   effort   the SKILL.md holds ${CLAUDE_EFFORT} (or the case cannot tell);
 #            no ${...} written in it reached any request as written; the
 #            body that reached the main conversation holds the effort where
@@ -926,21 +930,59 @@ h_start() {
 #            SKILL.md that names METHOD-ACTIVE (at least one, or the skill
 #            does not name it) reached the main conversation's requests:
 #            the text only; whether Claude acts on it is convention
+#   merged   (MODE default, step 6b.4) every line of method-start's SKILL.md
+#            that names `gh pr list --state merged` (at least one, or the
+#            skill does not name the read) reached the main conversation's
+#            requests: the text only, as for named
+#   steps    (MODE finish, step 6b.4) method-finish's SKILL.md has its
+#            thirteen numbered steps (lines "N. **...**") and names the
+#            commands they run (H_FINISH_NAMES: run-checks, the packet,
+#            done-check --ready, report-check, the push, gh pr create);
+#            each numbered step's line reached the main conversation's
+#            requests (expands shows the whole body did)
+H_FINISH_NAMES='scripts/method/run-checks.sh
+scripts/method/review-packet.sh
+scripts/method/done-check.sh --ready
+scripts/method/report-check.sh
+git push origin HEAD
+gh pr create'
 h_start_holds() {
   local f got v line n
   H_WHY=""
-  f="$H_PROJ/.claude/skills/method-start/SKILL.md"
+  f="$H_PROJ/.claude/skills/${H_SKILL:-method-start}/SKILL.md"
   case $1 in
     expands)
       got=$(perl "$HARNESS/read.pl" skill main "$f" "" "$H_DIR/fake" "$H_EFFORT")
-      [ "$got" = same ] || H_WHY="$H_WHY /method-start's body in main's first request: $got;"
+      [ "$got" = same ] || H_WHY="$H_WHY /$H_SKILL's body in main's first request: $got;"
       line=$(sed -n 's/^# rules: //p' "$f")
       if [ -z "$line" ]; then
-        H_WHY="$H_WHY method-start's SKILL.md has no '# rules:' line, so the case cannot tell;"
+        H_WHY="$H_WHY $H_SKILL's SKILL.md has no '# rules:' line, so the case cannot tell;"
       else
-        ! h_req_has "# rules: $line" || H_WHY="$H_WHY method-start's '# rules:' line reached a request;"
+        ! h_req_has "# rules: $line" || H_WHY="$H_WHY $H_SKILL's '# rules:' line reached a request;"
       fi
-      h_init slash_commands | grep -q -x -F method-start || H_WHY="$H_WHY method-start is not in init's slash_commands;"
+      h_init slash_commands | grep -q -x -F "$H_SKILL" || H_WHY="$H_WHY $H_SKILL is not in init's slash_commands;"
+      ;;
+    merged)
+      [ "$(LC_ALL=C grep -c -F -e '--state merged' "$f")" -gt 0 ] || H_WHY="$H_WHY method-start's SKILL.md has no line naming gh pr list --state merged;"
+      while IFS= read -r line; do
+        [ -z "$line" ] || perl "$HARNESS/read.pl" req main "$line" "$H_DIR/fake" || H_WHY="$H_WHY the skill's line naming the merged read did not reach main: $line;"
+      done <<EOF
+$(LC_ALL=C grep -F -e '--state merged' "$f")
+EOF
+      ;;
+    steps)
+      n=$(LC_ALL=C grep -c '^[0-9][0-9]*\. \*\*' "$f")
+      [ "$n" = 13 ] || H_WHY="$H_WHY method-finish's SKILL.md has $n numbered steps, not 13;"
+      while IFS= read -r v; do
+        [ -z "$v" ] || LC_ALL=C grep -q -F -e "$v" "$f" || H_WHY="$H_WHY method-finish's SKILL.md names no $v;"
+      done <<EOF
+$H_FINISH_NAMES
+EOF
+      while IFS= read -r line; do
+        [ -z "$line" ] || perl "$HARNESS/read.pl" req main "$line" "$H_DIR/fake" || H_WHY="$H_WHY a step's line did not reach main: $(printf '%s' "$line" | cut -c1-60);"
+      done <<EOF
+$(LC_ALL=C grep '^[0-9][0-9]*\. \*\*' "$f")
+EOF
       ;;
     effort)
       # shellcheck disable=SC2016 # the variable as written in the skill, not expanded here

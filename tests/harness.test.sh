@@ -916,6 +916,7 @@ if h_start "$root" default; then
   start_q effort "start: \${CLAUDE_EFFORT} in method-start is substituted with the session's effort (the fragment's effortLevel, which the main session's requests carry), and no \${...} reaches a request as written (F6)"
   start_q guard "start: the skill's Bash calls reach the guard: status.sh in a call of its own passes and runs; status.sh && git commit is refused (G6) and commits nothing"
   start_q active "start: with the start hook, its METHOD-ACTIVE line reaches the main session's first request"
+  start_q merged "start (6b.4): the skill's text naming its merged pull request read (gh pr list --state merged) reaches the main session (the text only)"
   h_safe start-default
 else
   fail "start-default: the case could not be made, or the fake did not answer; the client was not started"
@@ -926,6 +927,17 @@ if h_start "$root" nohook; then
   h_safe start-nohook
 else
   fail "start-nohook: the case could not be made, or the fake did not answer; the client was not started"
+fi
+
+# --- 22. /method-finish (step 6b.4): the skill typed as the owner's
+# message (-p "/method-finish", F6), with the method's fragment and its start
+# hook; the main session only answers (h_start finish, h_start_holds) ---
+if h_start "$root" finish; then
+  start_q expands "finish: -p \"/method-finish\" sends method-finish's SKILL.md body, with no ARGUMENTS line; its '# rules:' line reaches no request; it is in init's slash_commands"
+  start_q steps "finish: method-finish's thirteen numbered steps reach the main session, and its text names run-checks, the packet, done-check --ready, report-check, the push and gh pr create"
+  h_safe finish
+else
+  fail "finish: the case could not be made, or the fake did not answer; the client was not started"
 fi
 
 echo "harness: ${H_RUNS:-0} client runs took ${H_TOTAL_SECS:-0} s"
