@@ -1,0 +1,39 @@
+---
+name: method-finish
+description: Takes a finished task to a pull request. Records, commit, checks, the review packet, the gates in one message, the logs, the report and its check, the verdict line done-check gives, the push, then the pull request for the owner's merge. Stops when a push does not land.
+# rules: M007 M011 M070 M087 M148 M149 M150
+---
+# Finish the task
+
+The task's work is built and its own checks pass. This takes it to a pull request the owner can merge. Claude never merges: the owner's merge on GitHub is the approval.
+
+Run each command below in a Bash call of its own, with nothing chained to it: the guard refuses a call that names the method's scripts beside a command that is not a read. `<main>` is the branch the project merges into: main, unless status names another. `<id>` is the task's folder under `docs/tasks/`, the one this branch added. `<tree>` is what `git rev-parse HEAD^{tree}` prints for the commit being finished; read it again after every commit.
+
+## Before you start
+
+Run `git config --get-all remote.origin.fetch`. When it names one branch and not `+refs/heads/*:refs/remotes/origin/*`, this is a single-branch clone: it can neither compare with <main> nor push to it as the steps need. Say so, give the owner their fix (`git remote set-branches --add origin <main>`, then `git fetch origin`; the guard refuses it to Claude), and stop.
+
+## The steps, in order
+
+1. **Records first.** Run `bash scripts/method/status.sh` and read its records line. Bring the project's records up to date for this change before the commit, so that one review covers one change.
+2. **Commit** the work and the records together.
+3. **The checks.** Run `bash scripts/method/run-checks.sh`. Its first line names its log, `.method/local/logs/run-checks-<time>-<pid>.log`: that is the run-checks log of this version. A check that failed is fixed before anything else, then back to step 2.
+4. **The review packet.** Run `mkdir -p .method/local`, then `bash scripts/method/review-packet.sh --base origin/<main> --criteria docs/tasks/<id>/plan.md --checks <the run-checks log> > .method/local/packet-<tree>.txt`. Build it again for every new version: a packet names the tree it was built for, and a review of an old one does not count. When git finds several merge bases, use the first, as done-check does. Add `--since <the last reviewed version>` only when every gate you will run has a receipt on that version that done-check counted as reviewed from the merge base; when unsure, build from the merge base.
+5. **FULL: the tester.** Launch the method-tester agent with the Agent tool and `run_in_background: false`, its prompt naming `docs/tasks/<id>/expected.tsv` and the tests to run. It is to say TESTS PASS on this version; anything else is fixed, then back to step 2.
+6. **The review.** Launch the method-reviewer and the method-security-checker agents in one message, each with the Agent tool and `run_in_background: false`, each prompt naming the packet and saying that the plan is the criteria. Review the version after the plan's Approved line even when an earlier one was reviewed: rounds before the approval do not count. On a high-risk path (`HIGH_RISK_PATHS` in `.claude/method.conf`, main's list and this branch's together), this is Deep review: three method-reviewer runs and the security checker, all in one message, and every finding of any of the three gets a disposition in the report (fixed, and where; or not fixed, and why). When a gate asks for changes, fix them and go back to step 2. After three reviewed versions since the approval, stop: the task is planned again.
+7. **The logs.** Each to `.method/local/logs/`, in a call of its own: `bash scripts/method/done-check.sh --ready > .method/local/logs/done-check-<tree>.txt` (it says NOT READY at least for the missing verdict line; that is expected here); `git rev-list --count origin/<main>..HEAD > .method/local/logs/counts-<tree>.txt`; `git diff --stat origin/<main>...HEAD >> .method/local/logs/counts-<tree>.txt`; `git diff --name-only origin/<main>...HEAD > .method/local/logs/files-<tree>.txt`.
+8. **The report.** Write it to `.method/local/report.md`, in the form the method's rules give reports, with every number copied from a log exactly as written. It holds:
+   - a part headed `## What the checks would miss`: what no check run here looks at, such as what only a person can see, paths no test runs, and assumptions nothing tested; never "nothing" or "none";
+   - in the change summary, each changed file (the files log) that is outside the plan's `Paths:` line, or "none". A file is inside when it equals a listed path or is under one;
+   - when done-check's history names a method-diagnose word, one candidate line for the project's incident checklist, as an [EYES] item, in business terms: the trigger (what a diff shows), the check, and where it came from. The owner decides whether it goes in; never add it yourself.
+
+   Then run `bash scripts/method/report-check.sh .method/local/report.md <the run-checks log> .method/local/logs/counts-<tree>.txt .method/local/logs/done-check-<tree>.txt .method/local/gates.log > .method/local/logs/report-check-<tree>.txt`. When it lists anything, fix the report and run it again.
+9. **The reporter**, for FULL, and for LIGHT when the report has [EYES] or [CHECK] items. Launch the method-reporter agent with the Agent tool and `run_in_background: false`, its prompt naming `.method/local/report.md` and giving report-check's output as it came. When it asks for changes, fix the report, or the work and back to step 2, and run it again.
+10. **The verdict line.** Run `bash scripts/method/done-check.sh --ready`. Its `next:` line gives the exact verdict line; copy it, never write one of your own. Add it as the last paragraph of HEAD's commit message: when HEAD is already pushed, as an empty commit (`git commit --allow-empty`), since the guard refuses a force push; otherwise by amending the message. Either way the files stay as reviewed. Then run `bash scripts/method/done-check.sh --ready > .method/local/logs/done-check-<tree>-final.txt` and copy its READY line. When it says NOT READY, stop and report what it names.
+11. **The push.** Run `git push origin HEAD`. When it fails or is refused, stop: say the push did not land and why, and run no `gh pr` command.
+12. **The pull request.** Write its text to `.method/local/pr-body.md`: the READY line, the [EYES] and [AUTHORITY] items, done-check's history of the gates' words, then the report, and the verdict line last, as its own paragraph. Run `gh pr list --head <branch>`. With no open pull request for the branch, run `gh pr create --head <branch> --title "<the task in a few words>" --body-file .method/local/pr-body.md`; with one, `gh pr edit <number> --body-file .method/local/pr-body.md`. Copy the pull request's link and state from what gh printed in this step; when it printed none, say "could not read", never a link you made up.
+13. **Stop.** Show the owner the READY line and the pull request's link and state as copied. Tell them to delete any Co-authored-by lines GitHub adds in the merge box, after the verdict line, before they merge.
+
+## When a receipt is missing
+
+Receipts are kept in this clone only, so a fresh clone or a new cloud session has none. Run the reviews again on the same version. For FULL, a lost TESTS FAIL run is made again at the commit after the approval and before the code: `git switch -c <a new branch> <that commit>`, the tester there, then `git switch` back to the task's branch.

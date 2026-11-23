@@ -18,6 +18,8 @@ npx @anthropic-ai/claude-code -p hello
 npx -y @anthropic-ai/claude-code@2.1.319 -p hello
 @@ G4 Bash another Claude is refused: bunx
 bunx @anthropic-ai/claude-code -p hello
+@@ G4 Bash another Claude is refused: installing a mod or plugin (6b.4)
+claude plugin install token-weather@my-mods --scope user
 @@ G4 Bash setting CLAUDE_CONFIG_DIR is refused
 CLAUDE_CONFIG_DIR=/tmp/other ls
 @@ G4 Bash exporting CLAUDE_CODE_SIMPLE is refused

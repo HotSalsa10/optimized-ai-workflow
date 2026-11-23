@@ -206,6 +206,25 @@ if wanted "a method skill (6.3): an interpreter's code naming"; then
   if [ "$out" = "yyynn" ]; then pass "a method skill (6.3): an interpreter's code naming .claude/skills/method-start, method-plan or method-design is found, a project skill's is not"; else fail "a method skill (6.3): an interpreter's code naming a method skill is found" "$out (wanted yyynn)"; fi
 fi
 
+# --- the method's /method-finish skill (step 6b.4) and the folders Claude
+# Code loads mods and plugins from (~/.claude/dev-mods/, ~/.claude/
+# plugins/; also under CLAUDE_CONFIG_DIR): G6 as for ~/.claude/agents/ ---
+s="mods and plugins (6b.4):"
+tool "a method skill (6b.4): an Edit of method-finish's SKILL.md is refused" Edit "$(jpath "$proj/.claude/skills/method-finish/SKILL.md")" G6
+judge "a method skill (6b.4): a write is refused: sed -i s/a/b/ .claude/skills/method-finish/SKILL.md" "$proj" 'sed -i s/a/b/ .claude/skills/method-finish/SKILL.md' G6
+tool "$s Write to home/.claude/dev-mods/s1/m/index.ts is refused" Write "$(jpath "$HOME/.claude/dev-mods/s1/m/index.ts")" G6
+tool "$s Write to home/.claude/plugins/x is refused" Write "$(jpath "$HOME/.claude/plugins/x")" G6
+for c in 'echo x > ~/.claude/dev-mods/x' 'cp m.ts ~/.claude/plugins/x'; do
+  judge "$s a write is refused: $c" "$proj" "$c" G6
+done
+mkdir -p "$work/cfg"
+CLAUDE_CONFIG_DIR="$work/cfg" tool "$s Write to a mod under CLAUDE_CONFIG_DIR is refused" Write "$(jpath "$work/cfg/dev-mods/s1/m/index.ts")" G6
+CLAUDE_CONFIG_DIR="$work/cfg" tool "$s Write to a plugin under CLAUDE_CONFIG_DIR is refused" Write "$(jpath "$work/cfg/plugins/x")" G6
+for c in 'ls ~/.claude/plugins' 'cat ~/.claude/dev-mods/x'; do
+  judge "$s a read passes: $c" "$proj" "$c" allow
+done
+tool "$s Write to a folder whose name only starts like dev-mods passes" Write "$(jpath "$HOME/.claude/dev-mods-old/x")" allow
+
 # --- path forms and letter case, read by the resolver itself ---
 out=$(cd "$proj" && perl -e 'require $ARGV[0]; print Protect::resolve(q{C:\Users\a\.claude\settings.json}, "/x"), "\n", Protect::resolve("a/../b//c/./d", "/base"), "\n"' "$lib/protect.pl")
 if [ "$out" = "/c/Users/a/.claude/settings.json
@@ -321,9 +340,11 @@ open('.git/method-lock', 'w')
 open('.git/packed-refs', 'w')
 open('.git/refs/remotes/origin/main', 'w')
 open('notes.txt', 'w')
+open(os.path.expanduser('~/.claude/dev-mods/s1/m/index.ts'), 'w')
+open(f"{HOME}/.claude/plugins/x", "w")
 TEXT
 out=$(cd "$proj" && perl -e 'require $ARGV[0]; my $re = Protect::text_re(Protect::set($ARGV[1])); open my $h, "<", $ARGV[2] or die; while (my $t = <$h>) { chomp $t; print $t =~ $re ? "y" : "n" }' "$lib/protect.pl" "$proj" "$work/forms.txt")
-if [ "$out" = "yyyyyn" ]; then pass "an interpreter's code naming ~/.claude/skills, agents, .git/method-*, packed-refs or refs/remotes is found"; else fail "the text forms" "$out (wanted yyyyyn)"; fi
+if [ "$out" = "yyyyynyy" ]; then pass "an interpreter's code naming ~/.claude/skills, agents, .git/method-*, packed-refs, refs/remotes, dev-mods or plugins is found"; else fail "the text forms" "$out (wanted yyyyynyy)"; fi
 
 # --- G12: one warning per session below xhigh ---
 if wanted G12; then

@@ -63,7 +63,7 @@ drop "the method's files in git's folder dropped" "Write to projü/.git/method-m
 drop "the include files dropped" "Write to a settings file git reads through include.path is refused" '$inc, '
 drop "core.hooksPath dropped" "Write into the folder core.hooksPath names is refused" '($hp =~'
 drop "your Claude Code settings dropped" "Write to home/.claude/settings.json is refused" '$c, '
-drop "your Claude Code agents, skills and commands dropped" "Write to home/.claude/agents/x.md is refused" '"$c/$_"'
+drop "your Claude Code agents, skills, commands, mods and plugins dropped" "Write to home/.claude/agents/x.md is refused" '"$c/$_->[0]"'
 drop "the home .gitconfig dropped" "Write to ~/.gitconfig before it exists is refused" '"$h/.gitconfig"'
 drop "the home .config/git dropped" "Write to home/.config/git/config is refused" '"$xdg/git"'
 drop "GIT_CONFIG_GLOBAL dropped" "Write to the file GIT_CONFIG_GLOBAL names is refused" '$ENV{$v}'
@@ -128,9 +128,9 @@ plant "the commits after -- not judged" "a cherry-pick with -- before the commit
 drop "the remote's branches dropped" 'a write is refused (5.7 repair loop 1): echo x > .git/refs/remotes/origin/main' '"$common/refs/remotes"'
 drop "git's packed refs dropped" "Write to git's packed refs is refused" '"$common/packed-refs"'
 plant "a linked settings file's real path not protected" "Write to the real file a linked settings file points at is refused" 'for grep { -l } bsd_glob("$q/settings*.json", GLOB_QUOTE | GLOB_NOSORT);' 'for ();'
-plant "a linked skill's real folder not protected" "Write into the real folder a linked skill points at is refused" 'for grep { -l } bsd_glob("$q/$d/*", GLOB_QUOTE | GLOB_NOSORT);' 'for ();'
+plant "a linked skill's real folder not protected" "Write into the real folder a linked skill points at is refused" 'for grep { -l } bsd_glob("$q/$d->[0]/*", GLOB_QUOTE | GLOB_NOSORT);' 'for ();'
 plant "the new text forms dropped" "the text forms" '
-    . q!|(?:~|HOME\}?)/\.claude/(?:agents|skills|commands)\b|\.git/(?:method-|refs/remotes\b|packed-refs\b)!;' ';'
+    . q!|(?:~|HOME\}?)/\.claude/! . home_re() . q!|\.git/(?:method-|refs/remotes\b|packed-refs\b)!;' ';'
 plant "G12 keeps one session" "G12: a session warned before another one is not warned again" "'.method/local/effort-warned', 20," "'.method/local/effort-warned', 1,"
 # (the final review of step 5)
 PLANT_FILE=guard.pl plant "one folder guessed after a cd that may have failed" "a write after a cd that may have failed is judged from the cd's folder too: cd .claude/hooks/method;" "Protect::judge_bash(\\@cmds, [cmd_dir_sets(" "Protect::judge_bash(\\@cmds, [cmd_dirs("
@@ -167,6 +167,14 @@ drop "the method's skills dropped from the set" "$s Write to projü/.claude/skil
 plant "the method's skills dropped from the version check (@SPECS)" "$s switching to a branch whose method-start SKILL.md differs is refused" 'map { ".claude/skills/$_" } @METHOD_SKILLS);' '());'
 plant "the method's skills dropped from the text forms (text_re)" "$s an interpreter's code naming" '/! . skills_re()' '/(?!)!'
 PLANT_FILE=guard.pl plant "the method's skills dropped from the watched paths (\$WATCHED_PATH)" "$s perl -e that writes method-start's SKILL.md is refused" '|\.claude/skills/@{[ Protect::skills_re() ]}' ''
+
+# --- /method-finish, and the mods and plugins folders (step 6b.4) ---
+s="mods and plugins (6b.4):"
+plant "method-finish dropped from the method's skills" "a method skill (6b.4): an Edit of method-finish's SKILL.md is refused" 'qw(method-start method-plan method-design method-finish)' 'qw(method-start method-plan method-design)'
+plant "dev-mods dropped from the home folders" "$s Write to home/.claude/dev-mods/s1/m/index.ts is refused" "['dev-mods', 'mods'], " ''
+plant "plugins dropped from the home folders" "$s Write to home/.claude/plugins/x is refused" ", ['plugins', 'plugins']" ''
+plant "CLAUDE_CONFIG_DIR not added" "$s Write to a mod under CLAUDE_CONFIG_DIR is refused" 'push @cfg, $ENV{CLAUDE_CONFIG_DIR} if' '0 && push @cfg, $ENV{CLAUDE_CONFIG_DIR} if'
+plant "dev-mods dropped from the text forms" "the text forms" "/\\.claude/! . home_re() . q!" "/\\.claude/(?:agents|skills|commands|plugins)\\b"
 
 echo "plants: protected files: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]
