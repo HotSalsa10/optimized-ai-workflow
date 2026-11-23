@@ -603,15 +603,21 @@ fi
 h_stop
 drop_sandbox "$sb" || true
 # with no start hook: method-start's lines naming METHOD-ACTIVE removed
-# (named), and, in a second copy, method-start made a skill only Claude can
-# call (expands)
+# (named), and (step 6b.4's check) its merged read left without the
+# comparison of HEAD with the merged pull request's head (merged; the
+# question reads only the skill's text, so it holds with no start hook
+# too); in a second copy, method-start made a skill only Claude can call
+# (expands)
 sb=$(make_sandbox) || abort_sandbox
 s="$sb/method/.claude/skills/method-start/SKILL.md"
 perl -ni -e 'print unless /METHOD-ACTIVE/' "$s"
-if grep -q -F METHOD-ACTIVE "$s"; then
-  fail "start: the plant did not apply, so the check result would mean nothing"
+# shellcheck disable=SC2016 # perl code; the backquotes are the skill's text
+perl -pi -e 's/`git merge-base --is-ancestor HEAD <its headRefOid>`/a look at it/' "$s"
+if grep -q -F METHOD-ACTIVE "$s" || grep -q -F 'git merge-base --is-ancestor HEAD' "$s" || ! grep -q -F -e '--state merged' "$s"; then
+  fail "start: the plants did not apply, so the check results would mean nothing"
 else
-  start_plant nohook "named|method-start's SKILL.md has no line naming METHOD-ACTIVE|method-start's text naming the METHOD-ACTIVE line removed"
+  start_plant nohook "named|method-start's SKILL.md has no line naming METHOD-ACTIVE|method-start's text naming the METHOD-ACTIVE line removed" \
+    "merged|method-start's merged read does not compare HEAD with the merged head|method-start's merged read left without the HEAD comparison"
 fi
 h_stop
 drop_sandbox "$sb" || true

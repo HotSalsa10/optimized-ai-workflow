@@ -916,7 +916,7 @@ if h_start "$root" default; then
   start_q effort "start: \${CLAUDE_EFFORT} in method-start is substituted with the session's effort (the fragment's effortLevel, which the main session's requests carry), and no \${...} reaches a request as written (F6)"
   start_q guard "start: the skill's Bash calls reach the guard: status.sh in a call of its own passes and runs; status.sh && git commit is refused (G6) and commits nothing"
   start_q active "start: with the start hook, its METHOD-ACTIVE line reaches the main session's first request"
-  start_q merged "start (6b.4): the skill's text naming its merged pull request read (gh pr list --state merged) reaches the main session (the text only)"
+  start_q merged "start (6b.4): the skill's text naming its merged pull request read (gh pr list --state merged), which compares HEAD with the merged head (git merge-base --is-ancestor), reaches the main session (the text only)"
   h_safe start-default
 else
   fail "start-default: the case could not be made, or the fake did not answer; the client was not started"

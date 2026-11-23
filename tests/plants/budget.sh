@@ -120,6 +120,19 @@ if expect_landed "the tester's description as a | block, 301 bytes as YAML reads
 fi
 drop_sandbox "$sb"
 
+# (step 6b.4's check) a real description as a plain value of its text, two
+# blank lines and a second line, 301 bytes as YAML reads it (one line
+# break for each blank line); a counter that joins the lines with a space
+# reads 300: red
+sb=$(make_sandbox) || abort_sandbox
+# shellcheck disable=SC2016 # perl code, expanded by perl
+perl -0pi -e 's/^description: ([^\n]*)\n/"description: $1\n\n\n  " . ("w" x (299 - length $1)) . "\n"/me' "$sb/$tester"
+# shellcheck disable=SC2016 # perl code, expanded by perl
+if expect_landed "the tester's description as a plain value with two blank lines inside, 301 bytes as YAML reads it" perl -0ne 'exit !(/^description: ([^\n]*)\n\n\n  (w+)\n/m && length("$1\n\n$2") == 301)' "$sb/$tester"; then
+  judge "budget red with a description as a plain value with two blank lines inside, 301 bytes as YAML reads it (not 300, its lines joined by a space)" "$sb" red "descriptions: a description over the budget of 300 bytes"
+fi
+drop_sandbox "$sb"
+
 # the descriptions in all: exactly 3,000 bytes, then one byte over, in new
 # files of at most 300 bytes each
 for want in 3000 3001; do

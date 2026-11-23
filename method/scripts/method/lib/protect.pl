@@ -87,9 +87,11 @@ our @METHOD_SKILLS = qw(method-start method-plan method-design method-finish);
 # folder behind each link in them, and the text forms (home_re)
 our @HOME_DIRS = (['agents', 'agents'], ['skills', 'skills'], ['commands', 'commands'], ['dev-mods', 'mods'], ['plugins', 'plugins']);
 
-# the folders of @HOME_DIRS as one regex alternation, for text_re (each
-# name ends at a word's edge, as the forms there always have)
-sub home_re { return '(?:' . join('|', map { quotemeta $_->[0] } @HOME_DIRS) . ')\\b' }
+# the folders of @HOME_DIRS as one regex alternation, for text_re, each
+# name whole: it ends where the folder's name ends (no letter, digit, _, -
+# or . follows), as in skills_re, so ~/.claude/dev-mods-old is not one
+# (step 6b.4's check)
+sub home_re { return '(?:' . join('|', map { quotemeta $_->[0] } @HOME_DIRS) . ')(?![A-Za-z0-9_.-])' }
 
 # the method's skills as one regex alternation, each name whole: it ends
 # where the folder's name ends (no letter, digit, _, - or . follows); with

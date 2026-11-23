@@ -342,9 +342,13 @@ open('.git/refs/remotes/origin/main', 'w')
 open('notes.txt', 'w')
 open(os.path.expanduser('~/.claude/dev-mods/s1/m/index.ts'), 'w')
 open(f"{HOME}/.claude/plugins/x", "w")
+open(os.path.expanduser('~/.claude/dev-mods-old/x'), 'w')
+open(f"{HOME}/.claude/plugins-cache.txt", "w")
+open('~/.claude/skills.bak/x', 'w')
+p = '~/.claude/plugins'
 TEXT
 out=$(cd "$proj" && perl -e 'require $ARGV[0]; my $re = Protect::text_re(Protect::set($ARGV[1])); open my $h, "<", $ARGV[2] or die; while (my $t = <$h>) { chomp $t; print $t =~ $re ? "y" : "n" }' "$lib/protect.pl" "$proj" "$work/forms.txt")
-if [ "$out" = "yyyyynyy" ]; then pass "an interpreter's code naming ~/.claude/skills, agents, .git/method-*, packed-refs, refs/remotes, dev-mods or plugins is found"; else fail "the text forms" "$out (wanted yyyyynyy)"; fi
+if [ "$out" = "yyyyynyynnny" ]; then pass "an interpreter's code naming ~/.claude/skills, agents, .git/method-*, packed-refs, refs/remotes, dev-mods or plugins is found; a folder whose name only starts like one (dev-mods-old, plugins-cache.txt, skills.bak) is not"; else fail "the text forms" "$out (wanted yyyyynyynnny)"; fi
 
 # --- G12: one warning per session below xhigh ---
 if wanted G12; then

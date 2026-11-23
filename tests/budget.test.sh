@@ -64,9 +64,19 @@ budget_read() {
           if ($l[$i] =~ /\Adescription:[ \t]*(.*?)[ \t]*\z/) {
             $v = $1;
             # the lines YAML reads as part of the value: each indented or
-            # empty line after it, up to the next key, trimmed
-            my @more;
-            for my $j ($i + 1 .. $#l) { last unless $l[$j] =~ /\A(?:[ \t]|\z)/; push @more, $1 if $l[$j] =~ /\A[ \t]*(\S.*?)[ \t]*\z/ }
+            # empty line after it, up to the next key, trimmed; each line
+            # with text is kept with the blank lines just before it, since
+            # YAML joins two lines with a space when none come between and
+            # with one line break for each blank line otherwise
+            my (@more, $blank);
+            $blank = 0;
+            for my $j ($i + 1 .. $#l) {
+              last unless $l[$j] =~ /\A(?:[ \t]|\z)/;
+              if ($l[$j] =~ /\A[ \t]*(\S.*?)[ \t]*\z/) { push @more, [$1, $blank]; $blank = 0 } else { $blank++ }
+            }
+            # the lines joined as YAML joins them (blank lines before
+            # the first do not count)
+            my $joined = sub { my ($f, @r) = @_; my $s = $f->[0]; $s .= ($_->[1] ? "\n" x $_->[1] : " ") . $_->[0] for @r; $s };
             if ($v =~ /\A[|>]([-+0-9]*)(?:[ \t]+#.*)?\z/) {
               # a block value: each of its lines, blank ones too, with the
               # block'"'"'s indent taken off (its number, else the first
@@ -79,16 +89,16 @@ budget_read() {
               $ind = 0 unless defined $ind;
               $v = join "", map { (my $x = $_) =~ s/\A[ \t]{0,$ind}//; "$x\n" } @b;
             } elsif ($v =~ /\A[\x22\x27]/) {
-              $v = join " ", $v, @more;
+              $v = $joined->([$v, 0], @more);
             } else {
               my @p;
-              for my $s (grep { length } $v, @more) {
-                if ($s =~ /\A#/) { last if @p; next }
-                (my $c = $s) =~ s/[ \t]+#.*\z//;
-                push @p, $c;
-                last if $c ne $s;
+              for my $s (grep { length $_->[0] } [$v, 0], @more) {
+                if ($s->[0] =~ /\A#/) { last if @p; next }
+                (my $c = $s->[0]) =~ s/[ \t]+#.*\z//;
+                push @p, [$c, $s->[1]];
+                last if $c ne $s->[0];
               }
-              $v = join " ", @p;
+              $v = @p ? $joined->(@p) : "";
             }
             last;
           }
@@ -273,6 +283,27 @@ d=$(case_dir desc-block-over) || abort_sandbox
 printf 'r\n' >"$d/method/.claude/rules/method/r.md"
 mkdir -p "$d/method/.claude/skills/method-b" && printf -- '---\nname: b\ndescription: |\n  %s\n\n  %s\n---\n' "$(xs 149)" "$(xs 149)" >"$d/method/.claude/skills/method-b/SKILL.md"
 want "the counter: a | block of two lines of 149 bytes and a blank line between, 301 bytes as YAML reads it, fails" "$d" FAIL "descriptions: a description over the budget of 300 bytes"
+# (step 6b.4's check) blank lines inside a plain or quoted value: YAML
+# keeps one line break for each, where lines with none between are joined
+# by a space; blank lines before the value's first line are not part of
+# it. The values below are PyYAML's for the same text, the quoted one
+# counted over (its quotes are counted as written)
+d=$(case_dir desc-blank) || abort_sandbox
+printf 'r\n' >"$d/method/.claude/rules/method/r.md"
+printf -- '---\nname: p\ndescription: a\n\n\n  b\n---\n' >"$d/method/.claude/agents/method/p.md"
+printf -- '---\nname: o\ndescription: a\n\n  b\nmodel: x\n---\n' >"$d/method/.claude/agents/method/o.md"
+printf -- '---\nname: n\ndescription:\n\n  a\n\n\n  b\n---\n' >"$d/method/.claude/agents/method/n.md"
+printf -- '---\nname: q\ndescription: "a\n\n\n\n\n  b"\n---\n' >"$d/method/.claude/agents/method/q.md"
+if counted "$d" "DESC 4 method/.claude/agents/method/p.md" && counted "$d" "DESC 3 method/.claude/agents/method/o.md" && counted "$d" "DESC 4 method/.claude/agents/method/n.md" &&
+  counted "$d" "DESC 8 method/.claude/agents/method/q.md"; then
+  pass "the counter: blank lines inside a plain value, one line break each: two (4), one (3), none counted before its first line (4); in a quoted value, counted over (8, YAML 6)"
+else
+  fail "the counter: blank lines inside a plain value, one line break each: two (4), one (3), none counted before its first line (4); in a quoted value, counted over (8, YAML 6)" "$(budget_read "$d")"
+fi
+d=$(case_dir desc-blank-over) || abort_sandbox
+printf 'r\n' >"$d/method/.claude/rules/method/r.md"
+mkdir -p "$d/method/.claude/skills/method-p" && printf -- '---\nname: p\ndescription: %s\n\n\n  %s\n---\n' "$(xs 150)" "$(xs 149)" >"$d/method/.claude/skills/method-p/SKILL.md"
+want "the counter: a plain value of two lines of 150 and 149 bytes with two blank lines between, 301 bytes as YAML reads it, fails" "$d" FAIL "descriptions: a description over the budget of 300 bytes"
 
 echo "tests: budget: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]

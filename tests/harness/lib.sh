@@ -933,7 +933,10 @@ h_start() {
 #   merged   (MODE default, step 6b.4) every line of method-start's SKILL.md
 #            that names `gh pr list --state merged` (at least one, or the
 #            skill does not name the read) reached the main conversation's
-#            requests: the text only, as for named
+#            requests, and one of them compares HEAD with the merged pull
+#            request's head (headRefOid, `git merge-base --is-ancestor
+#            HEAD`), so work added after the merge is not read as merged:
+#            the text only, as for named
 #   steps    (MODE finish, step 6b.4) method-finish's SKILL.md has its
 #            thirteen numbered steps (lines "N. **...**") and names the
 #            commands they run (H_FINISH_NAMES: run-checks, the packet,
@@ -964,6 +967,8 @@ h_start_holds() {
       ;;
     merged)
       [ "$(LC_ALL=C grep -c -F -e '--state merged' "$f")" -gt 0 ] || H_WHY="$H_WHY method-start's SKILL.md has no line naming gh pr list --state merged;"
+      LC_ALL=C grep -F -e '--state merged' "$f" | LC_ALL=C grep -F -e headRefOid | LC_ALL=C grep -q -F -e 'git merge-base --is-ancestor HEAD' ||
+        H_WHY="$H_WHY method-start's merged read does not compare HEAD with the merged head (headRefOid, git merge-base --is-ancestor HEAD);"
       while IFS= read -r line; do
         [ -z "$line" ] || perl "$HARNESS/read.pl" req main "$line" "$H_DIR/fake" || H_WHY="$H_WHY the skill's line naming the merged read did not reach main: $line;"
       done <<EOF
