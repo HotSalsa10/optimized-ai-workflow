@@ -600,22 +600,33 @@ sub tier_condition {
   my ($main, $mwhy) = high_risk_list($tip, 'on main');
   my ($mine, $hwhy) = high_risk_list($T{head}, 'in this change');
   my @why = grep { defined } $mwhy, $hwhy;
-  # an entry this change adds to the list that names no path in its files
-  # or among the paths it touches (an inline comment, a misspelt path)
+  # an entry, main's or this change's, that names no path in its files or
+  # among the paths it touches (an inline comment, a misspelt path)
   # protects nothing it was meant to: it fails closed, as a problem the
-  # parser finds. Main's entries were checked when their change added them,
-  # so a listed path a later change deleted blocks no other branch
+  # parser finds. One exception: an entry on main's list that is a plain
+  # path (no space, no #) which some earlier commit of main had is a path
+  # a merged change deleted; it blocks no branch, and the tier line says
+  # to drop it from the list
   my @touched = touched();
   my %on_main = map { ($_ => 1) } @{ $main || [] };
-  my @none = grep { my $e = $_; !$on_main{$e} && $e ne '.' && !Tree::lookup($T{head}, $e) && !grep { Conf::under($_, [$e]) } @touched }
-    @{ $mine || [] };
+  my (%seen, @gone, @none, @none_main);
+  for my $e (grep { !$seen{$_}++ } @{ $main || [] }, @{ $mine || [] }) {
+    next if $e eq '.' || Tree::lookup($T{head}, $e) || grep { Conf::under($_, [$e]) } @touched;
+    if (!$on_main{$e}) { push @none, $e; next }
+    next if Tree::lookup($tip, $e);
+    if ($e =~ /\A[^\s#]+\z/ && Git::ok('rev-list', '-1', $tip, '--', $e) =~ /\S/) { push @gone, $e; next }
+    push @none_main, $e;
+  }
+  push @why, "$CONF on main (" . short($tip) . '): HIGH_RISK_PATHS has an entry that names no path in these files and is not a'
+    . ' plain path (no space, no #) that main had in an earlier commit: ' . names(@none_main)
+    . ' (the path may be misspelt, or the line may hold a comment, which the file does not allow)' if @none_main;
   push @why, "$CONF in this change (" . short($T{head}) . '): HIGH_RISK_PATHS adds an entry that names no path in its files: '
     . names(@none) . ' (the path may be misspelt or deleted, or the line may hold a comment, which the file does not allow)' if @none;
   return report($area, 0, 'the high-risk list cannot be read: ' . join('; ', @why) . '; a broken setting is not read as a shorter list', $fix)
     if @why;
   # main's list and the branch's together: a branch can add a path, never
   # remove one
-  my %seen;
+  %seen = ();
   my @list = grep { !$seen{$_}++ } @$main, @$mine;
   my @high = grep { Conf::under($_, \@list) } @touched;
   $T{high} = \@high;
@@ -623,13 +634,17 @@ sub tier_condition {
     : '(no HIGH_RISK_PATHS on main or in this change)';
   my $which = @high ? count(scalar(@high), 'changed path is', 'changed paths are') . ' high-risk: ' . names(@high) . " $lists"
     : "no changed path is high-risk $lists";
+  $which .= '; main\'s list names ' . names(@gone) . ', which ' . (@gone == 1 ? 'is' : 'are') . ' in none of these files but'
+    . ' main had in an earlier commit: a merged change deleted ' . (@gone == 1 ? 'it' : 'them') . '; drop '
+    . (@gone == 1 ? 'it' : 'them') . ' from HIGH_RISK_PATHS on main (a small task of its own)' if @gone;
   if (!$T{ok}{plan}) {
     $T{ok}{$area} = 1;
     return report($area, 1, "no approved plan to take the tier from (plan above); $which");
   }
   $T{full} = $T{tier} eq 'FULL' || @high ? 1 : 0;
   return report($area, 0, "the plan says Tier LIGHT, but $which; judged FULL, and the plan was not made as FULL",
-    'plan again as FULL (Tier: FULL, with expected.tsv), and ask the owner for their go again') if $T{tier} eq 'LIGHT' && @high;
+    'plan again as FULL (Tier: FULL, with expected.tsv), ask the owner for their go again, and replace the Approved line with'
+    . " their new reply, with today's date and the time (Approved: YYYY-MM-DD HH:MM \"<the reply>\")") if $T{tier} eq 'LIGHT' && @high;
   $T{ok}{$area} = 1;
   return report($area, 1, "Tier $T{tier}, as the plan says" . (@high ? "; $which, so Deep review applies" : $T{tier} eq 'LIGHT' ? ": $which" : "; $which"));
 }
@@ -678,7 +693,8 @@ sub lock_condition {
     'a change to the tier, the paths or the expected results is a new plan: ask the owner for their go again, and replace'
     . " the Approved line with their new reply, with today's date and the time (Approved: YYYY-MM-DD HH:MM \"<the reply>\")") if @moved;
   return report($area, 0, "the task is FULL, but its plan had no expected.tsv when it was approved in commit " . short($at)
-    . ': a FULL plan locks its expected results', "write $dir/expected.tsv, and ask the owner for their go again")
+    . ': a FULL plan locks its expected results', "write $dir/expected.tsv, ask the owner for their go again, and replace the Approved line with"
+    . " their new reply, with today's date and the time (Approved: YYYY-MM-DD HH:MM \"<the reply>\")")
     if $T{full} && !defined $then->{'expected.tsv'};
   $T{ok}{$area} = 1;
   return report($area, 1, "the plan's Tier and Paths lines and its expected.tsv are as approved in commit " . short($at)

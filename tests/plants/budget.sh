@@ -158,6 +158,21 @@ r16 "under a key with a space before its colon, 301 bytes" 's/^description: ([^\
 r16 "as a | block after an anchor, its second line 20 spaces deeper, 301 bytes as YAML reads it" 's/^description: ([^\n]*)\n/"description: &d |\n  $1\n" . (" " x 22) . ("w" x (279 - length $1)) . "\n"/me' 'exit !(/^description: &d \|\n  ([^\n]*)\n  ( {20}w+)\n/m && length("$1\n$2\n") == 301)'
 # shellcheck disable=SC2016 # perl code, expanded by perl
 r16 "in double quotes with \\L escapes, 301 bytes as YAML reads it" 's/^description: ([^\n]*)\n/my $n = 301 - length $1; "description: \x22$1" . ("w" x ($n % 3)) . ("\\L" x int($n \/ 3)) . "\x22\n"/me' 'exit !(/^description: "([^"\n\\]*)((?:\\L)+)"\n/m && length($1) + 3 * length($2) / 2 == 301 && length($1) + length($2) <= 298)'
+# (step 6b, R16, the extra round) the value starting on the line after the
+# key: a | header there after "description: &d", and a double-quoted value
+# with \L escapes there after a bare key; a counter that reads that line as
+# a plain value reads about 282 and 293: red
+# shellcheck disable=SC2016 # perl code, expanded by perl
+r16 "as a | block whose header is on the line after \"description: &d\", its second line 20 spaces deeper, 301 bytes as YAML reads it" 's/^description: ([^\n]*)\n/"description: &d\n  |\n  $1\n" . (" " x 22) . ("w" x (279 - length $1)) . "\n"/me' 'exit !(/^description: &d\n  \|\n  ([^\n]*)\n  ( {20}w+)\n/m && length("$1\n$2\n") == 301)'
+# shellcheck disable=SC2016 # perl code, expanded by perl
+r16 "in double quotes with \\L escapes on the line after a bare key, 301 bytes as YAML reads it" 's/^description: ([^\n]*)\n/my $n = 301 - length $1; "description:\n  \x22$1" . ("w" x ($n % 3)) . ("\\L" x int($n \/ 3)) . "\x22\n"/me' 'exit !(/^description:\n  "([^"\n\\]*)((?:\\L)+)"\n/m && length($1) + 3 * length($2) / 2 == 301 && length($1) + length($2) <= 298)'
+# a comment alone after the key, on its line or on a line of its own,
+# then the | header: a counter that reads the comment as the value reads
+# the block as plain text, about one byte short: red
+# shellcheck disable=SC2016 # perl code, expanded by perl
+r16 "as a | block after a comment on the key line, its second line 20 spaces deeper, 301 bytes as YAML reads it" 's/^description: ([^\n]*)\n/"description: # c\n  |\n  $1\n" . (" " x 22) . ("w" x (279 - length $1)) . "\n"/me' 'exit !(/^description: # c\n  \|\n  ([^\n]*)\n  ( {20}w+)\n/m && length("$1\n$2\n") == 301)'
+# shellcheck disable=SC2016 # perl code, expanded by perl
+r16 "as a | block after a comment on a line of its own, its second line 20 spaces deeper, 301 bytes as YAML reads it" 's/^description: ([^\n]*)\n/"description:\n  # c\n  |\n  $1\n" . (" " x 22) . ("w" x (279 - length $1)) . "\n"/me' 'exit !(/^description:\n  # c\n  \|\n  ([^\n]*)\n  ( {20}w+)\n/m && length("$1\n$2\n") == 301)'
 
 # the descriptions in all: exactly 3,000 bytes, then one byte over, in new
 # files of at most 300 bytes each

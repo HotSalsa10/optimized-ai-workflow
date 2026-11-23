@@ -61,10 +61,14 @@
 #                  change touches from the merge base (a moved file at its
 #                  old path too) that is a listed path or under one makes
 #                  the change high-risk; a plan that says LIGHT is then
-#                  judged FULL and fails (M147). An entry the change adds to
-#                  main's list that names no path in its files or among the
-#                  paths it touches (a misspelt or deleted path, a comment
-#                  on the line) fails it.
+#                  judged FULL and fails (M147). An entry, on main's list or
+#                  the change's, that names no path in its files or among
+#                  the paths it touches (a misspelt or deleted path, a
+#                  comment on the line) fails it, unless it is on main's
+#                  list, is a plain path (no space, no #) and an earlier
+#                  commit of main had it: that path a merged change deleted
+#                  fails nothing, and the tier line says to drop it from
+#                  main's list.
 #   lock           HEAD's Tier and Paths lines and expected.tsv (next to the
 #                  plan) are the anchor's; a FULL task had expected.tsv at
 #                  the anchor; expected.tsv, where it is, is a regular file

@@ -938,18 +938,22 @@ h_start() {
 #            skill does not name the read) reached the main conversation's
 #            requests, and one of them compares HEAD with the merged pull
 #            request's head (headRefOid, `git merge-base --is-ancestor
-#            HEAD`), so work added after the merge is not read as merged:
-#            the text only, as for named
+#            HEAD`), so work added after the merge is not read as merged,
+#            and takes the one merged last (mergedAt) and counts what is
+#            in neither it nor main (`--not <its headRefOid>
+#            origin/<main>`; step 6b, R5): the text only, as for named
 #   steps    (MODE finish, step 6b.4) method-finish's SKILL.md has its
 #            thirteen numbered steps (lines "N. **...**") and names the
 #            commands they run (H_FINISH_NAMES: run-checks, the packet,
-#            done-check --ready, report-check, the push, gh pr create);
+#            done-check --ready, report-check, the files log with
+#            --no-renames (step 6b, R15), the push, gh pr create);
 #            each numbered step's line reached the main conversation's
 #            requests (expands shows the whole body did)
 H_FINISH_NAMES='scripts/method/run-checks.sh
 scripts/method/review-packet.sh
 scripts/method/done-check.sh --ready
 scripts/method/report-check.sh
+git diff --name-only --no-renames origin/<main>...HEAD
 git push origin HEAD
 gh pr create'
 h_start_holds() {
@@ -972,6 +976,8 @@ h_start_holds() {
       [ "$(LC_ALL=C grep -c -F -e '--state merged' "$f")" -gt 0 ] || H_WHY="$H_WHY method-start's SKILL.md has no line naming gh pr list --state merged;"
       LC_ALL=C grep -F -e '--state merged' "$f" | LC_ALL=C grep -F -e headRefOid | LC_ALL=C grep -q -F -e 'git merge-base --is-ancestor HEAD' ||
         H_WHY="$H_WHY method-start's merged read does not compare HEAD with the merged head (headRefOid, git merge-base --is-ancestor HEAD);"
+      LC_ALL=C grep -F -e '--state merged' "$f" | LC_ALL=C grep -F -e "merged last (its \`mergedAt\`)" | LC_ALL=C grep -q -F -e '--not <its headRefOid> origin/<main>' ||
+        H_WHY="$H_WHY method-start's merged read does not count from the one merged last (mergedAt, --not <its headRefOid> origin/<main>);"
       while IFS= read -r line; do
         [ -z "$line" ] || perl "$HARNESS/read.pl" req main "$line" "$H_DIR/fake" || H_WHY="$H_WHY the skill's line naming the merged read did not reach main: $line;"
       done <<EOF

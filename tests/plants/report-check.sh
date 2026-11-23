@@ -31,9 +31,9 @@ cat >"$work/plants.txt" <<'PLANTS-END'
 ---
   for my $l ($logs[0]) {
 === a digit inside a piece taken for a number | method/scripts/method/lib/report.pl | IDs and hashes are not numbers
-our $NUMBER = qr/\A$SIGN?
+our $NUMBER = qr/\A(
 ---
-our $NUMBER = qr/$SIGN?
+our $NUMBER = qr/(
 === paths cut at colons and slashes | method/scripts/method/lib/report.pl | paths and line numbers are not numbers
 my $CUT = qr/(?:[ \t\r
 ---
@@ -135,9 +135,9 @@ $JOIN
 ---
 |
 === guillemets not a cut | method/scripts/method/lib/report.pl | guillemets cut a line
-|\xC2[\xAB\xBB]|\xE2\x80[\xB9\xBA]
+|\xC2[\xAB\xBB]|\xE2\x80[\xB9\xBA])+/;
 ---
-
+)+/;
 === a month's name in any case | method/scripts/method/lib/report.pl | a number beside a word that is not a month is a number
   |Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\z/x;
 ---
@@ -151,13 +151,17 @@ my $DAY = qr/\A\d+\z/;
 ---
       if (0) {
 === the currency mark not read | method/scripts/method/lib/report.pl | the currency mark is kept
-qr/\A$SIGN?$CUR?(?:
+qr/\A(?:$SIGN?$CUR?|$CUR$SIGN)(?:
 ---
-qr/\A$SIGN?(?:
+qr/\A(?:$SIGN?)(?:
 === the sign not read | method/scripts/method/lib/report.pl | the sign is kept
-our $NUMBER = qr/\A$SIGN?$CUR?
+our $NUMBER = qr/\A(?:$SIGN?$CUR?|$CUR$SIGN)
 ---
-our $NUMBER = qr/\A$CUR?
+our $NUMBER = qr/\A(?:$CUR?)
+=== a sign after a currency mark not read | method/scripts/method/lib/report.pl | a sign after a currency mark is read
+$CUR?|$CUR$SIGN)(?:
+---
+$CUR?)(?:
 === the percent mark not read | method/scripts/method/lib/report.pl | the percent mark is kept
 |\.\d+)(?:%|$CUR)?\z/;
 ---
@@ -222,6 +226,10 @@ my %SAYS_NOTHING = map { $_ => 1 } qw(nothing none);
       $x =~ s/\xE2\x80[\x98-\x9F]//g;    # curly quotes
 ---
 
+=== angle, guillemet and wide brackets kept in the miss part | method/scripts/method/lib/report.pl | a miss part saying only none in angle, guillemet or wide brackets is listed
+      $x =~ s/(?:<|\xC2[\xAB\xBB]|\xE2\x80[\xB9\xBA]|\xE3\x80[\x88-\x91\x94-\x9B]|\xEF\xBC[\x88\x89\xBB\xBD]|\xEF\xBD[\x9B\x9D])+//g;    # angle, guillemet and wide brackets
+---
+
 === a closing semicolon kept in the miss part | method/scripts/method/lib/report.pl | the miss heading saying only 'Nothing;' is listed
       $x =~ s/[.!;,:]+\z//;
 ---
@@ -235,7 +243,7 @@ my %SAYS_NOTHING = map { $_ => 1 } qw(nothing none);
 ---
 
 === a comment left open read as text | method/scripts/method/lib/report.pl | a comment left open in the miss part runs to its end
-    $body =~ s/<!--(?:(?!-->).)*\z//s;    # a comment left open runs to the end
+    $body =~ s/(?:\A|\n) {0,3}\K<!--(?:(?!-->).)*\z//s;    # a comment block left open runs to the end
 ---
 
 === dashes and wide spaces read as a word | method/scripts/method/lib/report.pl | a miss part holding only a dash has nothing under it
@@ -278,6 +286,26 @@ my %SAYS_NOTHING = map { $_ => 1 } qw(nothing none);
       ($l) = () if $comment[$j];    # a heading inside a comment
 ---
 
+=== a comment opener anywhere in a line starts a comment | method/scripts/method/lib/report.pl | a comment opener quoted inside a line starts no comment
+    } elsif ($lines[$i] =~ /\A {0,3}<!--/) {
+---
+    } elsif (index($lines[$i], '<!--') >= 0) {
+=== a comment opener anywhere in the miss part runs to its end | method/scripts/method/lib/report.pl | a comment opener quoted inside a line of the miss part is text
+s/(?:\A|\n) {0,3}\K<!--(?:(?!-->).)*\z//s;
+---
+s/<!--(?:(?!-->).)*\z//s;
+=== a line <!--> left open | method/scripts/method/lib/report.pl | a line <!--> opens and closes a comment
+      $open = index($lines[$i], '-->') < 0;
+---
+      $open = index($lines[$i], '-->', index($lines[$i], '<!--') + 4) < 0;
+=== a line <!---> left open | method/scripts/method/lib/report.pl | a line <!---> opens and closes a comment
+      $open = index($lines[$i], '-->') < 0;
+---
+      $open = index($lines[$i], '-->', index($lines[$i], '<!--') + 4) < 0;
+=== a comment opener after 4 spaces starts a comment | method/scripts/method/lib/report.pl | a comment opener after 4 spaces is code and starts no comment
+/\A {0,3}<!--/
+---
+/\A[ \t]*<!--/
 === a report with no LOG accepted | method/scripts/method/lib/report.pl | a report with no LOG is a usage error
 the numbers come from') unless @logs;
 ---

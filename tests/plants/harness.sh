@@ -643,6 +643,33 @@ else
 fi
 h_stop
 drop_sandbox "$sb" || true
+# (step 6b, R5) method-start's count after a merge put back to the old
+# "<its headRefOid>..HEAD", which counts <main>'s commits merged into the
+# branch since as waiting (merged)
+sb=$(make_sandbox) || abort_sandbox
+s="$sb/method/.claude/skills/method-start/SKILL.md"
+# shellcheck disable=SC2016 # perl code; the backquotes are the skill's text
+perl -pi -e 's/`git rev-list --count HEAD --not <its headRefOid> origin\/<main>`/`git rev-list --count <its headRefOid>..HEAD`/' "$s"
+if grep -q -F -e '--not <its headRefOid> origin/<main>' "$s" || ! grep -q -F '<its headRefOid>..HEAD' "$s"; then
+  fail "start: the plant did not apply, so the check result would mean nothing"
+else
+  start_plant nohook "merged|method-start's merged read does not count from the one merged last|method-start's count after a merge put back to <its headRefOid>..HEAD"
+fi
+h_stop
+drop_sandbox "$sb" || true
+# (step 6b, R5, the extra round) method-start no longer picks the one
+# merged last: "take any of them" in place of it (merged)
+sb=$(make_sandbox) || abort_sandbox
+s="$sb/method/.claude/skills/method-start/SKILL.md"
+# shellcheck disable=SC2016 # perl code; the backquotes are the skill's text
+perl -pi -e 's/take the one merged last \(its `mergedAt`\)/take any of them/' "$s"
+if grep -q -F 'merged last (its' "$s" || ! grep -q -F 'take any of them' "$s"; then
+  fail "start: the plant did not apply, so the check result would mean nothing"
+else
+  start_plant nohook "merged|method-start's merged read does not count from the one merged last|method-start's merged read left without picking the one merged last"
+fi
+h_stop
+drop_sandbox "$sb" || true
 sb=$(make_sandbox) || abort_sandbox
 s="$sb/method/.claude/skills/method-start/SKILL.md"
 # shellcheck disable=SC2016 # perl code, expanded by perl
@@ -656,8 +683,9 @@ h_stop
 drop_sandbox "$sb" || true
 
 # 20. step 6b.4's case for /method-finish (h_start finish, h_start_holds):
-# method-finish's report check taken out of its text (steps), and, in a
-# second copy, method-finish made a skill only Claude can call (expands)
+# method-finish's report check taken out of its text (steps), in a second
+# copy its files log without --no-renames (steps), and, in a third copy,
+# method-finish made a skill only Claude can call (expands)
 sb=$(make_sandbox) || abort_sandbox
 s="$sb/method/.claude/skills/method-finish/SKILL.md"
 perl -pi -e 's{scripts/method/report-check\.sh}{the report check}g' "$s"
@@ -665,6 +693,18 @@ if grep -q -F 'scripts/method/report-check.sh' "$s"; then
   fail "finish: the plant did not apply, so the check result would mean nothing"
 else
   start_plant finish "steps|method-finish's SKILL.md names no scripts/method/report-check.sh|method-finish's report check taken out of its steps"
+fi
+h_stop
+drop_sandbox "$sb" || true
+# (step 6b, R15) method-finish's files log without --no-renames, which
+# lists a renamed file under its new name only (steps)
+sb=$(make_sandbox) || abort_sandbox
+s="$sb/method/.claude/skills/method-finish/SKILL.md"
+perl -pi -e 's/git diff --name-only --no-renames /git diff --name-only /g' "$s"
+if grep -q -F -e '--no-renames' "$s" || ! grep -q -F 'git diff --name-only origin/<main>...HEAD' "$s"; then
+  fail "finish: the plant did not apply, so the check result would mean nothing"
+else
+  start_plant finish "steps|method-finish's SKILL.md names no git diff --name-only --no-renames|method-finish's files log without --no-renames"
 fi
 h_stop
 drop_sandbox "$sb" || true

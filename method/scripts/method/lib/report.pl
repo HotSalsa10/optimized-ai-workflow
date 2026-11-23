@@ -28,9 +28,16 @@
 # Report::miss_problems(TEXT): what is wrong with the "What the checks
 # would miss" part, one plain line each; none when it is there and says
 # something. HTML comments are not text: a heading inside one is no
-# heading. A part whose every line says only "nothing", "none" or "n/a"
-# (round, square and curly brackets, straight and curly quotes, emphasis,
-# list marks and closing . ! ; , : dropped) says nothing.
+# heading. As in CommonMark, a comment block starts at a line that opens
+# with up to 3 spaces and <!-- and ends at the first line holding -->
+# (<!--> and <!---> open and close at once; in the part's own text, a
+# known limit, such a line is taken for a comment left open), or at the end when none
+# does; a <!-- later in a line, or after 4 spaces (code), starts none,
+# and there only a whole <!-- ... --> is a comment. A part whose every line
+# says only "nothing", "none" or "n/a" (round, square, curly and angle
+# brackets, guillemets, the wide brackets U+3008 to U+3011, U+3014 to
+# U+301B and the fullwidth ( ) [ ] { }, straight and curly quotes,
+# emphasis, list marks and closing . ! ; , : dropped) says nothing.
 package Report;
 use strict;
 use warnings;
@@ -51,7 +58,7 @@ my %SAYS_NOTHING = map { $_ => 1 } qw(nothing none n/a);
 # the marks a number may carry, as UTF-8 bytes
 my $SIGN = qr/(?:[+-]|\xE2\x88\x92)/;                   # + - U+2212
 my $CUR = qr/(?:\$|\xE2\x82\xAC|\xC2\xA3|\xC2\xA5)/;    # $ EUR GBP JPY signs
-our $NUMBER = qr/\A$SIGN?$CUR?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)(?:%|$CUR)?\z/;
+our $NUMBER = qr/\A(?:$SIGN?$CUR?|$CUR$SIGN)(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)(?:%|$CUR)?\z/;
 my $MONTH = qr/\A(?:January|February|March|April|May|June|July|August|September|October|November|December
   |Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\z/x;
 my $DAY = qr/\A(?:0?[1-9]|[12]\d|3[01])\z/;
@@ -157,8 +164,8 @@ sub miss_problems {
   my ($text) = @_;
   my @lines = split /\n/, $text, -1;
   s/\r\z// for @lines;
-  # which lines are inside a code block, and which start inside an HTML
-  # comment (a heading on either is no heading)
+  # which lines are inside a code block, and which are inside an HTML
+  # comment block (a heading on either is no heading)
   my (@code, @comment, $fence, $open);
   for my $i (0 .. $#lines) {
     if (defined $fence) {
@@ -172,12 +179,11 @@ sub miss_problems {
       next;
     }
     $comment[$i] = $open;
-    my $at = 0;
-    while (1) {
-      my $k = index($lines[$i], $open ? '-->' : '<!--', $at);
-      last if $k < 0;
-      $at = $k + ($open ? 3 : 4);
-      $open = !$open;
+    if ($open) {
+      $open = 0 if index($lines[$i], '-->') >= 0;
+    } elsif ($lines[$i] =~ /\A {0,3}<!--/) {
+      $comment[$i] = 1;
+      $open = index($lines[$i], '-->') < 0;    # <!--> and <!---> close at once
     }
   }
   my (@problems, $found);
@@ -200,12 +206,13 @@ sub miss_problems {
     }
     my $body = join "\n", @body;
     $body =~ s/<!--.*?-->//gs;
-    $body =~ s/<!--(?:(?!-->).)*\z//s;    # a comment left open runs to the end
+    $body =~ s/(?:\A|\n) {0,3}\K<!--(?:(?!-->).)*\z//s;    # a comment block left open runs to the end
     my @said;
     for my $x (split /\n/, $body) {
       $x =~ s/\A[ \t]*(?:[-*+]|\d+[.)])[ \t]+//;
       $x =~ s/[*_`>#~()\[\]{}"']+//g;
       $x =~ s/\xE2\x80[\x98-\x9F]//g;    # curly quotes
+      $x =~ s/(?:<|\xC2[\xAB\xBB]|\xE2\x80[\xB9\xBA]|\xE3\x80[\x88-\x91\x94-\x9B]|\xEF\xBC[\x88\x89\xBB\xBD]|\xEF\xBD[\x9B\x9D])+//g;    # angle, guillemet and wide brackets
       $x =~ s/$NO_WORD/ /g;
       $x =~ s/\s+/ /g;
       $x =~ s/\A | \z//g;

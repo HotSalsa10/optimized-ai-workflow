@@ -3,7 +3,10 @@
 # here: every run step first stops the runner reading workflow commands, a
 # manual run and a push run use different concurrency groups, checkout does
 # not keep the job token, and no pull_request event starts a run (a push run
-# already checks a pull request's head; DECISIONS A76).
+# already checks a pull request's head; DECISIONS A76). In on:, a value
+# that does not close on its line (a quote or a [ or { left open) and an
+# escape in double quotes are refused, since either could hide or spell a
+# trigger (step 6b, R17).
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=tests/lib.sh
@@ -22,30 +25,36 @@ ci_problems() {
     my $group = 0;
     my $on = 0;    # inside the top-level on: block
     # nocomment LINE: LINE without its comment, a # at the start or after a
-    # space that is not inside quotes; a quote opens only where a value can
-    # start (step 6b'"'"'s review, R17: a quoted " #" before pull_request in
-    # a flow-form on: hid the trigger)
+    # space that is not inside quotes; a quote opens after a space, [, {, a
+    # comma or a colon, also inside a plain value (a known limit) (step 6b'"'"'s review, R17: a quoted " #" before pull_request in
+    # a flow-form on: hid the trigger), and '"''"' in single quotes is a
+    # quote, not its end. Then 1 when a quote or a [ or { is still open at
+    # the end of the line, else 0
     my $nocomment = sub {
       my ($s) = @_;
-      my $q = "";
+      my ($q, $depth) = ("", 0);
       for (my $k = 0; $k < length $s; $k++) {
         my $c = substr $s, $k, 1;
         my $prev = $k ? substr($s, $k - 1, 1) : " ";
         if ($q eq "\x22") {
           if ($c eq "\\") { $k++ } elsif ($c eq "\x22") { $q = "" }
         } elsif ($q eq "\x27") {
-          $q = "" if $c eq "\x27";
+          if ($c eq "\x27") { if (substr($s, $k + 1, 1) eq "\x27") { $k++ } else { $q = "" } }
         } elsif (($c eq "\x22" || $c eq "\x27") && $prev =~ /[\s\[\{,:]/) {
           $q = $c;
         } elsif ($c eq "#" && $prev =~ /\s/) {
-          return substr $s, 0, $k;
+          return (substr($s, 0, $k), ($q ne "" || $depth != 0) ? 1 : 0);
+        } elsif ($c eq "[" || $c eq "{") {
+          $depth++;
+        } elsif ($c eq "]" || $c eq "}") {
+          $depth--;
         }
       }
-      return $s;
+      return ($s, ($q ne "" || $depth != 0) ? 1 : 0);
     };
     for my $i (0 .. $#l) {
       my $n = $i + 1;
-      my $t = $nocomment->($l[$i]);    # comments do not count
+      my ($t, $open) = $nocomment->($l[$i]);    # comments do not count
       if ($t =~ /^["\x27]?on["\x27]?\s*:\s*(.*)$/) {
         $on = 1;
         print "line $n: a pull_request event starts a run\n" if $1 =~ /\bpull_request/;
@@ -54,6 +63,13 @@ ci_problems() {
       } elsif ($on && $t =~ /\bpull_request/) {
         print "line $n: a pull_request event starts a run\n";
       }
+      # a quoted value or a flow collection in on: that runs onto the next
+      # line is refused: the next line could hold a trigger after a # that
+      # is inside the quotes (step 6b, R17)
+      print "line $n: a value in on: does not close on its line, so its next line cannot be read\n" if $on && $open;
+      # an escape in double quotes in on: could spell a trigger
+      # ("pull_reques\x74"), so it is refused too
+      print "line $n: a double-quoted value in on: holds an escape, so it cannot be read\n" if $on && $t =~ /\x22[^\x22]*\\/;
       $group = 1 if $l[$i] =~ /^\s*group:.*github\.event_name/;
       if ($l[$i] =~ /^\s*(?:-\s+)?run:\s*(.*)$/) {
         my $v = $1;
@@ -136,6 +152,27 @@ elif problems=$(ci_problems "$sb/ci.yml") && [ -z "$problems" ]; then
 else
   fail "a comment after quoted values in a flow-form on: is not read: pull_request named only there is no trigger" "$problems"
 fi
+# 8-11. (step 6b, R17) on_case NAME ON WANT: the on: block of ci.yml
+# replaced by the text ON (perl replacement text) makes the check print a
+# problem holding WANT
+on_case() {
+  perl -0pe 's/^on:\n  push:\n    branches: \["\*\*"\]\n    tags: \["v\*"\]\n  workflow_dispatch:\n/'"$2"'/m' "$ci" >"$sb/ci.yml"
+  if cmp -s "$ci" "$sb/ci.yml"; then
+    fail "$1: the case did not apply, so the result would mean nothing"
+  elif ci_problems "$sb/ci.yml" | grep -q -F -- "$3"; then
+    pass "$1"
+  else
+    fail "$1" "$(ci_problems "$sb/ci.yml")"
+  fi
+}
+on_case "the test goes red with a pull_request trigger after '' (a quote inside single quotes) and \" #\" in a one-line flow-form on:" \
+  'on: {push: {branches: [\x27it\x27\x27s #\x27]}, pull_request: {}, workflow_dispatch: {}}\n' "a pull_request event starts a run"
+on_case "the test goes red with a quoted value in a flow-form on: that runs onto a next line starting with #, a trigger after it" \
+  'on: {push: {branches: ["**", "a\n  #b"], tags: ["v*"]}, pull_request: {}, workflow_dispatch: {}}\n' "line 7: a value in on: does not close on its line"
+on_case "the test goes red with a flow-form on: whose { runs onto a next line at the start of the line, a trigger there" \
+  'on: {push: {branches: ["**"]},\npull_request: {}, workflow_dispatch: {}}\n' "line 7: a value in on: does not close on its line"
+on_case "the test goes red with an escape in a double-quoted key in on: (\"pull_reques\\x74\")" \
+  'on: {push: {branches: ["**"]}, "pull_reques\\x74": {}, workflow_dispatch: {}}\n' "a double-quoted value in on: holds an escape"
 drop_sandbox "$sb"
 
 echo "tests: CI settings: $tests_pass passed, $tests_fail failed, $tests_skip skipped"

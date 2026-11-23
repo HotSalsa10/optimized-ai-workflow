@@ -15,7 +15,8 @@
 #   report-check: not in any log: NUMBER (line N)
 #                 a number in the report that no LOG holds. A number is a
 #                 run of digits with an optional sign (+, -, U+2212), a
-#                 currency mark before or after ($, EUR, GBP, JPY signs),
+#                 currency mark before or after ($, EUR, GBP, JPY signs;
+#                 a sign before or after a mark in front: -$5, $-5),
 #                 thousands separators (1,200), a decimal part (.45 too)
 #                 and a percent mark, standing alone between spaces or
 #                 marks such as ( ) * ` " = | ; the no-break, ideographic
@@ -43,11 +44,17 @@
 #                 the heading is a markdown heading (#, ##, ...) with that
 #                 text in any case, a colon allowed; its part runs to the
 #                 next heading of its level or higher; headings inside a
-#                 code block or an HTML comment do not count. HTML
-#                 comments are not text. A part whose every line says
-#                 only "nothing", "none" or "n/a" (round, square and
-#                 curly brackets, straight and curly quotes and closing
-#                 marks aside), or holds no word at all, is listed.
+#                 code block or an HTML comment do not count. Such a
+#                 comment starts at a line that opens with up to 3
+#                 spaces and <!-- and ends at the first line holding -->
+#                 (<!--> alone opens and closes one), or runs to the end;
+#                 a <!-- later in a line starts none, and there only a
+#                 whole <!-- ... --> is a comment. HTML comments are not
+#                 text. A part whose every line says only "nothing",
+#                 "none" or "n/a" (round, square, curly and angle
+#                 brackets, guillemets, U+3008 to U+3011, U+3014 to U+301B, the fullwidth ( ) [ ] { },
+#                 straight and curly quotes and closing marks aside), or
+#                 holds no word at all, is listed.
 # Then "report-check: PASS - ..." when nothing was listed, or
 # "report-check: FAIL - N listed".
 #
@@ -65,7 +72,14 @@
 # (5ms, 44-all, 40/s); a decimal comma (3,4 or 9,5%; 1.200,50); grouping
 # other than 1,200 (Indian 1,00,000, or 1'200); digits other than ASCII
 # 0 to 9 (fullwidth digits); and a currency sign other than $, EUR, GBP
-# and JPY (5 INR written with its sign, for one).
+# and JPY (5 INR written with its sign, for one). A month and a year
+# joined (3/2000) is taken for a date, so "Passed 3/2000" is not checked;
+# and a span of years written short (2025-26) is read as the numbers 2025
+# and 26, so it is listed unless a log holds them. A sign after a currency
+# mark in a piece joined by / or - ($-5/$-3) is not read, so such a piece
+# is not checked. In the miss part, a line <!--> or <!---> is taken for a
+# comment left open, so the text after it is not read; and text from a
+# <!-- to a later --> is taken for a comment even inside code spans.
 set -u
 # perl reads bytes; these settings would change how it reads and writes
 # them, and the library paths would let modules from elsewhere run inside it

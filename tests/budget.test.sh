@@ -22,7 +22,10 @@
 #   may be in quotes or have spaces before its colon, a tag or an anchor
 #   before the value (!!str |, &d >-) is not counted, and each escape in a
 #   double-quoted value is counted at the UTF-8 size of the character YAML
-#   reads (\L and \P 3 bytes; step 6b's review, R16).
+#   reads (\L and \P 3 bytes; step 6b's review, R16). A value that starts
+#   on the line after the key, bare or with only a tag or an anchor, has
+#   that line read as the key line would be: a block header or a quote
+#   there is read as a block or a quoted value (step 6b, R16).
 # With no agent or skill file yet, the description budget says SKIPPED.
 # A budget is raised only by the owner; text over it is cut. The counter is
 # tested here on small cases at and one byte over each budget;
@@ -72,16 +75,27 @@ budget_read() {
             # a tag or an anchor before the value (!!str |, &d >-) is not
             # part of it
             $v =~ s/\A(?:(?:&[^ \t]+|![^ \t]*)(?:[ \t]+|\z))+//;
+            $v = "" if $v =~ /\A#/;
             # the lines YAML reads as part of the value: each indented or
             # empty line after it, up to the next key, trimmed; each line
             # with text is kept with the blank lines just before it, since
             # YAML joins two lines with a space when none come between and
             # with one line break for each blank line otherwise
-            my (@more, $blank);
-            $blank = 0;
+            my (@more, $blank, $at);
+            ($blank, $at) = (0, $i);
             for my $j ($i + 1 .. $#l) {
               last unless $l[$j] =~ /\A(?:[ \t]|\z)/;
-              if ($l[$j] =~ /\A[ \t]*(\S.*?)[ \t]*\z/) { push @more, [$1, $blank]; $blank = 0 } else { $blank++ }
+              if ($l[$j] =~ /\A[ \t]*(\S.*?)[ \t]*\z/) { push @more, [$1, $blank, $j]; $blank = 0 } else { $blank++ }
+            }
+            # a value that starts on a later line, after a bare key or one
+            # with only a tag or an anchor: its first line, with any tag or
+            # anchor taken off, is read as the key line would be, so a block
+            # header or a quote there is read as such (step 6b, R16)
+            while ($v eq "" && @more) {
+              my $m = shift @more;
+              ($v = $m->[0]) =~ s/\A(?:(?:&[^ \t]+|![^ \t]*)(?:[ \t]+|\z))+//;
+              $v = "" if $v =~ /\A#/;
+              $at = $m->[2];
             }
             # the lines joined as YAML joins them (blank lines before
             # the first do not count)
@@ -93,7 +107,7 @@ budget_read() {
               # what YAML keeps (L24)
               my ($ind) = $1 =~ /([1-9])/;
               my @b;
-              for my $j ($i + 1 .. $#l) { last unless $l[$j] =~ /\A(?:[ \t]|\z)/; push @b, $l[$j] }
+              for my $j ($at + 1 .. $#l) { last unless $l[$j] =~ /\A(?:[ \t]|\z)/; push @b, $l[$j] }
               if (!defined $ind) { for (@b) { if (/\A([ \t]*)\S/) { $ind = length $1; last } } }
               $ind = 0 unless defined $ind;
               $v = join "", map { (my $x = $_) =~ s/\A[ \t]{0,$ind}//; "$x\n" } @b;
@@ -361,7 +375,7 @@ printf 'r\n' >"$d/method/.claude/rules/method/r.md"
 cat >"$d/method/.claude/agents/method/e.md" <<'TEXT'
 ---
 name: e
-description: "\L\P\N\_\x41é\U0001F600\\\"\t"
+description: "\L\P\N\_\x41\u00e9\U0001F600\\\"\t"
 ---
 TEXT
 if counted "$d" "DESC 22 method/.claude/agents/method/e.md"; then
@@ -373,6 +387,45 @@ d=$(case_dir desc-escapes-over) || abort_sandbox
 printf 'r\n' >"$d/method/.claude/rules/method/r.md"
 mkdir -p "$d/method/.claude/skills/method-e" && printf -- '---\nname: e\ndescription: "%s%s"\n---\n' "$(xs 271)" '\L\L\L\L\L\L\L\L\L\L' >"$d/method/.claude/skills/method-e/SKILL.md"
 want "the counter: a double-quoted value of 271 bytes and ten \\L escapes, 301 bytes as YAML reads it (293 as written), fails" "$d" FAIL "descriptions: a description over the budget of 300 bytes"
+# (step 6b, R16) a value that starts on the line after the key, the key
+# bare or with only a tag or an anchor: a block header or a quote there is
+# read as on the key line. The values below are PyYAML's for the same
+# text, the quoted ones counted with their quotes
+d=$(case_dir desc-next) || abort_sandbox
+printf 'r\n' >"$d/method/.claude/rules/method/r.md"
+printf -- '---\nname: a\ndescription: &a\n  |\n  a\n    b\n---\n' >"$d/method/.claude/agents/method/a.md"
+printf -- '---\nname: b\ndescription:\n  |\n  a\n    b\nmodel: x\n---\n' >"$d/method/.claude/agents/method/b.md"
+printf -- '---\nname: f\ndescription:\n  >-\n  a\n  b\n---\n' >"$d/method/.claude/agents/method/f.md"
+printf -- '---\nname: t\ndescription:\n  !!str |\n  a\n    b\n---\n' >"$d/method/.claude/agents/method/t.md"
+printf -- '---\nname: q\ndescription:\n  "\\L\\L"\n---\n' >"$d/method/.claude/agents/method/q.md"
+printf -- '---\nname: g\ndescription: !!str\n  "\\N"\n---\n' >"$d/method/.claude/agents/method/g.md"
+printf -- '---\nname: h\ndescription:\n  "a #b"\n---\n' >"$d/method/.claude/agents/method/h.md"
+printf -- '---\nname: c\ndescription: # c\n  |\n  a\n    b\n---\n' >"$d/method/.claude/agents/method/c.md"
+printf -- '---\nname: k\ndescription:\n  # c\n  |\n  a\n    b\n---\n' >"$d/method/.claude/agents/method/k.md"
+if counted "$d" "DESC 6 method/.claude/agents/method/c.md" && counted "$d" "DESC 6 method/.claude/agents/method/k.md"; then
+  pass "the counter: a comment alone after the key, on its line (6) or on a line of its own before a | header (6), is no value"
+else
+  fail "the counter: a comment alone after the key, on its line (6) or on a line of its own before a | header (6), is no value" "$(budget_read "$d")"
+fi
+if counted "$d" "DESC 6 method/.claude/agents/method/a.md" && counted "$d" "DESC 6 method/.claude/agents/method/b.md" && counted "$d" "DESC 4 method/.claude/agents/method/f.md" &&
+  counted "$d" "DESC 6 method/.claude/agents/method/t.md"; then
+  pass "the counter: a block header on the line after the key is read as a block: after &a (6), after a bare key (6), >- (4, YAML 3), with !!str on its line (6)"
+else
+  fail "the counter: a block header on the line after the key is read as a block: after &a (6), after a bare key (6), >- (4, YAML 3), with !!str on its line (6)" "$(budget_read "$d")"
+fi
+if counted "$d" "DESC 8 method/.claude/agents/method/q.md" && counted "$d" "DESC 4 method/.claude/agents/method/g.md" && counted "$d" "DESC 6 method/.claude/agents/method/h.md"; then
+  pass "the counter: a double-quoted value on the line after the key is read with its escapes and its whole text: \\L\\L (8, YAML 6), after !!str \\N (4, YAML 2), \" #\" inside the quotes kept (6, YAML 4)"
+else
+  fail "the counter: a double-quoted value on the line after the key is read with its escapes and its whole text: \\L\\L (8, YAML 6), after !!str \\N (4, YAML 2), \" #\" inside the quotes kept (6, YAML 4)" "$(budget_read "$d")"
+fi
+d=$(case_dir desc-next-block-over) || abort_sandbox
+printf 'r\n' >"$d/method/.claude/rules/method/r.md"
+mkdir -p "$d/method/.claude/skills/method-n" && printf -- '---\nname: n\ndescription: &a\n  |\n  %s\n                      %s\n---\n' "$(xs 140)" "$(xs 139)" >"$d/method/.claude/skills/method-n/SKILL.md"
+want "the counter: a | header on the line after \"description: &a\", its second line 20 spaces deeper, 301 bytes as YAML reads it, fails" "$d" FAIL "descriptions: a description over the budget of 300 bytes"
+d=$(case_dir desc-next-quoted-over) || abort_sandbox
+printf 'r\n' >"$d/method/.claude/rules/method/r.md"
+mkdir -p "$d/method/.claude/skills/method-n" && printf -- '---\nname: n\ndescription:\n  "%s%s"\n---\n' "$(xs 271)" '\L\L\L\L\L\L\L\L\L\L' >"$d/method/.claude/skills/method-n/SKILL.md"
+want "the counter: a double-quoted value of 271 bytes and ten \\L escapes on the line after a bare key, 301 bytes as YAML reads it (293 as written), fails" "$d" FAIL "descriptions: a description over the budget of 300 bytes"
 
 echo "tests: budget: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]

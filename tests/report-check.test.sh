@@ -320,6 +320,20 @@ if wanted "the currency mark is kept"; then
   expect_listed "the currency mark is kept" '$5'
 fi
 
+if wanted "a sign after a currency mark is read"; then
+  report 'Lost €-5, $-5 and £−5.'
+  log a.log 'count 99'
+  rc r.md a.log
+  expect_listed "a sign after a currency mark is read" '€-5' '$-5' '£−5'
+fi
+
+if wanted "a sign after a currency mark in a log is found"; then
+  report 'Lost €-5.'
+  log a.log 'loss €-5'
+  rc r.md a.log
+  expect "a sign after a currency mark in a log is found" 0 'PASS - 1 number, each in a log (1 log read)'
+fi
+
 if wanted "a currency mark dropped is listed"; then
   report 'Cost: 7.'
   log a.log 'cost $7'
@@ -391,6 +405,13 @@ if wanted "a miss part saying only curly-quoted words is listed"; then
   log a.log 'nothing'
   rc r.md a.log
   expect "a miss part saying only curly-quoted words is listed" 1 '(line 3) says only "none", "n/a"' 'FAIL - 1 listed'
+fi
+
+if wanted "a miss part saying only none in angle, guillemet or wide brackets is listed"; then
+  printf 'Status: ready.\n\n## What the checks would miss\n\n<none>\n\302\253none\302\273\n\342\200\271none\342\200\272\n\357\274\210none\357\274\211\n\343\200\220none\343\200\221\n\343\200\214n/a\343\200\215\n' >"$work/r.md"
+  log a.log 'nothing'
+  rc r.md a.log
+  expect "a miss part saying only none in angle, guillemet or wide brackets is listed" 1 '(line 3) says only "none", "n/a"' 'FAIL - 1 listed'
 fi
 
 if wanted "a miss part with one line that says something passes"; then
@@ -475,6 +496,39 @@ if wanted "a heading inside an HTML comment does not end the miss part"; then
   log a.log 'nothing'
   rc r.md a.log
   expect "a heading inside an HTML comment does not end the miss part" 0 'report-check: PASS'
+fi
+
+if wanted "a comment opener quoted inside a line starts no comment"; then
+  report 'Status: ready. The page keeps `<!--` as text.'
+  log a.log 'nothing'
+  rc r.md a.log
+  expect "a comment opener quoted inside a line starts no comment" 0 'report-check: PASS - 0 numbers'
+fi
+
+if wanted "a comment opener quoted inside a line of the miss part is text"; then
+  printf 'Status: ready.\n\n## What the checks would miss\n\n- `<!--` comments in the mail template.\n- The phone layout.\n' >"$work/r.md"
+  log a.log 'nothing'
+  rc r.md a.log
+  expect "a comment opener quoted inside a line of the miss part is text" 0 'report-check: PASS - 0 numbers'
+fi
+
+for opener in '<!-->' '<!--->'; do
+  if wanted "a line $opener opens and closes a comment"; then
+    report "$opener
+Status: ready."
+    log a.log 'nothing'
+    rc r.md a.log
+    expect "a line $opener opens and closes a comment" 0 'report-check: PASS - 0 numbers'
+  fi
+done
+
+if wanted "a comment opener after 4 spaces is code and starts no comment"; then
+  report 'Status: ready.
+
+    <!-- x'
+  log a.log 'nothing'
+  rc r.md a.log
+  expect "a comment opener after 4 spaces is code and starts no comment" 0 'report-check: PASS - 0 numbers'
 fi
 
 if wanted "every problem is listed and exits 1"; then

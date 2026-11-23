@@ -107,9 +107,9 @@ qw(git.pl esc.pl conf.pl tree.pl verdicts.pl checks.pl receipt.pl)
 ---
 
 === a LIGHT tier on a high-risk path accepted | method/scripts/method/lib/done.pl | R6: a LIGHT plan on a high-risk path is judged FULL
-'plan again as FULL (Tier: FULL, with expected.tsv), and ask the owner for their go again') if $T{tier} eq 'LIGHT' && @high;
+    . " their new reply, with today's date and the time (Approved: YYYY-MM-DD HH:MM \"<the reply>\")") if $T{tier} eq 'LIGHT' && @high;
 ---
-'plan again as FULL (Tier: FULL, with expected.tsv), and ask the owner for their go again') if 0;
+    . " their new reply, with today's date and the time (Approved: YYYY-MM-DD HH:MM \"<the reply>\")") if 0;
 === HIGH_RISK_PATHS shrunk in the same change judged LIGHT | method/scripts/method/lib/done.pl | R6: a branch that drops a high-risk path main lists
   my @list = grep { !$seen{$_}++ } @$main, @$mine;
 ---
@@ -171,18 +171,37 @@ qw(git.pl esc.pl conf.pl tree.pl verdicts.pl checks.pl receipt.pl)
 ---
     if (0) { $not{moved}++; next }
 === a HIGH_RISK_PATHS entry that names no path read as a path | method/scripts/method/lib/done.pl | R6: HIGH_RISK_PATHS: an entry that names no path (scr) is NOT READY
-  my @none = grep { my $e = $_; !$on_main{$e} && $e ne '.' && !Tree::lookup($T{head}, $e) && !grep { Conf::under($_, [$e]) } @touched }
-    @{ $mine || [] };
+    if (!$on_main{$e}) { push @none, $e; next }
 ---
-  my @none = ();
+    if (!$on_main{$e}) { next }
 === an entry whose files the change deletes read as naming nothing | method/scripts/method/lib/done.pl | R6: HIGH_RISK_PATHS: an entry whose files this change deletes is read
-&& !Tree::lookup($T{head}, $e) && !grep { Conf::under($_, [$e]) } @touched }
+    next if $e eq '.' || Tree::lookup($T{head}, $e) || grep { Conf::under($_, [$e]) } @touched;
 ---
-&& !Tree::lookup($T{head}, $e) }
-=== an entry main lists checked for a path again | method/scripts/method/lib/done.pl | R6: HIGH_RISK_PATHS: an entry main lists whose path a merged change deleted blocks no other branch
-  my @none = grep { my $e = $_; !$on_main{$e} && $e ne '.'
+    next if $e eq '.' || Tree::lookup($T{head}, $e);
+=== an entry main lists that a merged change deleted not told from a typo | method/scripts/method/lib/done.pl | R6: HIGH_RISK_PATHS: an entry main lists whose path a merged change deleted blocks no other branch
+    if ($e =~ /\A[^\s#]+\z/ && Git::ok('rev-list', '-1', $tip, '--', $e) =~ /\S/) { push @gone, $e; next }
 ---
-  my @none = grep { my $e = $_; $e ne '.'
+    if (0) { push @gone, $e; next }
+=== a deleted path main lists not named on the tier line | method/scripts/method/lib/done.pl | R6: HIGH_RISK_PATHS: an entry main lists whose path a merged change deleted blocks no other branch
+    . (@gone == 1 ? 'it' : 'them') . ' from HIGH_RISK_PATHS on main (a small task of its own)' if @gone;
+---
+    . (@gone == 1 ? 'it' : 'them') . ' from HIGH_RISK_PATHS on main (a small task of its own)' if 0;
+=== main's entries skipped again | method/scripts/method/lib/done.pl | R6: HIGH_RISK_PATHS: an entry main lists with a comment on its line
+  for my $e (grep { !$seen{$_}++ } @{ $main || [] }, @{ $mine || [] }) {
+---
+  for my $e (grep { !$seen{$_}++ && !$on_main{$_} } @{ $mine || [] }) {
+=== an entry main lists with a space or a # read as a deleted path | method/scripts/method/lib/done.pl | R6: HIGH_RISK_PATHS: an entry main lists with a # and spaces
+    if ($e =~ /\A[^\s#]+\z/ && Git::ok('rev-list', '-1', $tip, '--', $e) =~ /\S/) { push @gone, $e; next }
+---
+    if (Git::ok('rev-list', '-1', $tip, '--', $e) =~ /\S/) { push @gone, $e; next }
+=== a misspelt entry main lists read as a deleted path | method/scripts/method/lib/done.pl | R6: HIGH_RISK_PATHS: an entry main lists that names no path main ever had
+    if ($e =~ /\A[^\s#]+\z/ && Git::ok('rev-list', '-1', $tip, '--', $e) =~ /\S/) { push @gone, $e; next }
+---
+    if ($e =~ /\A[^\s#]+\z/) { push @gone, $e; next }
+=== a path main's tip has read as deleted | method/scripts/method/lib/done.pl | R6: HIGH_RISK_PATHS: an entry main lists on a path main's tip has is not called deleted
+    next if Tree::lookup($tip, $e);
+---
+    next if 0;
 === expected.tsv that is not a regular file read as locked | method/scripts/method/lib/done.pl | R6: the lock: expected.tsv as a submodule when the plan was approved is NOT READY
       . " again (replace the Approved line with their new reply, with today's date and the time)") if defined $l->{odd};
 ---

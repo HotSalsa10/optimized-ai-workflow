@@ -910,7 +910,7 @@ if wanted_any "R6: the lock" "R6: a re-approval" "R6: the code-removed commit" "
   dc "$f"
   expect "R6: a FULL plan with no expected.tsv when it was approved is NOT READY" 1 \
     "done-check: lock: FAIL - the task is FULL, but its plan had no expected.tsv when it was approved in commit " \
-    "done-check: next: write docs/tasks/t1/expected.tsv, and ask the owner for their go again"
+    "done-check: next: write docs/tasks/t1/expected.tsv, ask the owner for their go again, and replace the Approved line with their new reply, with today's date and the time (Approved: YYYY-MM-DD HH:MM \"<the reply>\")"
 
   # a re-approval: a wrong expected value found at the failing run, a new
   # reply, so a new Approved line and a new anchor; the failing run before
@@ -986,7 +986,7 @@ if wanted_any "R6: a LIGHT plan on a high-risk path" "R6: a branch that drops a 
   dc "$f"
   expect "R6: a LIGHT plan on a high-risk path is judged FULL: NOT READY" 1 \
     "done-check: tier: FAIL - the plan says Tier LIGHT, but 1 changed path is high-risk: src/a.txt (HIGH_RISK_PATHS, main's and this change's together: src); judged FULL, and the plan was not made as FULL" \
-    "done-check: next: plan again as FULL (Tier: FULL, with expected.tsv), and ask the owner for their go again" \
+    "done-check: next: plan again as FULL (Tier: FULL, with expected.tsv), ask the owner for their go again, and replace the Approved line with their new reply, with today's date and the time (Approved: YYYY-MM-DD HH:MM \"<the reply>\")" \
     "done-check: lock: FAIL - the task is FULL, but its plan had no expected.tsv" "done-check: deep review: FAIL"
 
   # main lists src as high-risk; the branch's own list drops it
@@ -1223,10 +1223,12 @@ if wanted_any "R6: a same-day re-approval with a time"; then
     "done-check: READY - "
 fi
 
-# main lists a path that a merged change deleted: main's entries were
-# checked when their change added them, so a later branch that keeps the
-# list as it is not blocked
-if wanted_any "R6: HIGH_RISK_PATHS: an entry main lists whose path"; then
+# main lists a path that a merged change deleted: a plain path that an
+# earlier commit of main had blocks no later branch that keeps the list as
+# it is, and the tier line says to drop it; an entry on main's list that
+# names no path main ever had (a comment on the line, a misspelt path)
+# still fails closed
+if wanted_any "R6: HIGH_RISK_PATHS: an entry main lists"; then
   f=$(floor_project) || abort_sandbox
   (cd "$f" && git checkout -q main && mkdir -p .claude keys && printf 'PRODUCT_PATHS=src\nHIGH_RISK_PATHS=keys\n' >.claude/method.conf &&
     printf 'k\n' >keys/k.txt && git add -A && git commit -q -m "Keys" -m "$OK" && git rm -q -r keys &&
@@ -1236,8 +1238,40 @@ if wanted_any "R6: HIGH_RISK_PATHS: an entry main lists whose path"; then
   approve_head "$f"
   dc "$f"
   expect "R6: HIGH_RISK_PATHS: an entry main lists whose path a merged change deleted blocks no other branch: READY" 0 \
-    "done-check: tier: PASS - Tier LIGHT, as the plan says: no changed path is high-risk (HIGH_RISK_PATHS, main's and this change's together: keys)" \
+    "done-check: tier: PASS - Tier LIGHT, as the plan says: no changed path is high-risk (HIGH_RISK_PATHS, main's and this change's together: keys); main's list names keys, which is in none of these files but main had in an earlier commit: a merged change deleted it; drop it from HIGH_RISK_PATHS on main (a small task of its own)" \
     "done-check: READY - "
+  # ('keys # old': main once had a file of that name, but an entry with a
+  # space or a # reads as a comment on the line)
+  for v in 'src # money code' scr 'keys # old'; do
+    f=$(floor_project) || abort_sandbox
+    [ "$v" != 'keys # old' ] || (cd "$f" && git checkout -q main && printf 'k\n' >"$v" && git add -A && git commit -q -m Old -m "$OK" &&
+      git rm -q "$v" && git commit -q -m "Old deleted" -m "$OK" && git checkout -q feat)
+    (cd "$f" && git checkout -q main && mkdir -p .claude && printf 'PRODUCT_PATHS=src\nHIGH_RISK_PATHS=%s\n' "$v" >.claude/method.conf &&
+      git add -A && git commit -q -m "High-risk list" -m "$OK" && git push -q origin main 2>/dev/null && git checkout -q feat &&
+      git merge -q -s ours --no-edit main)
+    amend "$f" "$OK"
+    rc "$f"
+    approve_head "$f"
+    dc "$f"
+    case "$v" in
+      scr) name="R6: HIGH_RISK_PATHS: an entry main lists that names no path main ever had ($v), a LIGHT change on src: NOT READY" ;;
+      'keys # old') name="R6: HIGH_RISK_PATHS: an entry main lists with a # and spaces, though main once had that path ($v): NOT READY" ;;
+      *) name="R6: HIGH_RISK_PATHS: an entry main lists with a comment on its line ($v), a LIGHT change on src: NOT READY" ;;
+    esac
+    expect "$name" 1 \
+      "done-check: tier: FAIL - the high-risk list cannot be read: .claude/method.conf on main (" \
+      "): HIGH_RISK_PATHS has an entry that names no path in these files and is not a plain path (no space, no #) that main had in an earlier commit: $v (the path may be misspelt, or the line may hold a comment, which the file does not allow); a broken setting is not read as a shorter list"
+  done
+  # a branch behind a main commit that adds a listed path: main's tip has
+  # the path, so nothing deleted it and the tier line must not say to drop it
+  f=$(floor_project) || abort_sandbox
+  (cd "$f" && git checkout -q main && mkdir -p .claude vault && printf 'PRODUCT_PATHS=src\nHIGH_RISK_PATHS=vault\n' >.claude/method.conf &&
+    printf 'v\n' >vault/x.txt && git add -A && git commit -q -m "Vault" -m "$OK" && git push -q origin main 2>/dev/null && git checkout -q feat)
+  approve_head "$f"
+  dc "$f"
+  expect "R6: HIGH_RISK_PATHS: an entry main lists on a path main's tip has, on a branch behind it: NOT READY (not up to date)" 1 \
+    "done-check: tier: PASS - Tier LIGHT"
+  lacks "R6: HIGH_RISK_PATHS: an entry main lists on a path main's tip has is not called deleted" "drop it from HIGH_RISK_PATHS"
 fi
 
 
