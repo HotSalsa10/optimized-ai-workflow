@@ -7,6 +7,7 @@ Every check in this project, and what runs it. A check that exists but that noth
 |---|---|---|
 | `secrets` | Keys, passwords and other secrets in tracked files (built in) | `bash scripts/method/run-checks.sh` |
 | `fresh-clone` | Files the product needs that a fresh copy of the repository would not have (built in) | `bash scripts/method/run-checks.sh` |
+| `method-files` | A method file changed, missing or added by hand, or the method's settings in `.claude/settings.json` changed, against `scripts/method/method.lock`; the method changes only through its release's sync (built in) | `bash scripts/method/run-checks.sh` |
 | `project-checks` | Says SKIPPED when `checks/*.tsv` lists no checks, so the project's own tests did not run (built in) | `bash scripts/method/run-checks.sh` |
 | `tree-unchanged` | A check that changed the files, branches or tags it ran on (built in) | `bash scripts/method/run-checks.sh` |
 | `example` | Replace this row: one row for each check in `checks/*.tsv`, named by its id | `bash scripts/method/run-checks.sh` |

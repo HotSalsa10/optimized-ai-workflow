@@ -19,7 +19,7 @@
 #   background, skills or mcpServers;
 #   and a file for every gate in verdicts.txt;
 # - in the skill folders (part three, step 6.3): a folder name that starts
-#   method- and is on G6's skill list (@METHOD_SKILLS in
+#   method- and is on the method's skill list (@METHOD_SKILLS in
 #   method/scripts/method/lib/protect.pl), its SKILL.md's name the folder's,
 #   no context: fork and no agent:; and a folder for every name on the list.
 # Examining nothing is a failure. The checks live in scripts/dev/lib/prompts.pl.
@@ -61,4 +61,4 @@ if [ "$bad" -gt 0 ]; then
   echo "lint-prompts: FAIL - $bad problem(s) in $examined prompt files"
   exit 1
 fi
-echo "lint-prompts: PASS - examined $examined prompt files under method/.claude/ (agents, rules, skills): no think-carefully lines, reasoning formats or emphasis words; every rules comment on a line of its own; every agent file's frontmatter as the method sets it, and a file for every gate; every skill folder named and listed as G6 protects it, and a folder for every name on the list"
+echo "lint-prompts: PASS - examined $examined prompt files under method/.claude/ (agents, rules, skills): no think-carefully lines, reasoning formats or emphasis words; every rules comment on a line of its own; every agent file's frontmatter as the method sets it, and a file for every gate; every skill folder named method- and on the method's skill list, and a folder for every name on the list"

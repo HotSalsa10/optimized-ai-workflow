@@ -76,8 +76,8 @@ our $WAY_OUT = 'if the guard is wrong, see .claude/hooks/method/README.md, "When
 # backslashes, past the hook's time limit; 5.5's round 3)
 our $WATCHED_NAME = qr{(?i:git(?:-[a-z][a-z0-9-]*)?|gh|claude|curl|wget)(?i:\.exe)?(?=\z|[\s;&|)`'"\\{},<>])};
 my $EDGE = qr{[\s;&|(`'"=\\{},<>]};
-# (the method's skills come from protect.pl's list, their one home; step
-# 6.3)
+# (the method's skills come from protect.pl, their one home; step 6.3, and
+# every method- name since step 7.2)
 our $WATCHED_PATH = qr{\.claude/(?:hooks/method|agents/method|rules/method|method-local|settings(?:\.local)?\.json)|\.claude/skills/@{[ Protect::skills_re() ]}|(?:\A|[\s/'"=])scripts/method\b|\.git/(?:hooks|config)\b|\.gitconfig\b|\.config/git\b|managed-settings}i;
 
 # does TEXT name a watched command: the name at the start, after an edge,

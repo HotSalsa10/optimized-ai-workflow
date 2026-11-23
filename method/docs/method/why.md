@@ -19,7 +19,7 @@ The hooks run in local sessions and in cloud sessions with one repository. Where
 | G2 powershell (M129) | Every PowerShell call | guard.sh |
 | G3 git-shapes (M130) | A git command not on the list of allowed shapes, such as a push to main | guard.sh, `git-shapes.txt` |
 | G4 outside (M131) | gh, MCP tools, curl or wget to GitHub, another Claude, SendMessage and remote agents, unless on a list | guard.sh, `gh-shapes.txt`, `mcp-tools.txt` |
-| G6 protected (M132) | A write to the method's files and skills, its settings, git's config and hooks, or the folders Claude Code loads mods and plugins from (`~/.claude/dev-mods/`, `~/.claude/plugins/`) | guard.sh |
+| G6 protected (M132) | A write to the method's files and skills (any skill named `method-`), its settings, git's config and hooks, or the folders Claude Code loads mods and plugins from (`~/.claude/dev-mods/`, `~/.claude/plugins/`) | guard.sh |
 | G8 mutant-commit (M133) | A commit while a mutation run, or what one left behind, is in the repository | guard.sh |
 | G12 effort (M134) | Nothing: a warning at the first call of a session below xhigh | guard.sh |
 | G16 settings-change (M136) | A settings change mid-session that switches off or weakens the hooks | guard.sh |
@@ -34,6 +34,7 @@ The hooks run in local sessions and in cloud sessions with one repository. Where
 |---|---|---|
 | M001, M003, M077 | Where things stand: uncommitted and unpushed work, commits missing a verdict, records, versions, effort | `scripts/method/status.sh` |
 | M002, M050, M051, M066 | Every check runs and examines something; a fresh clone works; no secrets; the log is kept | `scripts/method/run-checks.sh` |
+| M010 | The method changes only through its release's sync: the built-in `method-files` check fails when a file under the method's folders is changed, missing or not in `scripts/method/method.lock`, or when the method's settings in `.claude/settings.json` (its keys, hooks and deny entries) are not the release's; your own deny entries, hooks, other keys and skills are left alone. The method's keys are compared whole, `env` and `skillOverrides` among them, so an env variable or skill override of your own in `.claude/settings.json` turns the check red; one in `.claude/settings.local.json` is not compared, and session-status names it | `scripts/method/run-checks.sh` |
 | M032, M038, M085, M112, M113 | The review packet is the reviewer's whole input, without the author's account or noise | `scripts/method/review-packet.sh` |
 | M008, M089, M108 | Ready to merge: the files are the commit, main is merged in, the checks passed, and the verdict line is the one the receipts give | `scripts/method/done-check.sh` |
 | M044 | Mutation testing breaks the changed code on purpose | `scripts/method/mutate-changed.sh` |
@@ -60,6 +61,7 @@ The hooks run in local sessions and in cloud sessions with one repository. Where
 | Deep review (M087, M146): three independent method-reviewer runs, launched in one message, all approving; every finding of any of them gets a disposition in the report | Three VALID approving receipts of the reviewer for the exact files | That the three were launched together and worked apart, and that every finding got a disposition |
 | High-risk work beyond Deep review | Nothing | The person with authority signing the expected results (the `source` column names them), a test copy, an undo plan, a human expert: convention, in the plan's [AUTHORITY] items and the review |
 | M075 | `/code-review` is kept to you by the settings | That nothing else is treated as a gate |
+| M010, the method's files | Every method file and the method's settings against `method.lock`, whenever the checks run | That the lock is the real release's: a sync run from a doctored copy writes a lock that matches it (CI's comparison with the published release comes in step 9) |
 | M094, a scanner that is not AI | The built-in `secrets` check reads every tracked file whenever the checks run | Known security problems in the libraries the project uses: `checks/project.tsv` offers rows for four common scanners (Python, Node, Go, Rust), each off until you install its tool and turn its row on |
 | The records (M014, M019) | status says when a record is missing, when CLAUDE.md does not load AGENTS.md, and when TESTS.md does not name a check listed in `checks/*.tsv` | Whether the records are up to date, and whether TESTS.md names the built-in checks |
 

@@ -32,6 +32,13 @@
 #   fresh-clone     files under PRODUCT_PATHS that git ignores are here but
 #                   not in a clone; LOCAL_ONLY names the ones a clone is
 #                   meant to lack
+#   method-files    every file under the method's paths (scripts/method/,
+#                   .claude/hooks/method/, agents/method/, rules/method/,
+#                   skills/method-*, docs/method/) is the one method.lock
+#                   lists, with its hash; none is missing, none is extra;
+#                   and the method keys in .claude/settings.json are those
+#                   the release's settings.method.json and the profile give
+#                   (lib/lock.pl). Run where the method is installed.
 #   project-checks  SKIPPED when checks/*.tsv lists no checks
 #   tree-unchanged  last: the checks left HEAD (its commit and its branch),
 #                   the branches, the tags that were there, and the files on
@@ -69,6 +76,9 @@
 # Rules it serves:
 # - M002: a check that examined nothing is SKIPPED, never a pass; a check
 #   must print how many things it examined.
+# - M010: method scripts in a project change only through sync; method-files
+#   compares them, and the method's settings, with method.lock (DECISIONS
+#   A78).
 # - M050: fresh-clone fails on files that are here but not in a clone, and
 #   CI's clean checkout runs the same checks (DECISIONS A31).
 # - M051: the whole output goes to a log where the run happens; the screen

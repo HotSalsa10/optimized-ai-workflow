@@ -15,7 +15,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M007 | Update the records before review, so one review covers one change | incident | method/.claude/skills/method-finish/SKILL.md | done |
 | M008 | The verdict comes before the merge | incident | method/scripts/method/done-check.sh | done |
 | M009 | Act on the verdict; at most 3 review rounds, then re-plan | incident; research: Claude Code team | method/scripts/method/done-check.sh | done |
-| M010 | Method scripts in a project change only through sync; a built-in check compares them with method.lock (reworded, decision A78) | incident; decision A78 | method/scripts/method/run-checks.sh | step 7 |
+| M010 | Method scripts in a project change only through sync; a built-in check compares them with method.lock (reworded, decision A78) | incident; decision A78 | method/scripts/method/run-checks.sh | done |
 | M011 | Commit with the verdict trailer, push, show status | incident | method/.claude/skills/method-finish/SKILL.md | done |
 | M012 | Reports open with status and next step, then what changed, what is left, risks, what is uncertain, checks | incident | method/.claude/rules/method/owner.md | done |
 | M013 | If a new session cannot orient from the files, fix the files, not the handoff | incident | method/.claude/rules/method/method.md | done |

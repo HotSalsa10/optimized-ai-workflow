@@ -9,7 +9,7 @@
 # model changed, each red for its reason. Part three (step 6.3): a skill
 # folder added (as steps 6.4 and 6.5 will add them) with context: fork,
 # with agent:, without method-, with a name other than its folder's, not
-# on G6's list in protect.pl; a name on the list with no folder; each red
+# on the method's skill list in protect.pl; a name on the list with no folder; each red
 # for its reason, and a well-made listed skill green. Step 6.4: Bash and
 # PowerShell in the architect's tools (not a gate), and a built skill's
 # folder removed (method-plan; since 6.5 method-start too), each red. Step
@@ -133,11 +133,11 @@ if expect_landed "diagnose's file removed" test ! -e "$sb/$agents/method-diagnos
 fi
 drop_sandbox "$sb"
 
-# part three (step 6.3; S8 and S10): skill folders against G6's skill list
+# part three (step 6.3; S8 and S10): skill folders against the method's skill list
 # (protect.pl's @METHOD_SKILLS)
 protect=method/scripts/method/lib/protect.pl
 # skill NAME LIST DIR SKILL REASON: in a fresh copy, LIST (a name, or
-# empty) is put on G6's skill list, and DIR (a folder under
+# empty) is put on the method's skill list, and DIR (a folder under
 # method/.claude/skills/, or empty) gets SKILL as its SKILL.md; the lint
 # must go red with REASON, or stay green when REASON is "green"
 skill() {
@@ -170,17 +170,17 @@ skill "a listed skill folder without method-" plan plan "---${nl}name: plan${nl}
   "method/.claude/skills/plan/: the folder's name does not start method-"
 skill "a skill's name not its folder's" method-x method-x "---${nl}name: method-y${nl}---${nl}A step.${nl}" \
   "method/.claude/skills/method-x/: the name \"method-y\" in SKILL.md is not the folder's name, method-x"
-skill "a skill folder missing from G6's list" "" method-x "$ok_skill" \
-  "method/.claude/skills/method-x/: the folder is not on G6's skill list"
+skill "a skill folder missing from the method's skill list" "" method-x "$ok_skill" \
+  "method/.claude/skills/method-x/: the folder is not on the method's skill list"
 skill "a listed folder that does not exist" method-x "" "" \
-  "G6's skill list (@METHOD_SKILLS in method/scripts/method/lib/protect.pl) names method-x, but method/.claude/skills/method-x/ does not exist"
+  "the method's skill list (@METHOD_SKILLS in method/scripts/method/lib/protect.pl) names method-x, but method/.claude/skills/method-x/ does not exist"
 # a built skill's folder removed (step 6.4: method-plan; step 6.5:
 # method-start, the last name that was excepted as not built yet)
 for s in method-plan method-start; do
   sb=$(make_sandbox) || abort_sandbox
   rm -rf "$sb/method/.claude/skills/$s"
   if expect_landed "$s's folder removed" test ! -e "$sb/method/.claude/skills/$s"; then
-    expect_red "a built skill's folder removed ($s)" "$sb" "G6's skill list (@METHOD_SKILLS in method/scripts/method/lib/protect.pl) names $s, but method/.claude/skills/$s/ does not exist" bash scripts/dev/lint-prompts.sh
+    expect_red "a built skill's folder removed ($s)" "$sb" "the method's skill list (@METHOD_SKILLS in method/scripts/method/lib/protect.pl) names $s, but method/.claude/skills/$s/ does not exist" bash scripts/dev/lint-prompts.sh
   fi
   drop_sandbox "$sb"
 done

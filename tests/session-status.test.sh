@@ -74,6 +74,29 @@ hook "$p"
 first=$(printf '%s\n' "$out" | sed -n 1p)
 if [ "$first" = "METHOD-ACTIVE vunreleased" ] && [ "$code" -eq 0 ]; then pass "the first line is METHOD-ACTIVE vunreleased, and it exits 0"; else fail "the first line is METHOD-ACTIVE vunreleased, and it exits 0" "exit $code: $out"; fi
 has "a clean project gets status's summary, with the client's version and CI left to /start" "status: nothing needs a look" "claude-code" "ci)"
+
+# the version from the lock's first line (step 7.2): read before perl
+# starts; vunknown when that line is not a version line; vunreleased with
+# no lock (above)
+lp=$(project locked) || abort_sandbox
+printf 'version\tv0.7.0\nsource\t%s\nprofile\tbest\nsettings\t%s\n' "$(printf '%040d' 0)" "$(printf '%064d' 0)" >"$lp/scripts/method/method.lock"
+hook "$lp"
+first=$(printf '%s\n' "$out" | sed -n 1p)
+if [ "$first" = "METHOD-ACTIVE v0.7.0" ] && [ "$code" -eq 0 ]; then pass "the first line names the lock's version (METHOD-ACTIVE v0.7.0)"; else fail "the first line names the lock's version (METHOD-ACTIVE v0.7.0)" "exit $code: $out"; fi
+hook "$lp" "" METHOD_NESTED=1
+if [ "$out" = "METHOD-ACTIVE v0.7.0 (nested: status skipped)" ]; then pass "the first line names the lock's version in a nested run too"; else fail "the first line names the lock's version in a nested run too" "$out"; fi
+for bad in 'version\tv0.7.0 ; rm -rf ~' 'version\tv0.7.0\r' 'version\tlatest' 'Version\tv0.7.0' 'version\tv0.7.0.0.0.0.0.0.0.0.0.0.0' ''; do
+  # shellcheck disable=SC2059 # the line's \t and \r are printf's to read
+  printf "$bad\n" >"$lp/scripts/method/method.lock"
+  hook "$lp"
+  first=$(printf '%s\n' "$out" | sed -n 1p)
+  if [ "$first" = "METHOD-ACTIVE vunknown" ]; then pass "a lock whose first line is not a version line gives vunknown: $bad"; else fail "a lock whose first line is not a version line gives vunknown: $bad" "$first"; fi
+done
+rm -f "$lp/scripts/method/method.lock"
+mkdir "$lp/scripts/method/method.lock"
+hook "$lp"
+first=$(printf '%s\n' "$out" | sed -n 1p)
+if [ "$first" = "METHOD-ACTIVE vunreleased" ] && [ "$code" -eq 0 ]; then pass "a lock that is a folder is not read (vunreleased)"; else fail "a lock that is a folder is not read (vunreleased)" "exit $code: $out"; fi
 lacks "status's PASS lines stay out of the context" "records: PASS"
 
 # the gates' receipts for the files at HEAD (step 5b.2): one LOOK line with
