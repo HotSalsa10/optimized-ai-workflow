@@ -82,7 +82,8 @@
 #
 #   Setup::parse_answers(BYTES, PROFILE_NAMES) (ANSWERS, PROBLEMS)
 #   Setup::detect(ROOT) {main_tip, main_has_method, langs => [[manifest,
-#     language, row]]}
+#     language, row]], crlf => [tracked paths stored with CRLF line ends
+#     that no attribute asks for]}
 #   Setup::plan(ROOT, BYTES, DETECTED, OVERLAY) {problems, card, files
 #     => [[word, path, note]], out => {path => content}}; OVERLAY {path =>
 #     content} is read before the disk (the tests' second runs)
@@ -214,7 +215,7 @@ sub parse_answers {
 
 sub detect {
   my ($root) = @_;
-  my %d = (langs => []);
+  my %d = (langs => [], crlf => []);
   my $cwd = Cwd::getcwd();
   if (chdir $root) {
     my ($top, $why) = Git::top();
@@ -225,6 +226,20 @@ sub detect {
         # main already holds the method: its install commit is history that
         # status judges, so setup moves nothing past it (S17)
         $d{main_has_method} = (Git::run('cat-file', '-e', "$m[1]:$Lock::LOCK"))[0] == 0 ? 1 : 0;
+      }
+      # files git stores with CRLF line ends that no attribute asks for:
+      # the .gitattributes method block asks for LF, but git keeps such a
+      # file as stored until it is converted on purpose, so setup names
+      # them on the card and changes none. git prints the attributes as
+      # words with spaces between ("attr/text=auto eol=crlf"); a file
+      # whose words hold -text (binary too) or eol=crlf is left out
+      my ($st, $out) = Git::run('ls-files', '-z', '--eol');
+      for my $rec ($st ? () : split /\0/, $out) {
+        my ($info, $path) = split /\t/, $rec, 2;
+        next unless defined $path && $info =~ m{\Ai/(?:crlf|mixed)\s};
+        my ($attr) = $info =~ m{attr/(.*?)\s*\z};
+        next if grep { $_ eq '-text' || $_ eq 'eol=crlf' } split /\s+/, ($attr // '');
+        push @{ $d{crlf} }, $path;
       }
     }
     chdir $cwd;
@@ -633,6 +648,12 @@ sub plan {
   push @card, "The fast tests run in every check run (the row $TEST_ID in $CHECKS)." if $test_row;
   for my $l (@{ $det->{langs} }) {
     push @card, "Found $l->[1] ($l->[0]): the suggested scanner row is $l->[2], offered off in the checks template; install its tool, then turn it on.";
+  }
+  if (my @crlf = @{ $det->{crlf} || [] }) {
+    my @named = map { Esc::line($_) } @crlf[0 .. ($#crlf < 2 ? $#crlf : 2)];
+    push @card, 'Line ends: ' . scalar(@crlf) . (@crlf == 1 ? ' file is' : ' files are') . ' stored with CRLF line ends: ' . join(', ', @named)
+      . (@crlf > 3 ? ' and ' . (@crlf - 3) . ' more' : '') . '. The .gitattributes method block asks for LF, but git keeps such a file as'
+      . ' it is stored until it is converted on purpose (git add --renormalize FILE, then commit it); setup changes none.';
   }
   if (defined $tip && grep { $_ eq "VERDICTS_FROM=$tip" } @conf_lines) {
     push @card, 'History: VERDICTS_FROM is main\'s tip before the method, so status checks review lines from the install on.';

@@ -1,0 +1,20 @@
+# The answers the records keeper's owner gives /method-setup (step 7.7).
+# One KEY<TAB>value per line; method/scripts/method/lib/setup.pl reads them.
+DECIDES	owner
+REPORTS	full
+PACE	small
+TOUCHES	money
+TOUCHES	outside
+STRICT	strict
+PROFILE	best
+PROJECT_WHAT	A keeper of records: a ledger of items and amounts, and a script that posts its rows to the live ledger.
+NEVER_WRONG	A row posted to the live ledger twice, or an amount that is not whole cents.
+RULE	Amounts are whole cents, never fractions. Why: no rounding errors in the totals.
+RULE	Only the owner runs scripts/post-rows.sh with --live. Why: it writes to the live ledger.
+HOW_IT_STARTS	bash scripts/post-rows.sh --reason "a start check"
+TEST_COMMAND	bash scripts/check-ledger.sh
+PRODUCT_PATH	ledger.csv
+PRODUCT_PATH	scripts
+PRODUCT_PATH	exports
+RISK_PATH	ledger.csv
+RISK_PATH	scripts/post-rows.sh

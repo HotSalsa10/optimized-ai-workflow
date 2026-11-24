@@ -1,0 +1,16 @@
+# The answers the notes site's owner gives /method-setup (step 7.7), in
+# their own words. One KEY<TAB>value per line; method/scripts/method/lib/setup.pl
+# reads them.
+DECIDES	claude
+REPORTS	short
+PACE	small
+TOUCHES	none
+STRICT	standard
+PROFILE	balanced
+PROJECT_WHAT	My notes on the garden and the kitchen, as a small website.
+NEVER_WRONG	A link that goes to a page that is not there.
+RULE	Every page links back to the start page. Why: a reader should never get lost.
+HOW_IT_STARTS	perl check-links.pl pages/index.html
+TEST_COMMAND	perl check-links.pl pages
+PRODUCT_PATH	pages
+PRODUCT_PATH	check-links.pl

@@ -109,6 +109,15 @@ if expect_landed "portability plant 1" grep -q -F -- "$bash4_text" "$sb/planted-
 fi
 drop_sandbox "$sb"
 
+# 4b. the same in an example's script: the lint covers examples/ (step 7.7)
+sb=$(make_sandbox) || abort_sandbox
+printf '%s colours\n' "$bash4_text" >>"$sb/examples/word-game/project/game.sh"
+ex_line=$(wc -l <"$sb/examples/word-game/project/game.sh" | tr -d ' ')
+if expect_landed "portability plant 1b" grep -q -F -- "$bash4_text" "$sb/examples/word-game/project/game.sh"; then
+  expect_red "portability red on an associative array in an example's script" "$sb" "examples/word-game/project/game.sh:$ex_line: associative arrays" bash scripts/dev/lint-portability.sh
+fi
+drop_sandbox "$sb"
+
 # 5. GNU-only in-place sed, with another flag before it
 sb=$(make_sandbox) || abort_sandbox
 sed_text="sed -E -"'i'
