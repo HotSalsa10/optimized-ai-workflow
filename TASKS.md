@@ -1,6 +1,6 @@
 # TASKS
 
-Current phase: Release 1. Steps 1 to 6 are merged into main (3172399, pull request #3); step 6b is being built (docs/plans/step6b.md).
+Current phase: Release 1. Steps 1 to 6 are merged into main (3172399, pull request #3); step 6b and step 7 are built and wait for CI, review and the owner's merge; step 8 is planned (docs/plans/step8.md).
 
 ## Step 1: repo skeleton, records, rule map, CI with planted defects
 
@@ -438,8 +438,19 @@ Plan: docs/plans/step7.md (written 23 November 2026 on 551ae63; scope as A77 rew
   - [ ] 5. CI push C, only if the repair changed the tree.
   - [ ] 6. The owner merges; then the owner creates tag `v0.7.0` on GitHub (Claude gives the exact steps).
 
+## Step 8: this repo's own hooks, uninstall, the user-level audit, scripts that refuse a bare name
+
+Plan: docs/plans/step8.md, version 2 (after three critiques), written on claude/step8. 8.0 only measures and writes records; 8.1 to 8.5 are built only after step 7 is merged, `v0.7.0` exists and main is merged into claude/step8. One owner decision: D1 (how an uninstall merges), before 8.2.
+
+- [ ] 8.0 Measure Q1, Q2, Q3, Q6 and Q8 at both pins in throwaway copies; plan version 3 with the results and the A81 draft (kept in the plan until the IDs are checked again).
+- [ ] 8.1 This repo's own hooks from `v0.7.0` (one commit), validate's `self-install` check, AGENTS.md's guard notes.
+- [ ] 8.2 Uninstall (`sync.sh --uninstall`, M162) and the guard refusing `sync.sh --uninstall` and `--write` in a hooked session.
+- [ ] 8.3 Scripts that refuse a bare name (M163, tests/wrappers.test.sh); closes SEC-D.
+- [ ] 8.4 The user-level audit (M164) in session-status, with lines that tell Claude what to tell the owner.
+- [ ] 8.5 Close: records, the non-root run, CI push B, one review in a hooked session, one repair loop, CI push C only if the repair changed the tree, the owner's merge, then tag `v0.8.0`.
+
 ## Next
 
 Step 6 is merged (pull request #3, 3172399). Step 6b: 6b.0 to 6b.4 are built, with the flake fixes (78cc707), and 6b.5's records are committed (896447f). CI push A was green (run 157); CI push B (run 158 on 896447f) failed at shellcheck in Repo checks, its plants and harness green, about 63 minutes used. The review asked for changes; the one repair loop is committed (22db826), and its fresh check closed 20 of the 23 findings, leaving R14, R16 and R17 open and two repairs (R3, R11) with new defects. The owner approved one extra repair round on 23 November; it is built in the working tree, not yet committed. The extra round is committed (eeb506a, with its full local run's counts in 5d0f0a1). Next for 6b: CI push C after the 1 December minutes reset, then ask the owner to merge.
 
-Step 7 is built on claude/step7 (7.0 to 7.8 at 8b3f929, with no 7b), with the whole-step check's fix round and 7.9 step 1's records in the working tree, not yet committed. Next for step 7: commit them; after 6b merges, merge main into claude/step7; then the run as a user who is not root and CI push B on that tree (December's minutes), the review, its one repair loop, and the owner's merge and the first release tag.
+Step 7 is built on claude/step7 (7.0 to 7.8 at 8b3f929, with no 7b), with the whole-step check's fix round and 7.9 step 1's records committed (abc9628). Next for step 7: after 6b merges, merge main into claude/step7; then the run as a user who is not root and CI push B on that tree (December's minutes), the review, its one repair loop, and the owner's merge and the first release tag.

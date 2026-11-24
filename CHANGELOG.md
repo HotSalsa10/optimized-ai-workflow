@@ -245,6 +245,10 @@ After your merge, you create the first release tag, v0.7.0, on GitHub. Claude gi
 
 - Step 7's records before its review: DECISIONS A78 is its full record as built (the choices settled before the build, then how each part was built and the known limits); RISKS #2, #7, #16 and #19 say what step 7 changed, and #22 to #27 are new (settings a project keeps, checks that fail closed on files nobody meant to change, the steering list's gaps, the live-write helper, setup-write's limits, profiles and the client); ROADMAP marks step 7 built and waiting for its review and your merge, and opens step 8 with this repository's own hooks from the first release tag; SPEC R3, ROADMAP's exit and Track 3 name `/method-setup`; why.md says how the method is installed and that status names a first install merged without a review; TESTS.md gives the run times CI's push B will check.
 
+### Changed (step 8 plan)
+
+- Step 8's plan (docs/plans/step8.md) is at version 2 after three critiques: this repo runs the hooks from `v0.7.0`; uninstall keeps what was there before the install, the logs and setup's files, and runs only where the hooks are off; the check of your own Claude Code folder tells you what to change; one question for you (D1: how an uninstall merges). Nothing is built until step 7 is merged and tagged.
+
 ### Changed (step 6)
 
 - From step 6's review (6.6, one repair loop): the prompt check and the description budget read a frontmatter value as Claude Code does. A `tools:` list wrapped onto the next line, written in quotes, or followed by a `# comment` no longer hides a tool such as Agent or Bash from the check, and `context: fork  # a note` in a skill is refused as `context: fork` is. A description wrapped onto the next line is counted whole, since Claude Code joins the lines and sends them all.
