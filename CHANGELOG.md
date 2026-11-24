@@ -174,6 +174,13 @@ Nothing yet. Release 1 is being built. Release 1 will ship no ready-made packs f
 - setup's card names the files the project stores with CRLF line ends (up to three, and how many more), leaving out a file whose attributes ask for CRLF or no conversion: the method's `.gitattributes` block asks for LF, but git keeps such a file as it is until it is converted on purpose, and setup changes none.
 - Tests: tests/examples.test.sh (29 cases: each example installed as a first install is, then its floor, status, checks, done-check on the install branch and on a later change, and a second sync and setup that change nothing; make.sh's refusals and the same history whoever runs it; which CRLF files setup names) and tests/plants/examples.sh (9 plants); tests/plants/dev-checks.sh 1 new plant (the portability lint on an example's script).
 
+### Added (step 7.8)
+
+- The review packet carries your `REVIEW.md` (what a review of your project looks for) in a section of its own, as it stood where the change left main, as it already did for the incident checklist (M157): a change that loosens `REVIEW.md` is reviewed against the old text, and its edit is in the diff and counts from the next change. A project without `REVIEW.md` there gets a line saying so.
+- The reviewer answers every item of the incident checklist, also those that do not apply, and follows your `REVIEW.md` where it does not conflict with the reviewer's own rules (M158).
+- `/method-plan`: an expected result may come from the current version's output at a named commit, with the command that gave it, for a behaviour the change keeps (M159); a FULL plan names each choice that is hard to undo, with its options and a recommendation (M160); a FULL plan on a high-risk path is reviewed by the reviewer against your request before you are asked to approve it (M161). That review does not count for the built change.
+- Tests: tests/review-packet.test.sh 8 new cases (139 in all); tests/plants/review-packet.sh 3 new plants (6 in all).
+
 ### Changed (step 6b)
 
 - CI runs on pushes only (step 6b.0). A pull request no longer starts a second run of the same files: the push run already checks its head. tests/ci-config.test.sh turns red if a pull_request trigger comes back. Free CI minutes are scarce, so DECISIONS A76 also says when a push may skip CI (`[skip ci]`): only for a head that no review or merge reads; the tree that is reviewed and the tree that lands on main are always checked on Linux (A19).

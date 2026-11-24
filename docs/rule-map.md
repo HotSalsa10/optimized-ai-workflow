@@ -162,8 +162,8 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M154 | A flaky check: find the cause; never skip, retry or re-run it until it passes | step 6b plan, section 6 (P4) | method/.claude/rules/method/method.md | done |
 | M155 | Sync replaces nothing changed since the lock and writes nothing until its whole plan holds | SPEC R1 (step 7 plan, S3) | scripts/release/sync.sh | done |
 | M156 | Setup writes only through setup-write from an answers file and never overwrites a project file outside its block | SPEC R3 (step 7 plan, S9, S10) | method/scripts/method/lib/setup.pl | done |
-| M157 | The review packet carries the project's REVIEW.md as it stands at the merge base | step 6b plan, section 6 (P3) | method/scripts/method/lib/packet.pl | step 7 |
-| M158 | The reviewer checks every item of the project's incident checklist and says so | step 6b plan, section 6 (P8 part 3) | method/.claude/agents/method/method-reviewer.md | step 7 |
-| M159 | The plan names the current version's outputs at a named commit as an outside source of expected results | step 6b plan, section 6 (P9) | method/.claude/skills/method-plan/SKILL.md | step 7 |
-| M160 | A FULL plan names each hard-to-undo choice with its options and a recommendation | step 6b plan, section 6 (N2) | method/.claude/skills/method-plan/SKILL.md | step 7 |
-| M161 | The reviewer reviews a FULL high-risk plan before the owner is asked to approve it | step 6b plan, section 6 (P11) | method/.claude/skills/method-plan/SKILL.md | step 7 |
+| M157 | The review packet carries the project's REVIEW.md as it stands at the merge base, so a change cannot weaken the text it is reviewed against | step 6b plan, section 6 (P3) | method/scripts/method/lib/packet.pl | done |
+| M158 | The reviewer checks every item of the project's incident checklist and says so | step 6b plan, section 6 (P8 part 3) | method/.claude/agents/method/method-reviewer.md | done |
+| M159 | The plan names the current version's outputs at a named commit as an outside source of expected results | step 6b plan, section 6 (P9) | method/.claude/skills/method-plan/SKILL.md | done |
+| M160 | A FULL plan names each hard-to-undo choice with its options and a recommendation | step 6b plan, section 6 (N2) | method/.claude/skills/method-plan/SKILL.md | done |
+| M161 | The reviewer reviews a FULL high-risk plan before the owner is asked to approve it, against the owner's request | step 6b plan, section 6 (P11) | method/.claude/skills/method-plan/SKILL.md | done |

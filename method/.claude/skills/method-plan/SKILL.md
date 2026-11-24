@@ -1,7 +1,7 @@
 ---
 name: method-plan
 description: Plans one task before it is built. Asks for what is missing, writes docs/tasks/<id>/plan.md (and expected.tsv for FULL) with known and assumed marked, and stops until the owner replies "approve <id>". For FULL, then writes the tests and sees them fail first.
-# rules: M006 M021 M091 M125
+# rules: M006 M021 M091 M125 M159 M160 M161
 argument-hint: <task id> <what the task is>
 ---
 # Plan the task
@@ -27,7 +27,7 @@ done-check reads this format, so keep to it.
   - `Tier: FULL` or `Tier: LIGHT`;
   - `Paths: ` and the files and folders the change will touch, separated by commas;
   - `Approved: YYYY-MM-DD HH:MM "<the owner's reply>"`, added only once the owner has replied: the date and time as `date '+%Y-%m-%d %H:%M'` prints them when you add it, and the reply quoted exactly as typed, which holds `approve <id>` with this folder's id.
-- `expected.tsv`, for FULL only, a regular file (not a link): the expected results, tab-separated, its first line the header `case`, `inputs`, `expected`, `source`. One row per case: a short name; the inputs as `name=value;name=value`; the expected result; and its source, the requirement, document or person (by role) outside the model that gives the value. For a high-risk change, the person with authority signs the expected results, and the source names them. A value you assumed has a source that starts `INFERRED:` and is a question in the plan until someone gives it.
+- `expected.tsv`, for FULL only, a regular file (not a link): the expected results, tab-separated, its first line the header `case`, `inputs`, `expected`, `source`. One row per case: a short name; the inputs as `name=value;name=value`; the expected result; and its source, the requirement, document or person (by role) outside the model that gives the value. Where the change keeps a behaviour the project has now, the current version's output is such a source: name the commit and the command that gave it (`output at <commit>: <command>`). For a high-risk change, the person with authority signs the expected results, and the source names them. A value you assumed has a source that starts `INFERRED:` and is a question in the plan until someone gives it.
 - Once approved, the Tier line, the Paths line and expected.tsv stay as approved. A change to any of them is a new plan: change it, ask again, and replace the Approved line with one holding the new reply, date and time.
 
 ## A FULL plan
@@ -38,11 +38,15 @@ Before you write it, ask the owner for whatever is missing of these four, and gu
 3. what done looks like that the owner can see;
 4. what the owner expects to happen, as cases with their inputs and results.
 
-`plan.md` then holds, after its three lines: what the task is and the requirement it serves, in plain words; the four points; what is known and what is assumed; whether it can be done; the acceptance criteria the reviewer will hold the change to; the cases of `expected.tsv`, in words; the risks, with each item a person must look at tagged [EYES] and each item a person with authority must sign tagged [AUTHORITY].
+`plan.md` then holds, after its three lines: what the task is and the requirement it serves, in plain words; the four points; what is known and what is assumed; whether it can be done; the acceptance criteria the reviewer will hold the change to; the cases of `expected.tsv`, in words; each choice that is hard to undo (such as a stored format, a public interface or a dependency), with its options and your recommendation, or "none"; the risks, with each item a person must look at tagged [EYES] and each item a person with authority must sign tagged [AUTHORITY].
 
 ## A LIGHT plan
 
 `plan.md` with `Tier: LIGHT`, its Paths line, and one to three acceptance lines. No `expected.tsv`.
+
+## A FULL plan on a high-risk path
+
+When a FULL plan's Paths line names a high-risk path, a file under one or a folder that holds one, or the change will touch one (on `HIGH_RISK_PATHS` or done-check's built-in list, as above), the reviewer reviews the plan before you ask for approval. Commit the task folder, then run `mkdir -p .method/local` and `git rev-parse HEAD^{tree}`, each in a Bash call of its own. Write the owner's request as they gave it, with their answers to the four points, to `.method/local/request-<id>.md` (scratch, not part of the change), then run `bash scripts/method/review-packet.sh --base origin/<main> --criteria .method/local/request-<id>.md > .method/local/packet-<tree>.txt`. Launch the method-reviewer agent with the Agent tool and `run_in_background: false`, its prompt naming the packet and saying that it reviews a plan, not built work. Fix what it asks and review again, at most three rounds. Put its word and each finding's disposition in the plan. This review does not count for the built change.
 
 ## The approval
 
