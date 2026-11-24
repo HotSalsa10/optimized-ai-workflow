@@ -185,6 +185,43 @@ else
   fail "subagent: the fake did not answer; the client was not started"
 fi
 
+# --- 3b. after a subagent's tool call: PostToolUse, PostToolUseFailure and
+# PostToolBatch context reach the subagent's request (A80) ---
+h_case subagent-post
+h_fixtures
+h_settings <<EOF
+{"model":"claude-opus-5-5",
+ "hooks":{
+  "PostToolUse":[{"matcher":"Read","hooks":[{"type":"command","command":"$F/context.sh\" PostToolUse HARNESS-POST-CONTEXT"}]}],
+  "PostToolUseFailure":[{"matcher":"Read","hooks":[{"type":"command","command":"$F/context.sh\" PostToolUseFailure HARNESS-FAILURE-CONTEXT"}]}],
+  "PostToolBatch":[{"hooks":[{"type":"command","command":"$F/context.sh\" PostToolBatch HARNESS-BATCH-CONTEXT"}]}]}}
+EOF
+printf 'hello\n' >"$H_PROJ/readme.txt"
+cat >"$H_DIR/script.json" <<EOF
+{"convs":[
+  {"name":"sub","match":"HARNESS-SUBAGENT-TASK","turns":[
+    {"tool":"Read","input":{"file_path":"$H_PROJ/readme.txt"}},
+    {"tool":"Read","input":{"file_path":"$H_PROJ/no-such-file.txt"}},
+    {"text":"APPROVE\nEND-VERDICT harness"}]},
+  {"name":"main","match":"^go$","turns":[
+    {"tool":"Agent","input":{"description":"harness review","prompt":"HARNESS-SUBAGENT-TASK: review the change","subagent_type":"reviewer","run_in_background":false}},
+    {"text":"MAIN-DONE"}]}],
+ "fallback":{"text":"FAKE-FALLBACK"}}
+EOF
+if h_fake "$H_DIR/script.json"; then
+  # shellcheck disable=SC2086
+  h_client 90 -- $D
+  h_stop
+  if h_req_in sub HARNESS-POST-CONTEXT && h_req_in sub HARNESS-FAILURE-CONTEXT && h_req_in sub HARNESS-BATCH-CONTEXT; then
+    pass "subagent-post: PostToolUse, PostToolUseFailure and PostToolBatch additionalContext reach the subagent's request"
+  else
+    fail "subagent-post: PostToolUse, PostToolUseFailure and PostToolBatch additionalContext reach the subagent's request" "$(cut -f7- "$H_DIR/fake/requests.tsv")"
+  fi
+  h_safe subagent-post
+else
+  fail "subagent-post: the fake did not answer; the client was not started"
+fi
+
 # --- 4. onFailure: a hook that cannot start blocks only with "block" ---
 printf '%s\n' '{"convs":[{"name":"main","match":"^go$","turns":[{"tool":"Bash","input":{"command":"touch ran.txt","description":"Write a marker"}},{"text":"MAIN-DONE"}]}]}' >"$H_WORK/onfail.json"
 for mode in block unset; do

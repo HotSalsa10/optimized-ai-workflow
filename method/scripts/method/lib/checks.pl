@@ -624,16 +624,18 @@ sub check_method_files {
       odd => 'entries under the method\'s paths that are not regular files or cannot be read',
       settings => 'problems with the method keys in .claude/settings.json');
     # what puts each kind right: a changed or missing file comes back from
-    # git; a file the lock does not name, a link or an odd entry is removed
+    # the commit that last wrote the lock (a plain checkout of an edit
+    # already committed changes nothing); a file the lock does not name, a
+    # link or an odd entry is removed
     my @fix;
-    push @fix, 'put each changed or missing file back as released (git checkout -- PATH)' if grep { $n{$_} } qw(changed crlf missing);
+    push @fix, 'put each changed or missing file back from the commit that last wrote method.lock (the owner runs:'
+      . ' git checkout $(git log -1 --format=%H -- scripts/method/method.lock) -- PATH); rules of your own go in .claude/rules/pack/' if grep { $n{$_} } qw(changed crlf missing);
     push @fix, 'remove each file not in method.lock' if $n{extra};
     push @fix, 'replace each link or odd entry with a plain folder or file as released' if $n{link} || $n{odd};
     push @fix, 'put the method keys in .claude/settings.json back as scripts/method/settings.method.json has them' if $n{settings};
     return { status => 'FAIL', kind => 'finding', examined => $v->{examined},
       detail => join('; ', map {"$n{$_} $say{$_}"} grep { $n{$_} } qw(lock changed crlf missing extra link odd settings)),
-      hint => "the method's files and settings change only through the release's sync: " . join('; ', @fix, '')
-        . 'or ask the owner to run sync, which names what it would replace' };
+      hint => "the method's files and settings change only through the release's sync, which refuses a file changed or added by hand until it is put right: " . join('; ', @fix) };
   }
   return { status => 'PASS', kind => 'pass', examined => $v->{examined},
     detail => 'the ' . ($v->{examined} - 1) . " method files match method.lock ($v->{version}), and the method keys in"

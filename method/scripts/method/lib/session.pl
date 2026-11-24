@@ -17,8 +17,7 @@
 #   the project's settings only), an enabled plugin, an effort cap below
 #   xhigh (also per model); in the project's settings, what a first
 #   install refuses unless it is kept by name (Lock::refused: a hook of the
-#   project's own on PreToolUse, PermissionRequest, ConfigChange,
-#   SessionStart, SubagentStart, SubagentStop or UserPromptSubmit,
+#   project's own on an event @Lock::KEEP_EVENTS names,
 #   claudeMdExcludes, enabledPlugins, a key that runs a
 #   program; step 7.3, step7.md S6); a settings file that is not a regular file, is
 #   over 1 MB or is not JSON; the lines a project adds to the guard's lists

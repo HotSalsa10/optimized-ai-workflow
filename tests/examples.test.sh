@@ -11,11 +11,12 @@
 # - done-check on the install branch, while main has no method.conf,
 #   finds no tier or verdicts-start problem and asks for the full route
 #   (three reviewers);
-# - once the install is on main: status finds nothing that needs a look,
+# - once the install is on main: status finds nothing that needs a look
+#   and names the install, merged here without a review (S16),
 #   run-checks is green with method-files and the project's own checks,
 #   done-check on a branch with one product change finds no tier or
 #   verdicts-start problem, and sync and setup run again change nothing;
-# - records-keeper (an adopted project): its own hook, allow and deny
+# - records-keeper (an adopted project): its own hook (kept by name), allow and deny
 #   rules and CLAUDE.md lines survive, the card names Python, its scanner
 #   row and the CRLF file, which is not changed, the live-write helper
 #   refuses a write with no reason, a second post adds no row twice, and
@@ -132,16 +133,20 @@ build() {
   git_q remote add origin "$work/$ex.git"
   git_q push -q origin main
   git_q checkout -q -b install
-  # the first install (S16): the release's sync, then setup with the answers
-  step sync1 bash "$rel/scripts/release/sync.sh" --to . --write
+  # the first install (S16): the release's sync, then setup with the answers;
+  # records-keeper's owner keeps its own PostToolUse hook by name (A80)
+  if [ "$ex" = records-keeper ]; then
+    step sync1 bash "$rel/scripts/release/sync.sh" --to . --write --keep PostToolUse
+  else
+    step sync1 bash "$rel/scripts/release/sync.sh" --to . --write
+  fi
   cp "$root/examples/$ex/answers.txt" "$p/.claude/setup-answers.txt"
   step card bash scripts/method/setup-write.sh
   step setup1 bash scripts/method/setup-write.sh --write
-  # notes-site's owner turns the smoke row on, as the card says, and names
-  # it in TESTS.md, as the checks file asks
+  # notes-site's owner turns the smoke row on, as the card says, and does
+  # nothing else: setup's TESTS.md block already names it
   if [ "$ex" = notes-site ]; then
     perl -pi -e 's/^#(smoke\t)/$1/' "$p/checks/project.tsv"
-    printf '| `smoke` | The start page does not open: a link on it goes nowhere | `bash scripts/method/run-checks.sh` |\n' >>"$p/TESTS.md"
   fi
   git_q add -A
   git_q commit -q -m "Install the method v0.7.0" -m "Review-Verdict: not-required - first install of the method v0.7.0"
@@ -334,7 +339,7 @@ EOF
 
   n="$ex: once the install is on main, status finds nothing that needs a look"
   if wanted "$n"; then
-    if [ "$(rc status)" = 0 ] && has "$o/status.txt" 'status: nothing needs a look' 'records: PASS - 9 records present; CLAUDE.md imports AGENTS.md' >/dev/null; then
+    if [ "$(rc status)" = 0 ] && has "$o/status.txt" 'status: nothing needs a look' 'records: PASS - 9 records present; CLAUDE.md imports AGENTS.md' 'merged without a review as the first install of the method, an exception to the review floor allowed once per project: ' >/dev/null; then
       pass "$n"
     else
       fail "$n" "exit $(rc status): $(grep -v ': PASS - ' "$o/status.txt")"
@@ -390,6 +395,7 @@ EOF
       s="$p/.claude/settings.json"
       got=$(jget "$s" '[grep { $_->{matcher} eq "Write|Edit" && $_->{hooks}[0]{command} eq "bash scripts/check-ledger.sh" } @{ $d->{hooks}{PostToolUse} || [] }]' 2>&1)
       case "$got" in '[{'*) ;; *) r="$r [its PostToolUse hook: $got]" ;; esac
+      grep -q -F "kept      1 PostToolUse hook of the project's own, kept as --keep PostToolUse asked" "$o/sync1.txt" || r="$r [sync did not name the hook kept]"
       got=$(jget "$s" '$d->{permissions}{allow}' 2>&1)
       [ "$got" = '["Bash(bash scripts/check-ledger.sh)","Bash(bash scripts/post-rows.sh --reason *)"]' ] || r="$r [allow: $got]"
       got=$(jget "$s" 'scalar grep { $_ eq "Bash(bash scripts/post-rows.sh *--live*)" } @{ $d->{permissions}{deny} }' 2>&1)

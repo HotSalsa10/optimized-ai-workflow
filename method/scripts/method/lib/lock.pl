@@ -69,9 +69,9 @@
 #     lock, (NAME or '', undef) when either cannot be read.
 #   Lock::refused(SETTINGS) ([KEY, TEXT], ...): what in a project's
 #     settings a first install refuses unless it is named with --keep KEY
-#     (step7.md S3): a hook of the project's own on PreToolUse,
-#     PermissionRequest, ConfigChange or SessionStart (it runs beside the
-#     guard), claudeMdExcludes, enabledPlugins, and each key that runs a
+#     (step7.md S3): a hook of the project's own on an event @KEEP_EVENTS
+#     names (it runs beside the guard, or its output reaches the checking
+#     agents or every prompt), claudeMdExcludes, enabledPlugins, and each key that runs a
 #     program (@Watch::RUNS, their one home). session-status names them.
 #   Lock::k_hash(K): their SHA-256.
 #   Lock::make(ROOT, VERSION, SOURCE, PROFILE) (TEXT, PROBLEM): a lock for
@@ -107,11 +107,10 @@ our @PROFILE_KEYS = qw(availableModels effortLevel model);
 our @EFFORTS = qw(low medium high xhigh max);
 # the checking agents' model, which every profile's list must hold
 our $GATE_MODEL = 'claude-opus-5-5';
-# a first install refuses these in the project's settings unless kept
 # the hook events a first install refuses unless kept: those that run
 # beside the guard or before it, and those whose output reaches the
-# checking agents or every prompt (DECISIONS A79)
-our @KEEP_EVENTS = qw(PreToolUse PermissionRequest ConfigChange SessionStart SubagentStart SubagentStop UserPromptSubmit);
+# checking agents or every prompt (DECISIONS A79, A80)
+our @KEEP_EVENTS = qw(PreToolUse PermissionRequest ConfigChange SessionStart SubagentStart SubagentStop UserPromptSubmit PostToolUse PostToolUseFailure PostToolBatch);
 our @KEEP_KEYS = qw(claudeMdExcludes enabledPlugins);
 
 sub sha_file {
@@ -150,7 +149,7 @@ sub load {
 
 sub parse {
   my ($t) = @_;
-  return (undef, ["$LOCK holds a CR; it must have LF line ends (the .gitattributes method block is missing)"]) if $t =~ /\r/;
+  return (undef, ["$LOCK holds a CR; it must have LF line ends (the .gitattributes method block is missing, or a line below it asks for CRLF)"]) if $t =~ /\r/;
   return (undef, ["$LOCK does not end with a line end, so it may be cut off"]) unless $t =~ /\n\z/;
   my @lines = split /\n/, $t;
   my (%l, @p, %seen);
@@ -493,7 +492,7 @@ sub verify {
       $lf = Digest::SHA::sha256_hex($t) if defined $t && $t =~ s/\r\n/\n/g;
     }
     if (defined $lf && $lf eq $want) {
-      push @f, ['crlf', 'CRLF line ends: ' . Esc::line($rel) . ' (the .gitattributes method block is missing)'];
+      push @f, ['crlf', 'CRLF line ends: ' . Esc::line($rel) . ' (the .gitattributes method block is missing, or a line below it asks for CRLF)'];
     } else {
       push @f, ['changed', 'changed since the release: ' . Esc::line($rel)];
     }

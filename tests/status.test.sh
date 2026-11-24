@@ -376,6 +376,19 @@ if printf '%s\n' "$out" | grep -F -q 'the oldest, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 else
   fail "a subject cut where an escape starts loses the whole escape, not half of it" "$out"
 fi
+(cd "$vw" && git reset -q --hard "$accepted")
+cm "$vw" 'Install the method\n\nReview-Verdict: not-required - first install of the method v0.7.0\n'
+(cd "$vw" && git push -q -f origin main 2>/dev/null)
+fi1=$(cd "$vw" && git rev-parse --short=7 HEAD)
+st "$vw"
+expect "a first install merged without a review is named on a line of its own, and needs no look" 0 "verdicts: PASS - 2 commits on refs/remotes/origin/main after" \
+  "verdicts: PASS - 1 commit on refs/remotes/origin/main after $bad1 merged without a review as the first install of the method, an exception to the review floor allowed once per project: $fi1 v0.7.0"
+cm "$vw" 'Install it again\n\nReview-Verdict: not-required - first install of the method v0.7.1\n'
+(cd "$vw" && git push -q -f origin main 2>/dev/null)
+fi2=$(cd "$vw" && git rev-parse --short=7 HEAD)
+st "$vw"
+expect "a second first install merged without a review is a LOOK naming both" 1 "verdicts: LOOK - 2 commits on refs/remotes/origin/main after $bad1 merged without a review as the first install of the method" \
+  "$fi1 v0.7.0" "$fi2 v0.7.1" "each one after the first needed its review"
 (cd "$vw" && git reset -q --hard "$accepted" && git push -q -f origin main 2>/dev/null)
 (cd "$vw" && git checkout -q -b task && cm "$vw" 'wip\n' && git push -q origin task 2>/dev/null && git checkout -q main)
 st "$vw"

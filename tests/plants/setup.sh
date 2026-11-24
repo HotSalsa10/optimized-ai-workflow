@@ -108,6 +108,22 @@ cat >"$work/plants.txt" <<'PLANTS-END'
 ; Balanced, cheaper and slower to catch subtle bugs (PROFILE balanced)
 ---
 
+=== TESTS.md left without the smoke row | method/scripts/method/lib/setup.pl | a narrower re-run: the card's extra line comes from what method.conf keeps, setup's own MUTATION_CHECKS=fast-tests goes with its row, TESTS.md names smoke, and the card names the lock's profile
+        $a->{HOW_IT_STARTS} ne '' ? "- `$SMOKE_ID`:
+---
+        0 ? "- `$SMOKE_ID`:
+=== the extra line from the answers' risk paths only | method/scripts/method/lib/setup.pl | a narrower re-run: the card's extra line comes from what method.conf keeps, setup's own MUTATION_CHECKS=fast-tests goes with its row, TESTS.md names smoke, and the card names the lock's profile
+  } elsif (grep { $_ eq '.' } @hr) {
+---
+  } elsif (0) {
+=== setup's own MUTATION_CHECKS kept when its row is gone | method/scripts/method/lib/setup.pl | a narrower re-run: the card's extra line comes from what method.conf keeps, setup's own MUTATION_CHECKS=fast-tests goes with its row, TESTS.md names smoke, and the card names the lock's profile
+    if ($k eq 'MUTATION_CHECKS' && !$test_row && grep { $_ eq $TEST_ID } @old) {
+---
+    if (0) {
+=== the card silent on the lock's other profile | method/scripts/method/lib/setup.pl | a narrower re-run: the card's extra line comes from what method.conf keeps, setup's own MUTATION_CHECKS=fast-tests goes with its row, TESTS.md names smoke, and the card names the lock's profile
+    . ($a->{PROFILE} ne $lock->{profile} ?
+---
+    . (0 ?
 PLANTS-END
 plant_data "$work/plants.txt" tests/setup.test.sh only
 drop_sandbox "$work" || true

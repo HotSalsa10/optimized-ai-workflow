@@ -32,7 +32,8 @@
 #      tool or Bash, and a git command that would bring one of them to
 #      another version (lib/protect.pl).
 #   G12 effort (M134, step 5.7): not a refusal; the first main-session
-#      call below xhigh gets one warning (lib/protect.pl).
+#      call below the profile's effort (xhigh with no lock) gets one
+#      warning (lib/protect.pl).
 #   G4 outside (M131, step 5.8): gh by a list, curl and wget to GitHub only
 #      reading, no nested Claude, MCP tools by a list, no SendMessage
 #      (lib/outside.pl).

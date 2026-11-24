@@ -184,7 +184,7 @@ n="a project hook, allow rule, own deny rule and own key survive"
 if wanted "$n"; then
   proj own
   settings "$own"
-  sync "$rel" "$p" --write
+  sync "$rel" "$p" --write --keep PostToolUse
   c1=$code
   out1=$out
   s="$p/.claude/settings.json"
@@ -235,7 +235,25 @@ if wanted "$n"; then
   proj relative
   out=$(cd "$p" && bash "$rel/scripts/release/sync.sh" --to . --write 2>&1)
   code=$?
-  if [ "$code" -eq 0 ] && has "WROTE v0.7.0" && [ -z "$(findings "$p")" ]; then ok "$n"; else no "$n"; fi
+  if [ "$code" -eq 0 ] && has "WROTE v0.7.0, profile best: " "method files written, 0 removed, .claude/settings.json, the .gitattributes block, the .gitignore block written, method.lock written last" && [ -z "$(findings "$p")" ]; then ok "$n"; else no "$n"; fi
+fi
+n="an exported CDPATH does not change the folder sync.sh finds itself in"
+if wanted "$n"; then
+  proj cdpath
+  out=$(cd "$rel" && CDPATH=. bash scripts/release/sync.sh --to "$p" 2>&1)
+  code=$?
+  if [ "$code" -eq 0 ] && has "dry run - nothing written"; then ok "$n"; else no "$n"; fi
+fi
+n="a folder sync cannot make gives its FAIL line and exit 1"
+if wanted "$n"; then
+  proj mkdir-fail
+  # (make_path dies as it does when a folder cannot be made, for root too)
+  m_prog='require File::Path; no warnings "redefine";
+    *File::Path::make_path = sub { die "mkdir $_[0]/x: Permission denied at line 1.\n" if $_[0] =~ m{/scripts/method\z}; File::Path::mkpath(@_) };
+    my $f = shift; do $f; die $@ if $@'
+  out=$(perl -e "$m_prog" "$rel/scripts/release/lib/sync.pl" "$rel" --to "$p" --write 2>&1)
+  code=$?
+  if [ "$code" -eq 1 ] && has "FAIL - cannot make the folder for scripts/method/" "run sync again with the same options to finish it"; then ok "$n"; else no "$n"; fi
 fi
 n="a conflicting floor key is refused on first install, nothing written"
 if wanted "$n"; then
@@ -244,7 +262,8 @@ if wanted "$n"; then
   before=$(snap "$p")
   sync "$rel" "$p" --write
   if [ "$code" -eq 1 ] && has "the project sets the method key disableAllHooks to another value than the release's" \
-    "the project sets the method key model to another value" && [ "$(snap "$p")" = "$before" ]; then ok "$n"; else no "$n"; fi
+    "the project sets the method key model to another value than the release's; remove it from the file, or choose the --profile whose row sets it" \
+    "the project sets the method key disableAllHooks to another value than the release's; remove it from the file)" "take out each method key the project set" && [ "$(snap "$p")" = "$before" ]; then ok "$n"; else no "$n"; fi
 fi
 n="a hook naming the method's folder that is not the release's is refused on first install"
 if wanted "$n"; then
@@ -255,9 +274,11 @@ if wanted "$n"; then
 fi
 
 # --- what a first install refuses unless kept: a PreToolUse hook, a
-# SubagentStart hook (A79), claudeMdExcludes, statusLine ---
+# SubagentStart hook (A79), a PostToolUse hook (A80), claudeMdExcludes,
+# statusLine ---
 for item in 'PreToolUse|{"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "bash tools/check.sh"}]}]}}|1 PreToolUse hook of the project'"'"'s own' \
   'SubagentStart|{"hooks": {"SubagentStart": [{"hooks": [{"type": "command", "command": "bash tools/check.sh"}]}]}}|1 SubagentStart hook of the project'"'"'s own' \
+  'PostToolUse|{"hooks": {"PostToolUse": [{"matcher": "Read", "hooks": [{"type": "command", "command": "bash tools/check.sh"}]}]}}|1 PostToolUse hook of the project'"'"'s own' \
   'claudeMdExcludes|{"claudeMdExcludes": ["docs/**"]}|claudeMdExcludes' \
   'statusLine|{"statusLine": {"type": "command", "command": "bash tools/line.sh"}}|statusLine'; do
   key=${item%%|*}
@@ -279,7 +300,7 @@ for item in 'PreToolUse|{"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
     settings "$js"
     sync "$rel" "$p" --write --keep "$key"
     got=$(jget "$p/.claude/settings.json" '$d->{'"$key"'} ? 1 : 0')
-    case $key in PreToolUse | SubagentStart) got=$(jget "$p/.claude/settings.json" 'scalar grep { $_->{hooks}[0]{command} eq "bash tools/check.sh" } @{ $d->{hooks}{'"$key"'} }') ;; esac
+    case $key in PreToolUse | SubagentStart | PostToolUse) got=$(jget "$p/.claude/settings.json" 'scalar grep { $_->{hooks}[0]{command} eq "bash tools/check.sh" } @{ $d->{hooks}{'"$key"'} }') ;; esac
     if [ "$code" -eq 0 ] && [ "$got" = 1 ] && has "kept      $text, kept as --keep $key asked"; then ok "$n"; else no "$n" "exit $code, got $got: $(printf '%s\n' "$out" | tail -4)"; fi
   fi
 done
@@ -438,8 +459,18 @@ if wanted "$n"; then
   printf '# >>> method\n.method/local/\n' >"$p/.gitignore"
   sync "$rel" "$p" --write
   if [ "$c1" -eq 0 ] && [ "$g" = "$(printf 'node_modules/\n# >>> method\n.method/local/\n# <<< method\nbuild/')" ] &&
-    [ "$a" = "$(printf '*.png binary\n# >>> method\n* text=auto eol=lf\n*.cmd text eol=crlf\n*.bat text eol=crlf\n*.ps1 text eol=crlf\n# <<< method')" ] &&
+    [ "$a" = "$(printf '# >>> method\n* text=auto eol=lf\n*.cmd text eol=crlf\n*.bat text eol=crlf\n*.ps1 text eol=crlf\n# <<< method\n*.png binary')" ] &&
     [ "$code" -eq 1 ] && has 'conflict  .gitignore (its method block is broken'; then ok "$n"; else no "$n" "exit $c1 then $code; .gitignore: $g; .gitattributes: $a"; fi
+fi
+
+n="a new .gitattributes block goes at the top, so the project's own line-end rules still win"
+if wanted "$n"; then
+  proj attributes
+  printf '*.sln text eol=crlf\n*.fixture -text\n' >"$p/.gitattributes"
+  sync "$rel" "$p" --write
+  got=$(cd "$p" && git check-attr text eol -- a.sln b.fixture c.sh 2>&1 | tr '\n' ';')
+  if [ "$code" -eq 0 ] && [ "$(head -1 "$p/.gitattributes")" = '# >>> method' ] &&
+    [ "$got" = 'a.sln: text: set;a.sln: eol: crlf;b.fixture: text: unset;b.fixture: eol: lf;c.sh: text: auto;c.sh: eol: lf;' ]; then ok "$n"; else no "$n" "exit $code; check-attr: $got"; fi
 fi
 
 # --- the source ---

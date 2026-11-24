@@ -37,9 +37,7 @@
 # from the environment. Run on its own (bash live-write.sh), it runs
 # nothing.
 #
-# Rule it serves:
-# - M063: a script that writes to live records refuses to run without a
-#   stated reason, and does a dry run unless told otherwise.
+# Rule it serves: M063 (its home is .claude/rules/method/method.md).
 
 if [ -z "${BASH_VERSION:-}" ]; then
   echo "live-write: FAIL - source this file from a bash script; this shell is not bash" >&2

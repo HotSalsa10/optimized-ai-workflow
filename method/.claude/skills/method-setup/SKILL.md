@@ -6,7 +6,7 @@ disable-model-invocation: true
 ---
 # Setting up the project
 
-The owner typed this to set the project up for the method, or to change its setup. You ask; a script writes. Only `scripts/method/setup-write.sh` writes the project's files from the answers, so the same answers always give the same files and no answer can lower the method's floor. Write none of setup's files yourself and edit no `method-setup` block by hand: change an answer and run setup again.
+The owner typed this to set the project up for the method, or to change its setup. You ask; a script writes. Only `scripts/method/setup-write.sh` writes the project's files from the answers, so the same answers always give the same files and no answer can lower the method's floor. Write none of setup's files yourself and edit no `method-setup` block by hand: change an answer and run setup again. The one exception: to drop an entry the card lists as kept from an earlier run, delete its line inside the block of `.claude/method.conf`, in a reviewed change; setup does not put it back.
 
 If you are reading this file because `/method-setup` was not found: a session that started with no `.claude/skills/` folder does not see a skill made during it. The owner can type `/reload-skills` and then `/method-setup`, or start or resume a session; or follow this file as written.
 

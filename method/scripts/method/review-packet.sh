@@ -21,8 +21,8 @@
 # - M032: it holds the project's incident checklist,
 #   docs/incident-checklist.md, from the merge base, so a change cannot
 #   weaken the list it is checked against (DECISIONS A28).
-# - M157: it holds the project's REVIEW.md, what its reviews look for, from
-#   the merge base too, for the same reason (lib/packet.pl, from_base).
+# - M157 (its home is lib/packet.pl, from_base): REVIEW.md from the merge
+#   base too.
 # - M085: with --since, the diff holds only the changes since the last
 #   reviewed version, and FILES still lists the whole change. When that
 #   version is not between the merge base and HEAD, the packet says so and

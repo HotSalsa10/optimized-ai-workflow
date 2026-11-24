@@ -16,10 +16,7 @@
 # anything is written. lib/setup.pl does the work and says what each
 # refusal means.
 #
-# Rules it serves:
-# - M100: setup answers never lower the floor.
-# - M156: setup writes only through setup-write from an answers file and
-#   never overwrites a project file outside its block.
+# Rules it serves: M100, M156 (their home is lib/setup.pl).
 #
 # Exit codes: 0 the card holds (written with --write); 1 refused, nothing
 # written (or a write failed: run it again with --write to finish); 2 bad

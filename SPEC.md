@@ -23,7 +23,7 @@ R2. Install and uninstall. The per-machine layer is optional. The installer back
 - Running the installer twice in a temporary home gives identical files and one backup.
 - Uninstall restores the backed-up files.
 
-R3. Setup. The first use in a project asks plain questions about the person and the project, detects what it can, writes the configuration and plays the consequences back. Answers change who does what, the pace and how strict checks are; they never lower the floor.
+R3. Setup (`/method-setup`, DECISIONS A78 (18)). The first use in a project asks plain questions about the person and the project, detects what it can, writes the configuration and plays the consequences back. Answers change who does what, the pace and how strict checks are; they never lower the floor.
 - A test runs every answer combination and confirms the floor holds in each.
 - Running setup twice with the same answers gives the same configuration.
 

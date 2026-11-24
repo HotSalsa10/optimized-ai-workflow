@@ -69,6 +69,10 @@ grep { 0 } @{ $k->{deny} };
     push @fix, 'remove each file not in method.lock' if $n{extra};
 ---
     push @fix, 'put each back as released (git checkout -- PATH)' if $n{extra};
+=== the hint for a changed file says a plain git checkout, which an edit already committed defeats | method/scripts/method/lib/checks.pl | a changed file is red
+      . ' git checkout $(git log -1 --format=%H -- scripts/method/method.lock) -- PATH); rules of your own go in .claude/rules/pack/' if
+---
+      . ' git checkout -- PATH); rules of your own go in .claude/rules/pack/' if
 === a missing lock not reported | method/scripts/method/lib/lock.pl | no lock beside the method's files is red
     push @f, ['lock', "$LOCK is missing, so the method's files cannot be compared with the release"] unless @$lp;
 ---

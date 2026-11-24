@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Plants for status's context area (step 7.5, M152: the project's own
-# always-loaded text, at most 8,000 bytes): each planted break turns
+# always-loaded text, at most 8,000 bytes) and for the verdicts area's line
+# naming a first install merged without a review (step 7's whole-step
+# check; step7.md S16): each planted break turns
 # tests/status.test.sh red for its stated reason, in a throwaway copy of
 # the repo. The breaks are data: "=== NAME | FILE | REASON", the text OLD
 # (in FILE exactly once), "---", the text NEW (tests/lib.sh, plant_data).
@@ -42,6 +44,14 @@ cat >"$work/plants.txt" <<'PLANTS-END'
   for my $f (qw(CLAUDE.md .claude/CLAUDE.md AGENTS.md)) { push @files, [$f, -s _] if -f $f }
 ---
   for my $f (qw(CLAUDE.md AGENTS.md)) { push @files, [$f, -s _] if -f $f }
+=== a first install merged without a review not named | method/scripts/method/lib/status.pl | a first install merged without a review is named on a line of its own
+  my @also = !@first ? () :
+---
+  my @also = 1 ? () :
+=== a second first install not a LOOK | method/scripts/method/lib/status.pl | a second first install merged without a review is a LOOK naming both
+  my @also = !@first ? () : ['verdicts', @first > 1 ? 'LOOK' : 'PASS',
+---
+  my @also = !@first ? () : ['verdicts', 'PASS',
 PLANTS-END
 plant_data "$work/plants.txt" tests/status.test.sh
 drop_sandbox "$work" || true

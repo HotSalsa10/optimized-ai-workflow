@@ -33,6 +33,10 @@ if (0) {
     if ($keep{$key}) {
 ---
     if (1) {
+=== a project's PostToolUse hook kept without --keep | method/scripts/method/lib/lock.pl | a project's PostToolUse is refused on first install
+our @KEEP_EVENTS = qw(PreToolUse PermissionRequest ConfigChange SessionStart SubagentStart SubagentStop UserPromptSubmit PostToolUse PostToolUseFailure PostToolBatch);
+---
+our @KEEP_EVENTS = qw(PreToolUse PermissionRequest ConfigChange SessionStart SubagentStart SubagentStop UserPromptSubmit PostToolUseFailure PostToolBatch);
 === an update without --profile resets to Best | scripts/release/lib/sync.pl | a Budget project updated without --profile stays Budget
 my $profile = defined $profile_arg ? $profile_arg : $first ? 'best' : $lock->{profile};
 ---
@@ -109,6 +113,26 @@ put($MARKER, "$tag\n", 0644);
 my $proj = Cwd::realpath($to);
 ---
 my $proj = Cwd::realpath(File::Spec->rel2abs($to, $src_arg));
+=== the .gitattributes block added at the end, over the project's own line-end rules | scripts/release/lib/sync.pl | a new .gitattributes block goes at the top, so the project's own line-end rules still win
+    $new = $file eq '.gitattributes' ? $block . $t : $t
+---
+    $new = 0 ? $block . $t : $t
+=== a folder that cannot be made ends the run without a FAIL line | scripts/release/lib/sync.pl | a folder sync cannot make gives its FAIL line and exit 1
+  eval { File::Path::make_path(dirname($p)); 1 } or fail_now('cannot make the folder for ' . $rel);
+---
+  File::Path::make_path(dirname($p));
+=== a method key conflict names no way out | scripts/release/lib/sync.pl | a conflicting floor key is refused on first install
+      . ((grep { $_ eq $key } @Lock::PROFILE_KEYS) ? 'remove it from the file, or choose the --profile whose row sets it (method/scripts/method/profiles.tsv in the release)' : 'remove it from the file')]
+---
+      . '']
+=== the WROTE line counts only the method files | scripts/release/lib/sync.pl | a relative --to names the folder sync is run from
+my @also = ((defined
+---
+my @also = (); my @x = ((defined
+=== CDPATH left set | scripts/release/sync.sh | an exported CDPATH does not change the folder sync.sh finds itself in
+unset CDPATH
+---
+:
 PLANTS-END
 plant_data "$work/plants.txt" tests/sync.test.sh only
 drop_sandbox "$work" || true

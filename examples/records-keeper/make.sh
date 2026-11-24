@@ -17,6 +17,7 @@
 #
 # Usage: bash examples/records-keeper/make.sh DIR
 set -u
+unset CDPATH # (cd would print the folder it found through it)
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=examples/lib.sh
 . "$here/../lib.sh" || exit 2

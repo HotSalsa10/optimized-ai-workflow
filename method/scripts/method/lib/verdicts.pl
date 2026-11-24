@@ -145,6 +145,20 @@ sub trailer_word {
   return $word;
 }
 
+# trailer_reason MESSAGE: the reason of a valid message's trailer value
+# (the text after "<word> - "), or undef when the value takes no reason or
+# trailer_problem finds a problem
+sub trailer_reason {
+  my ($msg) = @_;
+  return undef if defined trailer_problem($msg);
+  my ($key) = words('trailer-key', rows());
+  (my $m = $msg) =~ s/\r\n/\n/g;
+  my ($line) = grep { index($_, "$key:") == 0 } split /\n/, $m;
+  $line =~ s/[ \t]+\z//;
+  my ($reason) = $line =~ /\A\Q$key\E: \S+ - (.*)\z/s;
+  return $reason;
+}
+
 sub trailer_problem {
   my ($msg) = @_;
   my @rows = rows();

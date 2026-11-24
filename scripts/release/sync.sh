@@ -22,6 +22,9 @@
 # written (or, after writing, the installed files do not match the lock);
 # 2 bad usage, or perl is missing.
 set -u
+# (an exported CDPATH would make cd print the folder it found, so here
+# would hold two lines)
+unset CDPATH
 case "$0" in
   */*) here=${0%/*} ;;
   *) here=. ;;

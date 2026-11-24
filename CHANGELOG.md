@@ -8,6 +8,20 @@ Each release has a "What changes for you" section in plain words.
 
 Nothing yet. Release 1 is being built. Release 1 will ship no ready-made packs for one field (such as ERPNext): the method fits any project, and each project can make its own pack (DECISIONS A77).
 
+Step 7 (built, waiting for its review and your merge) is the first step you will use in a project of your own:
+- The method can now be put into a project. A tool called sync copies one release of the method in and keeps a fingerprint of every method file. If someone changes a method file by hand, the checks turn red and sync will not overwrite it.
+- You set the project up by typing `/method-setup`. It asks six choice questions and a few short ones in your own words, shows you one screen of what your answers change, and writes the files only when you reply `write`. The same answers always give the same files.
+- No answer can weaken the checks. Every change still gets the checks, an independent review and a security check.
+- You choose a profile: Best results (the default), Balanced or Budget. A cheaper profile changes only the session you talk to. The checking agents stay on the strongest settings. A profile change takes effect from your next session.
+- Your project's own rules go in its pack. Setup writes the first one from your answers. If a project rule conflicts with a method rule, the method rule wins. A change to the pack, the checks or the files that steer Claude needs three reviewers.
+- Status tells you when your project's own always-loaded text passes 8,000 bytes, because long instructions are followed less well.
+- A script that writes to real records outside the repository can use a small helper. It refuses to run without a stated reason, and only practises unless you say `--live`.
+- If the project already has settings that could switch the method off or feed text to the checking agents, the first install stops and names them. You keep one only by naming it.
+- The first install is reviewed like any other change, in a fresh session on its own branch. If that session cannot start, you may merge it without a review, once per project, as you decided on 23 November. Status names that commit.
+- Three made-up example projects show it working: a word game, a small website and a records keeper.
+
+After your merge, you create the first release tag, v0.7.0, on GitHub. Claude gives you the exact steps.
+
 ### Added
 
 - Repo skeleton: records (SPEC, ROADMAP, TASKS, DECISIONS, RISKS, TESTS), MIT licence, pinned line endings, a research summary.
@@ -179,7 +193,17 @@ Nothing yet. Release 1 is being built. Release 1 will ship no ready-made packs f
 - The review packet carries your `REVIEW.md` (what a review of your project looks for) in a section of its own, as it stood where the change left main, as it already did for the incident checklist (M157): a change that loosens `REVIEW.md` is reviewed against the old text, and its edit is in the diff and counts from the next change. A project without `REVIEW.md` there gets a line saying so.
 - The reviewer answers every item of the incident checklist, also those that do not apply, and follows your `REVIEW.md` where it does not conflict with the reviewer's own rules (M158).
 - `/method-plan`: an expected result may come from the current version's output at a named commit, with the command that gave it, for a behaviour the change keeps (M159); a FULL plan names each choice that is hard to undo, with its options and a recommendation (M160); a FULL plan on a high-risk path is reviewed by the reviewer against your request before you are asked to approve it (M161). That review does not count for the built change.
-- Tests: tests/review-packet.test.sh 8 new cases (139 in all); tests/plants/review-packet.sh 3 new plants (6 in all).
+- Tests: tests/review-packet.test.sh 10 new cases (141 in all); tests/plants/review-packet.sh 5 new plants (8 in all).
+
+### Fixed before step 7's review
+
+- A first install also refuses your own PostToolUse, PostToolUseFailure or PostToolBatch hook unless you name it with `--keep` (DECISIONS A80): what such a hook adds reaches the checking agents after each of their tool calls, which the harness measured at both pinned versions. A formatter hook you keep this way is named by session-status in every session.
+- Status names a first install merged without a review (the exception allowed once per project) on a line of its own in its verdicts area, and a second such commit is a LOOK.
+- Sync puts a new `.gitattributes` method block at the top of the file, so your own line-end rules (`*.sln text eol=crlf`, `-text`) still win; before, the block went at the end and overrode them.
+- Sync says how to get past a method key your settings set (remove it, or choose the profile that sets it), names every file it wrote (`.claude/settings.json` and the blocks too), ends with its FAIL line when it cannot make a folder, and works with `CDPATH` set.
+- method-files says how to put back a method file whose hand edit was already committed (a checkout from the commit that last wrote `method.lock`); setup's TESTS.md block names the smoke row, so turning it on as the card says leaves status green; after a narrower setup run the card's extra-reviewers line counts what `method.conf` keeps, the card says how to drop a kept entry, setup's own `MUTATION_CHECKS=fast-tests` goes with its row, and the card names the profile `method.lock` holds when your answers name another.
+- Known limits recorded: files your system adds to a method folder (`.DS_Store`, `Thumbs.db`, `desktop.ini`) also stop sync until removed; on a case-insensitive file system an existing `Docs/` or `Scripts/` folder takes the method's files under its own spelling, which CI then names as missing.
+- Tests: tests/sync.test.sh 43 cases (5 new) and tests/plants/sync.sh 28 plants (6 new); tests/status.test.sh 162 (2 new) and its plants 7 (2 new); tests/setup.test.sh 30 (1 new) and its plants 26 (4 new); tests/method-files.test.sh 31 (1 new) and its plants 17 (1 new); the harness 164 passed at 2.1.316 and at 2.1.319 (162 before; case 3b new) and its plants 78 of 78 at 2.1.319.
 
 ### Changed (step 6b)
 
@@ -216,6 +240,10 @@ Nothing yet. Release 1 is being built. Release 1 will ship no ready-made packs f
 ### Changed (step 7.0)
 
 - Step 7's choices are recorded before its build (DECISIONS A78), with five facts about Claude Code measured at 2.1.316 and 2.1.319 and one about the method's guard: a skill added during a session needs `/reload-skills` (or a new session) before its name works; a settings change setup makes in a session applies from the next session; the checking agents stay on Opus 5.5 at xhigh in every profile while Opus is on the allowed models; the default with no model or effort set is Opus 5.5 at medium effort (signed in with an API key; a subscription's or a cloud session's default is measured in step 9); a `-p` run offers no question tool, so setup falls back to plain text; the guard does not see what an outside sync writes. The step 7 plan is at its version 2, the rule map gains M151 to M161 (planned), and RISKS #21 records the first-install exception you allowed.
+
+### Changed (step 7.9)
+
+- Step 7's records before its review: DECISIONS A78 is its full record as built (the choices settled before the build, then how each part was built and the known limits); RISKS #2, #7, #16 and #19 say what step 7 changed, and #22 to #27 are new (settings a project keeps, checks that fail closed on files nobody meant to change, the steering list's gaps, the live-write helper, setup-write's limits, profiles and the client); ROADMAP marks step 7 built and waiting for its review and your merge, and opens step 8 with this repository's own hooks from the first release tag; SPEC R3, ROADMAP's exit and Track 3 name `/method-setup`; why.md says how the method is installed and that status names a first install merged without a review; TESTS.md gives the run times CI's push B will check.
 
 ### Changed (step 6)
 

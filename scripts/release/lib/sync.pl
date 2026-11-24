@@ -34,8 +34,11 @@
 #   project's kept; the file is written by JSON::PP, sorted and indented,
 #   so a second run gives the same bytes.
 # - the managed blocks (class B): the "# >>> method" block in .gitignore
-#   and .gitattributes is replaced, or added at the end; text outside it is
-#   never touched; two openings, or one without its end, are a conflict.
+#   and .gitattributes is replaced where it stands, or added: at the end of
+#   .gitignore, so the method's ignore wins, and at the top of
+#   .gitattributes, so the project's own later line-end rules win (git
+#   takes the last line that matches); text outside it is never touched;
+#   two openings, or one without its end, are a conflict.
 # - method.lock, written last (Lock::make, Lock::save); then Lock::verify
 #   must find nothing. .method/local/sync-in-progress holds the tag and the
 #   profile while the files are written; .claude/settings.json is written
@@ -286,12 +289,13 @@ my $old_k;
 if ($cur && $first) {
   # a first install never overrides a method key the project set itself
   for my $key (sort keys %{ $k->{keys} }) {
-    push @plan, ['conflict', $settings_rel, "the project sets the method key $key to another value than the release's"]
+    push @plan, ['conflict', $settings_rel, "the project sets the method key $key to another value than the release's; "
+      . ((grep { $_ eq $key } @Lock::PROFILE_KEYS) ? 'remove it from the file, or choose the --profile whose row sets it (method/scripts/method/profiles.tsv in the release)' : 'remove it from the file')]
       if exists $cur->{$key} && Json::encode([$cur->{$key}]) ne Json::encode([$k->{keys}{$key}]);
   }
   my $cp = $cur->{permissions} || {};
   for my $key (sort keys %{ $k->{permissions} }) {
-    push @plan, ['conflict', $settings_rel, "the project sets the method key permissions.$key to another value than the release's"]
+    push @plan, ['conflict', $settings_rel, "the project sets the method key permissions.$key to another value than the release's; remove it from the file"]
       if exists $cp->{$key} && Json::encode([$cp->{$key}]) ne Json::encode([$k->{permissions}{$key}]);
   }
   for my $h (@{ Lock::method_hooks($cur) }) {
@@ -351,7 +355,8 @@ for my $file (sort keys %BLOCKS) {
   my @close = grep { $lines[$_] =~ /\A\Q$CLOSE\E\r?\n?\z/ } 0 .. $#lines;
   my $new;
   if (!@open && !@close) {
-    $new = $t . ($t eq '' || $t =~ /\n\z/ ? '' : "\n") . $block;
+    # (.gitattributes: at the top, so the project's own later rules win)
+    $new = $file eq '.gitattributes' ? $block . $t : $t . ($t eq '' || $t =~ /\n\z/ ? '' : "\n") . $block;
   } elsif (@open == 1 && @close == 1 && $close[0] > $open[0]) {
     $new = join('', @lines[0 .. $open[0] - 1]) . $block . join('', @lines[$close[0] + 1 .. $#lines]);
   } else {
@@ -379,7 +384,7 @@ $count{ $_->[0] }++ for @plan;
 say_line('plan: ' . join(', ', map { ($count{$_} || 0) . " $_" } qw(install update unchanged remove conflict)));
 if ($count{conflict}) {
   say_line('REFUSED - ' . $count{conflict} . ' conflict' . ($count{conflict} == 1 ? '' : 's') . '; nothing was written. '
-    . 'Put each method file back as its release has it (or remove the extra one), or name a kept setting with --keep KEY, then run sync again');
+    . 'Put each method file back as its release has it (or remove the extra one), take out each method key the project set, or name a kept setting with --keep KEY, as each conflict line says, then run sync again');
   exit 1;
 }
 if (!$write) {
@@ -391,7 +396,7 @@ if (!$write) {
 sub put {
   my ($rel, $content, $mode) = @_;
   my $p = $abs->($rel);
-  File::Path::make_path(dirname($p));
+  eval { File::Path::make_path(dirname($p)); 1 } or fail_now('cannot make the folder for ' . $rel);
   my $tmp = "$p.sync-$$";
   unlink $tmp;
   sysopen my $fh, $tmp, O_WRONLY | O_CREAT | O_EXCL, 0600 or fail_now('cannot write ' . $rel);
@@ -423,8 +428,9 @@ if (@{ $v->{findings} }) {
   exit 1;
 }
 unlink $abs->($MARKER);
-say_line("WROTE $tag, profile $profile: " . scalar(@writes) . ' file' . (@writes == 1 ? '' : 's') . ' written, '
-  . scalar(@removes) . ' removed, method.lock written last; review the change like any other before it is merged');
+my @also = ((defined $new_settings && (!defined $cur_bytes || $cur_bytes ne $new_settings) ? $settings_rel : ()), map {"the $_ block"} sort keys %block_text);
+say_line("WROTE $tag, profile $profile: " . scalar(@writes) . ' method file' . (@writes == 1 ? '' : 's') . ' written, '
+  . scalar(@removes) . ' removed, ' . (@also ? join(', ', @also) . ' written, ' : '') . 'method.lock written last; review the change like any other before it is merged');
 exit 0;
 
 # merge CURRENT FRAGMENT K [OLD_K]: the project's settings with the method

@@ -23,6 +23,9 @@ my @RECORDS = qw(CLAUDE.md AGENTS.md SPEC.md TASKS.md DECISIONS.md ROADMAP.md RI
 our $CONTEXT_MAX = 8000;
 my $CI_SECONDS = 15;
 my $VERSION_SECONDS = 10;
+# the reason a first install merged without a review carries, after the
+# trailer word: "first install of the method <tag>" (step7.md S16)
+our $FIRST_INSTALL = 'first install of the method';
 
 my (%look, @skipped_areas, @order);
 
@@ -294,6 +297,14 @@ sub verdicts_lines {
     @range = @{ $j->{ids} };
     $since = 'since ' . short($j->{start});
   }
+  # the first install merged without a review (docs/plans/step7.md S16):
+  # an exception allowed once per project, so status names it, and a
+  # second one is a LOOK
+  my @first = grep { (Verdicts::trailer_reason(Git::message($_)) // '') =~ /\A\Q$FIRST_INSTALL\E(?:\s|\z)/ } @range;
+  my @also = !@first ? () : ['verdicts', @first > 1 ? 'LOOK' : 'PASS', scalar(@first) . " commit" . (@first == 1 ? '' : 's')
+    . " on $ref $since merged without a review as the first install of the method, an exception to the review floor allowed once per project: "
+    . join(', ', map { short($_) . ((Verdicts::trailer_reason(Git::message($_)) =~ /\A\Q$FIRST_INSTALL\E (v[0-9][0-9A-Za-z.+-]{0,21})\z/) ? " $1" : '') } @first)
+    . (@first > 1 ? '; each one after the first needed its review' : '')];
   my @bad = grep { defined Verdicts::trailer_problem(Git::message($_)) } @range;
   if (@bad) {
     my $old = $bad[-1];
@@ -302,12 +313,12 @@ sub verdicts_lines {
       . (@bad > 5 ? ' ...' : '') . '; the oldest, ' . ($QUICK ? short($old) : '"' . subject(Git::message($old)) . '"') . ': '
       . Verdicts::trailer_problem(Git::message($old))
       . '; accept them by moving VERDICTS_FROM in .claude/method.conf through a reviewed change; never rewrite main'
-      . $shallow];
+      . $shallow], @also;
   }
   # in a shallow history the first verdict may be older than what is here
   return ['verdicts', 'SKIPPED', scalar(@range) . " commits on $ref $since carry a $key line, but the history is"
-    . ' shallow, so older commits were not read; fetch more history or set VERDICTS_FROM'] if $shallow;
-  return ['verdicts', 'PASS', scalar(@range) . " commits on $ref $since carry a $key line"];
+    . ' shallow, so older commits were not read; fetch more history or set VERDICTS_FROM'], @also if $shallow;
+  return (['verdicts', 'PASS', scalar(@range) . " commits on $ref $since carry a $key line"], @also);
 }
 
 # --- records ---

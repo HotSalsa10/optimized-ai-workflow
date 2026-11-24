@@ -61,7 +61,8 @@
 # that exist and hold a file), MUTATE_PATHS (the product paths, when
 # strict) and MUTATION_CHECKS (fast-tests, when strict and there is a test
 # command). An entry the last run wrote stays (setup never removes one) and
-# the card names it; VERDICTS_FROM, once written, stays. A key the block
+# the card names it, but MUTATION_CHECKS=fast-tests goes once there is no
+# test command, with its row; VERDICTS_FROM, once written, stays. A key the block
 # writes that the file also sets outside it is refused. A named path that
 # does not exist is not written; the card names it (a seeded file or the
 # pack's two count as there, as the run writes them). checks/project.tsv's
@@ -410,7 +411,7 @@ sub plan {
       . ' block (through a reviewed change), then run setup again';
   }
   return $r if @p;
-  my (@conf_lines, @kept, $tip);
+  my (@conf_lines, @kept, @dropped, $tip);
   for my $k (@conf_keys) {
     if ($k eq 'VERDICTS_FROM') {
       # main's tip only while it does not hold the method, so the install
@@ -424,6 +425,12 @@ sub plan {
     my @n = @{ $new{$k} };
     my %seen = map { ($_ => 1) } @n;
     my @old = grep { !$seen{$_}++ } @{ $old_v->{$k} || [] };
+    # (setup's own MUTATION_CHECKS=fast-tests goes with its fast-tests row,
+    # so mutate-changed is not left naming a check that is gone)
+    if ($k eq 'MUTATION_CHECKS' && !$test_row && grep { $_ eq $TEST_ID } @old) {
+      @old = grep { $_ ne $TEST_ID } @old;
+      push @dropped, "$k=$TEST_ID";
+    }
     my @all = (@n, @old);
     push @kept, map {"$k=$_"} @old;
     push @conf_lines, map {"$k=$_"} @all;
@@ -461,8 +468,10 @@ sub plan {
         $t{outside} ? '- A write to records outside this repository without a stated reason, or without a dry run first.' : ());
     },
     TEST_COMMAND => sub {
-      return () unless $test_row;
-      return ("- `$TEST_ID`: the project's fast tests, the command /method-setup was given ($CHECKS)");
+      # (the smoke row is named even while it is off, so turning it on, as
+      # the card says, leaves TESTS.md naming every check)
+      return ($test_row ? "- `$TEST_ID`: the project's fast tests, the command /method-setup was given ($CHECKS)" : (),
+        $a->{HOW_IT_STARTS} ne '' ? "- `$SMOKE_ID`: the project starts, is checked once and stops, by how it starts as /method-setup was given it ($CHECKS; off until its # is removed)" : ());
     },
     HOW_IT_STARTS => sub {
       my @l;
@@ -624,10 +633,14 @@ sub plan {
   push @card, $a->{PACE} eq 'small' ? 'Pace: small steps, one change at a time.' : 'Pace: larger steps, each still planned, checked and reviewed.';
   push @card, 'Every change gets: checks, an independent review, a security check.';
   my @tw = map { $TOUCH_WORDS{$_} } grep { $_ ne 'outside' } @{ $a->{touch} };
+  # (from the HIGH_RISK_PATHS written, kept entries among them)
+  my @hr = map { /\AHIGH_RISK_PATHS=(.*)\z/ ? $1 : () } @conf_lines;
   if ($a->{STRICT} eq 'strict') {
     push @card, 'Extra for every change (strict): three reviewers.';
-  } elsif (@risk) {
-    push @card, 'Extra for ' . (@tw ? and_list(@tw) : 'the paths you named') . ' (' . join(', ', @risk) . '): three reviewers.';
+  } elsif (grep { $_ eq '.' } @hr) {
+    push @card, 'Extra for every change (HIGH_RISK_PATHS keeps . from an earlier run): three reviewers.';
+  } elsif (@hr) {
+    push @card, 'Extra for ' . (@tw ? and_list(@tw) : 'the paths named') . ' (' . join(', ', @hr) . '): three reviewers.';
   } elsif (@tw) {
     push @card, ucfirst(and_list(@tw)) . ': no folder that holds it is listed yet, so no change is high-risk by its path; name its folder'
       . ' when it exists.';
@@ -636,7 +649,9 @@ sub plan {
     . ' (scripts/method/live-write.sh).' if $t{outside};
   push @card, 'Not there yet: ' . join(', ', @no_risk) . '; add each to HIGH_RISK_PATHS in .claude/method.conf when the folder exists.' if @no_risk;
   push @card, 'Not there yet as product paths: ' . join(', ', @no_product) . '; add each to PRODUCT_PATHS when it exists.' if @no_product;
-  push @card, "Profile: $pname. The checking agents stay on Opus 5.5 at xhigh effort in every profile; when a check misses something, step up a profile.";
+  push @card, "Profile: $pname"
+    . ($a->{PROFILE} ne $lock->{profile} ? ", in place of $lock->{profile}, which method.lock names now (to keep it, answer PROFILE $lock->{profile})" : '')
+    . ". The checking agents stay on Opus 5.5 at xhigh effort in every profile; when a check misses something, step up a profile.";
   my $rules = @{ $a->{RULE} } ? ': ' . join('; ', @{ $a->{RULE} }) : '';
   push @card, 'Your pack adds ' . scalar(@{ $a->{RULE} }) . ' rule' . (@{ $a->{RULE} } == 1 ? '' : 's') . $rules . ($rules =~ /[.!?]\z/ ? '' : '.');
   push @card, 'Changed from the method\'s default: reports are short (the one thing a pack may change).' if $a->{REPORTS} eq 'short';
@@ -661,11 +676,14 @@ sub plan {
     push @card, 'History: main already holds the method, so setup sets no VERDICTS_FROM and status checks main\'s review lines as they'
       . ' are; moving VERDICTS_FROM is your own reviewed change.';
   }
-  push @card, 'Kept from an earlier run (setup never removes an entry): ' . join(', ', @kept) . '.' if @kept;
+  push @card, 'Kept from an earlier run (setup never removes an entry): ' . join(', ', @kept) . '. To drop one, delete its line inside'
+    . " the method-setup block of $CONF in a reviewed change; setup does not put it back." if @kept;
+  push @card, 'Dropped: ' . join(', ', @dropped) . ", as the $TEST_ID row it names is gone (no fast tests were given)." if @dropped;
   push @card, "Kept as it was: $_ (it was there already, with no method-setup block, so its answers are not added)." for @no_block;
   push @card, 'Added: the line @AGENTS.md to CLAUDE.md, in a method-setup block, so AGENTS.md loads.'
     if grep { $_->[0] eq 'block' && $_->[1] eq 'CLAUDE.md' } @files;
-  push @card, "TESTS.md was there before: name `$TEST_ID` in it." if $test_row && grep { $_->[0] eq 'kept' && $_->[1] eq 'TESTS.md' } @files;
+  my @name = (($test_row ? "`$TEST_ID`" : ()), ($a->{HOW_IT_STARTS} ne '' ? "`$SMOKE_ID`" : ()));
+  push @card, 'TESTS.md was there before: name ' . join(' and ', @name) . ' in it.' if @name && grep { $_->[0] eq 'kept' && $_->[1] eq 'TESTS.md' } @files;
   push @card, 'Takes effect: files now; the profile from your next session.';
   return $r;
 }

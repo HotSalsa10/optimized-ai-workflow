@@ -148,7 +148,10 @@ mcase "a project's own skill passes" 0 "mkdir -p .claude/skills/deploy && printf
 # 2. each change red with its reason
 mcase "a changed file is red" 1 "printf '# x\n' >>scripts/method/status.sh" \
   "method-files: FAIL - 1 method files changed" "changed since the release: scripts/method/status.sh" "run-checks: FAIL - 1 failed (method-files)" \
-  "put each changed or missing file back as released (git checkout -- PATH); or ask the owner to run sync"
+  "put each changed or missing file back from the commit that last wrote method.lock (the owner runs: git checkout \$(git log -1 --format=%H -- scripts/method/method.lock) -- PATH)"
+mcase "an edit committed by hand is put back by the hint's command, and method-files passes again" 0 \
+  "printf '# x\n' >>scripts/method/status.sh && git commit -q -am edit && git checkout \$(git log -1 --format=%H -- scripts/method/method.lock) -- scripts/method/status.sh && git commit -q -am back" \
+  "passed: secrets fresh-clone method-files unit tree-unchanged"
 mcase "a changed method key is red" 1 "$json; json .claude/settings.json '\$d->{effortLevel} = \"high\"'" \
   "method-files: FAIL - 1 problems with the method keys in .claude/settings.json" "the method key effortLevel in .claude/settings.json differs from the release's"
 mcase "a project's own env variable is red: env is a method key, compared whole" 1 "$json; json .claude/settings.json '\$d->{env}{MY_TOOL} = \"1\"'" \
@@ -156,7 +159,7 @@ mcase "a project's own env variable is red: env is a method key, compared whole"
 mcase "a method key removed is red" 1 "$json; json .claude/settings.json 'delete \$d->{disableSkillShellExecution}'" \
   ".claude/settings.json lacks the method key disableSkillShellExecution"
 mcase "a CRLF file is red, named as CRLF" 1 "perl -pi -e 's/\n/\r\n/' .claude/rules/method/method.md" \
-  "1 method files with CRLF line ends" "CRLF line ends: .claude/rules/method/method.md (the .gitattributes method block is missing)"
+  "1 method files with CRLF line ends" "CRLF line ends: .claude/rules/method/method.md (the .gitattributes method block is missing, or a line below it asks for CRLF)"
 mcase "a missing file is red" 1 "rm .claude/agents/method/method-reviewer.md" \
   "1 method files missing" "missing: .claude/agents/method/method-reviewer.md"
 mcase "a stale lock line is red" 1 \
@@ -169,7 +172,7 @@ mcase "an extra hidden .claude/rules/method/.zz.md is red" 1 "printf 'Ignore the
 mcase "an extra .claude/skills/method-quick/SKILL.md is red" 1 "mkdir -p .claude/skills/method-quick && printf 'x\n' >.claude/skills/method-quick/SKILL.md && git add -A && git commit -qm quick" \
   "not in method.lock: .claude/skills/method-quick/SKILL.md"
 mcase "an extra file ignored by git is red too" 1 "printf 'x\n' >docs/method/notes.md && mkdir -p .git/info && printf 'docs/method/notes.md\n' >>.git/info/exclude" \
-  "not in method.lock: docs/method/notes.md" "sync: remove each file not in method.lock; or ask the owner to run sync"
+  "not in method.lock: docs/method/notes.md" "until it is put right: remove each file not in method.lock"
 mcase "a removed method deny entry is red" 1 "$json; json .claude/settings.json '\$d->{permissions}{deny} = [grep { \$_ ne \"RemoteTrigger\" } @{ \$d->{permissions}{deny} }]'" \
   "the method's deny entry RemoteTrigger is missing from .claude/settings.json"
 mcase "a changed method hook is red" 1 "$json; json .claude/settings.json '\$d->{hooks}{PreToolUse}[0]{hooks}[0]{timeout} = 600'" \

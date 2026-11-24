@@ -5,7 +5,8 @@
 # method/, tagged v0.7.0) through the release's own sync: "new" (no commit
 # on main, profile best) and "adopted" (history on main, its own AGENTS.md,
 # CLAUDE.md without @AGENTS.md, SPEC.md, method.conf, settings with its own
-# hook, allow and deny rules, a requirements.txt and folders of its own,
+# hook (kept with --keep PostToolUse), allow and deny rules, a
+# requirements.txt and folders of its own,
 # installed on a branch at profile budget). Then:
 # - one perl process tries every combination of the closed answers (2 x 2 x
 #   2 x 8 x 2 x 3 = 384 on each project, 768 in all) with fixed short
@@ -72,7 +73,7 @@ if ! { mkdir -p "$rel/scripts" &&
     git add -A && git commit -q -m "the project before the method" && printf 'more\n' >>src/keeper.sh && git commit -q -a -m "a second commit"
     git checkout -q -b install
   ) &&
-  bash "$rel/scripts/release/sync.sh" --to "$pold" --profile budget --write >/dev/null; }; then
+  bash "$rel/scripts/release/sync.sh" --to "$pold" --profile budget --keep PostToolUse --write >/dev/null; }; then
   abort_sandbox
 fi
 
@@ -479,6 +480,30 @@ if wanted "$n"; then
   if [ "$code" -ne 0 ] || ! grep -q "^#smoke${T}any${T}.*bash app.sh --check" "$c/checks/project.tsv" || grep -q "^smoke${T}" "$c/checks/project.tsv" ||
     ! has "has a new command, so it is off again"; then
     r="$r [a new command] exit $code; $(grep 'smoke' "$c/checks/project.tsv" | tail -1)"
+  fi
+  if [ -z "$r" ]; then pass "$n"; else fail "$n" "$r"; fi
+fi
+
+n="a narrower re-run: the card's extra line comes from what method.conf keeps, setup's own MUTATION_CHECKS=fast-tests goes with its row, TESTS.md names smoke, and the card names the lock's profile"
+if wanted "$n"; then
+  r=""
+  copy "$pnew" narrow
+  printf '%s\n' "$good" >"$c/.claude/setup-answers.txt"
+  setup "$c" --write
+  if [ "$code" -ne 0 ] || ! grep -q '^MUTATION_CHECKS=fast-tests$' "$c/.claude/method.conf" || ! grep -q '^- `smoke`: ' "$c/TESTS.md"; then
+    r="$r [strict] exit $code; $(grep -e MUTATION -e HIGH_RISK "$c/.claude/method.conf" | tr '\n' ' ')"
+  fi
+  printf '%s\n' "$good" | sed -e "s/^STRICT${T}.*/STRICT${T}standard/" -e "s/^TEST_COMMAND${T}.*/TEST_COMMAND${T}/" >"$c/.claude/setup-answers.txt"
+  setup "$c" --write
+  if [ "$code" -ne 0 ] || grep -q '^MUTATION_CHECKS=' "$c/.claude/method.conf" || ! grep -q '^HIGH_RISK_PATHS=\.$' "$c/.claude/method.conf" ||
+    ! has "Extra for every change (HIGH_RISK_PATHS keeps . from an earlier run): three reviewers." "Dropped: MUTATION_CHECKS=fast-tests, as the fast-tests row it names is gone" \
+      "Kept from an earlier run (setup never removes an entry): HIGH_RISK_PATHS=." "To drop one, delete its line inside the method-setup block of .claude/method.conf"; then
+    r="$r [standard, no tests] exit $code; $(printf '%s\n' "$out" | grep -e Extra -e Dropped -e Kept)"
+  fi
+  printf '%s\n' "$good" | sed "s/^PROFILE${T}.*/PROFILE${T}budget/" >"$c/.claude/setup-answers.txt"
+  setup "$c"
+  if [ "$code" -ne 0 ] || ! has "Profile: Budget (" "), in place of balanced, which method.lock names now (to keep it, answer PROFILE balanced)."; then
+    r="$r [the lock's profile] exit $code; $(printf '%s\n' "$out" | grep -e 'Profile:')"
   fi
   if [ -z "$r" ]; then pass "$n"; else fail "$n" "$r"; fi
 fi
