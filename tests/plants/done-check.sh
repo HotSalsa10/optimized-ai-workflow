@@ -9,6 +9,8 @@
 # missing elements are input cases in the test file; these are defects in
 # the code. The breaks are data: "=== NAME | FILE | REASON", the text OLD
 # (in FILE exactly once), "---", the text NEW (tests/lib.sh, plant_data).
+# The built-in list of the files that steer the method (step 7.6, M153)
+# is planted here too, in done.pl and in conf.pl's list and matcher.
 # PLANT_SHARD=K/N runs every Nth one from the Kth. The two breaks of the
 # receipt's base, which lib/receipt.pl records, are in
 # tests/plants/gate-receipt.sh.
@@ -261,6 +263,18 @@ qw(git.pl esc.pl conf.pl tree.pl verdicts.pl checks.pl receipt.pl)
   my %need = map { ($_ => 1) } 'plan', 'reviewer', 'security checker', 'rounds', @{ $T{need} };
 ---
   my %need = map { ($_ => 1) } 'plan', 'reviewer', 'security checker', 'rounds';
+=== the built-in list not unioned (M153) | method/scripts/method/lib/done.pl | M153: a LIGHT plan touching checks/ is judged FULL
+  my @high = grep { Conf::under($_, \@list) || defined Conf::steers($_) } @touched;
+---
+  my @high = grep { Conf::under($_, \@list) } @touched;
+=== one built-in path dropped (.claude/rules/pack) | method/scripts/method/lib/conf.pl | M153: a LIGHT plan touching .claude/rules/pack/ is judged FULL
+my @STEERING = ('.claude/method.conf', 'checks', '.claude/rules/pack', '.claude/skills/pack-',
+---
+my @STEERING = ('.claude/method.conf', 'checks', '.claude/skills/pack-',
+=== absent built-in paths put through the existence check | method/scripts/method/lib/done.pl | M153: a project with none of the built-in paths has no tier problem
+  for my $e (grep { !$seen{$_}++ } @{ $main || [] }, @{ $mine || [] }) {
+---
+  for my $e (grep { !$seen{$_}++ } @{ $main || [] }, @{ $mine || [] }, Conf::steering()) {
 PLANTS-END
 plant_data "$work/plants.txt" tests/done-check.test.sh only
 # the reader of method.conf: its HIGH_RISK_PATHS, its tags and under (step
@@ -282,6 +296,26 @@ cat >"$work/conf-plants.txt" <<'PLANTS-END'
     if (!$kind) { $problem->("unknown key $k (a typo, or a key from a newer method version)"); next }
 ---
     if (!$kind) { $problem->("unknown key $k (a typo, or a key from a newer method version)", $k); next }
+=== one built-in path dropped (AGENTS.md) | method/scripts/method/lib/conf.pl | steers: the built-in list is the plan's
+  'docs/incident-checklist.md', 'REVIEW.md', 'CLAUDE.md', '.claude/CLAUDE.md', 'AGENTS.md');
+---
+  'docs/incident-checklist.md', 'REVIEW.md', 'CLAUDE.md', '.claude/CLAUDE.md');
+=== the pack- name prefix read as a folder | method/scripts/method/lib/conf.pl | steers: .claude/skills/pack- is a name prefix
+    return $e if $le =~ /-\z/ ? index($lp, $le) == 0 : ($lp eq $le || index($lp, "$le/") == 0);
+---
+    return $e if $lp eq $le || index($lp, "$le/") == 0;
+=== the built-in list matched in one letter case | method/scripts/method/lib/conf.pl | steers: any letter case
+  my $lp = lc $p;
+  for my $e (@STEERING) {
+    my $le = lc $e;
+---
+  my $lp = $p;
+  for my $e (@STEERING) {
+    my $le = $e;
+=== why.md's M153 row missing one entry (.claude/CLAUDE.md) | method/docs/method/why.md | steers: why.md's M153 row names every entry of the list
+`CLAUDE.md`, `.claude/CLAUDE.md` or `AGENTS.md`, in any letter case
+---
+`CLAUDE.md` or `AGENTS.md`, in any letter case
 === HIGH_RISK_PATHS not read in PRODUCT_PATHS' syntax | method/scripts/method/lib/conf.pl | HIGH_RISK_PATHS is a list in PRODUCT_PATHS' syntax
   if ($k eq 'PRODUCT_PATHS' || $k eq 'MUTATE_PATHS' || $k eq 'HIGH_RISK_PATHS') { return check_path($val, 1) }
 ---

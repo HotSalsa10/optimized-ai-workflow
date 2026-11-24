@@ -68,7 +68,11 @@
 #                  list, is a plain path (no space, no #) and an earlier
 #                  commit of main had it: that path a merged change deleted
 #                  fails nothing, and the tier line says to drop it from
-#                  main's list.
+#                  main's list. A touched path on the built-in list of the
+#                  files that steer the method (Conf::steers in lib/conf.pl,
+#                  M153) is high-risk too; that list is added after the
+#                  check above, so a path on it that is absent is no
+#                  problem.
 #   lock           HEAD's Tier and Paths lines and expected.tsv (next to the
 #                  plan) are the anchor's; a FULL task had expected.tsv at
 #                  the anchor; expected.tsv, where it is, is a regular file
@@ -158,6 +162,8 @@
 #   they say.
 # - M147: LIGHT only when the plan says so and the change touches no
 #   high-risk path, as main or the branch lists them.
+# - M153 (its list in lib/conf.pl): the files that steer the method are
+#   high-risk whatever HIGH_RISK_PATHS says.
 set -u
 # perl reads bytes; these settings would change how it reads and writes
 # them, and the library paths would let modules from elsewhere run inside it

@@ -54,7 +54,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M046 | Four questions about every claim: reach, measured counts, closed or narrowed, survives re-derivation | incident | method/.claude/agents/method/method-reporter.md | done |
 | M047 | Write the question in words before computing; two agreeing methods can answer the wrong question | incident | method/.claude/rules/method/method.md | done |
 | M048 | The same rule implemented twice is a defect | incident | method/.claude/rules/method/method.md | done |
-| M049 | Verify through the path the user takes, or say plainly that you did not | incident | method/.claude/rules/method/method.md | done |
+| M049 | Verify through the path the user takes, or say plainly that you did not (its line names `bash scripts/method/run-checks.sh` since step 7.6, the step 6b plan's P10) | incident | method/.claude/rules/method/method.md | done |
 | M050 | Check what a fresh clone gets, not only what works locally | incident | method/scripts/method/run-checks.sh | done |
 | M051 | Long runs write their log where they run | incident | method/scripts/method/run-checks.sh | done |
 | M052 | A plant shows a check worked once; a committed test keeps it working | incident | method/.claude/rules/method/method.md | done |
@@ -68,7 +68,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M060 | Stop and ask before schema changes, regulated work, destructive data changes and production | incident | method/.claude/rules/method/method.md | done |
 | M061 | A live system marked read-only stays read-only | incident | method/.claude/rules/method/method.md | done |
 | M062 | Never hand-write regulated formats, signing, crypto, auth or payment logic when a vetted library exists; report the gap | incident | method/.claude/rules/method/method.md | done |
-| M063 | A script that writes to live records refuses to run without a stated reason, and does a dry run unless told otherwise | incident; decision A77 | method/.claude/rules/method/method.md | step 7 |
+| M063 | A script that writes to live records refuses to run without a stated reason, and does a dry run unless told otherwise (moved into the core in step 7.6, with its helper `method/scripts/method/live-write.sh`) | incident; decision A77 | method/.claude/rules/method/method.md | done |
 | M064 | Never edit core or third-party source in place | incident | method/.claude/rules/method/method.md | done |
 | M065 | Never work around the permission check; live steps are fixed scripts the owner runs | incident; decision A13 | method/.claude/rules/method/method.md | done |
 | M066 | No secrets or personal data in a repo | incident | method/scripts/method/run-checks.sh | done |
@@ -156,10 +156,10 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M148 | When the push did not land, stop, say so and run no pull request command; the pull request's link and state are copied from what gh printed, never typed | research: Martin and Avilla, agent automations (a write counts once the destination confirms it) | method/.claude/skills/method-finish/SKILL.md | done |
 | M149 | The report's change summary names each changed file outside the plan's Paths line, or says none | step 6b plan, section 1 item 13 (P6) | method/.claude/skills/method-finish/SKILL.md | done |
 | M150 | When done-check's history names a diagnose word, the report offers one candidate incident-checklist line as an [EYES] item; Claude never adds it | step 6b plan, section 1 item 13 (P8) | method/.claude/skills/method-finish/SKILL.md | done |
-| M151 | A project rule that conflicts with a method rule loses; a project rule may change only the length and detail of reports, which owner.md sets as a default (owner.md's other rules hold like method rules) | decision A77: a pack never weakens the core | method/.claude/rules/method/method.md | step 7 |
+| M151 | A project rule that conflicts with a method rule loses; a project rule may change only the length and detail of reports, which owner.md sets as a default (owner.md's other rules hold like method rules) | decision A77: a pack never weakens the core | method/.claude/rules/method/method.md | done |
 | M152 | status says when the project's own always-loaded text (rules outside `.claude/rules/method/` without `paths:`, CLAUDE.md, `.claude/CLAUDE.md`, AGENTS.md) passes 8,000 bytes | SPEC R12, applied to the project's own text (step 7 plan, S11) | method/scripts/method/lib/status.pl | done |
-| M153 | Changes to the files that steer the method (method.conf, checks, the project's pack, CI workflows, the incident checklist, REVIEW.md, CLAUDE.md, AGENTS.md) are high-risk whatever method.conf says | step 5 plan's touches-method route, in its cheap form (step 7 plan, S12) | method/scripts/method/lib/conf.pl | step 7 |
-| M154 | A flaky check: find the cause; never skip, retry or re-run it until it passes | step 6b plan, section 6 (P4) | method/.claude/rules/method/method.md | step 7 |
+| M153 | Changes to the files that steer the method (method.conf, checks, the project's pack, CI workflows, the incident checklist, REVIEW.md, CLAUDE.md and `.claude/CLAUDE.md`, AGENTS.md) are high-risk whatever method.conf says | step 5 plan's touches-method route, in its cheap form (step 7 plan, S12) | method/scripts/method/lib/conf.pl | done |
+| M154 | A flaky check: find the cause; never skip, retry or re-run it until it passes | step 6b plan, section 6 (P4) | method/.claude/rules/method/method.md | done |
 | M155 | Sync replaces nothing changed since the lock and writes nothing until its whole plan holds | SPEC R1 (step 7 plan, S3) | scripts/release/sync.sh | done |
 | M156 | Setup writes only through setup-write from an answers file and never overwrites a project file outside its block | SPEC R3 (step 7 plan, S9, S10) | method/scripts/method/lib/setup.pl | done |
 | M157 | The review packet carries the project's REVIEW.md as it stands at the merge base | step 6b plan, section 6 (P3) | method/scripts/method/lib/packet.pl | step 7 |

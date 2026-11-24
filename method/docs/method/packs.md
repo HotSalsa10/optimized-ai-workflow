@@ -2,7 +2,7 @@
 
 A pack is the project's own rules, checks and procedures, kept in places Claude Code already loads. There is no pack file, manifest or loader: the paths below are the pack. The method ships no pack for any one field of work; each project makes its own, and `/method-setup` starts it.
 
-A pack adds to the method and never weakens it. Where a pack rule and a method rule conflict, the method rule holds; the one thing a pack may change is how long and how detailed reports are, which `.claude/rules/method/owner.md` sets as a default.
+A pack adds to the method and never weakens it. How a conflict between a pack rule and a method rule is settled, and the one thing a pack may change, is the method's rule M151, under "The method is on" in `.claude/rules/method/method.md`.
 
 ## Where each part goes
 
@@ -14,7 +14,7 @@ A pack adds to the method and never weakens it. Where a pack rule and a method r
 | Risky paths: where a change gets the full route with three reviewers | `HIGH_RISK_PATHS` in `.claude/method.conf` | By done-check, before a merge |
 | Lessons: what to look for after something went wrong | `docs/incident-checklist.md` | By the reviewers, in every review packet |
 
-A pack never holds settings, hooks or agents, and nothing under the method's own paths (`scripts/method/`, `.claude/hooks/method/`, `.claude/agents/method/`, `.claude/rules/method/`, `.claude/skills/method-*`, `docs/method/`). The method's sync never reads or writes a pack, so an update of the method leaves it as it is. A change to a pack is reviewed and merged like any other change.
+A pack never holds settings, hooks or agents, and nothing under the method's own paths (`scripts/method/`, `.claude/hooks/method/`, `.claude/agents/method/`, `.claude/rules/method/`, `.claude/skills/method-*`, `docs/method/`). The method's sync never reads or writes a pack, so an update of the method leaves it as it is. A change to a pack is reviewed and merged like any other change, on the full route: done-check counts `.claude/rules/pack/`, `.claude/skills/pack-*`, `checks/`, `.claude/method.conf` and the incident checklist as high-risk whatever `HIGH_RISK_PATHS` says, so such a change needs three approving reviewers.
 
 ## How it starts
 

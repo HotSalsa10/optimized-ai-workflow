@@ -536,9 +536,9 @@ sub plan {
   my @rules = @{ $a->{RULE} } ? map {"- $_"} @{ $a->{RULE} } : ('- None yet; run /method-setup again to add them.');
   my %pack = (
     $WORKING => ["# How this project is worked on\n\nWritten by /method-setup from the owner's answers ($ANSWERS); run it again to change them."
-      . " Where a line here conflicts with a method rule, the method rule holds; only the length and detail of reports are the project's to set.\n\n", \@working],
+      . " A conflict with a method rule is settled as .claude/rules/method/method.md says (M151, under \"The method is on\").\n\n", \@working],
     $PROJECT => ["# The project's own rules\n\nRules that must always hold in this project, in the owner's words, from /method-setup."
-      . " Where one conflicts with a method rule, the method rule holds.\n\n", \@rules],
+      . " A conflict with a method rule is settled as .claude/rules/method/method.md says (M151, under \"The method is on\").\n\n", \@rules],
   );
   for my $target (sort keys %pack) {
     my ($head, $lines) = @{ $pack{$target} };

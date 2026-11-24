@@ -124,11 +124,12 @@ add_task() {
 }
 
 # new_project [TIER]: prints a folder holding remote.git (bare) and w: main
-# with one commit, pushed, origin/HEAD set; then w on branch feat with a
-# project check (unit: fails while flaky.marker exists), .claude/method.conf
-# (PRODUCT_PATHS=src), src/a.txt and the approved plan of task t1 (add_task,
-# Tier TIER, default LIGHT; with FULL also its expected.tsv), committed with
-# an open verdict line
+# with one commit, pushed, origin/HEAD set, holding a project check (unit:
+# fails while flaky.marker exists) and .claude/method.conf
+# (PRODUCT_PATHS=src), files on the built-in high-risk list (M153), so a
+# change on the branch leaves them be; then w on branch feat with src/a.txt
+# and the approved plan of task t1 (add_task, Tier TIER, default LIGHT; with
+# FULL also its expected.tsv), committed with an open verdict line
 new_project() {
   np_tier=${1:-LIGHT}
   b=$(new_sandbox_dir) || return 1
@@ -140,15 +141,16 @@ new_project() {
     cd w || exit 1
     printf '*.marker\n' >.gitignore
     printf 'hello\n' >README
+    mkdir -p checks .claude
+    printf 'unit\tany\t-\t(\\d+) ok\ttest ! -e flaky.marker && echo 3 ok\n' >checks/project.tsv
+    printf 'PRODUCT_PATHS=src\n' >.claude/method.conf
     git add -A
     git commit -q -m "Start" -m "Review-Verdict: not-required - the first commit"
     git remote add origin ../remote.git
     git push -q -u origin main 2>/dev/null
     git remote set-head origin main
     git checkout -q -b feat
-    mkdir -p checks .claude src
-    printf 'unit\tany\t-\t(\\d+) ok\ttest ! -e flaky.marker && echo 3 ok\n' >checks/project.tsv
-    printf 'PRODUCT_PATHS=src\n' >.claude/method.conf
+    mkdir -p src
     printf 'x = 1\n' >src/a.txt
     add_task . t1 "$np_tier"
     [ "$np_tier" != FULL ] || printf 'case\tinputs\texpected\tsource\none\tx=1\t2\tthe owner\n' >docs/tasks/t1/expected.tsv
@@ -985,7 +987,7 @@ if wanted_any "R6: a LIGHT plan on a high-risk path" "R6: a branch that drops a 
   approve_head "$f"
   dc "$f"
   expect "R6: a LIGHT plan on a high-risk path is judged FULL: NOT READY" 1 \
-    "done-check: tier: FAIL - the plan says Tier LIGHT, but 1 changed path is high-risk: src/a.txt (HIGH_RISK_PATHS, main's and this change's together: src); judged FULL, and the plan was not made as FULL" \
+    "done-check: tier: FAIL - the plan says Tier LIGHT, but 2 changed paths are high-risk: .claude/method.conf, src/a.txt (HIGH_RISK_PATHS, main's and this change's together: src; the built-in list of the files that steer the method: .claude/method.conf); judged FULL, and the plan was not made as FULL" \
     "done-check: next: plan again as FULL (Tier: FULL, with expected.tsv), ask the owner for their go again, and replace the Approved line with their new reply, with today's date and the time (Approved: YYYY-MM-DD HH:MM \"<the reply>\")" \
     "done-check: lock: FAIL - the task is FULL, but its plan had no expected.tsv" "done-check: deep review: FAIL"
 
@@ -999,7 +1001,7 @@ if wanted_any "R6: a LIGHT plan on a high-risk path" "R6: a branch that drops a 
   dc "$f"
   expect "R6: a branch that drops a high-risk path main lists, Tier LIGHT: NOT READY (judged FULL)" 1 \
     "done-check: up to date: PASS" \
-    "done-check: tier: FAIL - the plan says Tier LIGHT, but 1 changed path is high-risk: src/a.txt (HIGH_RISK_PATHS, main's and this change's together: src); judged FULL"
+    "done-check: tier: FAIL - the plan says Tier LIGHT, but 2 changed paths are high-risk: .claude/method.conf, src/a.txt (HIGH_RISK_PATHS, main's and this change's together: src; the built-in list of the files that steer the method: .claude/method.conf); judged FULL"
 
   # a file moved out of a high-risk folder: its old path counts
   f=$(floor_project) || abort_sandbox
@@ -1010,7 +1012,7 @@ if wanted_any "R6: a LIGHT plan on a high-risk path" "R6: a branch that drops a 
   approve_head "$f"
   dc "$f"
   expect "R6: a rename out of a high-risk path is high-risk: Tier LIGHT is NOT READY" 1 \
-    "done-check: tier: FAIL - the plan says Tier LIGHT, but 1 changed path is high-risk: keys/k.txt (HIGH_RISK_PATHS, main's and this change's together: keys)"
+    "done-check: tier: FAIL - the plan says Tier LIGHT, but 2 changed paths are high-risk: .claude/method.conf, keys/k.txt (HIGH_RISK_PATHS, main's and this change's together: keys; the built-in list of the files that steer the method: .claude/method.conf)"
 
   # Deep review: three approving reviewers on a high-risk path
   full_project || abort_sandbox
@@ -1020,8 +1022,8 @@ if wanted_any "R6: a LIGHT plan on a high-risk path" "R6: a branch that drops a 
   forge "$f" "$R" APPROVE
   dc "$f"
   expect "R6: two reviewers on a high-risk path are NOT READY" 1 \
-    "done-check: tier: PASS - Tier FULL, as the plan says; 1 changed path is high-risk: src/a.txt (HIGH_RISK_PATHS, main's and this change's together: src), so Deep review applies" \
-    "done-check: deep review: FAIL - the change touches high-risk paths (src/a.txt), so it needs three receipts of method-reviewer that opened with APPROVE on these files (tree " "reviewed from the merge base or chained back to it: 2 do" \
+    "done-check: tier: PASS - Tier FULL, as the plan says; 2 changed paths are high-risk: .claude/method.conf, src/a.txt (HIGH_RISK_PATHS, main's and this change's together: src; the built-in list of the files that steer the method: .claude/method.conf), so Deep review applies" \
+    "done-check: deep review: FAIL - the change touches high-risk paths (.claude/method.conf, src/a.txt), so it needs three receipts of method-reviewer that opened with APPROVE on these files (tree " "reviewed from the merge base or chained back to it: 2 do" \
     "done-check: next: run method-reviewer three times on these files, launched in one message in the foreground (Deep review)" \
     "done-check: NOT READY - 2 conditions failed (deep review, verdict)"
   forge "$f" "$R" APPROVE bases=
@@ -1030,13 +1032,13 @@ if wanted_any "R6: a LIGHT plan on a high-risk path" "R6: a branch that drops a 
   forge "$f" "$R" APPROVE
   dc "$f"
   expect "R6: Deep review: three approving reviewers on a high-risk path are READY" 0 \
-    "done-check: deep review: PASS - 3 receipts of method-reviewer opened with APPROVE on these files (tree " "the change touches high-risk paths (src/a.txt)" \
+    "done-check: deep review: PASS - 3 receipts of method-reviewer opened with APPROVE on these files (tree " "the change touches high-risk paths (.claude/method.conf, src/a.txt)" \
     "done-check: rounds: PASS - 1 version reviewed since the plan's approval" "done-check: READY - "
   forge "$f" "$R" "REQUEST CHANGES"
   dc "$f"
   expect "R6: three reviewers, one asking for changes, are NOT READY" 1 \
     "done-check: reviewer: FAIL - 1 receipt of method-reviewer for these files" \
-    "done-check: deep review: FAIL - the change touches high-risk paths (src/a.txt)" ": 3 do, and 1 opened with another word (REQUEST CHANGES (VALID))"
+    "done-check: deep review: FAIL - the change touches high-risk paths (.claude/method.conf, src/a.txt)" ": 3 do, and 1 opened with another word (REQUEST CHANGES (VALID))"
 fi
 
 # a broken high-risk list fails closed, on main's side and on the branch's
@@ -1066,7 +1068,8 @@ if wanted_any "R6: HIGH_RISK_PATHS"; then
       dc "$f"
       case $line in
         MUTATION_CHECKS=*)
-          expect "R6: HIGH_RISK_PATHS: a problem of another key ($side side) leaves the list readable" "$code" "done-check: tier: PASS"
+          expect "R6: HIGH_RISK_PATHS: a problem of another key ($side side) leaves the list readable" "$code" \
+            "done-check: tier: FAIL - the plan says Tier LIGHT, but 1 changed path is high-risk: .claude/method.conf (no HIGH_RISK_PATHS on main or in this change; the built-in list of the files that steer the method: .claude/method.conf)"
           ;;
         lfs)
           expect "R6: HIGH_RISK_PATHS: an unreadable method.conf ($side side, a Git LFS pointer) is NOT READY" 1 \
@@ -1109,14 +1112,14 @@ if wanted_any "R6: HIGH_RISK_PATHS"; then
   approve_head "$f"
   dc "$f"
   expect "R6: HIGH_RISK_PATHS: an entry whose files this change deletes is read: Tier LIGHT is NOT READY (judged FULL)" 1 \
-    "done-check: tier: FAIL - the plan says Tier LIGHT, but 1 changed path is high-risk: keys/k.txt (HIGH_RISK_PATHS, main's and this change's together: keys); judged FULL"
+    "done-check: tier: FAIL - the plan says Tier LIGHT, but 2 changed paths are high-risk: .claude/method.conf, keys/k.txt (HIGH_RISK_PATHS, main's and this change's together: keys; the built-in list of the files that steer the method: .claude/method.conf); judged FULL"
 
   # main's .claude or method.conf stored so that it cannot be read as a list
   for kind in file link filter; do
     f=$(floor_project) || abort_sandbox
     (cd "$f" && git checkout -q main && case $kind in
-      file) printf 'x\n' >.claude ;;
-      link) mkdir -p .claude && printf 'PRODUCT_PATHS=src\n' >.claude/other.conf && ln -s other.conf .claude/method.conf ;;
+      file) rm -r .claude && printf 'x\n' >.claude ;;
+      link) printf 'PRODUCT_PATHS=src\n' >.claude/other.conf && rm .claude/method.conf && ln -s other.conf .claude/method.conf ;;
       filter) mkdir -p .claude && printf 'PRODUCT_PATHS=src\nHIGH_RISK_PATHS=src\n' >.claude/method.conf && printf '.claude/method.conf filter=x\n' >.gitattributes ;;
     esac && git add -A && git commit -q -m "Conf" -m "$OK" && git push -q origin main 2>/dev/null && git checkout -q feat && git merge -q -s ours --no-edit main)
     amend "$f" "$OK"
@@ -1274,6 +1277,83 @@ if wanted_any "R6: HIGH_RISK_PATHS: an entry main lists"; then
   lacks "R6: HIGH_RISK_PATHS: an entry main lists on a path main's tip has is not called deleted" "drop it from HIGH_RISK_PATHS"
 fi
 
+# the built-in list of the files that steer the method (M153; step 7 plan,
+# S12): high-risk whatever HIGH_RISK_PATHS says, added after the check that
+# each entry names a path
+STEER='the built-in list of the files that steer the method'
+if wanted_any "M153: a LIGHT plan touching" "M153: three approving reviewers"; then
+  for what in checks pack; do
+    f=$(floor_project) || abort_sandbox
+    if [ "$what" = checks ]; then
+      printf '# a note on the checks\n' >>"$f/checks/project.tsv"
+      p=checks/project.tsv
+      e=checks
+    else
+      mkdir -p "$f/.claude/rules/pack" && printf '# Rules\n\nAlways keep the ledger balanced. Why: a test case.\n' >"$f/.claude/rules/pack/rules.md"
+      p=.claude/rules/pack/rules.md
+      e=.claude/rules/pack
+    fi
+    recommit "$f" Steer
+    approve_head "$f"
+    dc "$f"
+    expect "M153: a LIGHT plan touching $e/ is judged FULL: NOT READY" 1 \
+      "done-check: tier: FAIL - the plan says Tier LIGHT, but 1 changed path is high-risk: $p (no HIGH_RISK_PATHS on main or in this change; $STEER: $e); judged FULL, and the plan was not made as FULL" \
+      "done-check: deep review: FAIL - the change touches high-risk paths ($p)"
+  done
+  # the full route: three approving reviewers
+  full_project || abort_sandbox
+  printf '# a note on the checks\n' >>"$f/checks/project.tsv"
+  mkdir -p "$f/.claude/rules/pack" && printf '# Rules\n\nAlways keep the ledger balanced. Why: a test case.\n' >"$f/.claude/rules/pack/rules.md"
+  recommit "$f" Steer
+  finish "$f"
+  forge "$f" "$R" APPROVE
+  dc "$f"
+  expect "M153: two reviewers on a change to checks/ and .claude/rules/pack/ are NOT READY" 1 \
+    "done-check: tier: PASS - Tier FULL, as the plan says; 2 changed paths are high-risk: .claude/rules/pack/rules.md, checks/project.tsv (no HIGH_RISK_PATHS on main or in this change; $STEER: .claude/rules/pack, checks), so Deep review applies" \
+    "done-check: deep review: FAIL - the change touches high-risk paths (.claude/rules/pack/rules.md, checks/project.tsv)" ": 2 do"
+  forge "$f" "$R" APPROVE
+  dc "$f"
+  expect "M153: three approving reviewers on a change to checks/ and .claude/rules/pack/ are READY" 0 \
+    "done-check: deep review: PASS - 3 receipts of method-reviewer opened with APPROVE on these files (tree " \
+    "the change touches high-risk paths (.claude/rules/pack/rules.md, checks/project.tsv)" "done-check: READY - "
+fi
+
+if wanted_any "M153: a project with none of the built-in paths" "M153: a change to the method's own skill"; then
+  # main holds none of the files on the built-in list
+  b=$(new_sandbox_dir) || abort_sandbox
+  repos="$repos $b"
+  (cd "$b" && git init -q --bare remote.git && git init -q w && cd w && printf '*.marker\n' >.gitignore && printf 'hello\n' >README &&
+    git add -A && git commit -q -m "Start" -m "Review-Verdict: not-required - the first commit" && git remote add origin ../remote.git &&
+    git push -q -u origin main 2>/dev/null && git remote set-head origin main && git checkout -q -b feat && mkdir -p src &&
+    printf 'x = 1\n' >src/a.txt && add_task . && git add -A && git commit -q -m "Add the feature" -m "$OPEN") || abort_sandbox
+  f="$b/w"
+  rc "$f"
+  amend "$f" "$OK"
+  approve_head "$f"
+  dc "$f"
+  # (without checks/ and .claude/method.conf run-checks skips two checks, so
+  # the checks condition fails; the tier is what this case asks about)
+  expect "M153: a project with none of the built-in paths has no tier problem" 1 \
+    "done-check: tier: PASS - Tier LIGHT, as the plan says: no changed path is high-risk (no HIGH_RISK_PATHS on main or in this change)" \
+    "done-check: NOT READY - 1 condition failed (checks);"
+  # main holds checks/ and .claude/method.conf only, and the change touches
+  # neither: the absent entries are no problem
+  f=$(floor_project) || abort_sandbox
+  dca "$f"
+  expect "M153: a project with none of the built-in paths but checks/ and .claude/method.conf, untouched: READY" 0 \
+    "done-check: tier: PASS - Tier LIGHT, as the plan says: no changed path is high-risk (no HIGH_RISK_PATHS on main or in this change)" \
+    "done-check: READY - "
+  # the method's own skills are kept by G6 and method-files, not by this
+  # list (here method-files fails, as the skill is not in a method.lock)
+  f=$(floor_project) || abort_sandbox
+  mkdir -p "$f/.claude/skills/method-start" && printf -- '---\nname: method-start\n---\nStart.\n' >"$f/.claude/skills/method-start/SKILL.md"
+  recommit "$f" Skill
+  approve_head "$f"
+  dc "$f"
+  expect "M153: a change to the method's own skill (.claude/skills/method-start/) is not high-risk" 1 \
+    "done-check: tier: PASS - Tier LIGHT, as the plan says: no changed path is high-risk (no HIGH_RISK_PATHS on main or in this change)" \
+    "done-check: NOT READY - 1 condition failed (checks);"
+fi
 
 # (the conditions before step 6b follow; a run that keeps only some cases
 # ends here)
@@ -1976,34 +2056,52 @@ y="$vs/w"
 r0=$(cd "$y" && git rev-parse HEAD~3)
 r1=$(cd "$y" && git rev-parse HEAD~2)
 r2=$(cd "$y" && git rev-parse HEAD~1)
-setvf() { # setvf DIR VALUE: commits VERDICTS_FROM=VALUE (or none) with an approving line, and the task's plan
+# setvf DIR VALUE: commits the plan of task t1, Tier FULL with its
+# expected.tsv (a change to .claude/method.conf is high-risk, M153), then
+# VERDICTS_FROM=VALUE (or none), each with an approving line
+setvf() {
+  add_task "$1" t1 FULL
+  printf 'case\tinputs\texpected\tsource\none\tx=1\t2\tthe owner\n' >"$1/docs/tasks/t1/expected.tsv"
+  (cd "$1" && git add -A)
+  msg "$1" 'Plan\n\n%s\n' "$OK"
   if [ -n "$2" ]; then printf 'PRODUCT_PATHS=src\nVERDICTS_FROM=%s\n' "$2" >"$1/.claude/method.conf"; else printf 'PRODUCT_PATHS=src\n' >"$1/.claude/method.conf"; fi
-  add_task "$1"
   (cd "$1" && git add -A)
   msg "$1" 'Move VERDICTS_FROM\n\n%s\n' "$OK"
 }
+# dcf DIR: the receipts of a finished FULL change with Deep review, for a
+# change setvf made (the failing run on HEAD~1, the plan's commit; the
+# tester's pass, three reviewers, the security checker and the reporter on
+# HEAD), then done-check (dc)
+dcf() {
+  unforge "$1"
+  forge "$1" "$T" "TESTS FAIL" head="$(cd "$1" && git rev-parse HEAD~1)" tree="$(cd "$1" && git rev-parse 'HEAD~1^{tree}')"
+  finish "$1"
+  forge "$1" "$R" APPROVE
+  forge "$1" "$R" APPROVE
+  dc "$1"
+}
 setvf "$y" "$r0"
 rc "$y"
-dca "$y"
+dcf "$y"
 expect "moving VERDICTS_FROM to an older commit accepts nothing (READY)" 0 \
   "done-check: verdicts start: PASS - this change moves VERDICTS_FROM from ${r1%"${r1#???????}"} to ${r0%"${r0#???????}"}; it accepts no commit without a valid verdict line"
 (cd "$y" && git reset -q --hard origin/main)
 setvf "$y" "$r2"
 rc "$y"
-dca "$y"
+dcf "$y"
 expect "moving it forward over commits with valid lines accepts nothing (READY)" 0 \
   "from ${r1%"${r1#???????}"} to ${r2%"${r2#???????}"}; it accepts no commit without a valid verdict line"
 (cd "$y" && git reset -q --hard origin/main)
 side=$(cd "$y" && git commit-tree "$(git rev-parse "HEAD^{tree}")" -p "$r1" -m "Side")
 setvf "$y" "$side"
 rc "$y"
-dca "$y"
+dcf "$y"
 expect "a VERDICTS_FROM that is not on main fails" 1 "which is not on refs/remotes/origin/main's first-parent history, so status would report LOOK after the merge"
 (cd "$y" && git reset -q --hard origin/main)
 setvf "$y" "$r0"
 (cd "$vs" && git clone -q remote.git other 2>/dev/null && cd other && git commit -q --allow-empty -m "Later" -m "$OK" && git push -q origin main 2>/dev/null)
 (cd "$y" && git fetch -q origin)
-dca "$y"
+dcf "$y"
 expect "a VERDICTS_FROM move is judged only once the branch is up to date" 1 "done-check: verdicts start: FAIL - this change moves VERDICTS_FROM; judged once the branch is up to date with main"
 # VERDICTS_FROM is read as status reads it (A37): the file on disk must be
 # the one the commit stores, so a move cannot hide in a submodule or in LFS
@@ -2138,7 +2236,7 @@ repos="$repos $vo"
 ) || abort_sandbox
 setvf "$vo/w" "$(cd "$vo/w" && git rev-parse HEAD~1)"
 rc "$vo/w"
-dca "$vo/w"
+dcf "$vo/w"
 expect "a move from a VERDICTS_FROM that is not on main could not be checked" 1 "could not check what it accepts: the old value is not on refs/remotes/origin/main's first-parent history"
 
 # main: b0 (no line, the project), b1 (no line), b2 (VERDICTS_FROM=b0)
@@ -2168,22 +2266,22 @@ b0=$(cd "$z" && git rev-parse HEAD~2)
 b1=$(cd "$z" && git rev-parse HEAD~1)
 setvf "$z" "$b1"
 rc "$z"
-dca "$z"
+dcf "$z"
 expect "a move over a commit with no verdict line passes, naming it on the READY line (A30)" 0 \
   "done-check: verdicts start: PASS - this change moves VERDICTS_FROM from ${b0%"${b0#???????}"} to ${b1%"${b1#???????}"}; it accepts 1 commit on main without a valid verdict line: ${b1%"${b1#???????}"}" \
   "; accepts 1 commit on main without a valid verdict line: ${b1%"${b1#???????}"}"
 (cd "$z" && git push -q origin feat 2>/dev/null)
-(cd "$vb" && git clone -q --depth 2 -b feat "file://$vb/remote.git" shallow 2>/dev/null)
+(cd "$vb" && git clone -q --depth 3 -b feat "file://$vb/remote.git" shallow 2>/dev/null)
 (cd "$vb/shallow" && git remote set-branches --add origin main && git fetch -q --depth 1 origin main 2>/dev/null)
 rc "$vb/shallow"
-dca "$vb/shallow"
+dcf "$vb/shallow"
 expect "a changed value in a shallow clone could not be checked, and it alone fails" 1 \
   "done-check: verdicts start: FAIL - this change moves VERDICTS_FROM from " "which is not in this shallow history of refs/remotes/origin/main; could not check" \
   "done-check: NOT READY - 1 condition failed (verdicts start)"
 gv=$(git version | perl -ne 'print /(\d+)\.(\d+)/ && ($1 > 2 || ($1 == 2 && $2 >= 44)) ? 1 : 0')
 if [ "$gv" = 1 ]; then
   (cd "$vb" && git --git-dir=remote.git config uploadpack.allowFilter true && git clone -q --filter=blob:none -b feat "file://$vb/remote.git" partial 2>/dev/null)
-  dca "$vb/partial"
+  dcf "$vb/partial"
   expect "in a partial clone done-check never fetches a missing object: it cannot check (exit 2)" 2 "done-check: NOT READY - could not check: cannot read the stored blob"
 else
   skip "a partial clone never fetches (GIT_NO_LAZY_FETCH needs git 2.44)"
@@ -2191,7 +2289,7 @@ fi
 (cd "$z" && git reset -q --hard origin/main)
 setvf "$z" ""
 rc "$z"
-dca "$z"
+dcf "$z"
 expect "removing it so a commit with no line leaves the range names that commit" 0 \
   "from ${b0%"${b0#???????}"} to unset; it accepts 1 commit on main without a valid verdict line: ${b1%"${b1#???????}"}"
 # an error while checking (here a stored file that does not match its id)
@@ -2202,7 +2300,7 @@ obj="$z/.git/objects/$(printf '%s' "$confid" | cut -c1-2)/$(printf '%s' "$confid
 src="$z/.git/objects/$(printf '%s' "$other" | cut -c1-2)/$(printf '%s' "$other" | cut -c3-)"
 if [ -f "$obj" ] && [ -f "$src" ]; then
   cp "$obj" "$work/obj.saved" && chmod u+w "$obj" && cp "$src" "$obj"
-  dca "$z"
+  dcf "$z"
   expect "a stored file changed by hand stops done-check with exit 2 (could not check)" 2 "done-check: NOT READY - could not check: " "does not match its id" \
     "against refs/remotes/origin/main"
   cp "$work/obj.saved" "$obj"
@@ -2234,14 +2332,14 @@ u="$va/w"
 c0=$(cd "$u" && git rev-parse HEAD)
 setvf "$u" "$c0"
 rc "$u"
-dca "$u"
+dcf "$u"
 expect "adopting the method (VERDICTS_FROM set on a main with no verdict line) is READY" 0 \
   "this change moves VERDICTS_FROM from unset to ${c0%"${c0#???????}"}; it accepts no commit without a valid verdict line" "done-check: READY - "
 (cd "$u" && git push -q origin feat 2>/dev/null)
-(cd "$va" && git clone -q --depth 1 -b feat "file://$va/remote.git" shallow 2>/dev/null)
+(cd "$va" && git clone -q --depth 2 -b feat "file://$va/remote.git" shallow 2>/dev/null)
 (cd "$va/shallow" && git remote set-branches --add origin main && git fetch -q --depth 1 origin main 2>/dev/null && git fetch -q --deepen=1 origin feat 2>/dev/null)
 rc "$va/shallow"
-dca "$va/shallow"
+dcf "$va/shallow"
 expect "adoption in a shallow history could not be checked: older commits with a verdict line may be cut off" 1 \
   "done-check: up to date: PASS" "could not check what it accepts: the history here is shallow" "done-check: NOT READY - 1 condition failed (verdicts start)"
 

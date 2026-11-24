@@ -54,6 +54,12 @@
 #                              every path)
 #   Conf::check_path(PATH, LONE_DOT_OK)  the path without a trailing "/", or
 #                              undef when it breaks the path rules
+#   Conf::steers(PATH)         the entry of the built-in list of the files
+#                              that steer the method (M153) that PATH is or
+#                              lies under, or undef; PATH is repo-relative as
+#                              git prints it (CLAUDE.md, never ./CLAUDE.md
+#                              or an absolute path), as done-check hands it
+#   Conf::steering()           that list
 #   Conf::ignored_inputs(ROOT) the project's config files that git ignores
 #                              (needs lib/git.pl loaded)
 package Conf;
@@ -197,6 +203,32 @@ sub requires {
 sub under {
   my ($p, $list) = @_;
   return scalar grep { $_ eq '.' || $p eq $_ || index($p, "$_/") == 0 } @$list;
+}
+
+# The files that steer the method (M153; step 7 plan, S12): a change to one
+# is high-risk whatever HIGH_RISK_PATHS says, so a quiet change to what is
+# checked, the project's pack, CI, the incident checklist, REVIEW.md or the
+# always-loaded CLAUDE.md and AGENTS.md takes three approving reviewers.
+# done-check adds them after its check that each HIGH_RISK_PATHS entry names
+# a path, so a project without one of them has no problem. An entry that
+# ends in "-" is a name prefix (.claude/skills/pack-<name>, never the
+# method's own .claude/skills/method-*); the others match as under does.
+# Matched in any letter case, as a file system that folds case would load
+# claude.md as CLAUDE.md. The method's own files and settings.json are not
+# here: G6 and the method-files check keep them.
+my @STEERING = ('.claude/method.conf', 'checks', '.claude/rules/pack', '.claude/skills/pack-', '.github/workflows',
+  'docs/incident-checklist.md', 'REVIEW.md', 'CLAUDE.md', '.claude/CLAUDE.md', 'AGENTS.md');
+
+sub steering { return @STEERING }
+
+sub steers {
+  my ($p) = @_;
+  my $lp = lc $p;
+  for my $e (@STEERING) {
+    my $le = lc $e;
+    return $e if $le =~ /-\z/ ? index($lp, $le) == 0 : ($lp eq $le || index($lp, "$le/") == 0);
+  }
+  return undef;
 }
 
 sub ignored_inputs {
