@@ -248,6 +248,7 @@ After your merge, you create the first release tag, v0.7.0, on GitHub. Claude gi
 ### Changed (step 8 plan)
 
 - Step 8's plan (docs/plans/step8.md) is at version 2 after three critiques: this repo runs the hooks from `v0.7.0`; uninstall keeps what was there before the install, the logs and setup's files, and runs only where the hooks are off; the check of your own Claude Code folder tells you what to change; one question for you (D1: how an uninstall merges). Nothing is built until step 7 is merged and tagged.
+- Step 8's plan is at version 3 with 8.0's measurements: this repository passes its tests and checks with the method installed; one setting keeps the method's rules out of its sessions; a personal command or an account skill named like a method skill does not replace it, so the check of your own Claude Code folder does not look for them; hooks written into a project's settings during a session apply in that session about a second later.
 
 ### Changed (step 6)
 
