@@ -40,7 +40,7 @@ Blocker: cleaned copies of the owner's status.sh, review packet, verdict file, p
 
 ## Track 4: later
 
-`/lesson`, with its bar for what becomes a rule and its pruning (not built in step 6 or 6b, DECISIONS A74; until then a lesson is an ordinary reviewed change to the records), `/research <link>`, `/research-update`, `/method-explain` (M120, moved from step 6, DECISIONS A73), the model-release checklist and rule pruning; more field packs when a real project needs one.
+`/lesson`, with its bar for what becomes a rule and its pruning (not built in step 6 or 6b, DECISIONS A74; until then a lesson is an ordinary reviewed change to the records), `/research <link>`, `/research-update`, `/method-explain` (M120, moved from step 6, DECISIONS A73), the model-release checklist (its first case Claude Fable 5.2, DECISIONS A81) and rule pruning; more field packs when a real project needs one.
 
 Exit: the commands exist and one research run has produced a reviewed change.
 Blocker: Track 1.
