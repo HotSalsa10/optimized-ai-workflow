@@ -23,7 +23,8 @@
 #                balanced, budget)
 #   PROJECT_WHAT, NEVER_WRONG, HOW_IT_STARTS, TEST_COMMAND: the person's own
 #                words, once each, and may be empty
-#   RULE, PRODUCT_PATH, RISK_PATH: once per item
+#   RULE, PRODUCT_PATH, RISK_PATH: once per item; a line with an empty
+#                value adds nothing
 # Refused before anything else, each naming its key or line: a line that is
 # not KEY<TAB>value, an unknown key, a value holding a TAB, CR or other
 # control character, a value holding a method block marker's text (>>>
@@ -172,6 +173,8 @@ sub parse_answers {
       if (exists $a{$k}) { push @p, "$at: answered twice; it takes one answer"; next }
       $a{$k} = $v;
     } else {
+      # a list answer left empty (RULE, PRODUCT_PATH, RISK_PATH) adds nothing
+      next if $v eq '' && $k ne 'TOUCHES';
       push @{ $a{$k} }, $v;
     }
   }

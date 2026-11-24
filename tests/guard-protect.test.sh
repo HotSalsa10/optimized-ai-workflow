@@ -183,6 +183,8 @@ for p in "$proj/.claude/skills/method-start/SKILL.md" "$proj/.claude/skills/meth
   tool "a method skill (6.3): Write to ${p#"$work"/} is refused" Write "$(jpath "$p")" G6
 done
 tool "a method skill (6.3): an Edit of method-start's SKILL.md is refused" Edit "$(jpath "$proj/.claude/skills/method-start/SKILL.md")" G6
+tool "a method skill (7.5): an Edit of method-setup's SKILL.md is refused" Edit "$(jpath "$proj/.claude/skills/method-setup/SKILL.md")" G6
+judge "a method skill (7.5): a write to method-setup's SKILL.md is refused" "$proj" 'echo x > .claude/skills/method-setup/SKILL.md' G6
 for c in 'sed -i s/a/b/ .claude/skills/method-start/SKILL.md' 'echo x > .claude/skills/method-start/SKILL.md' 'echo x >> .claude/skills/method-plan/SKILL.md' \
   'cp notes.txt .claude/skills/method-start/SKILL.md' 'rm -rf .claude/skills/method-start' 'rm -rf .claude/skills' 'mv .claude/skills/method-start old-skill' \
   'cp -r x .claude/skills/method-design'; do

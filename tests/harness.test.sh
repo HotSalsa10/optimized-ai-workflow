@@ -947,5 +947,38 @@ else
   fail "finish: the case could not be made, or the fake did not answer; the client was not started"
 fi
 
+# --- 23. /method-setup (step 7.5): the skill typed as the owner's message
+# (-p "/method-setup", F6), with the method's fragment and its start hook;
+# the main session only answers (h_start setup, h_start_holds). A plain -p run
+# offers no AskUserQuestion (step 7.0, F5), so it is the plain-text
+# fallback the skill names that such a run takes ---
+if h_start "$root" setup; then
+  start_q expands "setup: -p \"/method-setup\" sends method-setup's SKILL.md body, with no ARGUMENTS line; its '# rules:' line reaches no request; it is in init's slash_commands"
+  start_q setup "setup: method-setup sets disable-model-invocation, its six numbered steps reach the main session, they name the answers file, setup-write.sh without and with --write, AskUserQuestion with its plain-text fallback, /reload-skills and the owner's reply, and its description reaches no request"
+  h_safe setup
+else
+  fail "setup: the case could not be made, or the fake did not answer; the client was not started"
+fi
+# F2 (step 7.0), kept as a case: setup-write --write run by the main
+# session in a session with the method's hooks, with answers that change
+# the profile (best to budget). The guard lets the call through (G6's
+# method scripts), settings.json and method.lock hold the bytes the same
+# run gives outside a session, and G16 refuses applying the settings
+# change mid-session: logged, and the next call the guard lets through
+# brings its one-time message, which names no file, so the card's own
+# first line names .claude/settings.json (S10) (h_setup_f2,
+# h_setup_f2_holds)
+f2_q() {
+  if h_setup_f2_holds "$1"; then pass "$2"; else fail "$2" "$H_WHY"; fi
+}
+if h_setup_f2 "$root"; then
+  f2_q bytes "F2: setup-write --write in a hooked session passes the guard, and settings.json and method.lock hold the bytes the same run gives outside a session"
+  f2_q g16 "F2: G16 refuses applying the settings setup-write wrote mid-session (logged), and the next call brings its one-time message"
+  f2_q card "F2: the card's first line, which reaches the main session, names .claude/settings.json; G16's one-time message names no file"
+  h_safe setup-f2
+else
+  fail "setup-f2: the case could not be made, or the fake did not answer; the client was not started"
+fi
+
 echo "harness: ${H_RUNS:-0} client runs took ${H_TOTAL_SECS:-0} s"
 finish

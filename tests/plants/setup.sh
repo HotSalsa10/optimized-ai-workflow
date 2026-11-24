@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Plants for setup-write (step 7.4; method/scripts/method/lib/setup.pl,
-# M100, M156): each planted break turns tests/setup.test.sh red for its
+# M100, M156) and for the answers method-setup's SKILL.md asks for (step
+# 7.5): each planted break turns tests/setup.test.sh red for its
 # stated reason, in a throwaway copy of the repo. The breaks are data: "===
 # NAME | FILE | REASON", the text OLD (in FILE exactly once), "---", the
 # text NEW (tests/lib.sh, plant_data). PLANT_SHARD=K/N runs every Nth one
@@ -92,6 +93,21 @@ cat >"$work/plants.txt" <<'PLANTS-END'
     unlink map { File::Spec->catfile($dir, $_) } grep { /\A\Q$base\E\.setup-[0-9]+\z/ } readdir $dh;
 ---
     ();
+=== 7.5 an empty list answer kept | method/scripts/method/lib/setup.pl | a list answer left empty (RULE, PRODUCT_PATH, RISK_PATH) adds nothing
+      next if $v eq '' && $k ne 'TOUCHES';
+---
+=== 7.5 the skill asks for a value setup does not take | method/.claude/skills/method-setup/SKILL.md | method-setup's SKILL.md asks for exactly the answer keys and values setup takes
+(PACE larger)
+---
+(PACE large)
+=== 7.5 the skill asks for a key setup does not know | method/.claude/skills/method-setup/SKILL.md | method-setup's SKILL.md asks for exactly the answer keys and values setup takes
+(STRICT strict)
+---
+(STRICTNESS strict)
+=== 7.5 the skill leaves out a profile | method/.claude/skills/method-setup/SKILL.md | method-setup's SKILL.md asks for exactly the answer keys and values setup takes
+; Balanced, cheaper and slower to catch subtle bugs (PROFILE balanced)
+---
+
 PLANTS-END
 plant_data "$work/plants.txt" tests/setup.test.sh only
 drop_sandbox "$work" || true

@@ -18,6 +18,9 @@ require File::Spec->catfile($lib, $_) for qw(git.pl esc.pl conf.pl verdicts.pl c
 
 # the records every project keeps (step 7's templates must match this list)
 my @RECORDS = qw(CLAUDE.md AGENTS.md SPEC.md TASKS.md DECISIONS.md ROADMAP.md RISKS.md CHANGELOG.md TESTS.md);
+# the project's own always-loaded text (M152): SPEC R12's 8,000 bytes,
+# applied to the project; only the owner raises it
+our $CONTEXT_MAX = 8000;
 my $CI_SECONDS = 15;
 my $VERSION_SECONDS = 10;
 
@@ -339,6 +342,68 @@ sub records_lines {
   return ['records', 'PASS', scalar(@RECORDS) . " records present; CLAUDE.md imports AGENTS.md$named"];
 }
 
+# --- context: the project's own always-loaded text (M152) ---
+
+# scoped FILE: true when FILE's frontmatter gives a paths: key a value (on
+# its line, or as a list on the lines after it), so Claude Code loads the
+# rule only for the files it names
+sub scoped {
+  my ($f) = @_;
+  open my $h, '<:raw', $f or die "cannot read $f\n";
+  my $text = do { local $/; <$h> };
+  close $h;
+  return 0 unless defined $text && $text =~ /\A---[ \t]*\r?\n(.*?)^---[ \t]*\r?$/ms;
+  my $fm = $1;
+  return $fm =~ /^(?:paths|"paths"|'paths')[ \t]*:(?:[ \t]*[^\s#]|[ \t]*(?:#[^\n]*)?\r?\n[ \t]*-)/m ? 1 : 0;
+}
+
+# always_loaded: [PATH, BYTES] for each file of the project's own that
+# Claude Code loads in every session: CLAUDE.md, .claude/CLAUDE.md and
+# AGENTS.md (which CLAUDE.md imports), and each .md file under
+# .claude/rules/ (in any folder; a link is followed, each folder read once)
+# without a paths: line, leaving out .claude/rules/method/, the method's own
+# text, which the method's budget test holds to its own 8,000, also when a
+# link leads into it (it is marked read before the walk). Bytes as stored.
+sub always_loaded {
+  my @files;
+  for my $f (qw(CLAUDE.md .claude/CLAUDE.md AGENTS.md)) { push @files, [$f, -s _] if -f $f }
+  my %seen;
+  if (my @m = stat '.claude/rules/method') { $seen{"$m[0]:$m[1]"} = 1 }
+  my $walk;
+  $walk = sub {
+    my ($dir) = @_;
+    my @st = stat $dir or die "cannot read the folder $dir\n";
+    return if $seen{"$st[0]:$st[1]"}++;
+    opendir my $d, $dir or die "cannot read the folder $dir\n";
+    my @entries = sort grep { !/\A\.\.?\z/ } readdir $d;
+    closedir $d;
+    for my $e (@entries) {
+      my $p = "$dir/$e";
+      if (-d $p) {
+        $walk->($p);
+      } elsif (-f _ && $e =~ /\.md\z/) {
+        my $bytes = -s _;
+        push @files, [$p, $bytes] unless scoped($p);
+      }
+    }
+  };
+  $walk->('.claude/rules') if -d '.claude/rules';
+  return @files;
+}
+
+sub context_lines {
+  my @files = always_loaded();
+  my $total = 0;
+  $total += $_->[1] for @files;
+  if ($total > $CONTEXT_MAX) {
+    my @big = sort { $b->[1] <=> $a->[1] || $a->[0] cmp $b->[0] } @files;
+    return ['context', 'LOOK', "$total bytes of the project's own text load in every session, over its budget of $CONTEXT_MAX: "
+      . names(map {"$_->[0] $_->[1]"} @big) . '; shorten it, give a rule a paths: line or move a procedure into a skill'];
+  }
+  return ['context', 'PASS', "$total of $CONTEXT_MAX bytes of the project's own text load in every session (" . scalar(@files)
+    . ' files; .claude/rules/method/ and rules with a paths: line not counted)'];
+}
+
 # --- Claude Code, its effort setting, perl ---
 
 # in_hook: run by one of the method's hooks. Claude Code gives a hook
@@ -527,6 +592,7 @@ sub main {
   area('work', sub { work_lines('work', $top) });
   area('verdicts', sub { verdicts_lines($conf) });
   area('records', \&records_lines);
+  area('context', \&context_lines);
   area('claude-code', \&claude_code_lines);
   area('effort', \&effort_lines);
   area('perl', \&perl_lines);

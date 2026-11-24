@@ -67,6 +67,9 @@
 # method's architect (below); h_design_holds QUESTION judges it.
 # Step 6.5's case: h_start ROOT MODE types /method-start (below);
 # h_start_holds QUESTION judges it.
+# Step 7.5's cases: h_start ROOT setup types /method-setup; h_setup_f2
+# ROOT runs setup-write --write in a hooked session (step 7.0's F2) and
+# h_setup_f2_holds QUESTION judges it (below).
 # req-001 is h_fake's own alive probe.
 
 # settings a caller's environment must not carry into every case
@@ -912,6 +915,7 @@ h_design_holds() {
 # hook, so no METHOD-ACTIVE line comes; the main session only answers.
 # MODE finish (step 6b.4): /method-finish typed in place of /method-start,
 # with the start hook; the main session only answers.
+# MODE setup (step 7.5): /method-setup typed in the same way.
 # Sets H_SKILL (the skill typed), H_EFFORT (the fragment's effortLevel) and
 # H_ACTIVE (the first line session-status.sh prints, up to its version).
 # Returns 1 when the case could not be made or the fake did not answer.
@@ -919,6 +923,7 @@ h_start() {
   local mode=$2
   H_SKILL=method-start
   [ "$mode" = finish ] && H_SKILL=method-finish
+  [ "$mode" = setup ] && H_SKILL=method-setup
   H_EFFORT=$(perl -MJSON::PP -0ne 'print JSON::PP->new->decode($_)->{effortLevel}' "$1/method/settings.fragment.json") || return 1
   H_ACTIVE="METHOD-ACTIVE v"
   { h_case "start-$mode" && h_method "$1"; } || return 1
@@ -983,6 +988,23 @@ h_start() {
 #            --no-renames (step 6b, R15), the push, gh pr create);
 #            each numbered step's line reached the main conversation's
 #            requests (expands shows the whole body did)
+#   setup    (MODE setup, step 7.5) method-setup's SKILL.md sets
+#            disable-model-invocation: true, has its six numbered steps
+#            and names what they use (H_SETUP_NAMES: the answers file,
+#            setup-write.sh without and with --write, AskUserQuestion and
+#            its plain-text fallback, /reload-skills, the owner's reply);
+#            each numbered step's line reached the main conversation's
+#            requests; and its description reached no request, as only the
+#            person can start it (it costs no context), while method-start's,
+#            which the model may start, did (the control)
+# shellcheck disable=SC2016 # the skill's text, backquotes as written
+H_SETUP_NAMES='.claude/setup-answers.txt
+`bash scripts/method/setup-write.sh` in a Bash call of its own
+`bash scripts/method/setup-write.sh --write`
+AskUserQuestion
+plain text
+/reload-skills
+Reply `write` to write these files.'
 H_FINISH_NAMES='scripts/method/run-checks.sh
 scripts/method/review-packet.sh
 scripts/method/done-check.sh --ready
@@ -1032,6 +1054,29 @@ EOF
 $(LC_ALL=C grep '^[0-9][0-9]*\. \*\*' "$f")
 EOF
       ;;
+    setup)
+      LC_ALL=C grep -q -x 'disable-model-invocation: true' "$f" || H_WHY="$H_WHY method-setup's SKILL.md does not set disable-model-invocation: true;"
+      n=$(LC_ALL=C grep -c '^[0-9][0-9]*\. \*\*' "$f")
+      [ "$n" = 6 ] || H_WHY="$H_WHY method-setup's SKILL.md has $n numbered steps, not 6;"
+      while IFS= read -r v; do
+        [ -z "$v" ] || LC_ALL=C grep -q -F -e "$v" "$f" || H_WHY="$H_WHY method-setup's SKILL.md names no $v;"
+      done <<EOF
+$H_SETUP_NAMES
+EOF
+      while IFS= read -r line; do
+        [ -z "$line" ] || perl "$HARNESS/read.pl" req main "$line" "$H_DIR/fake" || H_WHY="$H_WHY a step's line did not reach main: $(printf '%s' "$line" | cut -c1-60);"
+      done <<EOF
+$(LC_ALL=C grep '^[0-9][0-9]*\. \*\*' "$f")
+EOF
+      v=$(sed -n 's/^description: //p' "$f")
+      if [ -z "$v" ]; then
+        H_WHY="$H_WHY method-setup's SKILL.md has no description: line, so the case cannot tell;"
+      else
+        ! h_req_has "$v" || H_WHY="$H_WHY its description reached a request;"
+      fi
+      v=$(sed -n 's/^description: //p' "$H_PROJ/.claude/skills/method-start/SKILL.md")
+      [ -n "$v" ] && h_req_has "$v" || H_WHY="$H_WHY method-start's description, a skill the model may start, reached no request, so the case cannot tell;"
+      ;;
     effort)
       # shellcheck disable=SC2016 # the variable as written in the skill, not expanded here
       if ! grep -q -F '${CLAUDE_EFFORT}' "$f"; then
@@ -1074,6 +1119,61 @@ EOF
       [ "$(LC_ALL=C grep -c -F METHOD-ACTIVE "$f")" -gt 0 ] || H_WHY="$H_WHY method-start's SKILL.md has no line naming METHOD-ACTIVE;"
       ;;
     *) H_WHY="no such start question: $1" ;;
+  esac
+  [ -z "$H_WHY" ]
+}
+
+# h_setup_f2 ROOT (step 7.5; step 7.0's F2 kept as a case): the method
+# from the repository at ROOT (a planted copy in tests/plants/harness.sh),
+# with answers in .claude/setup-answers.txt that change the profile (best
+# to budget). setup-write.sh --write runs first outside a session, in a
+# copy of the project ($H_DIR/control); then the main session runs it in a
+# Bash call, and after the fake's 8 s pause (so the client notices the
+# changed file) a plain write. Returns 1 when the case could not be made or
+# the fake did not answer.
+h_setup_f2() {
+  { h_case setup-f2 && h_method "$1"; } || return 1
+  printf 'DECIDES\tclaude\nREPORTS\tshort\nPACE\tsmall\nTOUCHES\tnone\nSTRICT\tstandard\nPROFILE\tbudget\nPROJECT_WHAT\tA small tool.\nRULE\tKeep each change small.\n' >"$H_PROJ/.claude/setup-answers.txt" || return 1
+  rm -rf "$H_DIR/control" && cp -R "$H_PROJ" "$H_DIR/control" || return 1
+  HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 bash "$H_DIR/control/scripts/method/setup-write.sh" --write >"$H_DIR/control.txt" 2>&1 || return 1
+  perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({convs => [{name => "main", match => "^go\$", turns => [
+      {tool => "Bash", input => {command => "bash scripts/method/setup-write.sh --write", description => "HARNESS setup-write"}},
+      {pause => 8, tool => "Bash", input => {command => "echo ok > seen.txt", description => "a plain write"}}, {text => "MAIN-DONE"}]}]})' >"$H_DIR/f2.json" || return 1
+  h_fake "$H_DIR/f2.json" || return 1
+  h_client 90 -- --permission-mode default --allowedTools Bash
+  h_stop
+}
+# h_setup_f2_holds QUESTION: 0 when QUESTION holds for the case
+# h_setup_f2 ran last; else 1, with H_WHY saying what was seen.
+#   bytes  the guard refused nothing; setup-write's last line (setup:
+#          WROTE) reached the main session; settings.json and method.lock
+#          hold the bytes the run outside a session wrote, settings.json
+#          with the Budget profile's model
+#   g16    a G16 ConfigChange line is in the guard's log, the plain write
+#          ran, and the client's output holds G16's one-time message
+#   card   the card's first line, naming .claude/settings.json, reached the
+#          main session, and G16's one-time message names no settings.json
+#          (it names no file, so the card does, S10)
+h_setup_f2_holds() {
+  H_WHY=""
+  case $1 in
+    bytes)
+      ! h_tsv_has 'guard G' || H_WHY="$H_WHY the guard refused a call;"
+      h_req_in main 'setup: WROTE' || H_WHY="$H_WHY setup-write's last line, setup: WROTE, did not reach main;"
+      cmp -s "$H_PROJ/.claude/settings.json" "$H_DIR/control/.claude/settings.json" || H_WHY="$H_WHY settings.json differs from the run outside a session;"
+      cmp -s "$H_PROJ/scripts/method/method.lock" "$H_DIR/control/scripts/method/method.lock" || H_WHY="$H_WHY method.lock differs from the run outside a session;"
+      LC_ALL=C grep -q -F '"model": "claude-sonnet-5-5"' "$H_PROJ/.claude/settings.json" || H_WHY="$H_WHY settings.json does not hold the Budget profile's model;"
+      ;;
+    g16)
+      LC_ALL=C grep -q '	G16	ConfigChange	' "$H_PROJ/.method/local/guard.log" 2>/dev/null || H_WHY="$H_WHY no G16 ConfigChange line in the guard's log;"
+      h_ran seen.txt || H_WHY="$H_WHY the plain write did not run;"
+      LC_ALL=C grep -q 'guard G16: a settings change was refused during this session' "$H_DIR/out.jsonl" || H_WHY="$H_WHY G16's one-time message did not come;"
+      ;;
+    card)
+      h_req_in main 'Settings first: .claude/settings.json gets the profile' || H_WHY="$H_WHY the card's first line naming .claude/settings.json did not reach main;"
+      ! LC_ALL=C grep -q 'guard G16: [^"]*settings\.json' "$H_DIR/out.jsonl" || H_WHY="$H_WHY G16's one-time message names settings.json, so the card's line is not needed;"
+      ;;
+    *) H_WHY="no such setup-f2 question: $1" ;;
   esac
   [ -z "$H_WHY" ]
 }

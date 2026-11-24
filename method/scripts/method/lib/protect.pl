@@ -85,7 +85,7 @@ our $FOLD;
 # version check) with the names kept(), a text form in text_re, and a
 # watched path in guard.pl's $WATCHED_PATH, which reads skills_re from
 # here. A project's own skills, named otherwise, stay editable.
-our @METHOD_SKILLS = qw(method-start method-plan method-design method-finish);
+our @METHOD_SKILLS = qw(method-start method-plan method-design method-finish method-setup);
 
 # the folders of the Claude Code folder (~/.claude, and CLAUDE_CONFIG_DIR
 # when set) that hold what a session loads: its agents, skills and

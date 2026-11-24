@@ -185,5 +185,16 @@ for s in method-plan method-start; do
   drop_sandbox "$sb"
 done
 
+# method-setup dropped from the method's skill list (step 7.5): its folder
+# is then a method- skill the list does not name
+sb=$(make_sandbox) || abort_sandbox
+# shellcheck disable=SC2016 # perl code, expanded by perl
+perl -pi -e 's/^(our \@METHOD_SKILLS = qw\(.*) method-setup(.*\);)$/$1$2/' "$sb/$protect"
+# shellcheck disable=SC2016 # the $1 is the inner sh's argument
+if expect_landed "method-setup dropped from the list" sh -c '! grep -q "^our @METHOD_SKILLS = qw(.*method-setup.*);\$" "$1" && grep -q "^our @METHOD_SKILLS = qw(" "$1"' sh "$sb/$protect"; then
+  expect_red "method-setup dropped from the method's skill list" "$sb" "method/.claude/skills/method-setup/: the folder is not on the method's skill list" bash scripts/dev/lint-prompts.sh
+fi
+drop_sandbox "$sb"
+
 echo "plants: lint-prompts: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]

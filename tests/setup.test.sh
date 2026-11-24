@@ -555,6 +555,64 @@ if wanted "$n"; then
   fi
 fi
 
+n="a list answer left empty (RULE, PRODUCT_PATH, RISK_PATH) adds nothing: setup takes it and writes no empty rule"
+if wanted "$n"; then
+  copy "$pnew" emptylist
+  {
+    printf 'DECIDES\tclaude\nREPORTS\tshort\nPACE\tsmall\nTOUCHES\tnone\nSTRICT\tstandard\nPROFILE\tbest\n'
+    printf 'PROJECT_WHAT\t\nNEVER_WRONG\t\nRULE\t\nRULE\t   \nHOW_IT_STARTS\t\nTEST_COMMAND\t\nPRODUCT_PATH\t\nRISK_PATH\t\n'
+  } >"$c/.claude/setup-answers.txt"
+  setup "$c" --write
+  if [ "$code" -eq 0 ] && has "Your pack adds 0 rules." && ! grep -q '^- *$' "$c/.claude/rules/pack/project.md" &&
+    ! grep -q '^HIGH_RISK_PATHS=$' "$c/.claude/method.conf"; then pass "$n"; else no "$n"; fi
+fi
+
+# the answers method-setup's SKILL.md asks for are the ones setup takes:
+# each "KEY value" and "KEY" in brackets in the skill (alone, or in a list
+# after a comma) is a key and closed value of lib/setup.pl (%CHOICES, @TOUCH
+# and none, the profile names Lock::profiles reads from profiles.tsv, @TEXT,
+# @MANY) and passes parse_answers, and each of those is in the skill
+n="method-setup's SKILL.md asks for exactly the answer keys and values setup takes"
+if wanted "$n"; then
+  cat >"$work/skill-keys.pl" <<'SKILL-KEYS'
+use strict; use warnings; no warnings "once";
+my ($skill_f, $prof_f, $lib) = @ARGV;
+require "$lib/setup.pl";
+my $read = sub { open my $h, "<:raw", $_[0] or die "cannot read $_[0]\n"; local $/; my $t = <$h>; close $h; $t };
+my $skill = $read->($skill_f);
+my (undef, $names, $pp) = Lock::profiles($read->($prof_f));
+die "profiles.tsv: @$pp\n" if @$pp;
+my %want;
+for my $k (keys %Setup::CHOICES) { $want{"$k $_"} = 1 for @{ $Setup::CHOICES{$k} } }
+$want{"PROFILE $_"} = 1 for @$names;
+$want{"TOUCHES $_"} = 1 for @Setup::TOUCH, "none";
+$want{$_} = 1 for @Setup::TEXT, @Setup::MANY;
+my %got;
+$got{ defined $2 ? "$1 $2" : $1 } = 1 while $skill =~ /(?:\(|, )([A-Z][A-Z_]+)(?: ([a-z][a-z0-9-]*))?(?=[,)])/g;
+my @bad;
+push @bad, "the skill asks for $_, which setup does not take" for grep { !$want{$_} } sort keys %got;
+push @bad, "the skill does not ask for $_" for grep { !$got{$_} } sort keys %want;
+my %base = (map { ($_ => $Setup::CHOICES{$_}[0]) } keys %Setup::CHOICES);
+$base{PROFILE} = $names->[0];
+$base{TOUCHES} = "none";
+for my $g (sort keys %got) {
+  my ($k, $v) = split / /, $g;
+  my %a = %base;
+  my $extra = "";
+  if (defined $v) { $a{$k} = $v } else { $extra = "$k\tsrc\n" }
+  my ($ans, $p) = Setup::parse_answers(join("", map {"$_\t$a{$_}\n"} sort keys %a) . $extra, $names);
+  push @bad, "$g: parse_answers refuses it: @$p" if @$p;
+}
+print "$_\n" for @bad;
+print "keys and values: ", scalar(keys %got), "\n" unless @bad
+SKILL-KEYS
+  got=$(perl "$work/skill-keys.pl" "$root/method/.claude/skills/method-setup/SKILL.md" "$root/method/scripts/method/profiles.tsv" "$root/method/scripts/method/lib" 2>&1)
+  case "$got" in
+    "keys and values: "*) pass "$n (${got#keys and values: })" ;;
+    *) fail "$n" "$got" ;;
+  esac
+fi
+
 # --- a sample on disk: setup-write.sh, status and done-check ---
 n1="a sample on disk: a dry run writes nothing, --write twice gives the same bytes, and method-files finds nothing"
 n2="a sample on disk: status finds no records or config problem"

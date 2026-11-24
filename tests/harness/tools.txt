@@ -32,3 +32,8 @@ EnterWorktree	not	makes a new worktree and branch from HEAD, as G3's list allows
 WebFetch	not	reads a web page; writes nothing in the project
 WebSearch	not	searches the web; writes nothing in the project
 Workflow	not	runs agents whose own tool calls fire the hooks
+TaskCreate	not	adds an item to the session's own task list; writes nothing in the project
+TaskGet	not	reads an item of the session's own task list
+TaskList	not	lists the session's own task list
+TaskUpdate	not	changes an item of the session's own task list; writes nothing in the project
+AskUserQuestion	not	asks the person a question with choices (/method-setup); offered in interactive sessions, not in a -p run unless --permission-prompt-tool is given (step 7.0, F5)

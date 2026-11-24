@@ -96,9 +96,10 @@ expect "a clean, pushed project needs no look (exit 0)" 0 "status: w on main at 
   "work: PASS - nothing uncommitted, nothing unpushed (as of the last fetch)" \
   "verdicts: PASS - 1 commits on refs/remotes/origin/main since $head7 carry a Review-Verdict line" \
   "records: PASS - 9 records present; CLAUDE.md imports AGENTS.md; checks/*.tsv lists no checks" \
+  "context: PASS - 23 of 8000 bytes of the project's own text load in every session (2 files; .claude/rules/method/ and rules with a paths: line not counted)" \
   "claude-code: SKIPPED - not run inside Claude Code" "effort: SKIPPED - not run inside Claude Code" "perl: PASS - JSON::PP " \
   "ci: SKIPPED - origin is not on github.com" "status: nothing needs a look; 3 SKIPPED (claude-code, effort, ci)"
-if [ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" -eq 10 ]; then pass "the report is one line per area plus a first and a last line"; else fail "the report is one line per area" "$out"; fi
+if [ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" -eq 11 ]; then pass "the report is one line per area plus a first and a last line"; else fail "the report is one line per area" "$out"; fi
 out=$(cd "$w" && bash "$status" extra 2>&1)
 code=$?
 st "$w"
@@ -893,6 +894,78 @@ else
   skip "a FIFO where the lock should be: mkfifo is not available here"
 fi
 rm -f "$mw/.git/method-run.lock"
+
+# the project's own always-loaded text (step 7.5, M152): CLAUDE.md,
+# .claude/CLAUDE.md, AGENTS.md and the .md files under .claude/rules/ without a paths: line,
+# .claude/rules/method/ left out, at most 8,000 bytes. The project's
+# CLAUDE.md (11 bytes) and AGENTS.md (12) start at 23.
+p=$(new_project) || abort_sandbox
+cw="$p/w"
+# xs FILE N [HEAD]: FILE holds HEAD (printf format, may be empty), then x
+# up to N bytes in all, ending with a line break
+xs() {
+  # shellcheck disable=SC2059 # HEAD is a printf format on purpose
+  mkdir -p "$(dirname "$1")" && printf -- "${3:-}" >"$1" &&
+    N=$2 perl -e 'my $have = -s $ARGV[0]; open my $h, ">>", $ARGV[0] or die; print $h "x" x ($ENV{N} - $have - 1), "\n"' "$1"
+}
+# ctx NAME WANT: status's context line in the project is WANT
+ctx() {
+  st "$cw"
+  got=$(printf '%s\n' "$out" | grep '^context: ' || true)
+  if [ "$got" = "$2" ]; then pass "$1"; else fail "$1" "wanted: $2${nl}got:    $got"; fi
+}
+nl='
+'
+pass_line="of the project's own text load in every session"
+not_counted=".claude/rules/method/ and rules with a paths: line not counted)"
+xs "$cw/.claude/rules/pack/rule.md" 7977
+ctx "context: the project's own text at 8,000 bytes is a PASS, counting the pack rules, CLAUDE.md and AGENTS.md" \
+  "context: PASS - 8000 of 8000 bytes $pass_line (3 files; $not_counted"
+printf 'x' >>"$cw/AGENTS.md"
+ctx "context: at 8,001 bytes it is a LOOK naming the biggest files (one byte more in AGENTS.md)" \
+  "context: LOOK - 8001 bytes $pass_line, over its budget of 8000: .claude/rules/pack/rule.md 7977, AGENTS.md 13, CLAUDE.md 11; shorten it, give a rule a paths: line or move a procedure into a skill"
+printf '# AGENTS.md\n' >"$cw/AGENTS.md"
+printf 'x' >>"$cw/CLAUDE.md"
+st "$cw"
+case "$out" in
+  *"context: LOOK - 8001 bytes $pass_line"*) pass "context: one byte more in CLAUDE.md is a LOOK too" ;;
+  *) fail "context: one byte more in CLAUDE.md is a LOOK too" "$out" ;;
+esac
+printf '@AGENTS.md\n' >"$cw/CLAUDE.md"
+xs "$cw/.claude/rules/pack/scoped.md" 3000 '---\npaths:\n  - "src/**"\n---\n'
+xs "$cw/.claude/rules/pack/inline.md" 3000 '---\ndescription: the app only\npaths: src/**/*.sh\n---\n'
+xs "$cw/.claude/rules/scoped-crlf.md" 3000 '---\r\npaths:\r\n  - "docs/**"\r\n---\r\n'
+ctx "context: rules with a paths: line are not counted" "context: PASS - 8000 of 8000 bytes $pass_line (3 files; $not_counted"
+xs "$cw/.claude/rules/method/method.md" 5000
+xs "$cw/.claude/rules/method/more/owner.md" 3000
+ctx "context: .claude/rules/method/ is not counted" "context: PASS - 8000 of 8000 bytes $pass_line (3 files; $not_counted"
+rm -f "$cw/.claude/rules/pack/rule.md"
+xs "$cw/.claude/rules/pack/framed.md" 100 '---\ndescription: not scoped\n---\n'
+xs "$cw/.claude/rules/a/b/deep.md" 200
+xs "$cw/.claude/rules/pack/empty-paths.md" 300 '---\npaths:\n---\n'
+xs "$cw/.claude/rules/pack/notes.txt" 5000
+xs "$cw/extra.md" 400
+ln -s ../../../extra.md "$cw/.claude/rules/pack/linked.md" 2>/dev/null || cp "$cw/extra.md" "$cw/.claude/rules/pack/linked.md"
+ctx "context: a rule with other frontmatter or an empty paths:, one in a nested folder and one through a link are counted; other files are not" \
+  "context: PASS - 1023 of 8000 bytes $pass_line (6 files; $not_counted"
+if ln -s .. "$cw/.claude/rules/a/up" 2>/dev/null && [ -L "$cw/.claude/rules/a/up" ]; then
+  ctx "context: a link that leads back up is read once, and status ends" \
+    "context: PASS - 1023 of 8000 bytes $pass_line (6 files; $not_counted"
+  rm -f "$cw/.claude/rules/a/up"
+else
+  skip "context: a link that leads back up: links cannot be made here"
+fi
+xs "$cw/.claude/CLAUDE.md" 100
+ctx "context: .claude/CLAUDE.md, which Claude Code loads as project memory, is counted" \
+  "context: PASS - 1123 of 8000 bytes $pass_line (7 files; $not_counted"
+rm -f "$cw/.claude/CLAUDE.md"
+if ln -s ../method "$cw/.claude/rules/pack/m" 2>/dev/null && [ -L "$cw/.claude/rules/pack/m" ]; then
+  ctx "context: a link into .claude/rules/method/ from another rules folder is not counted" \
+    "context: PASS - 1023 of 8000 bytes $pass_line (6 files; $not_counted"
+  rm -f "$cw/.claude/rules/pack/m"
+else
+  skip "context: a link into .claude/rules/method/: links cannot be made here"
+fi
 
 for d in $repos; do drop_sandbox "$d"; done
 export HOME="$saved_home"

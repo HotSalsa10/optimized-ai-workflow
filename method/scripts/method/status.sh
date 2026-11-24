@@ -23,6 +23,11 @@
 #                ends with a valid trailer (lib/verdicts.pl check-trailer)
 #   records      the project records exist, CLAUDE.md imports AGENTS.md,
 #                checks/*.tsv reads cleanly and TESTS.md names each check
+#   context      the project's own text that loads in every session
+#                (CLAUDE.md, .claude/CLAUDE.md, AGENTS.md and the .md files
+#                under .claude/rules/ without a paths: line,
+#                .claude/rules/method/ left out, also through a link) is at
+#                most 8,000 bytes; LOOK over it, naming the biggest files
 #   claude-code  the running Claude Code is not older than REQUIRES says
 #                (SKIPPED inside a hook, which cannot see the client)
 #   effort       CLAUDE_CODE_EFFORT_LEVEL is not set (also checked inside a
@@ -42,6 +47,8 @@
 # - M001: one read-only command orients any session: work not committed or
 #   not pushed in every repository, commits missing a verdict, record
 #   consistency and health.
+# - M152: the project's own always-loaded text stays within 8,000 bytes
+#   (SPEC R12's budget, applied to the project), or status says so.
 # - M003: it exits 1 when something needs a look; it reports, it does not
 #   block.
 # - M077: CLAUDE_CODE_EFFORT_LEVEL is never set (DECISIONS A4).
