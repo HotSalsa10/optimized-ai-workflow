@@ -124,6 +124,35 @@ cat >"$work/plants.txt" <<'PLANTS-END'
     . ($a->{PROFILE} ne $lock->{profile} ?
 ---
     . (0 ?
+=== links not looked for on the way to a file | method/scripts/method/lib/setup.pl | a link on the way to a file setup writes
+    my @parts = split m{/}, $_[0];
+---
+    return undef;
+    my @parts = split m{/}, $_[0];
+=== a broken block in method.conf read as none | method/scripts/method/lib/setup.pl | a broken method-setup block
+    if ($w eq 'broken') { push @p, "$CONF: its
+---
+    if (0) { push @p, "$CONF: its
+=== a broken block in a seeded file read as none | method/scripts/method/lib/setup.pl | a broken method-setup block
+    if ($w eq 'broken') { push @p, "$target: its method-setup block is broken (\"$open\"
+---
+    if (0) { push @p, "$target: its method-setup block is broken (\"$open\"
+=== a broken block in the pack read as none | method/scripts/method/lib/setup.pl | a broken method-setup block
+    if ($w eq 'broken') { push @p, "$target: its method-setup block is broken (\"$MD_MARK[0]\"
+---
+    if (0) { push @p, "$target: its method-setup block is broken (\"$MD_MARK[0]\"
+=== no method.lock not refused | method/scripts/method/lib/setup.pl | no method.lock: setup is refused
+  if (!defined $lt) {
+---
+  if (0) {
+=== a kept VERDICTS_FROM said not to come back | method/scripts/method/lib/setup.pl | a VERDICTS_FROM kept from an earlier run has a card line of its own
+      $kept_from = $v if defined
+---
+      push @kept, "VERDICTS_FROM=$v" if defined
+=== the card says to turn on a scanner row the project lacks | method/scripts/method/lib/setup.pl | a checks/project.tsv there before setup: the card gives the suggested scanner row itself
+    if (defined $ck_now && $ck_now =~ /^#?\Q$l->[2]\E\t/m) {
+---
+    if (1) {
 PLANTS-END
 plant_data "$work/plants.txt" tests/setup.test.sh only
 drop_sandbox "$work" || true

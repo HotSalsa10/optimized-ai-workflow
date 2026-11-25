@@ -615,6 +615,17 @@ sub check_fresh_clone {
 sub check_method_files {
   my ($out) = @_;
   my $v = Lock::verify('.');
+  # what a commit would leave out or carry to every clone: a method file or
+  # the lock that git ignores, and a tracked .claude/settings.local.json
+  # (each person's own; committed, its disableAllHooks would turn every hook
+  # off in every clone, session-status among them, so no hook could say so)
+  my ($l) = Lock::load('.');
+  my $ignored = Git::ignored('.', ($l ? map { $_->[1] } @{ $l->{files} } : ()), do { no warnings 'once'; $Lock::LOCK });
+  push @{ $v->{findings} }, $ignored ? map { ['ignored', 'ignored by git (' . Esc::line($_->[1]) . '), so a commit leaves it out: ' . Esc::line($_->[0])] } @$ignored
+    : ['ignored', 'git cannot tell whether it ignores the method\'s files'];
+  my ($lst, $local) = Git::run('ls-files', '-z', '--', '.claude/settings.local.json');
+  push @{ $v->{findings} }, ['local', 'git cannot tell whether .claude/settings.local.json is tracked'] if $lst;
+  push @{ $v->{findings} }, ['local', '.claude/settings.local.json is tracked in git, so every clone gets it'] if !$lst && $local ne '';
   write_lines($out, map { $_->[1] } @{ $v->{findings} });
   my %n;
   $n{ $_->[0] }++ for @{ $v->{findings} };
@@ -622,7 +633,8 @@ sub check_method_files {
     my %say = (lock => 'problems with method.lock', changed => 'method files changed', crlf => 'method files with CRLF line ends',
       missing => 'method files missing', extra => 'files not in method.lock', link => 'links under the method\'s paths',
       odd => 'entries under the method\'s paths that are not regular files or cannot be read',
-      settings => 'problems with the method keys in .claude/settings.json');
+      settings => 'problems with the method keys in .claude/settings.json',
+      ignored => 'method files git ignores', local => 'problems with .claude/settings.local.json');
     # what puts each kind right: a changed or missing file comes back from
     # the commit that last wrote the lock (a plain checkout of an edit
     # already committed changes nothing); a file the lock does not name, a
@@ -633,8 +645,10 @@ sub check_method_files {
     push @fix, 'remove each file not in method.lock' if $n{extra};
     push @fix, 'replace each link or odd entry with a plain folder or file as released' if $n{link} || $n{odd};
     push @fix, 'put the method keys in .claude/settings.json back as scripts/method/settings.method.json has them' if $n{settings};
+    push @fix, 'change each ignore rule named (in .gitignore, .git/info/exclude or your global excludes file) so it no longer matches a method file' if $n{ignored};
+    push @fix, 'take .claude/settings.local.json out of git (the owner runs: git rm --cached .claude/settings.local.json) and commit that; the method\'s .gitignore block ignores it' if $n{local};
     return { status => 'FAIL', kind => 'finding', examined => $v->{examined},
-      detail => join('; ', map {"$n{$_} $say{$_}"} grep { $n{$_} } qw(lock changed crlf missing extra link odd settings)),
+      detail => join('; ', map {"$n{$_} $say{$_}"} grep { $n{$_} } qw(lock changed crlf missing extra link odd settings ignored local)),
       hint => "the method's files and settings change only through the release's sync, which refuses a file changed or added by hand until it is put right: " . join('; ', @fix) };
   }
   return { status => 'PASS', kind => 'pass', examined => $v->{examined},

@@ -411,14 +411,14 @@ sub plan {
       . ' block (through a reviewed change), then run setup again';
   }
   return $r if @p;
-  my (@conf_lines, @kept, @dropped, $tip);
+  my (@conf_lines, @kept, @dropped, $tip, $kept_from);
   for my $k (@conf_keys) {
     if ($k eq 'VERDICTS_FROM') {
       # main's tip only while it does not hold the method, so the install
       # and what follows it stay judged (S17)
       $tip = $det->{main_has_method} ? undef : $det->{main_tip};
       my $v = defined $old_v->{$k} ? $old_v->{$k} : $tip;
-      push @kept, "VERDICTS_FROM=$v" if defined $old_v->{$k} && (!defined $tip || $tip ne $v);
+      $kept_from = $v if defined $old_v->{$k} && (!defined $tip || $tip ne $v);
       push @conf_lines, "$k=$v" if defined $v;
       next;
     }
@@ -661,8 +661,15 @@ sub plan {
   push @card, "The smoke row (how it starts) in $CHECKS has a new command, so it is off again: once that command starts the project, checks"
     . ' it once and stops, remove its #.' if ($smoke || '') eq 'off again';
   push @card, "The fast tests run in every check run (the row $TEST_ID in $CHECKS)." if $test_row;
+  # (a checks/project.tsv that was there before setup lacks the template's
+  # scanner rows, so the card gives the row itself)
+  my $ck_now = exists $out{$CHECKS} ? $out{$CHECKS} : ($get->($CHECKS))[0];
   for my $l (@{ $det->{langs} }) {
-    push @card, "Found $l->[1] ($l->[0]): the suggested scanner row is $l->[2], offered off in the checks template; install its tool, then turn it on.";
+    my $found = "Found $l->[1] ($l->[0]): the suggested scanner row is $l->[2]";
+    if (defined $ck_now && $ck_now =~ /^#?\Q$l->[2]\E\t/m) { push @card, "$found, offered off in $CHECKS; install its tool, then turn it on."; next }
+    my ($row) = map { substr($_, 1) } grep { index($_, "#$l->[2]\t") == 0 } split /\n/, $tmpl_text{$CHECKS};
+    push @card, "$found, which $CHECKS does not hold (it was there before setup): install its tool, then add this row to $CHECKS or"
+      . " checks/pack.tsv: $row";
   }
   if (my @crlf = @{ $det->{crlf} || [] }) {
     my @named = map { Esc::line($_) } @crlf[0 .. ($#crlf < 2 ? $#crlf : 2)];
@@ -676,8 +683,11 @@ sub plan {
     push @card, 'History: main already holds the method, so setup sets no VERDICTS_FROM and status checks main\'s review lines as they'
       . ' are; moving VERDICTS_FROM is your own reviewed change.';
   }
-  push @card, 'Kept from an earlier run (setup never removes an entry): ' . join(', ', @kept) . '. To drop one, delete its line inside'
-    . " the method-setup block of $CONF in a reviewed change; setup does not put it back." if @kept;
+  push @card, "Kept from an earlier run (setup removes none, apart from its own MUTATION_CHECKS=$TEST_ID when its row goes): "
+    . join(', ', @kept) . ". To drop one, delete its line inside the method-setup block of $CONF in a reviewed change; setup does not"
+    . ' put it back.' if @kept;
+  push @card, "Kept from an earlier run: VERDICTS_FROM=$kept_from. If its line is deleted (a reviewed change), setup writes main's"
+    . ' current tip in its place while main lacks the method, and none once main holds it.' if defined $kept_from;
   push @card, 'Dropped: ' . join(', ', @dropped) . ", as the $TEST_ID row it names is gone (no fast tests were given)." if @dropped;
   push @card, "Kept as it was: $_ (it was there already, with no method-setup block, so its answers are not added)." for @no_block;
   push @card, 'Added: the line @AGENTS.md to CLAUDE.md, in a method-setup block, so AGENTS.md loads.'

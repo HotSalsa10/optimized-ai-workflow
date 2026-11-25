@@ -53,6 +53,14 @@ cat >"$work/plants.txt" <<'PLANTS-END'
 ---
   my @also = !@first ? () : ['verdicts', 'PASS',
 PLANTS-END
+# where links cannot be made (Git Bash may make a copy instead of a link),
+# the test skips its case on a link into .claude/rules/method/, so that
+# case's plant is dropped, and said so
+if ! { ln -s target "$work/link-probe" 2>/dev/null && [ -L "$work/link-probe" ]; }; then
+  perl -0pi -e 's/^=== 7\.5 the method.s folder left out by its name alone \|.*?(?=^=== |\z)//msg' "$work/plants.txt"
+  skip "the plant on the method's folder left out by its name alone (this system cannot make links)"
+fi
+rm -f "$work/link-probe"
 plant_data "$work/plants.txt" tests/status.test.sh
 drop_sandbox "$work" || true
 echo "plants: status: $tests_pass passed, $tests_fail failed, $tests_skip skipped"

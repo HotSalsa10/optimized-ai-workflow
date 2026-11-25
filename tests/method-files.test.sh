@@ -40,7 +40,7 @@ install() {
   printf 'unit\tany\t-\t^([0-9]+) passed\techo "3 passed"\n' >"$d/checks/main.tsv"
   # shellcheck disable=SC2016 # perl code, expanded by perl
   (cd "$d" && SRC="$SRC" perl -e 'require "./scripts/method/lib/lock.pl"; my ($t, $e) = Lock::make(".", "v0.7.0", $ENV{SRC}, "best");
-    die "$e\n" if $e; my $w = Lock::save(".", $t); die "$w\n" if $w') || return 1
+    die "$e\n" if $e; my $w = Lock::save(".", $t, ".new-$$"); die "$w\n" if $w') || return 1
   (
     cd "$d" || exit 1
     git init -q && git symbolic-ref HEAD refs/heads/main &&
@@ -173,6 +173,15 @@ mcase "an extra .claude/skills/method-quick/SKILL.md is red" 1 "mkdir -p .claude
   "not in method.lock: .claude/skills/method-quick/SKILL.md"
 mcase "an extra file ignored by git is red too" 1 "printf 'x\n' >docs/method/notes.md && mkdir -p .git/info && printf 'docs/method/notes.md\n' >>.git/info/exclude" \
   "not in method.lock: docs/method/notes.md" "until it is put right: remove each file not in method.lock"
+mcase "a method file git ignores is red" 1 "git rm -r -q --cached .claude/hooks && printf '.claude/hooks/\n' >.gitignore" \
+  "method files git ignores" "ignored by git (.gitignore line 1: .claude/hooks/), so a commit leaves it out: .claude/hooks/method/guard.sh" \
+  "change each ignore rule named"
+mcase "a method.lock git ignores is red" 1 "git rm -q --cached scripts/method/method.lock && printf '*.lock\n' >.gitignore" \
+  "1 method files git ignores" "ignored by git (.gitignore line 1: *.lock), so a commit leaves it out: scripts/method/method.lock"
+mcase "a tracked .claude/settings.local.json is red" 1 "printf '{}\n' >.claude/settings.local.json && git add .claude/settings.local.json && git commit -q -m local" \
+  "1 problems with .claude/settings.local.json" ".claude/settings.local.json is tracked in git, so every clone gets it" "git rm --cached .claude/settings.local.json"
+mcase "an untracked .claude/settings.local.json passes" 0 "printf '{}\n' >.claude/settings.local.json" \
+  "passed: secrets fresh-clone method-files unit tree-unchanged"
 mcase "a removed method deny entry is red" 1 "$json; json .claude/settings.json '\$d->{permissions}{deny} = [grep { \$_ ne \"RemoteTrigger\" } @{ \$d->{permissions}{deny} }]'" \
   "the method's deny entry RemoteTrigger is missing from .claude/settings.json"
 mcase "a changed method hook is red" 1 "$json; json .claude/settings.json '\$d->{hooks}{PreToolUse}[0]{hooks}[0]{timeout} = 600'" \

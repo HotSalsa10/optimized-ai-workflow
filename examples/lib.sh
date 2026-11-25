@@ -8,17 +8,27 @@
 # (example_start), so no CLAUDE.md, AGENTS.md or .claude/ an example needs
 # is ever written under this repository's tree, where it would load into
 # this repository's own sessions. Each commit has fixed names and dates
-# and runs no hook (example_commit), so the same make.sh gives the same
-# history. All data
-# is invented.
+# and runs no hook (example_commit), and the caller's git settings that
+# would change what is committed are turned off (example_start), so the
+# same make.sh gives the same history whoever runs it. All data is
+# invented.
 
 # example_start HERE DIR: refuses (exit 2), before it writes anything, a
 # DIR not given, one that is there but is not an empty folder (one ls
 # cannot list counts as not empty), one whose parent folder is not there,
 # and one inside this repository (HERE's grandparent); else copies
 # HERE/project/ into DIR, starts a git repository there on main and enters
-# DIR
+# DIR. The caller's GIT_DIR, GIT_INDEX_FILE and the like, which would send
+# every git call to another repository, are cleared first, as
+# method/scripts/method/lib/git.pl clears them. The new repository takes no
+# init template, and its own settings turn off the caller's global ignore
+# and attributes files (they name a file in .git that is never there) and
+# any file-system monitor, so none of them changes what is committed
 example_start() {
+  unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_CONFIG GIT_OBJECT_DIRECTORY \
+    GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_SHALLOW_FILE GIT_IMPLICIT_WORK_TREE GIT_PREFIX GIT_INTERNAL_SUPER_PREFIX \
+    GIT_NAMESPACE GIT_DIFF_OPTS GIT_EXTERNAL_DIFF GIT_REPLACE_REF_BASE \
+    GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS
   es_here=$1
   es_dir=${2:-}
   if [ -z "$es_dir" ]; then
@@ -52,9 +62,12 @@ example_start() {
   mkdir -p "$es_real" || exit 2
   cp -R "$es_here/project/." "$es_real/" || exit 2
   cd "$es_real" || exit 2
-  git -c init.defaultBranch=main init -q || exit 2
+  git -c init.defaultBranch=main init -q --template= || exit 2
   git symbolic-ref HEAD refs/heads/main || exit 2
   git config core.autocrlf false || exit 2
+  git config core.excludesFile .git/example-no-ignore || exit 2
+  git config core.attributesFile .git/example-no-attributes || exit 2
+  git config core.fsmonitor false || exit 2
 }
 
 # example_commit DATE MESSAGE [PATH...]: commits the PATHs (every file when

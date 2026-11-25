@@ -1282,12 +1282,19 @@ fi
 # each entry names a path
 STEER='the built-in list of the files that steer the method'
 if wanted_any "M153: a LIGHT plan touching" "M153: three approving reviewers"; then
-  for what in checks pack; do
+  for what in checks pack settings; do
     f=$(floor_project) || abort_sandbox
+    slash=/
     if [ "$what" = checks ]; then
       printf '# a note on the checks\n' >>"$f/checks/project.tsv"
       p=checks/project.tsv
       e=checks
+    elif [ "$what" = settings ]; then
+      # a profile change, as setup-write makes it
+      printf '{"model":"claude-sonnet-5-5","effortLevel":"medium"}\n' >"$f/.claude/settings.json"
+      p=.claude/settings.json
+      e=.claude/settings.json
+      slash=
     else
       mkdir -p "$f/.claude/rules/pack" && printf '# Rules\n\nAlways keep the ledger balanced. Why: a test case.\n' >"$f/.claude/rules/pack/rules.md"
       p=.claude/rules/pack/rules.md
@@ -1296,7 +1303,7 @@ if wanted_any "M153: a LIGHT plan touching" "M153: three approving reviewers"; t
     recommit "$f" Steer
     approve_head "$f"
     dc "$f"
-    expect "M153: a LIGHT plan touching $e/ is judged FULL: NOT READY" 1 \
+    expect "M153: a LIGHT plan touching ${e}$slash is judged FULL: NOT READY" 1 \
       "done-check: tier: FAIL - the plan says Tier LIGHT, but 1 changed path is high-risk: $p (no HIGH_RISK_PATHS on main or in this change; $STEER: $e); judged FULL, and the plan was not made as FULL" \
       "done-check: deep review: FAIL - the change touches high-risk paths ($p)"
   done

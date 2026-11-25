@@ -85,6 +85,18 @@ grep { 0 } @{ $k->{deny} };
   return @$disk || @$fp ? 1 : 0;
 ---
   return 1;
+=== method files git ignores not reported | method/scripts/method/lib/checks.pl | a method file git ignores is red
+  push @{ $v->{findings} }, $ignored ? map
+---
+  0 and push @{ $v->{findings} }, $ignored ? map
+=== the lock not among the paths asked about | method/scripts/method/lib/checks.pl | a method.lock git ignores is red
+: ()), do { no warnings 'once'; $Lock::LOCK });
+---
+: ()));
+=== a tracked settings.local.json not reported | method/scripts/method/lib/checks.pl | a tracked .claude/settings.local.json is red
+  push @{ $v->{findings} }, ['local', '.claude/settings.local.json is tracked in git, so every clone gets it'] if !$lst && $local ne '';
+---
+  1;
 PLANTS-END
 # where links or FIFOs cannot be made (Git Bash may make a copy instead of
 # a link), the test skips those cases, so their plants are dropped, and

@@ -146,7 +146,7 @@ if wanted_any "$n" "a dry run writes nothing" "a second run gives the same bytes
     [ "$(jget "$p/.claude/settings.json" '$d->{model}')" = claude-opus-5-5 ] &&
     cmp -s "$root/method/settings.fragment.json" "$p/scripts/method/settings.method.json" &&
     cmp -s "$root/method/.claude/hooks/method/guard.sh" "$p/.claude/hooks/method/guard.sh" &&
-    grep -q -x '.method/local/' "$p/.gitignore" && grep -q -x '\*.ps1 text eol=crlf' "$p/.gitattributes" &&
+    grep -q -x '.method/local/' "$p/.gitignore" && grep -q -x '.claude/settings.local.json' "$p/.gitignore" && grep -q -x '\*.ps1 text eol=crlf' "$p/.gitattributes" &&
     [ ! -e "$p/.method/local/sync-in-progress" ] && [ ! -e "$p/method" ] && [ ! -e "$p/settings.fragment.json" ]; then
     ok "$n"
   else
@@ -275,12 +275,15 @@ fi
 
 # --- what a first install refuses unless kept: a PreToolUse hook, a
 # SubagentStart hook (A79), a PostToolUse hook (A80), claudeMdExcludes,
-# statusLine ---
+# statusLine, gcpAuthRefresh, proxyAuthHelper, subagentStatusLine ---
 for item in 'PreToolUse|{"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "bash tools/check.sh"}]}]}}|1 PreToolUse hook of the project'"'"'s own' \
   'SubagentStart|{"hooks": {"SubagentStart": [{"hooks": [{"type": "command", "command": "bash tools/check.sh"}]}]}}|1 SubagentStart hook of the project'"'"'s own' \
   'PostToolUse|{"hooks": {"PostToolUse": [{"matcher": "Read", "hooks": [{"type": "command", "command": "bash tools/check.sh"}]}]}}|1 PostToolUse hook of the project'"'"'s own' \
   'claudeMdExcludes|{"claudeMdExcludes": ["docs/**"]}|claudeMdExcludes' \
-  'statusLine|{"statusLine": {"type": "command", "command": "bash tools/line.sh"}}|statusLine'; do
+  'statusLine|{"statusLine": {"type": "command", "command": "bash tools/line.sh"}}|statusLine' \
+  'gcpAuthRefresh|{"gcpAuthRefresh": "bash tools/x.sh"}|gcpAuthRefresh' \
+  'proxyAuthHelper|{"proxyAuthHelper": "bash tools/x.sh"}|proxyAuthHelper' \
+  'subagentStatusLine|{"subagentStatusLine": {"type": "command", "command": "bash tools/line.sh"}}|subagentStatusLine'; do
   key=${item%%|*}
   rest=${item#*|}
   js=${rest%%|*}
@@ -435,6 +438,18 @@ if wanted "$n"; then
     case "$out2" in *"an earlier run of v0.7.1 with --profile budget was cut off; this run finishes it when given the same --profile and --keep as that run"*) true ;; *) false ;; esac &&
     [ "$(sed -n 3p "$p/scripts/method/method.lock")" = "profile${T}budget" ]; then ok "$n"; else no "$n" "exit $c1, $c2, then $code; left $l1; findings $f; $(printf '%s\n' "$out2" | grep -v '^sync: unchanged' | tail -6)"; fi
 fi
+n="a run cut off while writing method.lock is finished by a re-run, which removes what it left"
+if wanted "$n"; then
+  proj cut-at-lock
+  sync "$rel" "$p" --write
+  cut /scripts/method/method.lock
+  c1=$code
+  l1=$(leftovers "$p")
+  sync "$rel71" "$p" --write
+  f=$(findings "$p")
+  if [ "$c1" -eq 9 ] && [ -n "$l1" ] && [ "$code" -eq 0 ] && has "(left by the run that was cut off)" && [ -z "$(leftovers "$p")" ] && [ -z "$f" ] &&
+    [ "$(sed -n 1p "$p/scripts/method/method.lock")" = "version${T}v0.7.1" ]; then ok "$n"; else no "$n" "exit $c1 then $code; left $l1; findings $f; $(printf '%s\n' "$out" | grep -v '^sync: unchanged' | tail -6)"; fi
+fi
 n="method keys changed by hand are refused on an update"
 if wanted "$n"; then
   proj keys-changed
@@ -458,7 +473,7 @@ if wanted "$n"; then
   proj blocks-broken
   printf '# >>> method\n.method/local/\n' >"$p/.gitignore"
   sync "$rel" "$p" --write
-  if [ "$c1" -eq 0 ] && [ "$g" = "$(printf 'node_modules/\n# >>> method\n.method/local/\n# <<< method\nbuild/')" ] &&
+  if [ "$c1" -eq 0 ] && [ "$g" = "$(printf 'node_modules/\n# >>> method\n.method/local/\n.claude/settings.local.json\n# <<< method\nbuild/')" ] &&
     [ "$a" = "$(printf '# >>> method\n* text=auto eol=lf\n*.cmd text eol=crlf\n*.bat text eol=crlf\n*.ps1 text eol=crlf\n# <<< method\n*.png binary')" ] &&
     [ "$code" -eq 1 ] && has 'conflict  .gitignore (its method block is broken'; then ok "$n"; else no "$n" "exit $c1 then $code; .gitignore: $g; .gitattributes: $a"; fi
 fi
@@ -471,6 +486,49 @@ if wanted "$n"; then
   got=$(cd "$p" && git check-attr text eol -- a.sln b.fixture c.sh 2>&1 | tr '\n' ';')
   if [ "$code" -eq 0 ] && [ "$(head -1 "$p/.gitattributes")" = '# >>> method' ] &&
     [ "$got" = 'a.sln: text: set;a.sln: eol: crlf;b.fixture: text: unset;b.fixture: eol: lf;c.sh: text: auto;c.sh: eol: lf;' ]; then ok "$n"; else no "$n" "exit $code; check-attr: $got"; fi
+fi
+
+n="a .gitattributes that starts with a byte-order mark keeps it first, so its own first rule still works"
+if wanted "$n"; then
+  proj attributes-bom
+  printf '\357\273\277*.csv -text\n' >"$p/.gitattributes"
+  sync "$rel" "$p" --write
+  c1=$code
+  got=$(cd "$p" && git check-attr text -- a.csv 2>&1)
+  sync "$rel" "$p" --write
+  if [ "$c1" -eq 0 ] && [ "$(head -c 15 "$p/.gitattributes")" = "$(printf '\357\273\277# >>> method')" ] && [ "$got" = 'a.csv: text: unset' ] &&
+    [ "$code" -eq 0 ] && has "unchanged .gitattributes (the method block)"; then ok "$n"; else no "$n" "exit $c1 then $code; check-attr: $got"; fi
+fi
+
+# --- what git ignores ---
+n="a path sync writes that git ignores is refused, naming the rule, nothing written"
+if wanted "$n"; then
+  proj ignored
+  printf '.claude/\n*.lock\n' >"$p/.gitignore"
+  before=$(snap "$p")
+  sync "$rel" "$p" --write
+  c1=$code
+  out1=$out
+  ok1=0
+  if [ "$c1" -eq 1 ] && has "conflict  .claude/settings.json (git ignores it (.gitignore line 1: .claude/), so a commit would leave it out" \
+    "conflict  .claude/hooks/method/guard.sh (git ignores it (.gitignore line 1: .claude/)" \
+    "conflict  scripts/method/method.lock (git ignores it (.gitignore line 2: *.lock)" && [ "$(snap "$p")" = "$before" ]; then ok1=1; fi
+  # (what the project ignores beside the method's paths, .method/ among
+  # them, is no conflict, nor is a path a ! line takes back)
+  proj ignored-other
+  printf '.method/\nnode_modules/\n*.lock\n!scripts/method/method.lock\n' >"$p/.gitignore"
+  sync "$rel" "$p" --write
+  if [ "$ok1" -eq 1 ] && [ "$code" -eq 0 ]; then ok "$n"; else no "$n" "exit $c1 then $code; $(printf '%s\n' "$out1" | grep conflict | head -3)"; fi
+fi
+
+# --- an error sync did not foresee ---
+n="an error sync did not foresee is a refusal with exit 1, nothing written"
+if wanted "$n"; then
+  proj huge-number
+  settings '{"x": 1e20000}'
+  before=$(snap "$p")
+  sync "$rel" "$p" --write
+  if [ "$code" -eq 1 ] && has "REFUSED - sync stopped on an error: " "; nothing was written" && [ "$(snap "$p")" = "$before" ]; then ok "$n"; else no "$n"; fi
 fi
 
 # --- the source ---

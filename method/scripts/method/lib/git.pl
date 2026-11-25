@@ -69,6 +69,11 @@
 #                       git fetch moves it
 #   Git::merge_base(A, B)  ('ok', ids), ('none', what to do) or ('error')
 #   Git::message(ID)    a commit's message, checked against its id
+#   Git::ignored(DIR, PATH...)  [[PATH, WHY], ...]: each PATH (relative to
+#                       the folder DIR) that git ignores and does not track,
+#                       so a commit would leave it out; WHY names the ignore
+#                       file, its line and its pattern. [] when DIR is not in
+#                       a working tree; undef when git cannot tell
 package Git;
 use strict;
 use warnings;
@@ -457,6 +462,26 @@ sub message {
   my $c = cat('commit', $_[0]);
   my $i = index $c, "\n\n";
   return $i < 0 ? '' : substr($c, $i + 2);
+}
+
+# ignored DIR PATH...: see the top of this file (a tracked file is never
+# reported: git's ignore rules do not apply to it)
+sub ignored {
+  my ($dir, @paths) = @_;
+  my ($st, $in) = run('-C', $dir, 'rev-parse', '--is-inside-work-tree');
+  return [] if $st || $in ne "true\n" || !@paths;
+  # (check-ignore refuses pathspec magic, --literal-pathspecs too; it reads
+  # each PATH as a path, never as a pattern)
+  local @GIT = grep { $_ ne '--literal-pathspecs' } @GIT;
+  my ($ist, $out) = run('-C', $dir, 'check-ignore', '-v', '--', @paths);
+  return undef if $ist && $ist != 1 << 8;    # (exit 1: none is ignored)
+  my @r;
+  for my $l (split /\n/, $out) {
+    my ($src, $n, $pat, $path) = $l =~ /\A(.*?):([0-9]+):(.*)\t([^\t]*)\z/ or return undef;
+    next if $pat =~ /\A!/;    # (a negated pattern matched: not ignored)
+    push @r, [$path, "$src line $n: $pat"];
+  }
+  return \@r;
 }
 
 1;

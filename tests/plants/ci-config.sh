@@ -4,7 +4,7 @@
 # flow form on one line, with a quoted " #" before a pull_request trigger.
 # YAML reads the # as text and the trigger as a trigger, so the test's
 # check of the real file must go red for its stated reason. The test's own
-# cases plant each other setting in a copy of ci.yml (its cases 2 to 25).
+# cases plant each other setting in a copy of ci.yml (its cases 2 to 31).
 # Step 6b's extra round adds three more on: forms YAML reads as a
 # pull_request trigger: one after '' inside single quotes and " #", one after
 # a quoted value that runs onto a next line starting with #, and one spelled
@@ -17,7 +17,10 @@
 # the plants job's limit, each turn the shard check of the real files red.
 # Step 7.9's check added three: a create trigger in on:, the branches filter
 # moved from push to another event, and the harness job on a runner named
-# macOS-14, each turning the check of the real file red.
+# macOS-14, each turning the check of the real file red. Step 7's review
+# added five: an exclude: or include: in the plants job's matrix or in the
+# matrix of the Windows and macOS jobs, and an if: on the plants job, each
+# turning the shard check of the real files red.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=tests/lib.sh
@@ -55,7 +58,9 @@ ci_plant() {
   perl -0pi -e 's/^on:\n  push:\n    branches: \["\*\*"\]\n  workflow_dispatch:\n/'"$2"'/m' "$ci"
   if expect_landed "$1" grep -q -F -- "$3" "$ci"; then
     plant_judge "$1" "$sb" tests/ci-config.test.sh "$real"
-    if ! (cd "$sb" && bash tests/ci-config.test.sh 2>&1) | grep -q -F -- "$4"; then
+    # the whole output first, so the test reaches its own drop_sandbox
+    got=$(cd "$sb" && bash tests/ci-config.test.sh 2>&1)
+    if ! printf '%s\n' "$got" | grep -q -F -- "$4"; then
       fail "$1: the problem named is not '$4'"
     fi
   fi
@@ -78,7 +83,8 @@ ci_edit_plant() {
   perl -0pi -e "$3" "$sb/$2"
   if expect_landed "$1" grep -q -F -- "$4" "$sb/$2"; then
     plant_judge "$1" "$sb" tests/ci-config.test.sh "$6"
-    if ! (cd "$sb" && bash tests/ci-config.test.sh 2>&1) | grep -q -F -- "$5"; then
+    got=$(cd "$sb" && bash tests/ci-config.test.sh 2>&1)
+    if ! printf '%s\n' "$got" | grep -q -F -- "$5"; then
       fail "$1: the problem named is not '$5'"
     fi
   fi
@@ -113,6 +119,21 @@ ci_edit_plant "the Windows and macOS jobs without their last plant part" .github
 # shellcheck disable=SC2016 # the plant is literal perl text
 ci_edit_plant "a part of the split whose measured time is over 70% of the limit" tests/plants/shards.txt \
   's/^(0 \S+ )[0-9]+$/${1}99999/m' " 99999" "part 0: its plant files took" "$split"
+# (step 7's review) a matrix exclude: or include:, or an if: on the plants
+# job, and an exclude: or include: in the matrix of the Windows and macOS
+# jobs, could each skip a part the list still names
+for key in exclude include; do
+  # shellcheck disable=SC2016 # the plant is literal perl text
+  ci_edit_plant "the plants job's matrix with an $key:" .github/workflows/ci.yml \
+    's/^([ ]+)(shard: \[("[^"]*").*\])$/$1$2\n$1'"$key"':\n$1  - shard: $3/m' "        $key:" "the plants job holds an $key:" "$split"
+  # shellcheck disable=SC2016 # the plant is literal perl text
+  ci_edit_plant "the matrix of the Windows and macOS jobs with an $key:" .github/workflows/ci.yml \
+    's/^([ ]+)(part: \[.*?("plants [^"]*").*\])$/$1$2\n$1'"$key"':\n$1  - part: $3/m' "        $key:" \
+    "the matrix of the Windows and macOS jobs holds an $key:" "$split"
+done
+# shellcheck disable=SC2016 # the plant is literal perl text
+ci_edit_plant "the plants job with an if: that skips it" .github/workflows/ci.yml \
+  's/^(    name: Linux planted defects .*)$/$1\n    if: false/m' "    if: false" "the plants job holds an if:" "$split"
 
 echo "plants: CI settings: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]

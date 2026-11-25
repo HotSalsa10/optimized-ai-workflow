@@ -50,6 +50,29 @@ bash
 ---
     GIT_AUTHOR_DATE="$ec_date" GIT_COMMITTER_DATE="$ec_date" git -c user.name="Example Owner" \
       -c user.email=owner@example.invalid -c commit.gpgsign=false commit -q -m "$ec_msg"
+=== example_start keeps the caller's GIT_DIR, GIT_WORK_TREE and GIT_INDEX_FILE, so make.sh writes into another repository | examples/lib.sh | make.sh run with GIT_DIR, GIT_WORK_TREE and GIT_INDEX_FILE set to another repository leaves that repository as it was
+  unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_CONFIG GIT_OBJECT_DIRECTORY \
+    GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_SHALLOW_FILE GIT_IMPLICIT_WORK_TREE GIT_PREFIX GIT_INTERNAL_SUPER_PREFIX \
+    GIT_NAMESPACE GIT_DIFF_OPTS GIT_EXTERNAL_DIFF GIT_REPLACE_REF_BASE \
+    GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS
+---
+  :
+=== example_start takes the caller's init template, whose exclude file skips a file | examples/lib.sh | make.sh gives the same history under the caller's own git name
+  git -c init.defaultBranch=main init -q --template= || exit 2
+---
+  git -c init.defaultBranch=main init -q || exit 2
+=== example_start keeps the caller's global ignore file | examples/lib.sh | make.sh gives the same history under the caller's own git name
+  git config core.excludesFile .git/example-no-ignore || exit 2
+---
+
+=== example_start keeps the caller's global attributes file | examples/lib.sh | make.sh gives the same history under the caller's own git name
+  git config core.attributesFile .git/example-no-attributes || exit 2
+---
+
+=== example_start keeps the caller's file-system monitor | examples/lib.sh | make.sh gives the same history under the caller's own git name
+  git config core.fsmonitor false || exit 2
+---
+
 === records-keeper posts a row the live ledger already holds | examples/records-keeper/project/scripts/append-rows.sh | records-keeper: the live-write helper refuses a write with no reason
 push @new, $l unless $have{$l}++
 ---

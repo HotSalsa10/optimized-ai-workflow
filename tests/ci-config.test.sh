@@ -12,7 +12,8 @@
 # quote or a [ or { left open) and an escape in double quotes are refused,
 # since either could hide or spell a trigger (step 6b, R17). Since step 7.9
 # the plants job must run exactly the parts of tests/plants/shards.txt, each
-# part's measured time within 70% of the job's limit.
+# part's measured time within 70% of the job's limit; since step 7's review,
+# with no matrix include: or exclude: and no if: that could skip one.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=tests/lib.sh
@@ -153,7 +154,10 @@ ci_problems() {
 # job of CI and the split in SHARDS (tests/plants/shards.txt) disagree: the
 # job must run exactly the parts 0/N to N-1/N of the split, and each part's
 # measured seconds must stay within 70% of the job's timeout-minutes, so a
-# runner up to about 40% slower than the measuring machine still finishes
+# runner up to about 40% slower than the measuring machine still finishes.
+# Since step 7's review, an include:, exclude: or if: in the plants job, or
+# an include: or exclude: in the Windows and macOS jobs, is refused, since
+# it could skip a part the list names
 shard_problems() {
   perl -e '
     open my $f, "<", $ARGV[0] or die "cannot read $ARGV[0]\n";
@@ -164,8 +168,16 @@ shard_problems() {
       if ($in eq "plants") {
         $limit = $1 if $l =~ /^    timeout-minutes:\s*([0-9]+)\s*$/;
         @matrix = $1 =~ /"([^"]*)"/g if $l =~ /^\s+shard:\s*\[(.*)\]\s*$/;
-      } elsif ($in eq "other-systems" && $l =~ /^\s+part:\s*\[(.*)\]\s*$/) {
-        @other = map { /^plants (.*)$/ ? $1 : () } $1 =~ /"([^"]*)"/g;
+        # (step 7 review) a matrix include: or exclude:, or an if: on the
+        # job or a step, could skip a part the list still names
+        print "line $.: the plants job holds an $1:, which could skip a part of the split\n"
+          if $l =~ /^\s+(?:-\s+)?(include|exclude|if)\s*:/;
+      } elsif ($in eq "other-systems") {
+        @other = map { /^plants (.*)$/ ? $1 : () } $1 =~ /"([^"]*)"/g if $l =~ /^\s+part:\s*\[(.*)\]\s*$/;
+        # the job keeps its if: (run only by hand, which ci_problems
+        # checks), and its steps may have their own
+        print "line $.: the matrix of the Windows and macOS jobs holds an $1:, which could skip a plant part\n"
+          if $l =~ /^\s+(?:-\s+)?(include|exclude)\s*:/;
       }
     }
     open my $s, "<", $ARGV[1] or die "cannot read $ARGV[1]\n";
@@ -202,15 +214,15 @@ else
   fail "ci.yml: every run step stops workflow commands, groups split by event, checkout keeps no token, no pull_request trigger, no tag trigger, Windows and macOS only by hand" "$problems"
 fi
 
-# 2-14. the test goes red when any one of the settings is removed, when a
+# 2-15. the test goes red when any one of the settings is removed, when a
 # pull_request or a tag trigger is added back, when push loses its branches
 # filter (then a tag push starts a run too), and when the Windows and macOS
 # jobs run on tags again or with no if: (since step 7.9); and (step 7.9's
-# check) with a create or release trigger, with the branches filter under
-# another event than push, and with a runner named macOS-14 or
+# check) with a create, delete or release trigger, with the branches filter
+# under another event than push, and with a runner named macOS-14 or
 # [self-hosted, macOS] in a job that runs on every push
 sb=$(new_sandbox_dir) || abort_sandbox
-for case in stop-commands event_name persist-credentials pull_request tags branches other-tags other-if create release branches-elsewhere runner-case runner-list; do
+for case in stop-commands event_name persist-credentials pull_request tags branches other-tags other-if create delete release branches-elsewhere runner-case runner-list; do
   what="without $case"
   want=$case
   case "$case" in
@@ -232,7 +244,7 @@ for case in stop-commands event_name persist-credentials pull_request tags branc
       want="push in on: names no branches filter, so a tag push starts a run"
       perl -ne 'print unless /^    branches: \["\*\*"\]$/' "$ci" >"$sb/ci.yml"
       ;;
-    create | release)
+    create | delete | release)
       what="with a $case trigger"
       want="a $case event starts a run on a tag"
       perl -pe 's/^(  workflow_dispatch:)$/  '"$case"':\n$1/' "$ci" >"$sb/ci.yml"
@@ -268,7 +280,7 @@ for case in stop-commands event_name persist-credentials pull_request tags branc
     fail "the test goes red $what"
   fi
 done
-# 15. (step 6b's review, R17) the on: block in flow form on one line, with a
+# 16. (step 6b's review, R17) the on: block in flow form on one line, with a
 # quoted " #" before a pull_request trigger: the # is inside quotes, not a
 # comment, so the trigger is still read
 perl -0pe 's/^on:\n  push:\n    branches: \["\*\*"\]\n  workflow_dispatch:\n/on: {push: {branches: ["**", "skip #"]}, pull_request: {}, workflow_dispatch: {}}\n/m' "$ci" >"$sb/ci.yml"
@@ -279,7 +291,7 @@ elif ci_problems "$sb/ci.yml" | grep -q -F -- "a pull_request event starts a run
 else
   fail "the test goes red with a pull_request trigger after a quoted \" #\" in a one-line flow-form on:" "$(ci_problems "$sb/ci.yml")"
 fi
-# 16. a comment after a quoted value is still a comment: pull_request named
+# 17. a comment after a quoted value is still a comment: pull_request named
 # only there is no trigger
 perl -0pe 's/^on:\n  push:\n    branches: \["\*\*"\]\n  workflow_dispatch:\n/on: {push: {branches: ["**", "a#b"]}, workflow_dispatch: {}} # no pull_request\n/m' "$ci" >"$sb/ci.yml"
 if cmp -s "$ci" "$sb/ci.yml"; then
@@ -289,7 +301,7 @@ elif problems=$(ci_problems "$sb/ci.yml") && [ -z "$problems" ]; then
 else
   fail "a comment after quoted values in a flow-form on: is not read: pull_request named only there is no trigger" "$problems"
 fi
-# 17-20. (step 6b, R17) on_case NAME ON WANT: the on: block of ci.yml
+# 18-21. (step 6b, R17) on_case NAME ON WANT: the on: block of ci.yml
 # replaced by the text ON (perl replacement text) makes the check print a
 # problem holding WANT
 on_case() {
@@ -310,7 +322,7 @@ on_case "the test goes red with a flow-form on: whose { runs onto a next line at
   'on: {push: {branches: ["**"]},\npull_request: {}, workflow_dispatch: {}}\n' "line 10: a value in on: does not close on its line"
 on_case "the test goes red with an escape in a double-quoted key in on: (\"pull_reques\\x74\")" \
   'on: {push: {branches: ["**"]}, "pull_reques\\x74": {}, workflow_dispatch: {}}\n' "a double-quoted value in on: holds an escape"
-# 21. a branch filter that names release is not a release trigger
+# 22. a branch filter that names release is not a release trigger
 perl -pe 's/^(    branches: \["\*\*")\]$/$1, "release\/*", "create"]/' "$ci" >"$sb/ci.yml"
 if cmp -s "$ci" "$sb/ci.yml"; then
   fail "the release-branch case did not apply, so the result would mean nothing"
@@ -321,7 +333,7 @@ else
 fi
 drop_sandbox "$sb"
 
-# 22-25. (step 7.9) the plants job, and the Windows and macOS jobs, run the
+# 23-26. (step 7.9) the plants job, and the Windows and macOS jobs, run the
 # parts of tests/plants/shards.txt, each part's measured time within 70% of
 # the plants job's limit; the check goes red when either drops a part, and
 # when a part's time grows past 70%
@@ -357,6 +369,36 @@ elif shard_problems "$ci" "$sb/shards.txt" | grep -q -F -- "part 0: its plant fi
 else
   fail "the shard check goes red when a part's measured time is over 70% of the limit" "$(shard_problems "$ci" "$sb/shards.txt")"
 fi
+# 27-31. (step 7's review) the shard check goes red when the plants job's
+# matrix gains an exclude: or include:, or the job an if:, and when the
+# matrix of the Windows and macOS jobs gains an exclude: or include:; each
+# could skip a part the list still names
+for case in exclude include if other-exclude other-include; do
+  case "$case" in
+    exclude | include)
+      what="when the plants job's matrix gains an $case:"
+      want="the plants job holds an $case:"
+      perl -pe 's/^(\s+)(shard: \[("[^"]*").*\])$/$1$2\n$1'"$case"':\n$1  - shard: $3/' "$ci" >"$sb/ci.yml"
+      ;;
+    if)
+      what="when the plants job gains an if:"
+      want="the plants job holds an if:"
+      perl -pe 's/^(    name: Linux planted defects .*)$/$1\n    if: false/' "$ci" >"$sb/ci.yml"
+      ;;
+    other-exclude | other-include)
+      what="when the matrix of the Windows and macOS jobs gains an ${case#other-}:"
+      want="the matrix of the Windows and macOS jobs holds an ${case#other-}:"
+      perl -pe 's/^(\s+)(part: \[.*?("plants [^"]*").*\])$/$1$2\n$1'"${case#other-}"':\n$1  - part: $3/' "$ci" >"$sb/ci.yml"
+      ;;
+  esac
+  if cmp -s "$ci" "$sb/ci.yml"; then
+    fail "the $case case did not apply, so the result would mean nothing"
+  elif shard_problems "$sb/ci.yml" "$shards" | grep -q -F -- "$want"; then
+    pass "the shard check goes red $what"
+  else
+    fail "the shard check goes red $what" "$(shard_problems "$sb/ci.yml" "$shards")"
+  fi
+done
 drop_sandbox "$sb"
 
 echo "tests: CI settings: $tests_pass passed, $tests_fail failed, $tests_skip skipped"

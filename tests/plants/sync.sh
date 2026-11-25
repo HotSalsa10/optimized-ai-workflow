@@ -129,6 +129,42 @@ my $proj = Cwd::realpath(File::Spec->rel2abs($to, $src_arg));
 my @also = ((defined
 ---
 my @also = (); my @x = ((defined
+=== the lock's copy named apart from sync's other copies | scripts/release/lib/sync.pl | a run cut off while writing method.lock is finished by a re-run, which removes what it left
+my $se = Lock::save($proj, $text, ".sync-$$");
+---
+my $se = Lock::save($proj, $text, ".new-$$");
+=== gcpAuthRefresh not among the keys that run a program | method/scripts/method/lib/watch.pl | a project's gcpAuthRefresh is refused on first install
+our @RUNS = qw(statusLine apiKeyHelper fileSuggestion otelHeadersHelper awsAuthRefresh awsCredentialExport gcpAuthRefresh proxyAuthHelper subagentStatusLine);
+---
+our @RUNS = qw(statusLine apiKeyHelper fileSuggestion otelHeadersHelper awsAuthRefresh awsCredentialExport proxyAuthHelper subagentStatusLine);
+=== proxyAuthHelper not among the keys that run a program | method/scripts/method/lib/watch.pl | a project's proxyAuthHelper is refused on first install
+our @RUNS = qw(statusLine apiKeyHelper fileSuggestion otelHeadersHelper awsAuthRefresh awsCredentialExport gcpAuthRefresh proxyAuthHelper subagentStatusLine);
+---
+our @RUNS = qw(statusLine apiKeyHelper fileSuggestion otelHeadersHelper awsAuthRefresh awsCredentialExport gcpAuthRefresh subagentStatusLine);
+=== subagentStatusLine not among the keys that run a program | method/scripts/method/lib/watch.pl | a project's subagentStatusLine is refused on first install
+our @RUNS = qw(statusLine apiKeyHelper fileSuggestion otelHeadersHelper awsAuthRefresh awsCredentialExport gcpAuthRefresh proxyAuthHelper subagentStatusLine);
+---
+our @RUNS = qw(statusLine apiKeyHelper fileSuggestion otelHeadersHelper awsAuthRefresh awsCredentialExport gcpAuthRefresh proxyAuthHelper);
+=== the .gitattributes byte-order mark left in front of the block | scripts/release/lib/sync.pl | a .gitattributes that starts with a byte-order mark keeps it first, so its own first rule still works
+  my $bom = $t =~ s/\A\xEF\xBB\xBF// ? "\xEF\xBB\xBF" : '';
+---
+  my $bom = '';
+=== paths git ignores written all the same | scripts/release/lib/sync.pl | a path sync writes that git ignores is refused, naming the rule, nothing written
+so a commit would leave it out; change that rule so it no longer matches"] for @$ignored;
+---
+so a commit would leave it out; change that rule so it no longer matches"] for ();
+=== negated ignore patterns read as ignoring | method/scripts/method/lib/git.pl | a path sync writes that git ignores is refused, naming the rule, nothing written
+    next if $pat =~ /\A!/;
+---
+    next if 0;
+=== an error sync did not foresee ends with perl's exit 255 | scripts/release/lib/sync.pl | an error sync did not foresee is a refusal with exit 1, nothing written
+  return if $^S;
+---
+  return;
+=== the .gitignore block does not ignore settings.local.json | scripts/release/lib/sync.pl | first install: the method's files, the merged settings, the blocks and method.lock, and method-files finds nothing
+  '.gitignore' => [".method/local/", ".claude/settings.local.json"],
+---
+  '.gitignore' => [".method/local/"],
 === CDPATH left set | scripts/release/sync.sh | an exported CDPATH does not change the folder sync.sh finds itself in
 unset CDPATH
 ---

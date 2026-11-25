@@ -237,15 +237,15 @@ steers_is() {
   got=$(perl -e "$steers_pl" "$conf_pl" "$2" 2>&1)
   if [ "$got" = "$3" ]; then pass "$1"; else fail "$1" "got $got, wanted $3"; fi
 }
-want_steering='.claude/method.conf checks .claude/rules/pack .claude/skills/pack- .github/workflows docs/incident-checklist.md REVIEW.md CLAUDE.md .claude/CLAUDE.md AGENTS.md'
+want_steering='.claude/method.conf checks .claude/rules/pack .claude/skills/pack- .github/workflows docs/incident-checklist.md REVIEW.md CLAUDE.md .claude/CLAUDE.md AGENTS.md .claude/settings.json .claude/settings.local.json .claude/setup-answers.txt'
 # shellcheck disable=SC2016 # perl code: perl expands it
 got=$(perl -e 'require $ARGV[0]; print join(" ", Conf::steering())' "$conf_pl" 2>&1)
-if [ "$got" = "$want_steering" ]; then pass "steers: the built-in list is the plan's (S12), with .claude/CLAUDE.md"; else fail "steers: the built-in list is the plan's (S12)" "got $got
+if [ "$got" = "$want_steering" ]; then pass "steers: the built-in list is the plan's (S12), with .claude/CLAUDE.md and the settings files"; else fail "steers: the built-in list is the plan's (S12)" "got $got
 wanted $want_steering"; fi
 for e in $want_steering; do
   case $e in
     *-) steers_is "steers: $e is a name prefix ($e""x/SKILL.md)" "$e""x/SKILL.md" "$e" ;;
-    *.md | *.conf) steers_is "steers: the file $e" "$e" "$e" ;;
+    *.md | *.conf | *.json | *.txt) steers_is "steers: the file $e" "$e" "$e" ;;
     *) steers_is "steers: a file in $e" "$e/a.tsv" "$e" ;;
   esac
 done
@@ -256,7 +256,10 @@ steers_is "steers: the method's own skills are not on it (.claude/skills/method-
 steers_is "steers: a name that only starts like a folder entry (checksum.txt)" checksum.txt none
 steers_is "steers: a CLAUDE.md in a subfolder is not on it" src/CLAUDE.md none
 steers_is "steers: .claude/skills/packer is not a pack skill" .claude/skills/packer/SKILL.md none
-steers_is "steers: settings.json is not on it (G6 and method-files keep it)" .claude/settings.json none
+steers_is "steers: .Claude/Settings.JSON in another case" .Claude/Settings.JSON .claude/settings.json
+steers_is "steers: .claude/SETTINGS.LOCAL.json in another case" .claude/SETTINGS.LOCAL.json .claude/settings.local.json
+steers_is "steers: .claude/Setup-Answers.TXT in another case" .claude/Setup-Answers.TXT .claude/setup-answers.txt
+steers_is "steers: a name that only starts like a file entry (.claude/settings.json.bak)" .claude/settings.json.bak none
 steers_is "steers: a product path" src/a.txt none
 # why.md's M153 row names the list for people (method-plan points there):
 # its paths, between "says:" and "in any letter case", read as entries
