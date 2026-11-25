@@ -449,6 +449,18 @@ Plan: docs/plans/step8.md, version 3 (after three critiques and 8.0's measuremen
 - [ ] 8.4 The user-level audit (M164) in session-status, with lines that tell Claude what to tell the owner.
 - [ ] 8.5 Close: records, the non-root run, CI push B, one review in a hooked session, one repair loop, CI push C only if the repair changed the tree, the owner's merge, then tag `v0.8.0`.
 
+## Step 9: project CI templates, the live cloud test, README v1 and Release 1
+
+Plan: docs/plans/step9.md, version 2 (after three critiques), written on claude/step9. 9.0 only measures, writes records and reports to the sessions closing step 7 (the tag fix, S9) and building step 8 (Code Mode off, S4; the Release 2 moves, S8); 9.1 to 9.6 are built only after step 8 is merged, `v0.8.0` exists and main is merged into claude/step9. One owner decision: D1 (the example repository private or public), before 9.1.
+
+- [ ] 9.0 Measure Q1 and Q3 in throwaway copies through the harness's helpers; correct ROADMAP's step 9 blocker line; report to step 7 and step 8; plan version 3 with the A83 draft.
+- [ ] 9.1 This repo to `v0.8.0` in the owner's two-repository session where its hooks are off (Q6 recorded first).
+- [ ] 9.2 The tested client moves to 2.1.332 (the floor stays 2.1.316), with Code Mode off first if `v0.8.0` lacks it.
+- [ ] 9.3 The project CI template seeded by setup (M166), and CI's job times checked locally.
+- [ ] 9.4 README v1 (M080), pull requests from a cloud session, M079's exception and the shipped words; then the pre-release `v0.9.0-rc.1`.
+- [ ] 9.5 The live test, L1 to L12, in two sessions the owner opens.
+- [ ] 9.6 Close: records, the non-root run, CI push B, one review, one repair loop, CI push C only if the repair changed the tree, the owner's merge, then tag `v1.0.0`.
+
 ## Next
 
 Step 6 is merged (pull request #3, 3172399). Step 6b: 6b.0 to 6b.4 are built, with the flake fixes (78cc707), and 6b.5's records are committed (896447f). CI push A was green (run 157); CI push B (run 158 on 896447f) failed at shellcheck in Repo checks, its plants and harness green, about 63 minutes used. The review asked for changes; the one repair loop is committed (22db826), and its fresh check closed 20 of the 23 findings, leaving R14, R16 and R17 open and two repairs (R3, R11) with new defects. The owner approved one extra repair round on 23 November; it is built in the working tree, not yet committed. The extra round is committed (eeb506a, with its full local run's counts in 5d0f0a1). Next for 6b: CI push C after the 1 December minutes reset, then ask the owner to merge.
