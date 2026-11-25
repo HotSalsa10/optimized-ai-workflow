@@ -23,8 +23,11 @@
 #   before the install post-rows refuses;
 # - notes-site: the smoke row, turned on by hand, runs and stays on.
 # Apart from the examples: make.sh's refusals, the same history whoever
-# runs it (with their own git settings, or a GIT_DIR that names another
-# repository, which it leaves as it was), and setup's choice of the files stored with CRLF that it names.
+# runs it (with their own git settings, in their files or in the
+# environment, or a GIT_DIR that names another repository, which it leaves
+# as it was), a built example that keeps none of the build's own ignore,
+# attributes and monitor settings, and setup's choice of the files stored
+# with CRLF that it names.
 # shellcheck disable=SC2016 # single-quoted perl code is expanded by perl
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
@@ -249,32 +252,39 @@ clean() {
   (cd "$work/clean-$1" && git rev-parse HEAD 2>&1)
 }
 
-n="make.sh gives the same history under the caller's own git name, GIT_AUTHOR_* and GIT_COMMITTER_* and commit hooks, which never run, and under the caller's global ignore and attributes, init template and file-system monitor"
+n="make.sh gives the same history under the caller's own git name, GIT_AUTHOR_* and GIT_COMMITTER_* and commit hooks, which never run, and under the caller's global ignore and attributes, init template, file-system monitor, commit encoding, object format and settings given in the environment"
 if wanted "$n"; then
   r=""
   # a caller with a name, hooks that change the message and leave a mark,
   # the GIT_AUTHOR_* and GIT_COMMITTER_* variables of their own, a global
   # ignore of .claude/ and CLAUDE.md, a global attribute that stores .csv
   # files with LF, an init template whose exclude file skips post-rows.sh,
-  # and a file-system monitor that leaves a mark
+  # a file-system monitor that leaves a mark, a commit encoding of
+  # ISO-8859-1, sha256 objects (GIT_DEFAULT_HASH, and the setting a newer
+  # git reads), and settings in the environment, the form git -c hands on:
+  # GIT_CONFIG_COUNT with an ignore file of .claude/ and CLAUDE.md and
+  # CRLF turned into LF, and GIT_CONFIG_PARAMETERS with the latter
   mkdir -p "$work/home2/.config/git" "$work/hooks2" "$work/tmpl2/info"
   printf '#!/bin/sh\necho hook >>"%s"\necho "Signed-off-by: Real Person" >>"$1"\n' "$work/hook-ran" >"$work/hooks2/commit-msg"
   printf '#!/bin/sh\necho hook >>"%s"\n' "$work/hook-ran" >"$work/hooks2/pre-commit"
   printf '#!/bin/sh\necho fsmonitor >>"%s"\nexit 1\n' "$work/fsmonitor-ran" >"$work/fsmonitor2"
   chmod +x "$work/hooks2/commit-msg" "$work/hooks2/pre-commit" "$work/fsmonitor2"
-  printf '[user]\n\tname = Real Person\n\temail = real@example.invalid\n[core]\n\thooksPath = %s\n\tfsmonitor = %s\n[init]\n\ttemplateDir = %s\n' \
+  printf '[user]\n\tname = Real Person\n\temail = real@example.invalid\n[core]\n\thooksPath = %s\n\tfsmonitor = %s\n[init]\n\ttemplateDir = %s\n\tdefaultObjectFormat = sha256\n[i18n]\n\tcommitEncoding = ISO-8859-1\n' \
     "$work/hooks2" "$work/fsmonitor2" "$work/tmpl2" >"$work/home2/.gitconfig"
   printf '%s\n' .claude/ CLAUDE.md >"$work/home2/.config/git/ignore"
+  printf '%s\n' .claude/ CLAUDE.md >"$work/ignore2"
   printf '%s\n' '*.csv text' >"$work/home2/.config/git/attributes"
   printf '%s\n' post-rows.sh >"$work/tmpl2/info/exclude"
   for ex in word-game records-keeper; do
     id1=$(clean "$ex")
     HOME="$work/home2" GIT_AUTHOR_NAME="Real Person" GIT_AUTHOR_EMAIL=real@example.invalid GIT_COMMITTER_NAME="Real Person" \
-      GIT_COMMITTER_EMAIL=real@example.invalid bash "$root/examples/$ex/make.sh" "$work/same-$ex" >"$work/same-$ex.txt" 2>&1 ||
+      GIT_COMMITTER_EMAIL=real@example.invalid GIT_DEFAULT_HASH=sha256 GIT_CONFIG_COUNT=2 \
+      GIT_CONFIG_KEY_0=core.excludesFile GIT_CONFIG_VALUE_0="$work/ignore2" GIT_CONFIG_KEY_1=core.autocrlf GIT_CONFIG_VALUE_1=true \
+      GIT_CONFIG_PARAMETERS="'core.autocrlf'='true'" bash "$root/examples/$ex/make.sh" "$work/same-$ex" >"$work/same-$ex.txt" 2>&1 ||
       r="$r [$ex: make.sh as the caller: $(tail -2 "$work/same-$ex.txt")]"
     id2=$(cd "$work/same-$ex" && git rev-parse HEAD 2>&1)
     if [ "$id1" != "$id2" ]; then
-      r="$r [$ex: $id1, then $id2: $(cd "$work/same-$ex" && git log -1 --format='%an <%ae>, %cn <%ce>' 2>&1);"
+      r="$r [$ex: $id1, then $id2: $(cd "$work/same-$ex" && git log -1 --format='%an <%ae>, %cn <%ce>, encoding %e' 2>&1);"
       (cd "$work/clean-$ex" && git ls-tree -r HEAD) >"$work/tree1" 2>&1
       (cd "$work/same-$ex" && git ls-tree -r HEAD) >"$work/tree2" 2>&1
       r="$r the trees differ: $(diff "$work/tree1" "$work/tree2" | grep '^[<>]' | tr '\n\t' '  ')]"
@@ -282,6 +292,21 @@ if wanted "$n"; then
   done
   [ ! -e "$work/hook-ran" ] || r="$r [the caller's hooks ran]"
   [ ! -e "$work/fsmonitor-ran" ] || r="$r [the caller's file-system monitor ran]"
+  if [ -z "$r" ]; then pass "$n"; else fail "$n" "$r"; fi
+fi
+
+n="the built example holds none of the build's own ignore, attributes and monitor settings, so the person's own global ignore works there"
+if wanted "$n"; then
+  r=""
+  clean word-game >/dev/null
+  mkdir -p "$work/home3/.config/git"
+  printf '%s\n' .DS_Store >"$work/home3/.config/git/ignore"
+  : >"$work/clean-word-game/.DS_Store"
+  got=$(cd "$work/clean-word-game" && git config --list --local 2>&1 | grep -i -E '^core\.(excludesfile|attributesfile|fsmonitor)=')
+  [ -z "$got" ] || r="$r [the built repository's settings hold: $(printf '%s' "$got" | tr '\n' ' ')]"
+  (cd "$work/clean-word-game" && HOME="$work/home3" git check-ignore -q .DS_Store) ||
+    r="$r [the person's global ignore does not ignore .DS_Store there]"
+  rm -f "$work/clean-word-game/.DS_Store"
   if [ -z "$r" ]; then pass "$n"; else fail "$n" "$r"; fi
 fi
 

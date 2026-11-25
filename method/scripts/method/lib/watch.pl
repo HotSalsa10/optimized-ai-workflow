@@ -55,7 +55,7 @@ our $MAX = 1024 * 1024;    # a settings or definition file is small
 our $KEEP = 20;            # snapshots kept: the last sessions' (A67's G12 note keeps as many)
 # the settings that run a program outside the hooks: compared with the
 # snapshot too (final review of step 5)
-our @RUNS = qw(statusLine apiKeyHelper fileSuggestion otelHeadersHelper awsAuthRefresh awsCredentialExport gcpAuthRefresh proxyAuthHelper subagentStatusLine);
+our @RUNS = qw(statusLine apiKeyHelper fileSuggestion otelHeadersHelper awsAuthRefresh awsCredentialExport gcpAuthRefresh proxyAuthHelper subagentStatusLine processWrapper);
 our @KEYS = (qw(env hooks disableAllHooks enabledPlugins disableSkillShellExecution), @RUNS);
 our $NOTE = '.method/local/settings-refused';
 

@@ -20,9 +20,10 @@
 #   broken method-setup block, no method.lock, a row id used twice) run
 #   setup-write.sh itself and must write nothing;
 # - re-runs on disk: VERDICTS_FROM once main holds the method, and kept
-#   while main moves, a smoke row turned on, a named path setup writes
-#   itself, settings.json laid out otherwise; the scanner row on the card
-#   when checks/project.tsv was there before;
+#   while main moves, a smoke row turned on (and then left unanswered), a
+#   named path setup writes itself, settings.json laid out otherwise; the
+#   scanner row on the card when checks/project.tsv was there before, when
+#   setup writes it, and when a checks file holds the row on;
 # - a sample of four combinations is written to disk by setup-write.sh and
 #   read by status and done-check.
 # shellcheck disable=SC2016 # single-quoted perl code is expanded by perl
@@ -563,6 +564,27 @@ if wanted "$n"; then
   if [ -z "$r" ]; then pass "$n"; else fail "$n" "$r"; fi
 fi
 
+n="a smoke row turned on goes when how it starts is left empty, and the card names it on its Dropped: line, once"
+if wanted "$n"; then
+  r=""
+  copy "$pnew" smokegone
+  printf '%s\n' "$good" >"$c/.claude/setup-answers.txt"
+  setup "$c" --write
+  c1=$code
+  rewrite "$c/checks/project.tsv" 's/^#smoke\t/smoke\t/'
+  printf '%s\n' "$good" | sed "s/^HOW_IT_STARTS${T}.*/HOW_IT_STARTS${T}/" >"$c/.claude/setup-answers.txt"
+  setup "$c" --write
+  if [ "$c1" -ne 0 ] || [ "$code" -ne 0 ] || grep -q "^#\{0,1\}smoke${T}" "$c/checks/project.tsv" ||
+    ! has "Dropped: the smoke row (how it starts) in checks/project.tsv, which was on, as how it starts was not answered."; then
+    r="$r [left empty] exit $c1 then $code; $(printf '%s\n' "$out" | grep -e Dropped -e smoke)"
+  fi
+  setup "$c" --write
+  if [ "$code" -ne 0 ] || has "Dropped:"; then
+    r="$r [run again] exit $code; $(printf '%s\n' "$out" | grep Dropped)"
+  fi
+  if [ -z "$r" ]; then pass "$n"; else fail "$n" "$r"; fi
+fi
+
 n="a narrower re-run: the card's extra line comes from what method.conf keeps, setup's own MUTATION_CHECKS=fast-tests goes with its row, TESTS.md names smoke, and the card names the lock's profile"
 if wanted "$n"; then
   r=""
@@ -597,6 +619,32 @@ if wanted "$n"; then
   setup "$c"
   if [ "$code" -eq 0 ] && [ -n "$row" ] && has "Found Python (requirements.txt): the suggested scanner row is deps-python, which checks/project.tsv does not hold (it was there before setup): install its tool, then add this row to checks/project.tsv or checks/pack.tsv: $row" &&
     ! has "then turn it on"; then pass "$n"; else no "$n" "exit $code; $(printf '%s\n' "$out" | grep 'Found')"; fi
+fi
+
+n="the card's scanner line: offered off in a checks/project.tsv setup writes, and already on, with no advice, when a checks file holds the row on"
+if wanted "$n"; then
+  r=""
+  found="Found Python (requirements.txt): the suggested scanner row is deps-python"
+  copy "$pnew" scanner-new
+  printf 'requests==2.0\n' >"$c/requirements.txt"
+  answers claude short small none standard best >"$c/.claude/setup-answers.txt"
+  setup "$c"
+  if [ "$code" -ne 0 ] || ! has "$found, offered off in checks/project.tsv; install its tool, then turn it on."; then
+    r="$r [a new checks/project.tsv] exit $code; $(printf '%s\n' "$out" | grep 'Found')"
+  fi
+  row=$(grep '^#deps-python' "$pold/scripts/method/templates/checks/project.tsv.tmpl" | cut -c2-)
+  for f in checks/pack.tsv checks/project.tsv; do
+    copy "$pold" "scanner-${f#checks/}"
+    mkdir -p "$c/checks"
+    printf 'own\tany\t-\t^own: (\\d+)\techo "own: 1"\n' >"$c/checks/project.tsv"
+    printf '%s\n' "$row" >>"$c/$f"
+    answers claude short small none standard budget >"$c/.claude/setup-answers.txt"
+    setup "$c"
+    if [ "$code" -ne 0 ] || [ -z "$row" ] || ! has "$found, already on in $f." || has "add this row" || has "turn it on"; then
+      r="$r [on in $f] exit $code; $(printf '%s\n' "$out" | grep 'Found')"
+    fi
+  done
+  if [ -z "$r" ]; then pass "$n"; else fail "$n" "$r"; fi
 fi
 
 n="a row id setup turns on that checks/pack.tsv already uses is refused, naming the row, and nothing is written"

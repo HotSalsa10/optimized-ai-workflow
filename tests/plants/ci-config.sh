@@ -4,7 +4,7 @@
 # flow form on one line, with a quoted " #" before a pull_request trigger.
 # YAML reads the # as text and the trigger as a trigger, so the test's
 # check of the real file must go red for its stated reason. The test's own
-# cases plant each other setting in a copy of ci.yml (its cases 2 to 31).
+# cases plant each other setting in a copy of ci.yml (its cases 2 to 34).
 # Step 6b's extra round adds three more on: forms YAML reads as a
 # pull_request trigger: one after '' inside single quotes and " #", one after
 # a quoted value that runs onto a next line starting with #, and one spelled
@@ -20,7 +20,9 @@
 # macOS-14, each turning the check of the real file red. Step 7's review
 # added five: an exclude: or include: in the plants job's matrix or in the
 # matrix of the Windows and macOS jobs, and an if: on the plants job, each
-# turning the shard check of the real files red.
+# turning the shard check of the real files red. The fresh check of step
+# 7's repair added two: an exclude: in quotes in the plants job's matrix and
+# in the matrix of the Windows and macOS jobs, each turning it red too.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=tests/lib.sh
@@ -134,6 +136,15 @@ done
 # shellcheck disable=SC2016 # the plant is literal perl text
 ci_edit_plant "the plants job with an if: that skips it" .github/workflows/ci.yml \
   's/^(    name: Linux planted defects .*)$/$1\n    if: false/m' "    if: false" "the plants job holds an if:" "$split"
+# (the fresh check of step 7's repair) the same keys in quotes, which YAML
+# reads as those keys
+# shellcheck disable=SC2016 # the plant is literal perl text
+ci_edit_plant "the plants job's matrix with an exclude: in quotes" .github/workflows/ci.yml \
+  's/^([ ]+)(shard: \[("[^"]*").*\])$/$1$2\n$1"exclude":\n$1  - shard: $3/m' '        "exclude":' "the plants job holds an exclude:" "$split"
+# shellcheck disable=SC2016 # the plant is literal perl text
+ci_edit_plant "the matrix of the Windows and macOS jobs with an exclude: in quotes" .github/workflows/ci.yml \
+  's/^([ ]+)(part: \[.*?("plants [^"]*").*\])$/$1$2\n$1\x27exclude\x27:\n$1  - part: $3/m' "        'exclude':" \
+  "the matrix of the Windows and macOS jobs holds an exclude:" "$split"
 
 echo "plants: CI settings: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]

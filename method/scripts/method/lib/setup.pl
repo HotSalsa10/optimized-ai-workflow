@@ -67,10 +67,11 @@
 # does not exist is not written; the card names it (a seeded file or the
 # pack's two count as there, as the run writes them). checks/project.tsv's
 # block: the smoke row, off, but on when the block holds it turned on with
-# the same command (the card says which); the row fast-tests, on, when
-# there is a test command. A row id the block turns on that another row in
-# checks/*.tsv uses is refused, naming the row. settings.json is written
-# only when its data changes, not for its layout alone.
+# the same command (the card says which), and gone, named on the card's
+# Dropped: line, when how it starts is left empty; the row fast-tests, on,
+# when there is a test command. A row id the block turns on that another
+# row in checks/*.tsv uses is refused, naming the row. settings.json is
+# written only when its data changes, not for its layout alone.
 #
 # Before it plans, setup refuses (naming the file or key): no method.lock;
 # a lock that cannot be read; the release's settings.method.json,
@@ -445,13 +446,18 @@ sub plan {
 
   # --- the blocks' lines, by the placeholder their template holds ---
   # the lines turned on in checks/project.tsv's block now: a smoke row the
-  # owner turned on stays on while its command is the same
-  my (%on_now, $smoke);
+  # owner turned on stays on while its command is the same, and a smoke row
+  # the block held goes, named, when how it starts is left empty
+  my (%on_now, $smoke, $smoke_was);
   my ($ck) = $get->($CHECKS);
   if (defined $ck) {
     my ($w, undef, $inside) = block_split($ck, @HASH_MARK);
     if ($w eq 'ok') {
-      for my $l (split /\n/, $inside) { $l =~ s/\r\z//; $on_now{$l} = 1 if $l !~ /\A[ \t]*(?:#|\z)/ }
+      for my $l (split /\n/, $inside) {
+        $l =~ s/\r\z//;
+        $smoke_was = $1 eq '' ? 'on' : ($smoke_was || 'off') if $l =~ /\A(#?)\Q$SMOKE_ID\E\t/;
+        $on_now{$l} = 1 if $l !~ /\A[ \t]*(?:#|\z)/;
+      }
     }
   }
   my $or = sub { $_[0] ne '' ? $_[0] : $_[1] };
@@ -481,7 +487,7 @@ sub plan {
         if ($on_now{$on}) { push @l, $on; $smoke = 'on' }
         else { push @l, $l; $smoke = (grep { index($_, "$SMOKE_ID\t") == 0 } keys %on_now) ? 'off again' : 'off' }
       }
-      else { push @l, '# How the project starts was not answered; run /method-setup again to add its smoke row.' }
+      else { push @l, '# How the project starts was not answered; run /method-setup again to add its smoke row.'; $smoke = "dropped $smoke_was" if $smoke_was }
       push @l, "$TEST_ID\tany\t-\t^$TEST_ID: (\\d+) run\t$a->{TEST_COMMAND} && echo \"$TEST_ID: 1 run passed\"" if $test_row;
       return @l;
     },
@@ -662,11 +668,15 @@ sub plan {
     . ' it once and stops, remove its #.' if ($smoke || '') eq 'off again';
   push @card, "The fast tests run in every check run (the row $TEST_ID in $CHECKS)." if $test_row;
   # (a checks/project.tsv that was there before setup lacks the template's
-  # scanner rows, so the card gives the row itself)
-  my $ck_now = exists $out{$CHECKS} ? $out{$CHECKS} : ($get->($CHECKS))[0];
+  # scanner rows, so the card gives the row itself; a row on in any
+  # checks/*.tsv gets no advice, so the id is not used twice)
+  my @ck_now = map { [$_, exists $out{$_} ? $out{$_} : ($get->($_))[0]] } $CHECKS, grep { $_ ne $CHECKS } map {"checks/$_"} @tsv;
   for my $l (@{ $det->{langs} }) {
     my $found = "Found $l->[1] ($l->[0]): the suggested scanner row is $l->[2]";
-    if (defined $ck_now && $ck_now =~ /^#?\Q$l->[2]\E\t/m) { push @card, "$found, offered off in $CHECKS; install its tool, then turn it on."; next }
+    my ($on) = grep { defined $_->[1] && $_->[1] =~ /^(?:\xEF\xBB\xBF)?\Q$l->[2]\E\t/m } @ck_now;
+    if ($on) { push @card, "$found, already on in $on->[0]."; next }
+    my ($off) = grep { defined $_->[1] && $_->[1] =~ /^(?:\xEF\xBB\xBF)?#\Q$l->[2]\E\t/m } @ck_now;
+    if ($off) { push @card, "$found, offered off in $off->[0]; install its tool, then turn it on."; next }
     my ($row) = map { substr($_, 1) } grep { index($_, "#$l->[2]\t") == 0 } split /\n/, $tmpl_text{$CHECKS};
     push @card, "$found, which $CHECKS does not hold (it was there before setup): install its tool, then add this row to $CHECKS or"
       . " checks/pack.tsv: $row";
@@ -688,7 +698,10 @@ sub plan {
     . ' put it back.' if @kept;
   push @card, "Kept from an earlier run: VERDICTS_FROM=$kept_from. If its line is deleted (a reviewed change), setup writes main's"
     . ' current tip in its place while main lacks the method, and none once main holds it.' if defined $kept_from;
-  push @card, 'Dropped: ' . join(', ', @dropped) . ", as the $TEST_ID row it names is gone (no fast tests were given)." if @dropped;
+  my @gone = ((map {"$_, as the $TEST_ID row it names is gone (no fast tests were given)"} @dropped),
+    ($smoke || '') =~ /\Adropped (on|off)\z/
+      ? "the smoke row (how it starts) in $CHECKS" . ($1 eq 'on' ? ', which was on,' : '') . ' as how it starts was not answered' : ());
+  push @card, 'Dropped: ' . join('; ', @gone) . '.' if @gone;
   push @card, "Kept as it was: $_ (it was there already, with no method-setup block, so its answers are not added)." for @no_block;
   push @card, 'Added: the line @AGENTS.md to CLAUDE.md, in a method-setup block, so AGENTS.md loads.'
     if grep { $_->[0] eq 'block' && $_->[1] eq 'CLAUDE.md' } @files;

@@ -157,7 +157,7 @@ ci_problems() {
 # runner up to about 40% slower than the measuring machine still finishes.
 # Since step 7's review, an include:, exclude: or if: in the plants job, or
 # an include: or exclude: in the Windows and macOS jobs, is refused, since
-# it could skip a part the list names
+# it could skip a part the list names; a key in quotes is the same key
 shard_problems() {
   perl -e '
     open my $f, "<", $ARGV[0] or die "cannot read $ARGV[0]\n";
@@ -171,13 +171,13 @@ shard_problems() {
         # (step 7 review) a matrix include: or exclude:, or an if: on the
         # job or a step, could skip a part the list still names
         print "line $.: the plants job holds an $1:, which could skip a part of the split\n"
-          if $l =~ /^\s+(?:-\s+)?(include|exclude|if)\s*:/;
+          if $l =~ /^\s+(?:-\s+)?["\x27]?(include|exclude|if)["\x27]?\s*:/;
       } elsif ($in eq "other-systems") {
         @other = map { /^plants (.*)$/ ? $1 : () } $1 =~ /"([^"]*)"/g if $l =~ /^\s+part:\s*\[(.*)\]\s*$/;
         # the job keeps its if: (run only by hand, which ci_problems
         # checks), and its steps may have their own
         print "line $.: the matrix of the Windows and macOS jobs holds an $1:, which could skip a plant part\n"
-          if $l =~ /^\s+(?:-\s+)?(include|exclude)\s*:/;
+          if $l =~ /^\s+(?:-\s+)?["\x27]?(include|exclude)["\x27]?\s*:/;
       }
     }
     open my $s, "<", $ARGV[1] or die "cannot read $ARGV[1]\n";
@@ -372,8 +372,11 @@ fi
 # 27-31. (step 7's review) the shard check goes red when the plants job's
 # matrix gains an exclude: or include:, or the job an if:, and when the
 # matrix of the Windows and macOS jobs gains an exclude: or include:; each
-# could skip a part the list still names
-for case in exclude include if other-exclude other-include; do
+# could skip a part the list still names. 32-34. (the fresh check of step
+# 7's repair) the same with the key in quotes, which YAML reads as that key:
+# an "exclude": in the plants job's matrix, an 'if': on the plants job, an
+# 'exclude': in the matrix of the Windows and macOS jobs
+for case in exclude include if other-exclude other-include quoted-exclude quoted-if other-quoted-exclude; do
   case "$case" in
     exclude | include)
       what="when the plants job's matrix gains an $case:"
@@ -389,6 +392,21 @@ for case in exclude include if other-exclude other-include; do
       what="when the matrix of the Windows and macOS jobs gains an ${case#other-}:"
       want="the matrix of the Windows and macOS jobs holds an ${case#other-}:"
       perl -pe 's/^(\s+)(part: \[.*?("plants [^"]*").*\])$/$1$2\n$1'"${case#other-}"':\n$1  - part: $3/' "$ci" >"$sb/ci.yml"
+      ;;
+    quoted-exclude)
+      what="when the plants job's matrix gains an exclude: in quotes (\"exclude\":)"
+      want="the plants job holds an exclude:"
+      perl -pe 's/^(\s+)(shard: \[("[^"]*").*\])$/$1$2\n$1"exclude":\n$1  - shard: $3/' "$ci" >"$sb/ci.yml"
+      ;;
+    quoted-if)
+      what="when the plants job gains an if: in quotes ('if':)"
+      want="the plants job holds an if:"
+      perl -pe 's/^(    name: Linux planted defects .*)$/$1\n    \x27if\x27: false/' "$ci" >"$sb/ci.yml"
+      ;;
+    other-quoted-exclude)
+      what="when the matrix of the Windows and macOS jobs gains an exclude: in quotes ('exclude':)"
+      want="the matrix of the Windows and macOS jobs holds an exclude:"
+      perl -pe 's/^(\s+)(part: \[.*?("plants [^"]*").*\])$/$1$2\n$1\x27exclude\x27:\n$1  - part: $3/' "$ci" >"$sb/ci.yml"
       ;;
   esac
   if cmp -s "$ci" "$sb/ci.yml"; then

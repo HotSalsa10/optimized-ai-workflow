@@ -46,7 +46,8 @@ bash
 === example_commit names the owner through git's settings, which the caller's environment overrides, and runs the caller's hooks | examples/lib.sh | make.sh gives the same history under the caller's own git name
     GIT_AUTHOR_NAME="Example Owner" GIT_AUTHOR_EMAIL=owner@example.invalid GIT_AUTHOR_DATE="$ec_date" \
       GIT_COMMITTER_NAME="Example Owner" GIT_COMMITTER_EMAIL=owner@example.invalid GIT_COMMITTER_DATE="$ec_date" \
-      git -c core.hooksPath=.git/example-no-hooks -c commit.gpgsign=false commit -q -m "$ec_msg"
+      example_git -c core.hooksPath=.git/example-no-hooks -c commit.gpgsign=false -c i18n.commitEncoding=UTF-8 \
+      commit -q -m "$ec_msg"
 ---
     GIT_AUTHOR_DATE="$ec_date" GIT_COMMITTER_DATE="$ec_date" git -c user.name="Example Owner" \
       -c user.email=owner@example.invalid -c commit.gpgsign=false commit -q -m "$ec_msg"
@@ -58,21 +59,42 @@ bash
 ---
   :
 === example_start takes the caller's init template, whose exclude file skips a file | examples/lib.sh | make.sh gives the same history under the caller's own git name
-  git -c init.defaultBranch=main init -q --template= || exit 2
+  example_git -c init.defaultBranch=main -c init.defaultObjectFormat=sha1 init -q --template= || exit 2
 ---
-  git -c init.defaultBranch=main init -q || exit 2
-=== example_start keeps the caller's global ignore file | examples/lib.sh | make.sh gives the same history under the caller's own git name
+  example_git -c init.defaultBranch=main -c init.defaultObjectFormat=sha1 init -q || exit 2
+=== the build's git keeps the caller's global ignore file | examples/lib.sh | make.sh gives the same history under the caller's own git name
+  git -c core.excludesFile=.git/example-no-ignore \
+---
+  git \
+=== the build's git keeps the caller's global attributes file | examples/lib.sh | make.sh gives the same history under the caller's own git name
+    -c core.attributesFile=.git/example-no-attributes \
+---
+    -c example.none=1 \
+=== the build's git keeps the caller's file-system monitor | examples/lib.sh | make.sh gives the same history under the caller's own git name
+    -c core.fsmonitor=false "$@"
+---
+    "$@"
+=== example_commit keeps the caller's commit encoding | examples/lib.sh | make.sh gives the same history under the caller's own git name
+-c commit.gpgsign=false -c i18n.commitEncoding=UTF-8 \
+---
+-c commit.gpgsign=false \
+=== example_start keeps the caller's GIT_DEFAULT_HASH, so the objects are sha256 | examples/lib.sh | make.sh gives the same history under the caller's own git name
+  unset GIT_DEFAULT_HASH GIT_DEFAULT_REF_FORMAT
+---
+  unset GIT_DEFAULT_REF_FORMAT
+=== example_start keeps the caller's GIT_CONFIG_COUNT settings | examples/lib.sh | make.sh gives the same history under the caller's own git name
+  unset GIT_CONFIG_COUNT
+---
+  :
+=== example_start keeps the caller's GIT_CONFIG_PARAMETERS settings | examples/lib.sh | make.sh gives the same history under the caller's own git name
+  unset GIT_CONFIG_PARAMETERS
+---
+  :
+=== example_start writes the build's ignore setting into the built repository, where it turns off the person's own global ignore | examples/lib.sh | the built example holds none of the build's own ignore, attributes and monitor settings
+  git config core.autocrlf false || exit 2
+---
+  git config core.autocrlf false || exit 2
   git config core.excludesFile .git/example-no-ignore || exit 2
----
-
-=== example_start keeps the caller's global attributes file | examples/lib.sh | make.sh gives the same history under the caller's own git name
-  git config core.attributesFile .git/example-no-attributes || exit 2
----
-
-=== example_start keeps the caller's file-system monitor | examples/lib.sh | make.sh gives the same history under the caller's own git name
-  git config core.fsmonitor false || exit 2
----
-
 === records-keeper posts a row the live ledger already holds | examples/records-keeper/project/scripts/append-rows.sh | records-keeper: the live-write helper refuses a write with no reason
 push @new, $l unless $have{$l}++
 ---

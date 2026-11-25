@@ -94,16 +94,36 @@ grep { 0 } @{ $k->{deny} };
 ---
 : ()));
 === a tracked settings.local.json not reported | method/scripts/method/lib/checks.pl | a tracked .claude/settings.local.json is red
-  push @{ $v->{findings} }, ['local', '.claude/settings.local.json is tracked in git, so every clone gets it'] if !$lst && $local ne '';
+    grep { lc($_) eq '.claude/settings.local.json' } split /\0/, $tracked if !$lst;
 ---
-  1;
+    grep { 0 } split /\0/, $tracked if !$lst;
+=== a tracked settings.local.json found only in its own letter case | method/scripts/method/lib/checks.pl | a tracked .claude/Settings.Local.json is red too
+    grep { lc($_) eq '.claude/settings.local.json' }
+---
+    grep { $_ eq '.claude/settings.local.json' }
+=== tracked files asked about as if untracked (check-ignore --no-index) | method/scripts/method/lib/git.pl | a tracked method file an ignore rule matches passes
+'check-ignore', '-v', '-z', '--stdin');
+---
+'check-ignore', '--no-index', '-v', '-z', '--stdin');
+=== a repository git refuses read as no repository | method/scripts/method/lib/git.pl | in a repository git refuses, method-files says git cannot tell what it ignores
+    return undef unless defined $up;
+---
+    return [];
+=== git unable to tell counted as files it ignores | method/scripts/method/lib/checks.pl | in a repository git refuses, method-files says git cannot tell what it ignores
+    : ['untold', 'git cannot tell whether it ignores the method\'s files'];
+---
+    : ['ignored', 'git cannot tell whether it ignores the method\'s files'];
+=== a link under the method's paths asked of git | method/scripts/method/lib/checks.pl | a method file under a linked folder is a link finding only
+    !grep { -l join '/', @parts[0 .. $_] } 0 .. $#parts - 1
+---
+    1
 PLANTS-END
 # where links or FIFOs cannot be made (Git Bash may make a copy instead of
 # a link), the test skips those cases, so their plants are dropped, and
 # said so
 if ! { ln -s target "$work/link-probe" 2>/dev/null && [ -L "$work/link-probe" ]; }; then
-  perl -0pi -e 's/^=== a link under the method.s paths not named \|.*?(?=^=== |\z)//msg' "$work/plants.txt"
-  skip "the plant on a link under the method's paths (this system cannot make links)"
+  perl -0pi -e 's/^=== a link under the method.s paths (?:not named|asked of git) \|.*?(?=^=== |\z)//msg' "$work/plants.txt"
+  skip "the plants on a link under the method's paths (this system cannot make links)"
 fi
 if ! { mkfifo "$work/fifo-probe" 2>/dev/null && [ -p "$work/fifo-probe" ]; }; then
   perl -0pi -e 's/^=== an entry that is not a regular file named a link \|.*?(?=^=== |\z)//msg' "$work/plants.txt"

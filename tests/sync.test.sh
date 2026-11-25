@@ -275,7 +275,8 @@ fi
 
 # --- what a first install refuses unless kept: a PreToolUse hook, a
 # SubagentStart hook (A79), a PostToolUse hook (A80), claudeMdExcludes,
-# statusLine, gcpAuthRefresh, proxyAuthHelper, subagentStatusLine ---
+# statusLine, gcpAuthRefresh, proxyAuthHelper, subagentStatusLine,
+# processWrapper ---
 for item in 'PreToolUse|{"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "bash tools/check.sh"}]}]}}|1 PreToolUse hook of the project'"'"'s own' \
   'SubagentStart|{"hooks": {"SubagentStart": [{"hooks": [{"type": "command", "command": "bash tools/check.sh"}]}]}}|1 SubagentStart hook of the project'"'"'s own' \
   'PostToolUse|{"hooks": {"PostToolUse": [{"matcher": "Read", "hooks": [{"type": "command", "command": "bash tools/check.sh"}]}]}}|1 PostToolUse hook of the project'"'"'s own' \
@@ -283,7 +284,8 @@ for item in 'PreToolUse|{"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
   'statusLine|{"statusLine": {"type": "command", "command": "bash tools/line.sh"}}|statusLine' \
   'gcpAuthRefresh|{"gcpAuthRefresh": "bash tools/x.sh"}|gcpAuthRefresh' \
   'proxyAuthHelper|{"proxyAuthHelper": "bash tools/x.sh"}|proxyAuthHelper' \
-  'subagentStatusLine|{"subagentStatusLine": {"type": "command", "command": "bash tools/line.sh"}}|subagentStatusLine'; do
+  'subagentStatusLine|{"subagentStatusLine": {"type": "command", "command": "bash tools/line.sh"}}|subagentStatusLine' \
+  'processWrapper|{"processWrapper": "bash tools/x.sh"}|processWrapper'; do
   key=${item%%|*}
   rest=${item#*|}
   js=${rest%%|*}
@@ -520,6 +522,35 @@ if wanted "$n"; then
   sync "$rel" "$p" --write
   if [ "$ok1" -eq 1 ] && [ "$code" -eq 0 ]; then ok "$n"; else no "$n" "exit $c1 then $code; $(printf '%s\n' "$out1" | grep conflict | head -3)"; fi
 fi
+n="a project whose repository git refuses is refused: git cannot tell which paths it ignores"
+if wanted "$n"; then
+  proj refused-git
+  # (a .git that points nowhere: git fails there as it does on a repository
+  # owned by another user)
+  rm -rf "$p/.git" && printf 'gitdir: %s\n' "$work/nowhere" >"$p/.git" && printf '.claude/\n' >"$p/.gitignore"
+  before=$(snap "$p")
+  sync "$rel" "$p" --write
+  if [ "$code" -eq 1 ] && has "conflict  the project (git cannot tell which of the paths sync writes it ignores)" && [ "$(snap "$p")" = "$before" ]; then ok "$n"; else no "$n"; fi
+fi
+n="an update of a committed install whose .gitignore then ignores .claude/ is no conflict: git's rules do not apply to a tracked file"
+if wanted "$n"; then
+  proj tracked-ignored
+  sync "$rel" "$p" --write
+  (cd "$p" && git add -A && git commit -q -m install && printf '.claude/\n' >>.gitignore && git commit -q -am ignore)
+  sync "$rel71" "$p" --write
+  if [ "$code" -eq 0 ] && has "WROTE v0.7.1" && [ -z "$(findings "$p")" ]; then ok "$n"; else no "$n"; fi
+fi
+n="the ignore file a rule comes from is named whole, even when its path holds :12: and a non-ASCII letter"
+if wanted "$n"; then
+  proj ignored-name
+  # (a folder name with a colon cannot be made on Windows)
+  e_acute=$(printf '\303\251')
+  case $(uname -s) in MINGW* | MSYS* | CYGWIN*) exname="ex-d$e_acute" ;; *) exname="ex:12:d$e_acute" ;; esac
+  mkdir -p "$work/$exname" && printf '*.lock\n' >"$work/$exname/ignore" && git -C "$p" config core.excludesFile "$work/$exname/ignore"
+  sync "$rel" "$p" --write
+  if [ "$code" -eq 1 ] && has "$exname/ignore line 1: *.lock), so a commit would leave it out" &&
+    case "$out" in *"line 12"*) false ;; *) true ;; esac; then ok "$n"; else no "$n"; fi
+fi
 
 # --- an error sync did not foresee ---
 n="an error sync did not foresee is a refusal with exit 1, nothing written"
@@ -529,6 +560,29 @@ if wanted "$n"; then
   before=$(snap "$p")
   sync "$rel" "$p" --write
   if [ "$code" -eq 1 ] && has "REFUSED - sync stopped on an error: " "; nothing was written" && [ "$(snap "$p")" = "$before" ]; then ok "$n"; else no "$n"; fi
+fi
+n="an error after the first write gives its FAIL line, not a refusal, and a re-run finishes it"
+if wanted "$n"; then
+  proj die-after-write
+  sync "$rel" "$p" --write
+  # rel71's sync.pl run as sync.sh runs it (as the main script, so its die
+  # handler is in force), dying at the rename onto method.lock, after the
+  # marker and the method files are written
+  mkdir -p "$work/mods" && printf '%s\n' 'package DieAt;' \
+    'BEGIN { *CORE::GLOBAL::rename = sub { die "planted die at $_[1]\n" if $_[1] =~ /\Q$ENV{DIE_AT}\E\z/; CORE::rename($_[0], $_[1]) } }' \
+    '1;' >"$work/mods/DieAt.pm"
+  out=$(DIE_AT=/scripts/method/method.lock perl -I"$work/mods" -MDieAt "$rel71/scripts/release/lib/sync.pl" "$rel71" --to "$p" --write 2>&1)
+  c1=$?
+  out1=$out
+  sync "$rel71" "$p" --write
+  f=$(findings "$p")
+  if [ "$c1" -eq 1 ] && case "$out1" in *"FAIL - sync stopped on an error: planted die at "*"(the run was cut off; run sync again with the same options to finish it)"*) true ;; *) false ;; esac &&
+    case "$out1" in *"nothing was written"*) false ;; *) true ;; esac &&
+    [ "$code" -eq 0 ] && [ -z "$(leftovers "$p")" ] && [ -z "$f" ] && [ "$(sed -n 1p "$p/scripts/method/method.lock")" = "version${T}v0.7.1" ]; then
+    ok "$n"
+  else
+    no "$n" "exit $c1 then $code; findings $f; $(printf '%s\n' "$out1" | tail -2)"
+  fi
 fi
 
 # --- the source ---
