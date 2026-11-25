@@ -9,7 +9,8 @@
 #     .claude/agents/method/, .claude/rules/method/, the method's skills
 #     (.claude/skills/NAME/ for each NAME in @METHOD_SKILLS, step 6.3, and
 #     since step 7.2 every .claude/skills/method-* entry, so a new method-
-#     skill cannot be made in a session; step7.md S12),
+#     skill folder cannot be made in a session, by folder name only (RISKS
+#     #24); step7.md S12),
 #     .claude/method-local/, scripts/method/, .claude/settings.json,
 #     .claude/settings.local.json;
 #   in git's own folder: hooks/, config, config.worktree, and the method's
