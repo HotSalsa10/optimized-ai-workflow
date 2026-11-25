@@ -10,21 +10,22 @@
 # f8d78d7) as a user who is not root, on a 4-core machine running up to
 # three files side by side; ci-config.sh and test-helpers.sh were timed again
 # after step 7.9 added their plants, and ci-config.sh again (alone) after
-# step 7.9's check added three more.
+# step 7.9's check added three more. After step 7's review the seven plant
+# files its repair grew were timed again, one after another, and examples.sh
+# moved to part 5 to keep part 1 within its margin.
 0 dev-checks.sh 1154
-0 ci-config.sh 19
+0 ci-config.sh 37
 0 live-write.sh 12
 0 harness.sh 0
-1 done-check.sh 1075
-1 examples.sh 41
+1 done-check.sh 1175
 1 test-helpers.sh 44
 1 templates.sh 18
-2 setup.sh 709
+2 setup.sh 616
 2 guard.sh 423
 3 protect.sh 606
 3 session-status.sh 544
 4 outside.sh 327
-4 status.sh 314
+4 status.sh 295
 4 gate-receipt.sh 275
 4 log.sh 195
 5 watch.sh 158
@@ -32,8 +33,9 @@
 5 report-check.sh 113
 5 review-packet.sh 108
 5 settings.sh 105
-5 sync.sh 74
-5 method-files.sh 65
+5 sync.sh 115
+5 method-files.sh 68
 5 verdicts.sh 61
 5 budget.sh 56
 5 lint-prompts.sh 55
+5 examples.sh 59
