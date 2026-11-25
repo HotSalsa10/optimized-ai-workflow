@@ -177,26 +177,28 @@ sub run_input {
   my $pid = open(my $fh, '-|');
   die "cannot run git\n" unless defined $pid;
   if (!$pid) {
+    # the child leaves with POSIX::_exit, so no END block or destructor of
+    # the caller runs here and writes into git's pipe
+    require POSIX;
     open STDERR, '>', File::Spec->devnull;
     if (defined $input) {
-      pipe(my $r, my $w) or exit 127;
+      pipe(my $r, my $w) or POSIX::_exit(127);
       my $wpid = fork;
-      exit 127 unless defined $wpid;
+      POSIX::_exit(127) unless defined $wpid;
       if (!$wpid) {
         close $r;
         close STDOUT;    # (so the caller's read ends when git's does)
         binmode $w;
         print {$w} $input;
         close $w;
-        require POSIX;
         POSIX::_exit(0);
       }
       close $w;
-      open STDIN, '<&', $r or exit 127;
+      open STDIN, '<&', $r or POSIX::_exit(127);
     } else {
       open STDIN, '<', File::Spec->devnull;
     }
-    exec { $cmd[0] } @cmd or exit 127;
+    exec { $cmd[0] } @cmd or POSIX::_exit(127);
   }
   binmode $fh;
   my $out = do { local $/; <$fh> };
