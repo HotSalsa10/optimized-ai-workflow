@@ -4,14 +4,18 @@
 # flow form on one line, with a quoted " #" before a pull_request trigger.
 # YAML reads the # as text and the trigger as a trigger, so the test's
 # check of the real file must go red for its stated reason. The test's own
-# cases plant each other setting in a copy of ci.yml (its cases 2 to 11).
+# cases plant each other setting in a copy of ci.yml (its cases 2 to 19).
 # Step 6b's extra round adds three more on: forms YAML reads as a
 # pull_request trigger: one after '' inside single quotes and " #", one after
 # a quoted value that runs onto a next line starting with #, and one spelled
 # with an escape in a double-quoted key.
 # Since step 7.9: the tag trigger put back in on:, and the Windows and macOS
 # jobs' if: put back to run on tags, each turn the check of the real file
-# red (a tag push would start a run, or those jobs would run on tags).
+# red (a tag push would start a run, or those jobs would run on tags); the
+# plants job, or the Windows and macOS jobs, without the last part of
+# tests/plants/shards.txt, and a part whose measured seconds are over 70% of
+# the plants job's limit, each turn the shard check of the real files red.
+# shellcheck disable=SC2016 # the plants are literal perl text
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=tests/lib.sh
@@ -83,9 +87,11 @@ ci_edit_plant "the tag trigger put back in on:" .github/workflows/ci.yml \
 ci_edit_plant "the Windows and macOS jobs put back to run on tags" .github/workflows/ci.yml \
   's/^    if: github\.event_name == \x27workflow_dispatch\x27$/    if: startsWith(github.ref, \x27refs\/tags\/v\x27) || github.event_name == \x27workflow_dispatch\x27/m' \
   "if: startsWith(github.ref, 'refs/tags/v')" "job other-systems: a Windows or macOS job runs without being started by hand" "$real"
-split="the plants job runs every part of tests/plants/shards.txt, each part's measured time within 70% of its limit"
+split="the plants job and the Windows and macOS jobs run every part of tests/plants/shards.txt, each part's measured time within 70% of its limit"
 ci_edit_plant "the plants job without its last part" .github/workflows/ci.yml \
-  's/^(\s+shard: \[.*), "[0-9]+\/[0-9]+"\]$/$1]/m' 'shard: ["0/' "the plants job runs the shards" "$split"
+  's/^(\s+shard: \[.*), "[0-9]+\/[0-9]+"\]$/$1]/m' '"4/6"]' "the plants job runs the shards" "$split"
+ci_edit_plant "the Windows and macOS jobs without their last plant part" .github/workflows/ci.yml \
+  's/^(\s+part: \[.*), "plants [0-9]+\/[0-9]+"\]$/$1]/m' '"plants 4/6"]' "the Windows and macOS jobs run the plant parts" "$split"
 ci_edit_plant "a part of the split whose measured time is over 70% of the limit" tests/plants/shards.txt \
   's/^(0 \S+ )[0-9]+$/${1}99999/m' " 99999" "part 0: its plant files took" "$split"
 

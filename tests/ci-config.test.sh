@@ -135,13 +135,16 @@ ci_problems() {
 shard_problems() {
   perl -e '
     open my $f, "<", $ARGV[0] or die "cannot read $ARGV[0]\n";
-    my ($in, $limit, @matrix) = (0, undef);
+    my ($in, $limit, @matrix, @other) = ("", undef);
     while (my $l = <$f>) {
       $l =~ s/\r?\n\z//;
-      if ($l =~ /^  ([A-Za-z0-9_-]+):\s*$/) { $in = $1 eq "plants"; next }
-      next unless $in;
-      $limit = $1 if $l =~ /^    timeout-minutes:\s*([0-9]+)\s*$/;
-      @matrix = $1 =~ /"([^"]*)"/g if $l =~ /^\s+shard:\s*\[(.*)\]\s*$/;
+      if ($l =~ /^  ([A-Za-z0-9_-]+):\s*$/) { $in = $1; next }
+      if ($in eq "plants") {
+        $limit = $1 if $l =~ /^    timeout-minutes:\s*([0-9]+)\s*$/;
+        @matrix = $1 =~ /"([^"]*)"/g if $l =~ /^\s+shard:\s*\[(.*)\]\s*$/;
+      } elsif ($in eq "other-systems" && $l =~ /^\s+part:\s*\[(.*)\]\s*$/) {
+        @other = map { /^plants (.*)$/ ? $1 : () } $1 =~ /"([^"]*)"/g;
+      }
     }
     open my $s, "<", $ARGV[1] or die "cannot read $ARGV[1]\n";
     my ($parts, %sum) = (0);
@@ -153,6 +156,8 @@ shard_problems() {
     my $want = join " ", map { "$_/$parts" } 0 .. $parts - 1;
     print "the plants job runs the shards (@matrix), not the $parts parts of the split ($want)\n"
       if "@matrix" ne $want;
+    print "the Windows and macOS jobs run the plant parts (@other), not the $parts parts of the split ($want)\n"
+      if "@other" ne $want;
     if (!defined $limit) {
       print "the plants job has no timeout-minutes\n";
     } else {
@@ -221,7 +226,7 @@ for case in stop-commands event_name persist-credentials pull_request tags branc
     fail "the test goes red $what"
   fi
 done
-# 6. (step 6b's review, R17) the on: block in flow form on one line, with a
+# 10. (step 6b's review, R17) the on: block in flow form on one line, with a
 # quoted " #" before a pull_request trigger: the # is inside quotes, not a
 # comment, so the trigger is still read
 perl -0pe 's/^on:\n  push:\n    branches: \["\*\*"\]\n  workflow_dispatch:\n/on: {push: {branches: ["**", "skip #"]}, pull_request: {}, workflow_dispatch: {}}\n/m' "$ci" >"$sb/ci.yml"
@@ -232,7 +237,7 @@ elif ci_problems "$sb/ci.yml" | grep -q -F -- "a pull_request event starts a run
 else
   fail "the test goes red with a pull_request trigger after a quoted \" #\" in a one-line flow-form on:" "$(ci_problems "$sb/ci.yml")"
 fi
-# 7. a comment after a quoted value is still a comment: pull_request named
+# 11. a comment after a quoted value is still a comment: pull_request named
 # only there is no trigger
 perl -0pe 's/^on:\n  push:\n    branches: \["\*\*"\]\n  workflow_dispatch:\n/on: {push: {branches: ["**", "a#b"]}, workflow_dispatch: {}} # no pull_request\n/m' "$ci" >"$sb/ci.yml"
 if cmp -s "$ci" "$sb/ci.yml"; then
@@ -242,7 +247,7 @@ elif problems=$(ci_problems "$sb/ci.yml") && [ -z "$problems" ]; then
 else
   fail "a comment after quoted values in a flow-form on: is not read: pull_request named only there is no trigger" "$problems"
 fi
-# 8-11. (step 6b, R17) on_case NAME ON WANT: the on: block of ci.yml
+# 12-15. (step 6b, R17) on_case NAME ON WANT: the on: block of ci.yml
 # replaced by the text ON (perl replacement text) makes the check print a
 # problem holding WANT
 on_case() {
@@ -265,15 +270,16 @@ on_case "the test goes red with an escape in a double-quoted key in on: (\"pull_
   'on: {push: {branches: ["**"]}, "pull_reques\\x74": {}, workflow_dispatch: {}}\n' "a double-quoted value in on: holds an escape"
 drop_sandbox "$sb"
 
-# 12-14. (step 7.9) the plants job runs the parts of tests/plants/shards.txt,
-# each part's measured time within 70% of the job's limit; the check goes
-# red when the job drops a part, and when a part's time grows past 70%
+# 16-19. (step 7.9) the plants job, and the Windows and macOS jobs, run the
+# parts of tests/plants/shards.txt, each part's measured time within 70% of
+# the plants job's limit; the check goes red when either drops a part, and
+# when a part's time grows past 70%
 shards=$(repo_root)/tests/plants/shards.txt
 problems=$(shard_problems "$ci" "$shards")
 if [ -z "$problems" ]; then
-  pass "the plants job runs every part of tests/plants/shards.txt, each part's measured time within 70% of its limit"
+  pass "the plants job and the Windows and macOS jobs run every part of tests/plants/shards.txt, each part's measured time within 70% of its limit"
 else
-  fail "the plants job runs every part of tests/plants/shards.txt, each part's measured time within 70% of its limit" "$problems"
+  fail "the plants job and the Windows and macOS jobs run every part of tests/plants/shards.txt, each part's measured time within 70% of its limit" "$problems"
 fi
 sb=$(new_sandbox_dir) || abort_sandbox
 perl -pe 's/^(\s+shard: \[.*), "[0-9]+\/[0-9]+"\]$/$1]/' "$ci" >"$sb/ci.yml"
@@ -283,6 +289,14 @@ elif shard_problems "$sb/ci.yml" "$shards" | grep -q -F -- "the plants job runs 
   pass "the shard check goes red when the plants job drops a part"
 else
   fail "the shard check goes red when the plants job drops a part" "$(shard_problems "$sb/ci.yml" "$shards")"
+fi
+perl -pe 's/^(\s+part: \[.*), "plants [0-9]+\/[0-9]+"\]$/$1]/' "$ci" >"$sb/ci.yml"
+if cmp -s "$ci" "$sb/ci.yml"; then
+  fail "the dropped Windows and macOS part case did not apply, so the result would mean nothing"
+elif shard_problems "$sb/ci.yml" "$shards" | grep -q -F -- "the Windows and macOS jobs run the plant parts"; then
+  pass "the shard check goes red when the Windows and macOS jobs drop a part"
+else
+  fail "the shard check goes red when the Windows and macOS jobs drop a part" "$(shard_problems "$sb/ci.yml" "$shards")"
 fi
 perl -pe 's/^(0 \S+ )[0-9]+$/${1}99999/ if !$done && /^0 / && ($done = 1)' "$shards" >"$sb/shards.txt"
 if cmp -s "$shards" "$sb/shards.txt"; then

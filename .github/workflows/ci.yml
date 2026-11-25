@@ -25,10 +25,12 @@ concurrency:
 # starting with ::) in its output, so text from a file in the repo cannot
 # fake an annotation or hide later output.
 jobs:
+  # The repo checks and the tests: 19 minutes as a user who is not root
+  # (step 7.9), so 30 minutes keeps them within 70% of the limit.
   linux:
     name: Linux
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     env:
       REQUIRE_SHELLCHECK: "1"
     steps:
@@ -45,9 +47,11 @@ jobs:
           echo "::stop-commands::stop-$RANDOM$RANDOM$RANDOM"
           bash tests/run.sh tests
 
-  # The planted defects run beside the tests, in three parts (every third
-  # plant file), each plant with only the test cases that can show its
-  # stated reason (tests/lib.sh, TEST_ONLY; DECISIONS A70).
+  # The planted defects run beside the tests, in the six parts that
+  # tests/plants/shards.txt gives the plant files by measured time (each part
+  # within 70% of the 30-minute limit; tests/ci-config.test.sh checks this
+  # list against that file), each plant with only the test cases that can
+  # show its stated reason (tests/lib.sh, TEST_ONLY; DECISIONS A70).
   plants:
     name: Linux planted defects ${{ matrix.shard }}
     runs-on: ubuntu-latest
@@ -55,7 +59,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: ["0/3", "1/3", "2/3"]
+        shard: ["0/6", "1/6", "2/6", "3/6", "4/6", "5/6"]
     env:
       REQUIRE_SHELLCHECK: "1"
       SHARD: ${{ matrix.shard }}
@@ -97,7 +101,7 @@ jobs:
           METHOD_HARNESS_CLIENT="$RUNNER_TEMP/claude-tested/claude" METHOD_HARNESS_VERSION="$tested" bash tests/harness.test.sh
           METHOD_HARNESS_CLIENT="$RUNNER_TEMP/claude-tested/claude" bash tests/plants/harness.sh
 
-  # Split as on Linux: the tests (with the repo checks) and each half of the
+  # Split as on Linux: the tests (with the repo checks) and each part of the
   # plant files in a job of their own. Their times are not measured yet
   # (A27 defers these systems), so each has 60 minutes.
   other-systems:
@@ -109,7 +113,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest, macos-latest]
-        part: ["tests", "plants 0/3", "plants 1/3", "plants 2/3"]
+        part: ["tests", "plants 0/6", "plants 1/6", "plants 2/6", "plants 3/6", "plants 4/6", "plants 5/6"]
     env:
       PART: ${{ matrix.part }}
     defaults:

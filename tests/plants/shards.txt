@@ -1,0 +1,38 @@
+# The plant files' split into CI's parts (tests/run.sh plants K/N; ci.yml's
+# plants job runs parts 0/N to N-1/N). One line per plant file: its part K
+# (0-based), its name in tests/plants/, and the seconds it took run whole.
+# Every plant file is named exactly once; a shard run stops before running
+# anything otherwise. tests/ci-config.test.sh checks that the plants job runs
+# every part and that each part's seconds stay within 70% of the job's
+# timeout-minutes. A new or grown plant file is timed whole, as a user who is
+# not root, and given the part with room for it (or a new part, added to
+# ci.yml's two shard lists too). Measured on 25 November 2026 (step 7.9, on
+# f8d78d7) as a user who is not root, on a 4-core machine running up to
+# three files side by side; ci-config.sh and test-helpers.sh were timed again
+# after step 7.9 added their plants.
+0 dev-checks.sh 1154
+0 ci-config.sh 14
+0 live-write.sh 12
+0 harness.sh 0
+1 done-check.sh 1075
+1 examples.sh 41
+1 test-helpers.sh 44
+1 templates.sh 18
+2 setup.sh 709
+2 guard.sh 423
+3 protect.sh 606
+3 session-status.sh 544
+4 outside.sh 327
+4 status.sh 314
+4 gate-receipt.sh 275
+4 log.sh 195
+5 watch.sh 158
+5 git-shapes.sh 152
+5 report-check.sh 113
+5 review-packet.sh 108
+5 settings.sh 105
+5 sync.sh 74
+5 method-files.sh 65
+5 verdicts.sh 61
+5 budget.sh 56
+5 lint-prompts.sh 55
