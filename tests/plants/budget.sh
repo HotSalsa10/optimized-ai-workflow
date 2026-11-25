@@ -107,6 +107,73 @@ if expect_landed "the tester's description wrapped, 301 bytes joined" perl -0ne 
 fi
 drop_sandbox "$sb"
 
+# (step 6b.4, L24) a real description as a | block of its text, a blank
+# line and a second line, 301 bytes as YAML reads it (each line and the
+# blank one end with a line break); a counter that joins a block's lines
+# with spaces reads 299: red
+sb=$(make_sandbox) || abort_sandbox
+# shellcheck disable=SC2016 # perl code, expanded by perl
+perl -0pi -e 's/^description: ([^\n]*)\n/"description: |\n  $1\n\n  " . ("w" x (298 - length $1)) . "\n"/me' "$sb/$tester"
+# shellcheck disable=SC2016 # perl code, expanded by perl
+if expect_landed "the tester's description as a | block, 301 bytes as YAML reads it" perl -0ne 'exit !(/^description: \|\n  ([^\n]*)\n\n  (w+)\n/m && length("$1\n\n$2\n") == 301)' "$sb/$tester"; then
+  judge "budget red with a description as a | block, 301 bytes as YAML reads it (not 299, its lines joined by spaces)" "$sb" red "descriptions: a description over the budget of 300 bytes"
+fi
+drop_sandbox "$sb"
+
+# (step 6b.4's check) a real description as a plain value of its text, two
+# blank lines and a second line, 301 bytes as YAML reads it (one line
+# break for each blank line); a counter that joins the lines with a space
+# reads 300: red
+sb=$(make_sandbox) || abort_sandbox
+# shellcheck disable=SC2016 # perl code, expanded by perl
+perl -0pi -e 's/^description: ([^\n]*)\n/"description: $1\n\n\n  " . ("w" x (299 - length $1)) . "\n"/me' "$sb/$tester"
+# shellcheck disable=SC2016 # perl code, expanded by perl
+if expect_landed "the tester's description as a plain value with two blank lines inside, 301 bytes as YAML reads it" perl -0ne 'exit !(/^description: ([^\n]*)\n\n\n  (w+)\n/m && length("$1\n\n$2") == 301)' "$sb/$tester"; then
+  judge "budget red with a description as a plain value with two blank lines inside, 301 bytes as YAML reads it (not 300, its lines joined by a space)" "$sb" red "descriptions: a description over the budget of 300 bytes"
+fi
+drop_sandbox "$sb"
+
+# (step 6b's review, R16) a real description, 301 bytes as YAML reads it,
+# under a key in quotes, under a key with a space before its colon, as a |
+# block after an anchor with its second line 20 spaces deeper, and in
+# double quotes with \L escapes (3 bytes each as YAML reads them, 2 as
+# written): a counter that reads only a bare "description:" key reads 0, one
+# that misses the anchor joins the block's lines and reads 285 or so, and
+# one that counts escapes as written reads under 300: red
+# r16 NAME CODE CHECK: CODE (perl, on the tester's file) rewrites the
+# description, CHECK (perl, exit 0) says it landed; the budget test is red
+r16() {
+  sb=$(make_sandbox) || abort_sandbox
+  perl -0pi -e "$2" "$sb/$tester"
+  if expect_landed "the tester's description $1" perl -0ne "$3" "$sb/$tester"; then
+    judge "budget red with a description $1" "$sb" red "descriptions: a description over the budget of 300 bytes"
+  fi
+  drop_sandbox "$sb"
+}
+# shellcheck disable=SC2016 # perl code, expanded by perl
+r16 "under a key in double quotes, 301 bytes" 's/^description: ([^\n]*)\n/"\x22description\x22: $1" . ("w" x (301 - length $1)) . "\n"/me' 'exit !(/^"description": ([^\n]*)\n/m && length($1) == 301)'
+# shellcheck disable=SC2016 # perl code, expanded by perl
+r16 "under a key with a space before its colon, 301 bytes" 's/^description: ([^\n]*)\n/"description : $1" . ("w" x (301 - length $1)) . "\n"/me' 'exit !(/^description : ([^\n]*)\n/m && length($1) == 301)'
+# shellcheck disable=SC2016 # perl code, expanded by perl
+r16 "as a | block after an anchor, its second line 20 spaces deeper, 301 bytes as YAML reads it" 's/^description: ([^\n]*)\n/"description: &d |\n  $1\n" . (" " x 22) . ("w" x (279 - length $1)) . "\n"/me' 'exit !(/^description: &d \|\n  ([^\n]*)\n  ( {20}w+)\n/m && length("$1\n$2\n") == 301)'
+# shellcheck disable=SC2016 # perl code, expanded by perl
+r16 "in double quotes with \\L escapes, 301 bytes as YAML reads it" 's/^description: ([^\n]*)\n/my $n = 301 - length $1; "description: \x22$1" . ("w" x ($n % 3)) . ("\\L" x int($n \/ 3)) . "\x22\n"/me' 'exit !(/^description: "([^"\n\\]*)((?:\\L)+)"\n/m && length($1) + 3 * length($2) / 2 == 301 && length($1) + length($2) <= 298)'
+# (step 6b, R16, the extra round) the value starting on the line after the
+# key: a | header there after "description: &d", and a double-quoted value
+# with \L escapes there after a bare key; a counter that reads that line as
+# a plain value reads about 282 and 293: red
+# shellcheck disable=SC2016 # perl code, expanded by perl
+r16 "as a | block whose header is on the line after \"description: &d\", its second line 20 spaces deeper, 301 bytes as YAML reads it" 's/^description: ([^\n]*)\n/"description: &d\n  |\n  $1\n" . (" " x 22) . ("w" x (279 - length $1)) . "\n"/me' 'exit !(/^description: &d\n  \|\n  ([^\n]*)\n  ( {20}w+)\n/m && length("$1\n$2\n") == 301)'
+# shellcheck disable=SC2016 # perl code, expanded by perl
+r16 "in double quotes with \\L escapes on the line after a bare key, 301 bytes as YAML reads it" 's/^description: ([^\n]*)\n/my $n = 301 - length $1; "description:\n  \x22$1" . ("w" x ($n % 3)) . ("\\L" x int($n \/ 3)) . "\x22\n"/me' 'exit !(/^description:\n  "([^"\n\\]*)((?:\\L)+)"\n/m && length($1) + 3 * length($2) / 2 == 301 && length($1) + length($2) <= 298)'
+# a comment alone after the key, on its line or on a line of its own,
+# then the | header: a counter that reads the comment as the value reads
+# the block as plain text, about one byte short: red
+# shellcheck disable=SC2016 # perl code, expanded by perl
+r16 "as a | block after a comment on the key line, its second line 20 spaces deeper, 301 bytes as YAML reads it" 's/^description: ([^\n]*)\n/"description: # c\n  |\n  $1\n" . (" " x 22) . ("w" x (279 - length $1)) . "\n"/me' 'exit !(/^description: # c\n  \|\n  ([^\n]*)\n  ( {20}w+)\n/m && length("$1\n$2\n") == 301)'
+# shellcheck disable=SC2016 # perl code, expanded by perl
+r16 "as a | block after a comment on a line of its own, its second line 20 spaces deeper, 301 bytes as YAML reads it" 's/^description: ([^\n]*)\n/"description:\n  # c\n  |\n  $1\n" . (" " x 22) . ("w" x (279 - length $1)) . "\n"/me' 'exit !(/^description:\n  # c\n  \|\n  ([^\n]*)\n  ( {20}w+)\n/m && length("$1\n$2\n") == 301)'
+
 # the descriptions in all: exactly 3,000 bytes, then one byte over, in new
 # files of at most 300 bytes each
 for want in 3000 3001; do

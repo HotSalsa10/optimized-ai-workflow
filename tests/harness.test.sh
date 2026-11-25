@@ -93,8 +93,15 @@ if h_fake "$H_DIR/script.json"; then
   else
     fail "startup: the client's version '$version' is not at or above the floor $floor" "$(tail -3 "$H_DIR/err.txt")"
   fi
-  if [ -n "${METHOD_HARNESS_VERSION:-}" ]; then
-    if [ "$version" = "$METHOD_HARNESS_VERSION" ]; then pass "startup: the client is the version asked for ($METHOD_HARNESS_VERSION)"; else fail "startup: the client reports '$version', not the version asked for ($METHOD_HARNESS_VERSION)"; fi
+  # (step 6b's review, R20) the case is always counted: with no version
+  # asked for it says SKIPPED, so a run without METHOD_HARNESS_VERSION
+  # shows the same number of cases as CI's
+  if [ -z "${METHOD_HARNESS_VERSION:-}" ]; then
+    skip "startup: no version asked for (METHOD_HARNESS_VERSION is not set), so the client's version is not compared with one"
+  elif [ "$version" = "$METHOD_HARNESS_VERSION" ]; then
+    pass "startup: the client is the version asked for ($METHOD_HARNESS_VERSION)"
+  else
+    fail "startup: the client reports '$version', not the version asked for ($METHOD_HARNESS_VERSION)"
   fi
   tools=$(h_init tools)
   missing=""
@@ -840,7 +847,8 @@ fi
 # --- 19. the gates (step 6.2): the method's own gate files, laid out as
 # sync will, each called by the main session in one message in the
 # foreground, once in default mode and once in auto mode (h_real_gates,
-# h_real_holds) ---
+# h_real_holds); since step 6b.1 each reads the review packet first, and in
+# default mode one gate's calls meet the guard (N1) ---
 real_q() {
   if h_real_holds "$1"; then pass "$2"; else fail "$2" "$H_WHY"; fi
 }
@@ -849,6 +857,8 @@ if h_real_gates "$root" default; then
   real_q valid "real gates (default mode): each gate's receipt is VALID with its word, its real body compared with what the client sent (B10)"
   real_q record "real gates (default mode): each receipt took the fragment's model and effort xhigh from the gate's record"
   real_q tools "real gates (default mode): each gate is offered its tools, Read and Bash among them, and no Agent, Task, Skill or SendMessage"
+  real_q base "real gates (default mode): each gate reads the review packet first, and its VALID receipt records the packet's base, the merge base"
+  real_q refused "real gates (default mode, N1): inside a gate the guard still refuses a write to the project's settings (G6) and a push to main (G3); nothing changed, and the receipt stays VALID"
   h_safe real-gates-default
 else
   fail "real-gates-default: the case could not be made, or the fake did not answer; the client was not started"
@@ -857,9 +867,20 @@ if h_real_gates "$root" auto; then
   real_q handback "real gates (auto mode): with tools: set, each gate is still offered SubagentHandback"
   real_q valid "real gates (auto mode): each gate's handback gets a VALID receipt with its word"
   real_q tools "real gates (auto mode): each gate is offered no Agent, Task, Skill or SendMessage"
+  real_q base "real gates (auto mode): each gate reads the review packet first, and its VALID receipt records the packet's base, the merge base"
   h_safe real-gates-auto
 else
   fail "real-gates-auto: the case could not be made, or the fake did not answer; the client was not started"
+fi
+# Deep review (step 6b.3, F12, item 31): three runs of the reviewer in one
+# message, each with its own match string, each leaving its own VALID receipt
+if h_real_gates "$root" deep; then
+  real_q own "real gates (deep): three method-reviewer runs launched in one message each leave a VALID receipt of their own, three for the tree"
+  real_q base "real gates (deep): each of the three runs reads the review packet first, and its receipt records the merge base"
+  real_q record "real gates (deep): each of the three runs took the fragment's model and effort xhigh"
+  h_safe real-gates-deep
+else
+  fail "real-gates-deep: the case could not be made, or the fake did not answer; the client was not started"
 fi
 
 # --- 20. planning and design (step 6.4): the method's skills typed as the
@@ -902,6 +923,7 @@ if h_start "$root" default; then
   start_q effort "start: \${CLAUDE_EFFORT} in method-start is substituted with the session's effort (the fragment's effortLevel, which the main session's requests carry), and no \${...} reaches a request as written (F6)"
   start_q guard "start: the skill's Bash calls reach the guard: status.sh in a call of its own passes and runs; status.sh && git commit is refused (G6) and commits nothing"
   start_q active "start: with the start hook, its METHOD-ACTIVE line reaches the main session's first request"
+  start_q merged "start (6b.4): the skill's text naming its merged pull request read (gh pr list --state merged), which compares HEAD with the merged head (git merge-base --is-ancestor) and counts from the one merged last (mergedAt, --not <its headRefOid> origin/<main>), reaches the main session (the text only)"
   h_safe start-default
 else
   fail "start-default: the case could not be made, or the fake did not answer; the client was not started"
@@ -912,6 +934,17 @@ if h_start "$root" nohook; then
   h_safe start-nohook
 else
   fail "start-nohook: the case could not be made, or the fake did not answer; the client was not started"
+fi
+
+# --- 22. /method-finish (step 6b.4): the skill typed as the owner's
+# message (-p "/method-finish", F6), with the method's fragment and its start
+# hook; the main session only answers (h_start finish, h_start_holds) ---
+if h_start "$root" finish; then
+  start_q expands "finish: -p \"/method-finish\" sends method-finish's SKILL.md body, with no ARGUMENTS line; its '# rules:' line reaches no request; it is in init's slash_commands"
+  start_q steps "finish: method-finish's thirteen numbered steps reach the main session, and its text names run-checks, the packet, done-check --ready, report-check, the files log with --no-renames, the push and gh pr create"
+  h_safe finish
+else
+  fail "finish: the case could not be made, or the fake did not answer; the client was not started"
 fi
 
 echo "harness: ${H_RUNS:-0} client runs took ${H_TOTAL_SECS:-0} s"

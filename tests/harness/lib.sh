@@ -70,7 +70,7 @@
 # req-001 is h_fake's own alive probe.
 
 # settings a caller's environment must not carry into every case
-unset H_CWD H_PROMPT H_FEED H_TMPDIR H_TMP_ROOT H_FAKE_API H_SEND_MESSAGE H_FAKE_PID H_PORT H_RUNS H_TOTAL_SECS
+unset H_CWD H_PROMPT H_FEED H_TMPDIR H_TMP_ROOT H_FAKE_API H_SEND_MESSAGE H_FAKE_PID H_PORT H_RUNS H_TOTAL_SECS H_GATE_RUNS
 
 h_case() {
   H_DIR="$H_WORK/it's a case ü/$1"
@@ -523,19 +523,41 @@ h_words_holds() {
 # h_real_gates ROOT MODE (step 6.2): the method's own gate files, from the
 # repository at ROOT (a planted copy in tests/plants/harness.sh), laid out
 # as sync will (h_method, h_method_words: no stand-in), with the fragment as
-# the project's settings. The main session calls every gate verdicts.txt
-# names in one message, in the foreground (each told apart by its Agent
-# call's description, "harness gate <name>", and its conversation named
-# after it); each answers with the first word of its gate's kind and the
-# END-VERDICT line. MODE default: each answers as text, and the client's
-# debug log goes to $H_DIR/debug.log. MODE auto (the test-only allow hook
-# on Agent, as h_gates): each hands its report back. Sets H_GATES (one
-# "NAME<TAB>WORD" a gate) and H_MODEL (the fragment's model). Returns 1
-# when the case could not be made or the fake did not answer.
+# the project's settings. Since step 6b.1 the change the gates check is a
+# task branch: main is pushed to a bare origin ($H_DIR/origin.git), the
+# branch "task" adds one file, and its review packet is built from the merge
+# base (review-packet.sh --base origin/main) into
+# .method/local/packet-<tree>.txt. The main session calls every gate
+# verdicts.txt names in one message, in the foreground (each told apart by
+# its Agent call's description, "harness gate <name>", and its conversation
+# named after it); each first Reads the packet, then answers with the first
+# word of its gate's kind and the END-VERDICT line. MODE default: each
+# answers as text, and the client's debug log goes to $H_DIR/debug.log;
+# the first gate (H_N1) runs two Bash calls between (N1: the guard inside a
+# gate): a write to the project's settings and a push to main. MODE auto
+# (the test-only allow hook on Agent, as h_gates): each hands its report
+# back. MODE deep (step 6b.3, Deep review, F12): as default, with no N1,
+# and the main session's one message calls the reviewer (the first gate in
+# verdicts.txt) three times, the runs told apart by their own match strings
+# and descriptions (HARNESS-GATE-<gate>-<n>:, "harness gate <gate>-<n>",
+# conversation <gate>-<n>, n 1 to 3). Sets H_GATES (one "NAME<TAB>WORD" a
+# gate), H_GATE_RUNS (one "RUN<TAB>GATE<TAB>WORD" a run: RUN is the gate's name,
+# or <gate>-<n> in MODE deep), H_MODEL (the fragment's model), H_BASE (the
+# merge base), H_N1 and H_SETTINGS (the settings' cksum before the run).
+# Returns 1 when the case could not be made or the fake did not answer.
 h_real_gates() {
   local mode=$2
   H_TREE=""
+  H_BASE=""
+  H_N1=""
   H_GATES=$(cd "$1" && perl -e 'require "./method/scripts/method/lib/verdicts.pl"; my @r = Verdicts::rows(); print "$_->[0]\t", (Verdicts::words($_->[1], @r))[0], "\n" for Verdicts::gates(@r)') || return 1
+  # shellcheck disable=SC2016 # perl code, expanded by perl
+  if [ "$mode" = deep ]; then
+    H_GATE_RUNS=$(printf '%s\n' "$H_GATES" | sed -n 1p | perl -ne 'chomp; my ($g, $w) = split /\t/; print "$g-$_\t$g\t$w\n" for 1 .. 3')
+  else
+    H_GATE_RUNS=$(printf '%s\n' "$H_GATES" | perl -ne 'chomp; my ($g, $w) = split /\t/; print "$g\t$g\t$w\n"')
+  fi
+  [ -n "$H_GATE_RUNS" ] || return 1
   H_MODEL=$(perl -MJSON::PP -0ne 'print JSON::PP->new->decode($_)->{model}' "$1/method/settings.fragment.json") || return 1
   { h_case "real-gates-$mode" && h_method "$1"; } || return 1
   if [ "$mode" = auto ]; then
@@ -545,22 +567,38 @@ h_real_gates() {
       open $h, ">", $f or die; print $h JSON::PP->new->canonical->pretty->encode($d); close $h or die' "$H_PROJ/.claude/settings.json" || return 1
   fi
   h_method_words "$1" || return 1
+  git init -q --bare "$H_DIR/origin.git" || return 1
+  (
+    cd "$H_PROJ" || exit 1
+    rg_git() { HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git "$@"; }
+    rg_git remote add origin "$H_DIR/origin.git" && rg_git push -q origin main && rg_git switch -q -c task &&
+      printf 'the change\n' >change.txt && rg_git add change.txt && rg_git commit -q -m "the change"
+  ) || return 1
+  H_BASE=$(git -C "$H_DIR/origin.git" rev-parse refs/heads/main) || return 1
   H_TREE=$(HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git -C "$H_PROJ" rev-parse 'HEAD^{tree}') || return 1
-  printf '%s\n' "$H_GATES" | perl -MJSON::PP -e '
-    my ($mode, $t) = @ARGV;
+  mkdir -p "$H_PROJ/.method/local" &&
+    (cd "$H_PROJ" && HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 bash scripts/method/review-packet.sh --base origin/main >".method/local/packet-$H_TREE.txt" 2>/dev/null) || return 1
+  [ "$mode" != default ] || H_N1=$(printf '%s\n' "$H_GATES" | sed -n 1p | cut -f1)
+  H_SETTINGS=$(cksum <"$H_PROJ/.claude/settings.json")
+  printf '%s\n' "$H_GATE_RUNS" | perl -MJSON::PP -e '
+    my ($mode, $t, $packet, $n1, $write, $push) = @ARGV;
     my (@convs, @calls);
     while (my $l = <STDIN>) {
       chomp $l;
-      my ($g, $w) = split /\t/, $l;
+      my ($run, $g, $w) = split /\t/, $l;
       my $good = "$w\nSummary: the change is fine.\nEND-VERDICT $t";
-      my @turns = $mode eq "auto" ? ({tool => "SubagentHandback", input => {message => $good}}, map { {text => $good} } 1 .. 3) : ({text => $good});
-      push @convs, {name => $g, match => "HARNESS-GATE-\Q$g\E:", turns => \@turns};
-      push @calls, {type => "tool_use", name => "Agent", input => {description => "harness gate $g", prompt => "HARNESS-GATE-$g: check the change",
+      my $read = {tool => "Read", input => {file_path => $packet}};
+      my @n1 = $run eq $n1 ? ({tool => "Bash", input => {command => $write, description => "write the settings"}},
+        {tool => "Bash", input => {command => $push, description => "push to main"}}) : ();
+      my @turns = $mode eq "auto" ? ($read, {tool => "SubagentHandback", input => {message => $good}}, map { {text => $good} } 1 .. 3) : ($read, @n1, {text => $good});
+      push @convs, {name => $run, match => "HARNESS-GATE-\Q$run\E:", turns => \@turns};
+      push @calls, {type => "tool_use", name => "Agent", input => {description => "harness gate $run", prompt => "HARNESS-GATE-$run: check the change",
         subagent_type => $g, run_in_background => JSON::PP::false}};
     }
     unshift @convs, {name => "classifier", match => "(?:^<transcript>|<user_claude_md>)", turns => [{text => "<block>no</block>"}]} if $mode eq "auto";
     push @convs, {name => "main", match => "^go\$", turns => [{blocks => \@calls}, map { {text => "MAIN-DONE-$_"} } 1 .. 4]};
-    print JSON::PP->new->canonical->encode({convs => \@convs, fallback => {text => "FAKE-FALLBACK"}, usage => {input_tokens => 11, output_tokens => 7}})' "$mode" "$H_TREE" >"$H_DIR/real-gates.json" || return 1
+    print JSON::PP->new->canonical->encode({convs => \@convs, fallback => {text => "FAKE-FALLBACK"}, usage => {input_tokens => 11, output_tokens => 7}})' \
+    "$mode" "$H_TREE" "$H_PROJ/.method/local/packet-$H_TREE.txt" "$H_N1" "printf '{}\\n' > .claude/settings.json" "git push origin HEAD:main" >"$H_DIR/real-gates.json" || return 1
   h_fake "$H_DIR/real-gates.json" 80 || return 1
   if [ "$mode" = auto ]; then
     h_client 120 -- --permission-mode auto --debug-file "$H_DIR/debug.log"
@@ -569,9 +607,10 @@ h_real_gates() {
   fi
   h_stop
 }
-# h_real_holds QUESTION: 0 when QUESTION holds for every gate of the case
-# h_real_gates ran last; else 1, with H_WHY saying what was seen, gate by
-# gate. The questions:
+# h_real_holds QUESTION: 0 when QUESTION holds for every gate run of the
+# case h_real_gates ran last (one a gate, or MODE deep's three of the
+# reviewer); else 1, with H_WHY saying what was seen, run by run. The
+# questions:
 #   loads    each gate is in the init event's agents, and the client's
 #            debug log (not empty, or the case cannot tell) has no line
 #            naming the gate with "does not recognize or apply" (an unknown
@@ -585,15 +624,63 @@ h_real_gates() {
 #            them, and none of Agent, Task, Skill or SendMessage
 #   handback (MODE auto) each gate's first request offers SubagentHandback,
 #            though its tools: line does not list it
+#   base     (step 6b.1) each gate read the packet (the Read result reached
+#            its requests, so the case can tell), and its receipt records
+#            the packet's base, the merge base, as its only base
+#   refused  (N1; MODE default) the guard holds inside a gate: the first
+#            gate's write to the project's settings and its push to main
+#            were refused (its requests carry "guard G6:" and "guard G3:
+#            pushing to main is refused"), the settings and origin's main
+#            are unchanged, and its receipt is still VALID
+#   own      (step 6b.3; MODE deep, item 31) each run left a receipt of its
+#            own: each run's receipt is found by its Agent call (one
+#            receipt for its agent) and is VALID with its word, and the git
+#            folder holds exactly as many VALID receipts of the gate for the
+#            tree as there were runs
 h_real_holds() {
-  local g w got line t
+  local r g w got line t own_pl
   H_WHY=""
-  [ -n "$H_GATES" ] || { H_WHY="no gate read from verdicts.txt, so the case cannot tell"; return 1; }
+  if [ -z "$H_GATES" ] || [ -z "${H_GATE_RUNS:-}" ]; then
+    H_WHY="no gate read from verdicts.txt, so the case cannot tell"
+    return 1
+  fi
+  if [ "$1" = own ]; then
+    while IFS="$(printf '\t')" read -r r g w; do
+      got=$(h_receipt "$r")
+      [ "$got" = "VALID why=none open=$w stops=1 blocked=0 denied=0" ] || H_WHY="$H_WHY $r's receipt: $got;"
+    done <<GATE_RUNS
+$H_GATE_RUNS
+GATE_RUNS
+    g=$(printf '%s\n' "$H_GATE_RUNS" | sed -n 1p | cut -f2)
+    # (the VALID receipts of the gate for the tree in the git folder)
+    # shellcheck disable=SC2016 # perl code, expanded by perl
+    own_pl='my ($dir, $g, $t) = @ARGV; my $n = 0; opendir my $d, $dir or die "no git folder\n";
+      for my $f (grep { /\Amethod-receipt-[0-9a-f]+\.json\z/ } readdir $d) {
+        open my $h, "<", "$dir/$f" or next; my $r = eval { local $/; JSON::PP->new->decode(<$h>) } or next;
+        $n++ if ($r->{gate} // "") eq $g && ($r->{tree} // "") eq $t && ($r->{state} // "") eq "VALID" }
+      print "$n\n"'
+    got=$(perl -MJSON::PP -e "$own_pl" "$H_PROJ/.git" "$g" "$H_TREE" 2>&1)
+    [ "$got" = "$(printf '%s\n' "$H_GATE_RUNS" | grep -c .)" ] || H_WHY="$H_WHY the git folder holds $got VALID receipts of $g for the tree;"
+    [ -z "$H_WHY" ]
+    return
+  fi
+  if [ "$1" = refused ]; then
+    [ -n "$H_N1" ] || { H_WHY="no gate ran the two calls (MODE auto?), so the case cannot tell"; return 1; }
+    h_req_in "$H_N1" "guard G6:" || H_WHY="$H_WHY $H_N1's requests do not carry the guard's G6 refusal;"
+    h_req_in "$H_N1" "guard G3: pushing to main is refused" || H_WHY="$H_WHY $H_N1's requests do not carry the guard's G3 refusal;"
+    [ "$(cksum <"$H_PROJ/.claude/settings.json")" = "$H_SETTINGS" ] || H_WHY="$H_WHY the project's settings changed;"
+    got=$(git -C "$H_DIR/origin.git" rev-parse refs/heads/main 2>/dev/null)
+    [ "$got" = "$H_BASE" ] || H_WHY="$H_WHY origin's main moved to $got;"
+    got=$(h_receipt "$H_N1")
+    case $got in "VALID why=none "*) ;; *) H_WHY="$H_WHY $H_N1's receipt: $got;" ;; esac
+    [ -z "$H_WHY" ]
+    return
+  fi
   if [ "$1" = loads ] && [ ! -s "$H_DIR/debug.log" ]; then
     H_WHY="the client wrote no debug log, so the case cannot tell"
     return 1
   fi
-  while IFS="$(printf '\t')" read -r g w; do
+  while IFS="$(printf '\t')" read -r r g w; do
     case $1 in
       loads)
         h_init agents | grep -q -x -F -- "$g" || H_WHY="$H_WHY $g is not in the init event's agents;"
@@ -601,31 +688,36 @@ h_real_holds() {
         [ -z "$line" ] || H_WHY="$H_WHY the debug log names $g: $line;"
         ;;
       valid)
-        got=$(h_receipt "$g")
-        [ "$got" = "VALID why=none open=$w stops=1 blocked=0 denied=0" ] || H_WHY="$H_WHY $g's receipt: $got;"
+        got=$(h_receipt "$r")
+        [ "$got" = "VALID why=none open=$w stops=1 blocked=0 denied=0" ] || H_WHY="$H_WHY $r's receipt: $got;"
         ;;
       record)
-        got=$(h_used "$g")
-        case $got in "models=$H_MODEL efforts=xhigh "*) ;; *) H_WHY="$H_WHY $g's receipt holds $got;" ;; esac
+        got=$(h_used "$r")
+        case $got in "models=$H_MODEL efforts=xhigh "*) ;; *) H_WHY="$H_WHY $r's receipt holds $got;" ;; esac
         ;;
       tools)
-        got=$(perl "$HARNESS/read.pl" tools "$g" "$H_DIR/fake")
-        case ",$got," in ,none, | ,,) H_WHY="$H_WHY $g's first request offers no tools ($got);" ;; esac
+        got=$(perl "$HARNESS/read.pl" tools "$r" "$H_DIR/fake")
+        case ",$got," in ,none, | ,,) H_WHY="$H_WHY $r's first request offers no tools ($got);" ;; esac
         for t in Agent Task Skill SendMessage; do
-          case ",$got," in *",$t,"*) H_WHY="$H_WHY $g's first request offers $t, a delegation tool: $got;" ;; esac
+          case ",$got," in *",$t,"*) H_WHY="$H_WHY $r's first request offers $t, a delegation tool: $got;" ;; esac
         done
         for t in Read Bash; do
-          case ",$got," in *",$t,"*) ;; *) H_WHY="$H_WHY $g's first request lacks $t: $got;" ;; esac
+          case ",$got," in *",$t,"*) ;; *) H_WHY="$H_WHY $r's first request lacks $t: $got;" ;; esac
         done
         ;;
       handback)
-        got=$(perl "$HARNESS/read.pl" tools "$g" "$H_DIR/fake")
-        case ",$got," in *,SubagentHandback,*) ;; *) H_WHY="$H_WHY $g's first request does not offer SubagentHandback: $got;" ;; esac
+        got=$(perl "$HARNESS/read.pl" tools "$r" "$H_DIR/fake")
+        case ",$got," in *,SubagentHandback,*) ;; *) H_WHY="$H_WHY $r's first request does not offer SubagentHandback: $got;" ;; esac
+        ;;
+      base)
+        h_req_in "$r" "Merge base: $H_BASE" || H_WHY="$H_WHY the packet did not reach $r's requests;"
+        got=$(perl "$HARNESS/read.pl" bases "harness gate $r" "$H_DIR/home" "$H_PROJ/.git")
+        [ "$got" = "$H_BASE" ] || H_WHY="$H_WHY $r's receipt records the bases $got;"
         ;;
       *) H_WHY="no such real-gates question: $1" ;;
     esac
   done <<EOF
-$H_GATES
+$H_GATE_RUNS
 EOF
   [ -z "$H_WHY" ]
 }
@@ -784,11 +876,15 @@ h_design_holds() {
 # commit (HARNESS-CHAINED), then ends; the client's debug log goes to
 # $H_DIR/debug.log. MODE nohook: the fragment without its SessionStart
 # hook, so no METHOD-ACTIVE line comes; the main session only answers.
-# Sets H_EFFORT (the fragment's effortLevel) and H_ACTIVE (the first line
-# session-status.sh prints, up to its version). Returns 1 when the case
-# could not be made or the fake did not answer.
+# MODE finish (step 6b.4): /method-finish typed in place of /method-start,
+# with the start hook; the main session only answers.
+# Sets H_SKILL (the skill typed), H_EFFORT (the fragment's effortLevel) and
+# H_ACTIVE (the first line session-status.sh prints, up to its version).
+# Returns 1 when the case could not be made or the fake did not answer.
 h_start() {
   local mode=$2
+  H_SKILL=method-start
+  [ "$mode" = finish ] && H_SKILL=method-finish
   H_EFFORT=$(perl -MJSON::PP -0ne 'print JSON::PP->new->decode($_)->{effortLevel}' "$1/method/settings.fragment.json") || return 1
   H_ACTIVE="METHOD-ACTIVE v"
   { h_case "start-$mode" && h_method "$1"; } || return 1
@@ -799,24 +895,24 @@ h_start() {
   fi
   h_method_words "$1" || return 1
   perl -MJSON::PP -e '
-    my ($mode) = @ARGV;
+    my ($mode, $skill) = @ARGV;
     my @turns = map { {text => "MAIN-DONE-$_"} } 1 .. 3;
     unshift @turns, {tool => "Bash", input => {command => "bash scripts/method/status.sh", description => "HARNESS status alone"}},
       {tool => "Bash", input => {command => "bash scripts/method/status.sh && git commit -q --allow-empty -m HARNESS-CHAINED", description => "HARNESS status chained"}}
       if $mode eq "default";
-    print JSON::PP->new->canonical->encode({convs => [{name => "main", match => "^<command-name>/method-start</command-name>\$", turns => \@turns}],
-      fallback => {text => "FAKE-FALLBACK"}, usage => {input_tokens => 11, output_tokens => 7}})' "$mode" >"$H_DIR/start.json" || return 1
+    print JSON::PP->new->canonical->encode({convs => [{name => "main", match => "^<command-name>/\Q$skill\E</command-name>\$", turns => \@turns}],
+      fallback => {text => "FAKE-FALLBACK"}, usage => {input_tokens => 11, output_tokens => 7}})' "$mode" "$H_SKILL" >"$H_DIR/start.json" || return 1
   h_fake "$H_DIR/start.json" || return 1
-  H_PROMPT="/method-start" h_client 90 -- --permission-mode default --allowedTools Bash --debug-file "$H_DIR/debug.log"
+  H_PROMPT="/$H_SKILL" h_client 90 -- --permission-mode default --allowedTools Bash --debug-file "$H_DIR/debug.log"
   h_stop
 }
 # h_start_holds QUESTION: 0 when QUESTION holds for the case h_start ran
 # last; else 1, with H_WHY saying what was seen. The questions:
-#   expands  method-start's body (its SKILL.md after the frontmatter, each
-#            ${CLAUDE_EFFORT} read as the fragment's effortLevel) reached the
-#            main conversation's first request, with no ARGUMENTS line (none
-#            was typed); its "# rules:" line reached no request; and init's
-#            slash_commands lists method-start
+#   expands  the typed skill's body (its SKILL.md after the frontmatter,
+#            each ${CLAUDE_EFFORT} read as the fragment's effortLevel)
+#            reached the main conversation's first request, with no
+#            ARGUMENTS line (none was typed); its "# rules:" line reached no
+#            request; and init's slash_commands lists the skill
 #   effort   the SKILL.md holds ${CLAUDE_EFFORT} (or the case cannot tell);
 #            no ${...} written in it reached any request as written; the
 #            body that reached the main conversation holds the effort where
@@ -837,21 +933,70 @@ h_start() {
 #            SKILL.md that names METHOD-ACTIVE (at least one, or the skill
 #            does not name it) reached the main conversation's requests:
 #            the text only; whether Claude acts on it is convention
+#   merged   (MODE default, step 6b.4) every line of method-start's SKILL.md
+#            that names `gh pr list --state merged` (at least one, or the
+#            skill does not name the read) reached the main conversation's
+#            requests, and one of them compares HEAD with the merged pull
+#            request's head (headRefOid, `git merge-base --is-ancestor
+#            HEAD`), so work added after the merge is not read as merged,
+#            and takes the one merged last (mergedAt) and counts what is
+#            in neither it nor main (`--not <its headRefOid>
+#            origin/<main>`; step 6b, R5): the text only, as for named
+#   steps    (MODE finish, step 6b.4) method-finish's SKILL.md has its
+#            thirteen numbered steps (lines "N. **...**") and names the
+#            commands they run (H_FINISH_NAMES: run-checks, the packet,
+#            done-check --ready, report-check, the files log with
+#            --no-renames (step 6b, R15), the push, gh pr create);
+#            each numbered step's line reached the main conversation's
+#            requests (expands shows the whole body did)
+H_FINISH_NAMES='scripts/method/run-checks.sh
+scripts/method/review-packet.sh
+scripts/method/done-check.sh --ready
+scripts/method/report-check.sh
+git diff --name-only --no-renames origin/<main>...HEAD
+git push origin HEAD
+gh pr create'
 h_start_holds() {
   local f got v line n
   H_WHY=""
-  f="$H_PROJ/.claude/skills/method-start/SKILL.md"
+  f="$H_PROJ/.claude/skills/${H_SKILL:-method-start}/SKILL.md"
   case $1 in
     expands)
       got=$(perl "$HARNESS/read.pl" skill main "$f" "" "$H_DIR/fake" "$H_EFFORT")
-      [ "$got" = same ] || H_WHY="$H_WHY /method-start's body in main's first request: $got;"
+      [ "$got" = same ] || H_WHY="$H_WHY /$H_SKILL's body in main's first request: $got;"
       line=$(sed -n 's/^# rules: //p' "$f")
       if [ -z "$line" ]; then
-        H_WHY="$H_WHY method-start's SKILL.md has no '# rules:' line, so the case cannot tell;"
+        H_WHY="$H_WHY $H_SKILL's SKILL.md has no '# rules:' line, so the case cannot tell;"
       else
-        ! h_req_has "# rules: $line" || H_WHY="$H_WHY method-start's '# rules:' line reached a request;"
+        ! h_req_has "# rules: $line" || H_WHY="$H_WHY $H_SKILL's '# rules:' line reached a request;"
       fi
-      h_init slash_commands | grep -q -x -F method-start || H_WHY="$H_WHY method-start is not in init's slash_commands;"
+      h_init slash_commands | grep -q -x -F "$H_SKILL" || H_WHY="$H_WHY $H_SKILL is not in init's slash_commands;"
+      ;;
+    merged)
+      [ "$(LC_ALL=C grep -c -F -e '--state merged' "$f")" -gt 0 ] || H_WHY="$H_WHY method-start's SKILL.md has no line naming gh pr list --state merged;"
+      LC_ALL=C grep -F -e '--state merged' "$f" | LC_ALL=C grep -F -e headRefOid | LC_ALL=C grep -q -F -e 'git merge-base --is-ancestor HEAD' ||
+        H_WHY="$H_WHY method-start's merged read does not compare HEAD with the merged head (headRefOid, git merge-base --is-ancestor HEAD);"
+      LC_ALL=C grep -F -e '--state merged' "$f" | LC_ALL=C grep -F -e "merged last (its \`mergedAt\`)" | LC_ALL=C grep -q -F -e '--not <its headRefOid> origin/<main>' ||
+        H_WHY="$H_WHY method-start's merged read does not count from the one merged last (mergedAt, --not <its headRefOid> origin/<main>);"
+      while IFS= read -r line; do
+        [ -z "$line" ] || perl "$HARNESS/read.pl" req main "$line" "$H_DIR/fake" || H_WHY="$H_WHY the skill's line naming the merged read did not reach main: $line;"
+      done <<EOF
+$(LC_ALL=C grep -F -e '--state merged' "$f")
+EOF
+      ;;
+    steps)
+      n=$(LC_ALL=C grep -c '^[0-9][0-9]*\. \*\*' "$f")
+      [ "$n" = 13 ] || H_WHY="$H_WHY method-finish's SKILL.md has $n numbered steps, not 13;"
+      while IFS= read -r v; do
+        [ -z "$v" ] || LC_ALL=C grep -q -F -e "$v" "$f" || H_WHY="$H_WHY method-finish's SKILL.md names no $v;"
+      done <<EOF
+$H_FINISH_NAMES
+EOF
+      while IFS= read -r line; do
+        [ -z "$line" ] || perl "$HARNESS/read.pl" req main "$line" "$H_DIR/fake" || H_WHY="$H_WHY a step's line did not reach main: $(printf '%s' "$line" | cut -c1-60);"
+      done <<EOF
+$(LC_ALL=C grep '^[0-9][0-9]*\. \*\*' "$f")
+EOF
       ;;
     effort)
       # shellcheck disable=SC2016 # the variable as written in the skill, not expanded here

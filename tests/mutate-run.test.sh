@@ -154,7 +154,14 @@ fp=$(new_project "$strong") || abort_sandbox
 fw="$fp/w"
 printf 'p=1\nq=1\nr=1\n' >"$fw/src/d.sh"
 check "$fw" 'if git diff HEAD -- src | grep -q "^+[a-z]"; then sleep 26; exit 1; fi'
-(cd "$fw" && exec env CI= perl -e 'alarm 300; exec @ARGV' bash "$mutate" --minutes 3) >"$work/fit.out" 2>&1 &
+# The run writes its own exit code to fit.code: it ends minutes before it
+# is judged, and bash forgets a finished background job's code once a later
+# child of the shell gets its pid (pids wrap at 32768 on some systems, sooner
+# with other runs beside this one), when "wait PID" says "not a child".
+(
+  if cd "$fw"; then env CI= perl -e 'alarm 300; exec @ARGV' bash "$mutate" --minutes 3 >"$work/fit.out" 2>&1; else false; fi
+  echo "$?" >"$work/fit.code.tmp" && mv "$work/fit.code.tmp" "$work/fit.code"
+) &
 fit_pid=$!
 # when SLOW is set and src/a.sh holds its mutant (-gt), the check marks it and runs
 # a heartbeat that ignores TERM (MODE ignore) or dies on it, for 60 s at most
@@ -1539,8 +1546,12 @@ clean "and the files are the commit" "$cjw"
 
 # --- the fit started at the top (a mutant starts only when it and run C
 # still fit --minutes), judged now ---
-wait "$fit_pid"
-code=$?
+if wait_for "$work/fit.code" 300; then
+  code=$(cat "$work/fit.code")
+else
+  fail "setup: the fit run (pid $fit_pid, started at the top) wrote its exit code" "no $work/fit.code after 300 s"
+  code=-1
+fi
 out=$(cat "$work/fit.out")
 expect "a mutant starts only when it and run C still fit --minutes: not all 6 ran (exit 3)" 3 "mutate-changed: SKIPPED - time-reached: "
 # (4 run; 3 where each round takes 4 s or more longer; one round's room

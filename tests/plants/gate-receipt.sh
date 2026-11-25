@@ -130,7 +130,7 @@ exit 0
 ---
 fi
 exit "$code"
-=== the store taken through its link | method/scripts/method/lib/receipt.pl | with .git a link, the receipt is written where it points
+=== the store taken through its link | method/scripts/method/lib/receipt-read.pl | with .git a link, the receipt is written where it points
   return defined $real && -d $real ? $real : undef;
 ---
   return -d $c && !-l $c ? $c : undef;
@@ -343,6 +343,16 @@ $ev{hb_sha} eq ($r->{handback}{sha} // '')
   my $model;
 === 5b.2 models, efforts and tokens not kept | method/scripts/method/lib/receipt.pl | the receipt keeps the models, efforts and tokens
   $r->{tokens} = $ev{tokens};
+---
+
+=== 6b.1 the merge base taken over the last reviewed version | method/scripts/method/lib/receipt.pl | a packet since the last reviewed version records that version as its base
+      push @p, [$seen // 'none', $last // $mb];
+      $open = undef;
+---
+      push @p, [$seen // 'none', $mb // $last];
+      $open = undef;
+=== 6b.1 the base not recorded | method/scripts/method/lib/receipt.pl | a packet from the merge base records the merge base as its base
+  $r->{bases} = $ev{bases};
 ---
 
 PLANTS-END

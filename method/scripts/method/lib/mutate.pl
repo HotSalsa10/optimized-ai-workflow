@@ -135,12 +135,6 @@ sub excluded {
   return undef;
 }
 
-# under PATH LIST: PATH is one of LIST's paths or lies under one ("." is all)
-sub under {
-  my ($p, $list) = @_;
-  return grep { $_ eq '.' || $p eq $_ || index($p, "$_/") == 0 } @$list;
-}
-
 # method_folder TOP: the folder mutate-changed.sh runs from, relative to TOP,
 # or undef when it is outside TOP (a method installed elsewhere). Found by
 # walking up until a folder is TOP by device and inode, as Git::top does, so
@@ -324,7 +318,7 @@ sub plan {
   my @cand;
   for my $f (Tree::changed($base, $fp->{head})) {
     next if $f->{st} eq 'D';
-    next unless under($f->{path}, $conf->{MUTATE_PATHS});
+    next unless Conf::under($f->{path}, $conf->{MUTATE_PATHS});
     if (excluded($f->{path}, $method)) {
       if ($folds || excluded($f->{path}, $method, 1)) {
         $skip{"left out (the method's or git's own files)"}++;
@@ -399,7 +393,7 @@ sub plan {
   splice @order, $max if @order > $max;
   # a MUTATE_PATHS entry that names no tracked file is likely a typo
   my %all = %{ Tree::all_files($fp->{head}) };
-  my @none = grep { my $e = $_; !grep { under($_, [$e]) } keys %all } @{ $conf->{MUTATE_PATHS} };
+  my @none = grep { my $e = $_; !grep { Conf::under($_, [$e]) } keys %all } @{ $conf->{MUTATE_PATHS} };
   return { mutants => \@order, possible => $possible || 0, counts => \%c, skipped => \%skip, ref => $ref,
     base => $base, none => \@none, fp => $fp, guarded_at => \@guarded_at, skipped_files => \@skipped_files };
 }

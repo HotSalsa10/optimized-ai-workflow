@@ -14,6 +14,10 @@
 # the client's agent-<id>.meta.json under HOME/.claude/projects, the
 # receipt by that id among the method-receipt-*.json files in the git
 # folder GIT. Prints "none" and exits 1 when either is missing or not one.
+# read.pl bases DESC HOME GIT (step 6b.1): the same receipt's bases (the
+# review packets' bases its gate read), joined by commas, "none" for none,
+# "absent" when the receipt has no such field; or "none" and exit 1 as
+# above.
 # read.pl used DESC HOME GIT: the same receipt's evidence from the agent's
 # record (step 5b.2), as "models=M efforts=E input=N output=N
 # cache_creation=N cache_read=N" (M and E joined by commas, "none" for
@@ -116,6 +120,14 @@ if (($what // '') eq 'receipt' && @ARGV == 4) {
   binmode STDOUT, ':utf8';
   printf "%s why=%s open=%s stops=%s blocked=%s denied=%s\n", $r->{state} // 'none', @why ? join(',', @why) : 'none',
     $r->{open} // 'none', map { $r->{$_} // 'none' } qw(stops blocked denied);
+  exit 0;
+}
+if (($what // '') eq 'bases' && @ARGV == 4) {
+  my $r = receipt_of(@ARGV[1 .. 3]);
+  if (!$r) { print "none\n"; exit 1 }
+  if (ref $r->{bases} ne 'ARRAY') { print "absent\n"; exit 0 }
+  my @b = grep { defined && !ref } @{ $r->{bases} };
+  print @b ? join(',', @b) : 'none', "\n";
   exit 0;
 }
 if (($what // '') eq 'hooks' && @ARGV == 5) {
@@ -269,7 +281,7 @@ if (($what // '') eq 'skill' && (@ARGV == 5 || @ARGV == 6)) {
   print "same\n";
   exit 0;
 }
-die "usage: read.pl init FIELD FILE | read.pl req CONV TEXT DIR | read.pl first CONV TEXT DIR | read.pl rules CONV SUFFIX FILE DIR | read.pl skill CONV FILE ARGS DIR [EFFORT] | read.pl effort CONV DIR | read.pl model CONV DIR | read.pl tools CONV DIR | read.pl receipt DESC HOME GIT | read.pl used DESC HOME GIT | read.pl hooks DESC TEXT HOME LOG\n" unless defined $file && $what eq 'init';
+die "usage: read.pl init FIELD FILE | read.pl req CONV TEXT DIR | read.pl first CONV TEXT DIR | read.pl rules CONV SUFFIX FILE DIR | read.pl skill CONV FILE ARGS DIR [EFFORT] | read.pl effort CONV DIR | read.pl model CONV DIR | read.pl tools CONV DIR | read.pl receipt DESC HOME GIT | read.pl bases DESC HOME GIT | read.pl used DESC HOME GIT | read.pl hooks DESC TEXT HOME LOG\n" unless defined $file && $what eq 'init';
 open my $f, '<', $file or exit 1;
 while (my $l = <$f>) {
   my $o = eval { JSON::PP->new->utf8->decode($l) } or next;

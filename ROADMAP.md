@@ -16,7 +16,7 @@ Steps, each reviewed in a fresh context and committed with a verdict trailer:
 5b. gate-receipt, the third hook, split from step 5 after its plan review (A54).
 6. Method rules, agents (the five checking agents and the architect) and skills (`/method-start`, `/method-plan`, `/method-design`), with checks on their text and size (docs/plans/step6.md; `/setup` moved to step 7, DECISIONS A73).
 6b. A computed "Ready to merge": done-check reads the gates' receipts and the task's plan, a report check, and `/method-finish`, split from step 6 (docs/plans/step6.md S1).
-7. Project templates, setup, sync, the money, ERPNext and documents packs, three example projects.
+7. Project templates, setup, sync, the pack format and a way to make a project's own pack (no ready-made field packs, DECISIONS A77), three example projects of different kinds.
 8. Installer and uninstall.
 9. Project CI templates, a live test in a fresh cloud session, README v1.
 
@@ -32,7 +32,7 @@ Blocker: an API key from the owner's Max plan credits, scoped to the test runs (
 
 ## Track 3: Release 3, moving the owner's projects over
 
-Migration prompt; `/setup` for the owner; one ERPNext project first, then the second; every rule from the old AGENTS.md mapped, none dropped silently.
+Migration prompt; `/setup` for the owner; one ERPNext project first, then the second; their field rules become those projects' own packs (A77); every rule from the old AGENTS.md mapped, none dropped silently.
 
 Exit: both projects run on the method with 0 rules dropped without a recorded decision.
 Before the import: the secret scan's known credential misses are closed and a second scanner runs (TESTS.md Known limits).
@@ -40,7 +40,7 @@ Blocker: cleaned copies of the owner's status.sh, review packet, verdict file, p
 
 ## Track 4: later
 
-`/research <link>`, `/research-update`, `/method-explain` (M120, moved from step 6, DECISIONS A73), the model-release checklist and rule pruning; more field packs when a real project needs one.
+`/lesson`, with its bar for what becomes a rule and its pruning (not built in step 6 or 6b, DECISIONS A74; until then a lesson is an ordinary reviewed change to the records), `/research <link>`, `/research-update`, `/method-explain` (M120, moved from step 6, DECISIONS A73), the model-release checklist and rule pruning; more field packs when a real project needs one.
 
 Exit: the commands exist and one research run has produced a reviewed change.
 Blocker: Track 1.

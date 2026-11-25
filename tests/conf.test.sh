@@ -160,6 +160,75 @@ esac
 rm -f "$work/.claude"
 mv "$work/real-claude" "$work/.claude"
 
+# 2b. HIGH_RISK_PATHS (step 6b.3): a list in PRODUCT_PATHS' syntax, read
+# by done-check from main's tip and from the branch; the problems are
+# tagged by the key their line sets (none for a line that cannot be tied to
+# a key), so done-check can refuse a broken high-risk list instead of
+# reading it shorter
+conf_is "HIGH_RISK_PATHS is a list in PRODUCT_PATHS' syntax, the whole repo too" 'HIGH_RISK_PATHS=src/pay\nHIGH_RISK_PATHS=Client Letters/\nHIGH_RISK_PATHS=.\n' 'V HIGH_RISK_PATHS=src/pay
+V HIGH_RISK_PATHS=Client Letters
+V HIGH_RISK_PATHS=.'
+conf_bad "HIGH_RISK_PATHS refuses a path breaking the path rules" 'HIGH_RISK_PATHS=zq/../x\n' 1 "HIGH_RISK_PATHS: a relative path"
+# tags_of CONTENT: the problems of a file holding CONTENT (printf format),
+# each "TAG PROBLEM" (TAG the key, or "-" for none), into $got
+tags_of() {
+  # shellcheck disable=SC2059 # the content is a printf format on purpose
+  printf "$1" >"$cfile"
+  # shellcheck disable=SC2016 # perl code: perl expands it
+  got=$(perl -e 'require $ARGV[0]; my (undef, $p, $t) = Conf::read($ARGV[1]); print defined $t->[$_] ? $t->[$_] : "-", " $p->[$_]\n" for 0 .. $#$p' "$conf_pl" "$work" 2>&1)
+}
+# tag_is NAME CONTENT WANTED: the problems of a file holding CONTENT read,
+# with their tags, as WANTED
+tag_is() {
+  tags_of "$2"
+  if [ "$got" = "$3" ]; then pass "$1"; else fail "$1" "got:
+$got
+wanted:
+$3"; fi
+}
+tag_is "a bad HIGH_RISK_PATHS value is a problem tagged HIGH_RISK_PATHS" 'HIGH_RISK_PATHS=src\nHIGH_RISK_PATHS=../x\n' \
+  "HIGH_RISK_PATHS .claude/method.conf line 2: HIGH_RISK_PATHS: a relative path with no ., .. or empty part, no leading : or -, and none of * ? [ \\"
+tag_is "an empty HIGH_RISK_PATHS value is a problem tagged HIGH_RISK_PATHS" 'HIGH_RISK_PATHS=\n' 'HIGH_RISK_PATHS .claude/method.conf line 1: HIGH_RISK_PATHS has no value'
+tag_is "a misspelt key (HIGH_RISK_PATH=src) is a problem with no tag" 'HIGH_RISK_PATH=src\n' \
+  '- .claude/method.conf line 1: unknown key HIGH_RISK_PATH (a typo, or a key from a newer method version)'
+tag_is "a spaced = (HIGH_RISK_PATHS = src) is a problem with no tag" 'HIGH_RISK_PATHS = src\n' '- .claude/method.conf line 1: is not KEY=VALUE'
+tag_is "a control character is a problem with no tag" 'HIGH_RISK_PATHS=src\001\n' '- .claude/method.conf line 1: holds a control character'
+tag_is "a problem of another key is tagged with that key" 'PRODUCT_PATHS=src\nMUTATION_CHECKS=Unit Tests\nLOCAL_ONLY=elsewhere/x\n' \
+  'MUTATION_CHECKS .claude/method.conf line 2: MUTATION_CHECKS: a check id from checks/*.tsv (lower-case letters, digits and -, starting with a letter)
+LOCAL_ONLY .claude/method.conf line 3: LOCAL_ONLY: a path must lie under a PRODUCT_PATHS entry'
+tag_is "a single-value key given twice is tagged with that key" 'VERDICTS_FROM=0123456789abcdef0123456789abcdef01234567\nVERDICTS_FROM=1123456789abcdef0123456789abcdef01234567\n' \
+  'VERDICTS_FROM .claude/method.conf line 2: VERDICTS_FROM is given twice'
+rm -f "$cfile"
+mkdir "$cfile"
+tags_of ''
+rmdir "$cfile"
+if [ "$got" = "- .claude/method.conf: not a regular file" ]; then pass "a method.conf that is not a regular file is a problem with no tag"; else fail "a method.conf that is not a regular file is a problem with no tag" "$got"; fi
+# shellcheck disable=SC2016 # perl code: perl expands it
+got=$(perl -e 'require $ARGV[0]; my (undef, $p, $t) = Conf::read_text("HIGH_RISK_PATH=src\nHIGH_RISK_PATHS=a b \n", "X"); print defined $t->[$_] ? $t->[$_] : "-", " $p->[$_]\n" for 0 .. $#$p' "$conf_pl" 2>&1)
+want='- X line 1: unknown key HIGH_RISK_PATH (a typo, or a key from a newer method version)
+HIGH_RISK_PATHS X line 2: HIGH_RISK_PATHS: the value starts or ends with a space'
+if [ "$got" = "$want" ]; then pass "read_text tags its problems as read does"; else fail "read_text tags its problems as read does" "got:
+$got
+wanted:
+$want"; fi
+
+# 2c. under: the one matcher of a path against a list of paths (done-check's
+# high-risk paths, mutate-changed's MUTATE_PATHS): whole path segments, "."
+# for every path
+# shellcheck disable=SC2016 # perl code: perl expands it
+under_pl='require $ARGV[0]; my ($p, @l) = @ARGV[1 .. $#ARGV]; print Conf::under($p, \@l) ? "yes" : "no"'
+under_is() {
+  got=$(perl -e "$under_pl" "$conf_pl" "$2" "${@:4}" 2>&1)
+  if [ "$got" = "$3" ]; then pass "$1"; else fail "$1" "got $got, wanted $3"; fi
+}
+under_is "under: a path equal to a listed path" src yes src
+under_is "under: a path inside a listed folder" src/pay/a.pl yes lib src
+under_is "under: a path that only starts like a listed one is not under it" srcx/a.pl no src
+under_is "under: a listed path's parent is not under it" src no src/pay
+under_is "under: a listed path that only ends like it" pay/a no src/pay
+under_is "under: . holds every path" deep/down/a.txt yes .
+under_is "under: an empty list holds nothing" src/a no
+
 # 3. REQUIRES: read by the same parser, and the same floor as SPEC.md
 req=$(perl -e "require \$ARGV[0]; shift; $read_pl" "$conf_pl" requires "$root/method/scripts/method" 2>&1)
 spec_floor=$(sed -n 's/^| Claude Code | \([0-9][0-9.]*\) or later |.*/\1/p' "$root/SPEC.md")

@@ -15,6 +15,15 @@ SPEC.md (requirements), ROADMAP.md (tracks), TASKS.md (current step), DECISIONS.
 - Commit messages end with one line as the last paragraph: `Review-Verdict: <value>` (values in DECISIONS.md A10). No Co-Authored-By or session-link lines.
 - One review and one repair loop per step (DECISIONS A66); if the repair does not close a finding, stop and report what is failing and what was tried.
 
+## Pushes and CI (DECISIONS A76)
+
+- CI runs on pushes only, never on pull_request events; a push run checks a pull request's head.
+- A commit that changes only records (root records and docs/, never method/) may carry `[skip ci]` in its first line, never after the trailer; run validate.sh on it, and tests/verdicts.test.sh when DECISIONS.md or AGENTS.md change.
+- A pushed head that a review or a merge will read never carries `[skip ci]`; a backup push of work no review reads yet may.
+- Before a push that runs CI, run `bash tests/run.sh tests` once as a user who is not root, in a throwaway copy that user owns.
+- A merge commit carries `[skip ci]` only when the pull request's head had a green CI run and the branch contains main's tip.
+- Before a push that adds shell code, read it for SC2016, SC2034 and SC2086. A local shellcheck helps, but CI's copy decides.
+
 ## Hard rules
 
 - No secrets, personal data or business data anywhere in this repo.

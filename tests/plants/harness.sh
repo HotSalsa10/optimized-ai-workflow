@@ -431,6 +431,73 @@ fi
 h_stop
 drop_sandbox "$sb" || true
 
+# 17b. step 6b.1's N1 case (h_real_gates, question refused): with the
+# guard taken off the fragment's PreToolUse hook for Bash, a gate's write
+# to the project's settings and its push to main are not refused, and the
+# question turns red
+sb=$(make_sandbox) || abort_sandbox
+# shellcheck disable=SC2016 # perl code, expanded by perl
+perl -0pi -e 's/"matcher": "Bash\|PowerShell\|/"matcher": "PowerShell|/' "$sb/method/settings.fragment.json"
+if ! grep -q '"matcher": "PowerShell|Monitor|' "$sb/method/settings.fragment.json"; then
+  fail "real gates (N1): the plant did not apply, so the check result would mean nothing"
+elif ! h_real_gates "$sb" default; then
+  fail "real gates (N1): the case could not be made, or the fake did not answer"
+elif h_real_holds refused; then
+  fail "real gates (N1): the guard taken off the fragment's PreToolUse Bash hook: the question 'refused' stayed green"
+else
+  case $H_WHY in
+    *"requests do not carry the guard's G6 refusal"*) pass "real gates (N1): the guard taken off the fragment's PreToolUse Bash hook: the question 'refused' turns red (${H_WHY%%;*})" ;;
+    *) fail "real gates (N1): the guard taken off the fragment's PreToolUse Bash hook: the question 'refused' turned red for another reason" "$H_WHY" ;;
+  esac
+fi
+h_stop
+drop_sandbox "$sb" || true
+
+# 17c. step 6b.3's Deep review case (h_real_gates MODE deep, question own):
+# with receipt.pl naming a receipt by the session alone, not by the session
+# and the agent, the three reviewer runs of one message share one run
+# number series and each stop lands on the newest run's receipt, so the runs
+# do not each leave a VALID receipt of their own
+sb=$(make_sandbox) || abort_sandbox
+# shellcheck disable=SC2016 # perl code, expanded by perl
+perl -pi -e 's/return substr\(sha\(\x27receipt\x27, \$sid, \$aid\), 0, 16\)/return substr(sha(\x27receipt\x27, \$sid), 0, 16) # HARNESS-PLANT/' "$sb/method/scripts/method/lib/receipt.pl"
+if ! grep -q -F HARNESS-PLANT "$sb/method/scripts/method/lib/receipt.pl"; then
+  fail "real gates (deep): the plant did not apply, so the check result would mean nothing"
+elif ! h_real_gates "$sb" deep; then
+  fail "real gates (deep): the case could not be made, or the fake did not answer"
+elif h_real_holds own; then
+  fail "real gates (deep): receipts named by the session alone: the question 'own' stayed green"
+else
+  case $H_WHY in
+    *"method-reviewer-1's receipt: "*) pass "real gates (deep): receipts named by the session alone: the question 'own' turns red (${H_WHY%%;*})" ;;
+    *) fail "real gates (deep): receipts named by the session alone: the question 'own' turned red for another reason" "$H_WHY" ;;
+  esac
+fi
+h_stop
+drop_sandbox "$sb" || true
+
+# 17d. step 6b.1's question base (h_real_gates, h_real_holds base; step
+# 6b's review, R22): with receipt.pl recording no bases, each gate still
+# reads the packet and its receipt stays VALID, but records none of the
+# packet's bases, so the question turns red
+sb=$(make_sandbox) || abort_sandbox
+# shellcheck disable=SC2016 # perl code, expanded by perl
+perl -pi -e 's/\$r->\{bases\} = \$ev\{bases\};/\$r->{bases} = []; # HARNESS-PLANT/' "$sb/method/scripts/method/lib/receipt.pl"
+if ! grep -q -F HARNESS-PLANT "$sb/method/scripts/method/lib/receipt.pl"; then
+  fail "real gates (base): the plant did not apply, so the check result would mean nothing"
+elif ! h_real_gates "$sb" default; then
+  fail "real gates (base): the case could not be made, or the fake did not answer"
+elif h_real_holds base; then
+  fail "real gates (base): receipt.pl recording no bases: the question 'base' stayed green"
+else
+  case $H_WHY in
+    *"'s receipt records the bases none;"*) pass "real gates (base): receipt.pl recording no bases: the question 'base' turns red (${H_WHY%%;*})" ;;
+    *) fail "real gates (base): receipt.pl recording no bases: the question 'base' turned red for another reason" "$H_WHY" ;;
+  esac
+fi
+h_stop
+drop_sandbox "$sb" || true
+
 # 18. step 6.4's case for planning and design (h_design, h_design_holds).
 # design_plant MODE QUESTION|SEEN|TEXT...: with the plants already made in
 # the copy $sb, h_design runs there in MODE; each QUESTION must fail with
@@ -530,40 +597,76 @@ start_plant() {
     fi
   done
 }
-# one copy with three defects in default mode, each turning one question
+# one copy with four defects in default mode, each turning one question
 # red for its own reason, in one client run: a variable the client does not
 # substitute added to method-start (effort), the guard taken off the
-# fragment's PreToolUse hook on Bash (guard), and the start hook taken off its
-# SessionStart (active)
+# fragment's PreToolUse hook on Bash (guard), the start hook taken off its
+# SessionStart (active), and (step 6b.4) method-start's merged pull request
+# read removed (merged)
 sb=$(make_sandbox) || abort_sandbox
 s="$sb/method/.claude/skills/method-start/SKILL.md"
 # shellcheck disable=SC2016 # the variable is written into the skill as text
 printf '\nPlanted: ${CLAUDE_EFFORTS}.\n' >>"$s"
+perl -ni -e 'print unless /--state merged/' "$s"
 perl -MJSON::PP -e 'my $f = shift; open my $h, "<", $f or die; my $d = JSON::PP->new->decode(do { local $/; <$h> }); close $h;
   delete $d->{hooks}{SessionStart};
   $d->{hooks}{PreToolUse} = [grep { ($_->{matcher} // "") !~ /(?:\A|\|)Bash(?:\||\z)/ } @{ $d->{hooks}{PreToolUse} }];
   open $h, ">", $f or die; print $h JSON::PP->new->canonical->pretty->encode($d); close $h or die' "$sb/method/settings.fragment.json"
 # shellcheck disable=SC2016 # the planted variable as written, not expanded here
-if ! grep -q -F 'Planted: ${CLAUDE_EFFORTS}.' "$s" || grep -q -F 'session-status.sh' "$sb/method/settings.fragment.json" ||
+if ! grep -q -F 'Planted: ${CLAUDE_EFFORTS}.' "$s" || grep -q -F -e '--state merged' "$s" || grep -q -F 'session-status.sh' "$sb/method/settings.fragment.json" ||
   ! perl -MJSON::PP -0ne 'my $d = JSON::PP->new->decode($_); my @p = @{ $d->{hooks}{PreToolUse} || [] }; exit(@p && !(grep { ($_->{matcher} // "") =~ /(?:\A|\|)Bash(?:\||\z)/ } @p) ? 0 : 1)' "$sb/method/settings.fragment.json"; then
   fail "start: the plants did not apply, so the check results would mean nothing"
 else
   start_plant default "effort|the literal \${CLAUDE_EFFORTS} reached main's requests|a variable the client does not substitute in method-start" \
     "guard|the chained call was not refused by G6|the guard taken off the fragment's PreToolUse hook on Bash" \
-    "active|no start hook's METHOD-ACTIVE line reached main's requests|the start hook taken off the fragment"
+    "active|no start hook's METHOD-ACTIVE line reached main's requests|the start hook taken off the fragment" \
+    "merged|method-start's SKILL.md has no line naming gh pr list --state merged|method-start's merged pull request read removed"
 fi
 h_stop
 drop_sandbox "$sb" || true
 # with no start hook: method-start's lines naming METHOD-ACTIVE removed
-# (named), and, in a second copy, method-start made a skill only Claude can
-# call (expands)
+# (named), and (step 6b.4's check) its merged read left without the
+# comparison of HEAD with the merged pull request's head (merged; the
+# question reads only the skill's text, so it holds with no start hook
+# too); in a second copy, method-start made a skill only Claude can call
+# (expands)
 sb=$(make_sandbox) || abort_sandbox
 s="$sb/method/.claude/skills/method-start/SKILL.md"
 perl -ni -e 'print unless /METHOD-ACTIVE/' "$s"
-if grep -q -F METHOD-ACTIVE "$s"; then
+# shellcheck disable=SC2016 # perl code; the backquotes are the skill's text
+perl -pi -e 's/`git merge-base --is-ancestor HEAD <its headRefOid>`/a look at it/' "$s"
+if grep -q -F METHOD-ACTIVE "$s" || grep -q -F 'git merge-base --is-ancestor HEAD' "$s" || ! grep -q -F -e '--state merged' "$s"; then
+  fail "start: the plants did not apply, so the check results would mean nothing"
+else
+  start_plant nohook "named|method-start's SKILL.md has no line naming METHOD-ACTIVE|method-start's text naming the METHOD-ACTIVE line removed" \
+    "merged|method-start's merged read does not compare HEAD with the merged head|method-start's merged read left without the HEAD comparison"
+fi
+h_stop
+drop_sandbox "$sb" || true
+# (step 6b, R5) method-start's count after a merge put back to the old
+# "<its headRefOid>..HEAD", which counts <main>'s commits merged into the
+# branch since as waiting (merged)
+sb=$(make_sandbox) || abort_sandbox
+s="$sb/method/.claude/skills/method-start/SKILL.md"
+# shellcheck disable=SC2016 # perl code; the backquotes are the skill's text
+perl -pi -e 's/`git rev-list --count HEAD --not <its headRefOid> origin\/<main>`/`git rev-list --count <its headRefOid>..HEAD`/' "$s"
+if grep -q -F -e '--not <its headRefOid> origin/<main>' "$s" || ! grep -q -F '<its headRefOid>..HEAD' "$s"; then
   fail "start: the plant did not apply, so the check result would mean nothing"
 else
-  start_plant nohook "named|method-start's SKILL.md has no line naming METHOD-ACTIVE|method-start's text naming the METHOD-ACTIVE line removed"
+  start_plant nohook "merged|method-start's merged read does not count from the one merged last|method-start's count after a merge put back to <its headRefOid>..HEAD"
+fi
+h_stop
+drop_sandbox "$sb" || true
+# (step 6b, R5, the extra round) method-start no longer picks the one
+# merged last: "take any of them" in place of it (merged)
+sb=$(make_sandbox) || abort_sandbox
+s="$sb/method/.claude/skills/method-start/SKILL.md"
+# shellcheck disable=SC2016 # perl code; the backquotes are the skill's text
+perl -pi -e 's/take the one merged last \(its `mergedAt`\)/take any of them/' "$s"
+if grep -q -F 'merged last (its' "$s" || ! grep -q -F 'take any of them' "$s"; then
+  fail "start: the plant did not apply, so the check result would mean nothing"
+else
+  start_plant nohook "merged|method-start's merged read does not count from the one merged last|method-start's merged read left without picking the one merged last"
 fi
 h_stop
 drop_sandbox "$sb" || true
@@ -575,6 +678,44 @@ if ! grep -q '^user-invocable: false$' "$s"; then
   fail "start: the plant did not apply, so the check result would mean nothing"
 else
   start_plant nohook "expands|/method-start's body in main's first request: no request|method-start made a skill only Claude can call"
+fi
+h_stop
+drop_sandbox "$sb" || true
+
+# 20. step 6b.4's case for /method-finish (h_start finish, h_start_holds):
+# method-finish's report check taken out of its text (steps), in a second
+# copy its files log without --no-renames (steps), and, in a third copy,
+# method-finish made a skill only Claude can call (expands)
+sb=$(make_sandbox) || abort_sandbox
+s="$sb/method/.claude/skills/method-finish/SKILL.md"
+perl -pi -e 's{scripts/method/report-check\.sh}{the report check}g' "$s"
+if grep -q -F 'scripts/method/report-check.sh' "$s"; then
+  fail "finish: the plant did not apply, so the check result would mean nothing"
+else
+  start_plant finish "steps|method-finish's SKILL.md names no scripts/method/report-check.sh|method-finish's report check taken out of its steps"
+fi
+h_stop
+drop_sandbox "$sb" || true
+# (step 6b, R15) method-finish's files log without --no-renames, which
+# lists a renamed file under its new name only (steps)
+sb=$(make_sandbox) || abort_sandbox
+s="$sb/method/.claude/skills/method-finish/SKILL.md"
+perl -pi -e 's/git diff --name-only --no-renames /git diff --name-only /g' "$s"
+if grep -q -F -e '--no-renames' "$s" || ! grep -q -F 'git diff --name-only origin/<main>...HEAD' "$s"; then
+  fail "finish: the plant did not apply, so the check result would mean nothing"
+else
+  start_plant finish "steps|method-finish's SKILL.md names no git diff --name-only --no-renames|method-finish's files log without --no-renames"
+fi
+h_stop
+drop_sandbox "$sb" || true
+sb=$(make_sandbox) || abort_sandbox
+s="$sb/method/.claude/skills/method-finish/SKILL.md"
+# shellcheck disable=SC2016 # perl code, expanded by perl
+perl -0pi -e 's/^(name: method-finish\n)/${1}user-invocable: false\n/m' "$s"
+if ! grep -q '^user-invocable: false$' "$s"; then
+  fail "finish: the plant did not apply, so the check result would mean nothing"
+else
+  start_plant finish "expands|/method-finish's body in main's first request: no request|method-finish made a skill only Claude can call"
 fi
 h_stop
 drop_sandbox "$sb" || true

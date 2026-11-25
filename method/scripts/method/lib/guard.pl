@@ -515,7 +515,7 @@ sub push_rule {
   return "this push's destination is not a branch; $form" if $dst =~ m{\Arefs/} || $dst eq '' || $dst =~ /\A-/;
   # (refusals name no word of the push, the branch included; final review
   # of step 5)
-  return "pushing to main is refused: the owner merges into main on GitHub (until review receipts exist, step 6); push your task branch instead"
+  return "pushing to main is refused: the owner merges into main on GitHub; push your task branch instead"
     if main_names($dir)->{ lc $dst };
   my ($st, $out) = git_at($dir, 'config', '--get-regexp', '^remote\..*\.(push|mirror)$');
   return 'a remote.*.push or remote.*.mirror setting would change where this push goes; the owner must remove it first' if $st == 0 && $out ne '';
@@ -883,7 +883,7 @@ sub main {
     return refuse($rule, $text, $tool, $raw, $in) if $rule;
   }
   if ($tool eq 'SendMessage') {
-    return refuse('G4', "messages to other agents or sessions are refused in this method (step 5; D10): they can start work that runs without this project's hooks; tell the owner what you needed", $tool, $raw, $in);
+    return refuse('G4', "messages to other agents or sessions are refused in this method: they can start work that runs without this project's hooks; tell the owner what you needed", $tool, $raw, $in);
   }
   if ($tool eq 'ExitWorktree' && ref $input eq 'HASH' && $input->{discard_changes}) {
     return refuse('G3', 'leaving a worktree with discard_changes would delete its uncommitted work; commit it first, or keep the worktree and tell the owner', $tool, $raw, $in);
@@ -892,10 +892,10 @@ sub main {
   # starts work that runs without this project's hooks (D10, D11; final
   # review of step 5)
   if ($tool eq 'RemoteTrigger') {
-    return refuse('G4', "scheduled remote agents are refused in this method (D10, D11): they run without this project's hooks; tell the owner what you needed", $tool, $raw, $in);
+    return refuse('G4', "scheduled remote agents are refused in this method: they run without this project's hooks; tell the owner what you needed", $tool, $raw, $in);
   }
   if ($tool =~ /\A(?:Agent|Task)\z/ && ref $input eq 'HASH' && defined $input->{isolation} && !ref $input->{isolation} && $input->{isolation} eq 'remote') {
-    return refuse('G4', "an agent in a remote sandbox runs without this project's hooks (D10, D11), so it is refused; run it here, without isolation remote", $tool, $raw, $in);
+    return refuse('G4', "an agent in a remote sandbox runs without this project's hooks, so it is refused; run it here, without isolation remote", $tool, $raw, $in);
   }
   # G17: a skill or agent whose frontmatter declares hooks
   if ($tool =~ /\A(?:Skill|Agent|Task)\z/) {

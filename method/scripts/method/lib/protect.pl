@@ -14,8 +14,9 @@
 #     files there (method-*), also in each worktree's own folder; the folder
 #     core.hooksPath names; every config file git reads (its --show-origin);
 #   in the home folder: ~/.claude/settings*.json, ~/.claude/agents/,
-#     skills/ and commands/ (also under CLAUDE_CONFIG_DIR), ~/.gitconfig,
-#     ~/.config/git/;
+#     skills/, commands/, and dev-mods/ and plugins/, where Claude Code
+#     loads mods and plugins from (@HOME_DIRS; also under
+#     CLAUDE_CONFIG_DIR; step 6b.4), ~/.gitconfig, ~/.config/git/;
 #   on the machine: /etc/gitconfig, and the managed settings folders
 #     (/etc/claude-code, /Library/Application Support/ClaudeCode,
 #     C:\Program Files\ClaudeCode, C:\ProgramData\ClaudeCode).
@@ -76,7 +77,23 @@ our $FOLD;
 # which reads it from here. scripts/dev/lint-prompts.sh checks that it
 # names exactly the method's skill folders. A project's own skills stay
 # editable.
-our @METHOD_SKILLS = qw(method-start method-plan method-design);
+our @METHOD_SKILLS = qw(method-start method-plan method-design method-finish);
+
+# the folders of the Claude Code folder (~/.claude, and CLAUDE_CONFIG_DIR
+# when set) that hold what a session loads: its agents, skills and
+# commands, and the mods and plugins that run inside Claude Code, outside
+# the method's checks (step 6b.4; docs/plans/step6b.md item 19). Each is
+# [folder, what the refusal calls it]; one list for the folders, the real
+# folder behind each link in them, and the text forms (home_re)
+our @HOME_DIRS = (['agents', 'agents'], ['skills', 'skills'], ['commands', 'commands'], ['dev-mods', 'mods'], ['plugins', 'plugins']);
+
+# the folders of @HOME_DIRS as one regex alternation, for text_re, each
+# name whole: it ends where the folder's name ends (no letter, digit, _, -
+# or . follows), as in skills_re, so ~/.claude/dev-mods-old is not one
+# (step 6b.4's check). A run of dots and spaces may come first, as Windows
+# drops them from the end of a folder's name: ~/.claude/agents./x opens
+# ~/.claude/agents/x there, while skills.bak stays another folder
+sub home_re { return '(?:' . join('|', map { quotemeta $_->[0] } @HOME_DIRS) . ')[. ]*(?![A-Za-z0-9_.-])' }
 
 # the method's skills as one regex alternation, each name whole: it ends
 # where the folder's name ends (no letter, digit, _, - or . follows); with
@@ -301,13 +318,13 @@ sub set {
     push @cfg, $ENV{CLAUDE_CONFIG_DIR} if defined $ENV{CLAUDE_CONFIG_DIR} && $ENV{CLAUDE_CONFIG_DIR} ne '';
     for my $c (@cfg) {
       $add->($c, 'prefix', "your Claude Code settings (~/.claude/settings*.json)", 'settings');
-      $add->("$c/$_", 'dir', "your Claude Code $_ (~/.claude/$_/)") for qw(agents skills commands);
-      # a settings file, agent, skill or command that is a link: its real
-      # path too (5.7 repair loop 1)
+      $add->("$c/$_->[0]", 'dir', "your Claude Code $_->[1] (~/.claude/$_->[0]/)") for @HOME_DIRS;
+      # a settings file, agent, skill, command, mod or plugin that is a
+      # link: its real path too (5.7 repair loop 1)
       my $q = glob_quote(slashes($c));
       $add->($_, 'file', "your Claude Code settings (~/.claude/settings*.json)") for grep { -l } bsd_glob("$q/settings*.json", GLOB_QUOTE | GLOB_NOSORT);
-      for my $d (qw(agents skills commands)) {
-        $add->($_, 'dir', "your Claude Code $d (~/.claude/$d/)") for grep { -l } bsd_glob("$q/$d/*", GLOB_QUOTE | GLOB_NOSORT);
+      for my $d (@HOME_DIRS) {
+        $add->($_, 'dir', "your Claude Code $d->[1] (~/.claude/$d->[0]/)") for grep { -l } bsd_glob("$q/$d->[0]/*", GLOB_QUOTE | GLOB_NOSORT);
       }
     }
     $add->("$h/.gitconfig", 'file', "your git settings (~/.gitconfig)");
@@ -572,7 +589,7 @@ sub text_re {
   my $re = q!(?:\A|[\s'"=:(/,\[{])\.claude/(?:hooks/method|agents/method|rules/method|method-local|settings(?:\.local)?\.json)!
     . q!|(?:\A|[\s'"=:(/,\[{])\.claude/skills/! . skills_re()
     . q!|(?:\A|[\s'"=:(,\[{])(?:\./)?scripts/method\b|\.git/(?:hooks|config)\b|\.gitconfig\b|\.config/git\b|managed-settings|ClaudeCode!
-    . q!|(?:~|HOME\}?)/\.claude/(?:agents|skills|commands)\b|\.git/(?:method-|refs/remotes\b|packed-refs\b)!;
+    . q!|(?:~|HOME\}?)/\.claude/! . home_re() . q!|\.git/(?:method-|refs/remotes\b|packed-refs\b)!;
   $re .= "|$abs" if $abs ne '';
   return $FOLD ? qr/$re/i : qr/$re/;
 }

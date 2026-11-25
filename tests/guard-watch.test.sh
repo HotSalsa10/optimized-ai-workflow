@@ -114,7 +114,7 @@ printf '{"theme": "dark", "disableAllHooks": false}\n' >"$local_s"
 change "with no snapshot, a local settings file with only a theme and disableAllHooks false passes" s9 local_settings allow
 
 # --- G16: logged, and one message at the next call let through ---
-if grep -q '	G16	ConfigChange	' "$proj/.method/local/guard.log" 2>/dev/null; then pass "a refused change is logged in guard.log (G16, ConfigChange)"; else fail "a refused change is logged" "$(cat "$proj/.method/local/guard.log" 2>/dev/null | tail -2)"; fi
+if grep -q '	G16	ConfigChange	' "$proj/.method/local/guard.log" 2>/dev/null; then pass "a refused change is logged in guard.log (G16, ConfigChange)"; else fail "a refused change is logged" "$(tail -2 "$proj/.method/local/guard.log" 2>/dev/null)"; fi
 hook "{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"s1\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls\"},\"cwd\":\"$proj\"}"
 first=$(cat "$work/out.txt")
 hook "{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"s1\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls\"},\"cwd\":\"$proj\"}"

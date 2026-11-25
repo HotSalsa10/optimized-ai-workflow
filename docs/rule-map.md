@@ -12,11 +12,11 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M004 | Session start says where things stand, what is blocked and on whom, and the one next thing and why | incident | method/.claude/skills/method-start/SKILL.md | done |
 | M005 | Do not start work until the owner says go | incident | method/.claude/skills/method-start/SKILL.md | done |
 | M006 | Plan first: read everything, change nothing but the plan's own folder before the go, mark VERIFIED and INFERRED, wait | incident | method/.claude/skills/method-plan/SKILL.md | done |
-| M007 | Update the records before review, so one review covers one change | incident | method/.claude/skills/method-finish/SKILL.md | step 6b |
+| M007 | Update the records before review, so one review covers one change | incident | method/.claude/skills/method-finish/SKILL.md | done |
 | M008 | The verdict comes before the merge | incident | method/scripts/method/done-check.sh | done |
-| M009 | Act on the verdict; at most 3 review rounds, then re-plan | incident; research: Claude Code team | method/scripts/method/done-check.sh | step 6b |
+| M009 | Act on the verdict; at most 3 review rounds, then re-plan | incident; research: Claude Code team | method/scripts/method/done-check.sh | done |
 | M010 | When scripts change, run the guards' own tests | incident | method/scripts/method/run-checks.sh | step 7 |
-| M011 | Commit with the verdict trailer, push, show status | incident | method/.claude/skills/method-finish/SKILL.md | step 6b |
+| M011 | Commit with the verdict trailer, push, show status | incident | method/.claude/skills/method-finish/SKILL.md | done |
 | M012 | Reports open with status and next step, then what changed, what is left, risks, what is uncertain, checks | incident | method/.claude/rules/method/owner.md | done |
 | M013 | If a new session cannot orient from the files, fix the files, not the handoff | incident | method/.claude/rules/method/method.md | done |
 | M014 | CLAUDE.md imports AGENTS.md; AGENTS.md is authoritative for the project | incident | templates/CLAUDE.md | step 7 |
@@ -75,7 +75,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M067 | Enforcement is stated honestly: what hooks and CI enforce, and what is only convention | incident | method/docs/method/why.md | done |
 | M068 | Writing for people: plain, precise, honest hedges; no machine-sounding habits | incident | method/.claude/rules/method/owner.md | done |
 | M069 | A reporter agent re-derives claims before the owner approves; /supervise stays optional | incident; decision A12 | method/.claude/agents/method/method-reporter.md | done |
-| M070 | The pull request and the task's plan carry reports between sessions, not a handoff file | incident | method/.claude/skills/method-finish/SKILL.md | step 6b |
+| M070 | The pull request and the task's plan carry reports between sessions, not a handoff file | incident | method/.claude/skills/method-finish/SKILL.md | done |
 | M071 | Plain language; one complete paste-able prompt; no deadline pressure | incident | method/.claude/rules/method/owner.md | done |
 | M072 | No log grows forever or stores secrets | incident | method/scripts/method/lib/log.pl | done |
 | M073 | Few hooks, each documented with what it prevents, what it costs and how it was seen to fire | incident | method/.claude/hooks/method/README.md | done |
@@ -92,7 +92,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M084 | Flag the whole class of bug; never repeat a finding already posted | research: Claude Code team | method/.claude/agents/method/method-reviewer.md | done |
 | M085 | Later review rounds see only the changes since the last reviewed version, or the whole change when in doubt | research: Claude Code team, Cloudflare | method/scripts/method/review-packet.sh | done |
 | M086 | Unproven serious or security findings go on an unresolved list; they are never dropped | research: evidence critique | method/.claude/agents/method/method-reviewer.md | done |
-| M087 | High-risk changes get Deep review: several independent finders and a vote on each finding | research: Claude Code team | method/.claude/skills/method-finish/SKILL.md | step 6b |
+| M087 | High-risk changes get Deep review: three independent reviewers, all approving; every finding of any of them gets a disposition | research: Claude Code team | method/.claude/skills/method-finish/SKILL.md | done |
 | M088 | People add a review layer and never replace the reviewer agents; they look at intent and risk before the AI findings | research: layered review; decision A8 | method/docs/method/why.md | done |
 | M089 | "No findings" never counts as a pass on its own | research: Anthropic docs | method/scripts/method/done-check.sh | done |
 | M090 | The reviewer checks for gaming: edited tests or expected values, skipped tests, answers hard-coded to tests, special cases, faked or display-only features | research: ImpossibleBench, harness post | method/.claude/agents/method/method-reviewer.md | done |
@@ -131,13 +131,13 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M123 | A report lists the choices the builder made that the plan did not settle (defaults, scope cut or added, which requirement won a clash), each in business terms with the test or file that shows it, or says "none" | research: Osmani, critical thinking with agents | method/.claude/rules/method/owner.md | done |
 | M124 | Before the owner approves a FULL merge, the owner predicts what happens in three cases taken from the locked expected results, then sees the results copied from the test log; a mismatch stops the merge for a talk | research: Osmani, critical thinking with agents | method/.claude/agents/method/method-reporter.md | done |
 | M125 | Before planning a FULL task, the planner asks for whatever is missing of: who it is for, what is out of scope, what done looks like that the owner can see, and what the owner expects to happen | research: Osmani, critical thinking with agents | method/.claude/skills/method-plan/SKILL.md | done |
-| M126 | The report check lists every number that appears in no log, and refuses a report whose "what the checks would miss" part is missing, empty or "nothing" (SPEC R8) | research: Osmani, critical thinking with agents | method/scripts/method/report-check.sh | step 6b |
+| M126 | The report check lists every number that appears in no log, and refuses a report whose "what the checks would miss" part is missing, empty, "nothing" or "none" (SPEC R8) | research: Osmani, critical thinking with agents | method/scripts/method/report-check.sh | done |
 | M127 | Session start says how much finished work waits for the owner's merge approval (steps, commits, files) and makes that approval the one next thing, unless the owner says to keep building | incident: 117 commits waited unmerged | method/.claude/skills/method-start/SKILL.md | done |
 | M128 | The guard refuses what it cannot check: a command it cannot read that names something it watches, input it cannot parse, or a missing perl | research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | done |
 | M129 | No PowerShell tool in method projects: the guard and the method's scripts read bash | research: docs | method/.claude/hooks/method/guard.sh | done |
 | M130 | Claude's git commands at the session's repository match a short list of allowed shapes; anything else is refused with what to do instead | research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | done |
 | M131 | Claude never lands a change; gh, HTTP calls to GitHub, MCP tools and other Claude runs pass only from a list | incident; research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | done |
-| M132 | Claude only reads the method's installed files (its hooks, scripts, agents, rules and skills), its settings and git's own config and hooks; it never writes them | research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | done |
+| M132 | Claude only reads the method's installed files (its hooks, scripts, agents, rules and skills), its settings, git's own config and hooks, and the folders Claude Code loads mods and plugins from; it never writes them | research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | done |
 | M133 | No commit while a mutation run or its journal exists | research: decision A41 | method/.claude/hooks/method/guard.sh | done |
 | M134 | Effort below xhigh is announced at a session's first tool call | research: decision A3 | method/.claude/hooks/method/guard.sh | done |
 | M135 | Secrets, personal data and Claude attribution are stopped before they leave the machine: a push, gh text and MCP writes are scanned | incident | method/.claude/hooks/method/guard.sh | R2 |
@@ -149,7 +149,10 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M141 | The architect drafts a design for a new project or big feature (options and trade-offs in business terms; where the project uses packages, versions checked against live registries; the thinnest end-to-end version first) and builds nothing | decision A16 | method/.claude/agents/method/method-architect.md | done |
 | M142 | Diagnose finds the cause before any fix: it reads the evidence, changes nothing, and opens with ROOT CAUSE, SYMPTOM CHASE or SPEC QUESTION | decision A71 | method/.claude/agents/method/method-diagnose.md | done |
 | M143 | When the same check fails twice, call diagnose before a third fix | plan v3, moved by step 3 (TASKS.md) | method/.claude/rules/method/method.md | done |
-| M144 | A change is ready only when its task's plan carries a quoted approval naming the task | SPEC R4; decision A61 | method/scripts/method/done-check.sh | step 6b |
-| M145 | Expected results, tier and paths are locked at the plan's approval; a test run is seen failing after approval and before the code, and passing at the end | SPEC R6 | method/scripts/method/done-check.sh | step 6b |
-| M146 | Ready to merge needs VALID approving receipts for the exact files, reviewed from the merge base: reviewer and security check always; tester and reporter for FULL; three approving reviewers on high-risk paths; no other word from those gates on those files. The verdict line says what they say | SPEC R4, R6; decision A24 | method/scripts/method/done-check.sh | step 6b |
-| M147 | LIGHT only when the plan says so and the change touches no high-risk path, as main or the branch lists them | SPEC R6 | method/scripts/method/done-check.sh | step 6b |
+| M144 | A change is ready only when its task's plan carries a quoted approval naming the task | SPEC R4; decision A61 | method/scripts/method/done-check.sh | done |
+| M145 | Expected results, tier and paths are locked at the plan's approval; a test run is seen failing after approval and before the code, and passing at the end | SPEC R6 | method/scripts/method/done-check.sh | done |
+| M146 | Ready to merge needs VALID approving receipts for the exact files, reviewed from the merge base: reviewer and security check always; tester and reporter for FULL; three approving reviewers on high-risk paths; no other word from the reviewer or the security checker on those files, and for the tester and the reporter the newest word decides. The verdict line says what they say | SPEC R4, R6; decision A24 | method/scripts/method/done-check.sh | done |
+| M147 | LIGHT only when the plan says so and the change touches no high-risk path, as main or the branch lists them | SPEC R6 | method/scripts/method/done-check.sh | done |
+| M148 | When the push did not land, stop, say so and run no pull request command; the pull request's link and state are copied from what gh printed, never typed | research: Martin and Avilla, agent automations (a write counts once the destination confirms it) | method/.claude/skills/method-finish/SKILL.md | done |
+| M149 | The report's change summary names each changed file outside the plan's Paths line, or says none | step 6b plan, section 1 item 13 (P6) | method/.claude/skills/method-finish/SKILL.md | done |
+| M150 | When done-check's history names a diagnose word, the report offers one candidate incident-checklist line as an [EYES] item; Claude never adds it | step 6b plan, section 1 item 13 (P8) | method/.claude/skills/method-finish/SKILL.md | done |

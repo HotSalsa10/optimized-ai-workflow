@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Plants for lib/log.pl's writers of step 5b (gates.log's fields, the
 # guard's write marks' fields (5b.2), a file written whole, the newest
-# files kept) and for the settings snapshot that
-# lib/watch.pl now writes with them: each planted break turns
-# tests/hook-lib.test.sh (only the cases kept for its reason, after they
-# pass on the clean copy) or tests/guard-watch.test.sh red for its stated
-# reason, in a throwaway copy of the repo. The breaks are data: "=== NAME
-# | FILE | REASON", the text OLD (in FILE exactly once), "---", the text
-# NEW (tests/lib.sh, plant_data). PLANT_SHARD=K/N runs every Nth one from
-# the Kth.
+# files kept), for its readers' open of a log of 0 links (6b) and for
+# the settings snapshot that lib/watch.pl now writes with them: each
+# planted break turns tests/hook-lib.test.sh (only the cases kept for its
+# reason, after they pass on the clean copy) or tests/guard-watch.test.sh
+# red for its stated reason, in a throwaway copy of the repo. The breaks
+# are data: "=== NAME | FILE | REASON", the text OLD (in FILE exactly
+# once), "---", the text NEW (tests/lib.sh, plant_data). PLANT_SHARD=K/N
+# runs every Nth one from the Kth.
 # shellcheck disable=SC2016 # the plants are literal perl text
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
@@ -143,6 +143,14 @@ utf8::downgrade(my $copy = $data, 1)
   one_part('prefix', $prefix);
 ---
   one_part('prefix', $prefix, 1);
+=== a log of 0 links taken for a hard link | method/scripts/method/lib/log.pl | a reader that opens the old log as a trim's rename takes its last name
+ && $ps[1] == $fs[1] && $fs[3] > 0;
+---
+ && $ps[1] == $fs[1];
+=== a log of 0 links refused as a hard link | method/scripts/method/lib/log.pl | a log that keeps showing 0 links is refused as changed, not as a hard link
+ && $ps[1] == $fs[1] && $fs[3] > 0;
+---
+ && $ps[1] == $fs[1];
 PLANTS-END
 cat >"$work/watch.txt" <<'PLANTS-END'
 === the snapshot written as characters | method/scripts/method/lib/watch.pl | a non-ASCII settings value round-trips through the snapshot

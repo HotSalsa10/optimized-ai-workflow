@@ -23,7 +23,7 @@
 # session starts (lib/watch.pl; step 5.9), never at clear, compact or fork.
 # Since step 5b.2, one LOOK line names how many of the gates' receipts for
 # the files at HEAD do not say the first receipt word, and how many say
-# each other word (lib/receipt.pl; the words are verdicts.txt's).
+# each other word (lib/receipt-read.pl; the words are verdicts.txt's).
 # Over the caps, the last line says how many more and to run status.sh.
 # Every line is one clean line (Hook::clean); anything that goes wrong
 # becomes a LOOK line, never a crash that hides the rest.
@@ -153,13 +153,13 @@ sub warnings_for {
   my ($in, $top, $in_err) = @_;
   my @w;
   push @w, look("the hook's input could not be read ($in_err), so the session's model was not checked") if defined $in_err;
-  push @w, look("the advisor is not switched off (CLAUDE_CODE_DISABLE_ADVISOR_TOOL is not 1; DECISIONS A5)")
+  push @w, look("the advisor is not switched off (CLAUDE_CODE_DISABLE_ADVISOR_TOOL is not 1; the method's settings switch it off)")
     unless ($ENV{CLAUDE_CODE_DISABLE_ADVISOR_TOOL} // '') eq '1';
   push @w, look('auto memory is switched on by CLAUDE_CODE_DISABLE_AUTO_MEMORY=0 (M104)')
     if defined $ENV{CLAUDE_CODE_DISABLE_AUTO_MEMORY} && $ENV{CLAUDE_CODE_DISABLE_AUTO_MEMORY} eq '0';
   my $model = ref $in eq 'HASH' ? $in->{model} : undef;
   # (a model id is shown only in the shape Anthropic's ids have)
-  push @w, look('this session runs ' . ($model =~ /\Aclaude-[a-z0-9.-]{1,60}\z/ ? $model : 'a model') . ', not claude-opus-5-5 (DECISIONS A2)')
+  push @w, look('this session runs ' . ($model =~ /\Aclaude-[a-z0-9.-]{1,60}\z/ ? $model : 'a model') . ', not claude-opus-5-5, the model the method sets')
     if defined $model && !ref $model && $model ne '' && $model ne 'claude-opus-5-5';
   push @w, look('the PowerShell tool is not switched off (CLAUDE_CODE_USE_POWERSHELL_TOOL is not 0); the guard refuses it')
     if $^O =~ /\A(?:msys|MSWin32|cygwin)\z/ && ($ENV{CLAUDE_CODE_USE_POWERSHELL_TOOL} // '') ne '0';
@@ -204,7 +204,7 @@ sub warnings_for {
 # receipt word: one LOOK line, or none
 sub receipt_lines {
   my ($top, $project) = @_;
-  my @c = eval { require File::Spec->catfile($lib, 'receipt.pl'); Receipt::counts($project, $top) };
+  my @c = eval { require File::Spec->catfile($lib, 'receipt-read.pl'); Receipt::counts($project, $top) };
   my $err = $@;
   in_time();
   return (look("the gates' receipts could not be read; .method/local/gates.log has a line for each gate run")) if $err;

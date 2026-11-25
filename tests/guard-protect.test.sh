@@ -206,6 +206,25 @@ if wanted "a method skill (6.3): an interpreter's code naming"; then
   if [ "$out" = "yyynn" ]; then pass "a method skill (6.3): an interpreter's code naming .claude/skills/method-start, method-plan or method-design is found, a project skill's is not"; else fail "a method skill (6.3): an interpreter's code naming a method skill is found" "$out (wanted yyynn)"; fi
 fi
 
+# --- the method's /method-finish skill (step 6b.4) and the folders Claude
+# Code loads mods and plugins from (~/.claude/dev-mods/, ~/.claude/
+# plugins/; also under CLAUDE_CONFIG_DIR): G6 as for ~/.claude/agents/ ---
+s="mods and plugins (6b.4):"
+tool "a method skill (6b.4): an Edit of method-finish's SKILL.md is refused" Edit "$(jpath "$proj/.claude/skills/method-finish/SKILL.md")" G6
+judge "a method skill (6b.4): a write is refused: sed -i s/a/b/ .claude/skills/method-finish/SKILL.md" "$proj" 'sed -i s/a/b/ .claude/skills/method-finish/SKILL.md' G6
+tool "$s Write to home/.claude/dev-mods/s1/m/index.ts is refused" Write "$(jpath "$HOME/.claude/dev-mods/s1/m/index.ts")" G6
+tool "$s Write to home/.claude/plugins/x is refused" Write "$(jpath "$HOME/.claude/plugins/x")" G6
+for c in 'echo x > ~/.claude/dev-mods/x' 'cp m.ts ~/.claude/plugins/x'; do
+  judge "$s a write is refused: $c" "$proj" "$c" G6
+done
+mkdir -p "$work/cfg"
+CLAUDE_CONFIG_DIR="$work/cfg" tool "$s Write to a mod under CLAUDE_CONFIG_DIR is refused" Write "$(jpath "$work/cfg/dev-mods/s1/m/index.ts")" G6
+CLAUDE_CONFIG_DIR="$work/cfg" tool "$s Write to a plugin under CLAUDE_CONFIG_DIR is refused" Write "$(jpath "$work/cfg/plugins/x")" G6
+for c in 'ls ~/.claude/plugins' 'cat ~/.claude/dev-mods/x'; do
+  judge "$s a read passes: $c" "$proj" "$c" allow
+done
+tool "$s Write to a folder whose name only starts like dev-mods passes" Write "$(jpath "$HOME/.claude/dev-mods-old/x")" allow
+
 # --- path forms and letter case, read by the resolver itself ---
 out=$(cd "$proj" && perl -e 'require $ARGV[0]; print Protect::resolve(q{C:\Users\a\.claude\settings.json}, "/x"), "\n", Protect::resolve("a/../b//c/./d", "/base"), "\n"' "$lib/protect.pl")
 if [ "$out" = "/c/Users/a/.claude/settings.json
@@ -313,17 +332,39 @@ done
 (cd "$proj" && git push -q origin evil && git fetch -q origin && git switch -q -c track task && git branch -q -u origin/evil) || fail "setup: a branch that tracks the evil one"
 judge "a pull whose upstream changed the guard is refused" "$proj" 'git pull --ff-only' G6
 (cd "$proj" && git switch -q task && git branch -q -D track) || fail "setup: back to the task branch"
-# the text forms an interpreter's code is searched for
+# the text forms an interpreter's code is searched for: each line of
+# forms.txt is "y TEXT" (TEXT is found), "n TEXT" (it is not) or "d TEXT"
+# (found: a folder's name with dots or spaces after it, which Windows
+# drops, so agents./ opens agents/ there; step 6b's review, R18)
 cat >"$work/forms.txt" <<'TEXT'
-open(os.path.expanduser('~/.claude/skills/x/SKILL.md'), 'w')
-open(f"{HOME}/.claude/agents/a.md", "w")
-open('.git/method-lock', 'w')
-open('.git/packed-refs', 'w')
-open('.git/refs/remotes/origin/main', 'w')
-open('notes.txt', 'w')
+y open(os.path.expanduser('~/.claude/skills/x/SKILL.md'), 'w')
+y open(f"{HOME}/.claude/agents/a.md", "w")
+y open('.git/method-lock', 'w')
+y open('.git/packed-refs', 'w')
+y open('.git/refs/remotes/origin/main', 'w')
+n open('notes.txt', 'w')
+y open(os.path.expanduser('~/.claude/dev-mods/s1/m/index.ts'), 'w')
+y open(f"{HOME}/.claude/plugins/x", "w")
+n open(os.path.expanduser('~/.claude/dev-mods-old/x'), 'w')
+n open(f"{HOME}/.claude/plugins-cache.txt", "w")
+n open('~/.claude/skills.bak/x', 'w')
+y p = '~/.claude/plugins'
+d open(os.path.expanduser('~/.claude/agents./x.md'), 'w')
+d open('~/.claude/skills. /x/SKILL.md', 'w')
+d open(f"{HOME}/.claude/commands../c.md", "w")
+n open('~/.claude/skills.d/x', 'w')
 TEXT
-out=$(cd "$proj" && perl -e 'require $ARGV[0]; my $re = Protect::text_re(Protect::set($ARGV[1])); open my $h, "<", $ARGV[2] or die; while (my $t = <$h>) { chomp $t; print $t =~ $re ? "y" : "n" }' "$lib/protect.pl" "$proj" "$work/forms.txt")
-if [ "$out" = "yyyyyn" ]; then pass "an interpreter's code naming ~/.claude/skills, agents, .git/method-*, packed-refs or refs/remotes is found"; else fail "the text forms" "$out (wanted yyyyyn)"; fi
+# shellcheck disable=SC2016 # perl code, expanded by perl
+if ! forms=$(cd "$proj" && perl -e 'require $ARGV[0]; my $re = Protect::text_re(Protect::set($ARGV[1])); open my $h, "<", $ARGV[2] or die; while (my $l = <$h>) { chomp $l; my ($k, $t) = $l =~ /\A(\S) (.*)\z/ or die "bad line: $l\n"; my $got = $t =~ $re ? "y" : "n"; print "$k $got $t\n" }' "$lib/protect.pl" "$proj" "$work/forms.txt" 2>&1); then forms="the reader stopped: $forms"; fi
+# form_group KIND WANT NAME: the lines of KIND (y, n or d) each gave WANT,
+# and there is one at least
+form_group() {
+  fg_bad=$(printf '%s\n' "$forms" | awk -v k="$1" -v w="$2" '$1 == k && $2 != w')
+  if [ "${forms#the reader stopped}" = "$forms" ] && [ -z "$fg_bad" ] && printf '%s\n' "$forms" | awk -v k="$1" '$1 == k { n++ } END { exit !n }'; then pass "$3"; else fail "$3" "${fg_bad:-$forms}"; fi
+}
+form_group y y "the text forms: an interpreter's code naming ~/.claude/skills, agents, .git/method-*, packed-refs, refs/remotes, dev-mods or plugins is found"
+form_group n n "the text forms: a folder whose name only starts like one (dev-mods-old, plugins-cache.txt, skills.bak, skills.d) is not found"
+form_group d y "the text forms: a folder's name with dots or spaces after it (agents./, skills. /, commands../), which Windows drops, is found"
 
 # --- G12: one warning per session below xhigh ---
 if wanted G12; then

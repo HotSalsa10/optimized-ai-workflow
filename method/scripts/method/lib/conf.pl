@@ -10,7 +10,11 @@
 # quotes is a problem (a tab is a control character). A list key may be
 # given once per value; any other key once. An unknown key is a problem (a
 # typo, or a key from a newer method version). Problems name the file and
-# line, never the value.
+# line, never the value. Each problem is tagged with the key its line sets,
+# or with none when the line cannot be tied to a key (not KEY=VALUE, an
+# unknown key, a control character, a file that cannot be read): a reader
+# that must not take a broken setting for a shorter one, as done-check
+# reads HIGH_RISK_PATHS, refuses both.
 #
 # .claude/method.conf keys:
 #   PRODUCT_PATHS  (list) paths that make up the product, relative to the
@@ -28,16 +32,26 @@
 #   MUTATION_CHECKS (list) the ids of the checks in checks/*.tsv that
 #                  mutate-changed.sh runs against each mutant (the fast
 #                  tests); unset, it runs none
+#   HIGH_RISK_PATHS (list) paths where a change is high-risk, as
+#                  PRODUCT_PATHS ("." is the whole repo): done-check judges
+#                  a change that touches one FULL, with three reviewers;
+#                  the list is main's and the branch's together, so a
+#                  branch can add a path, never remove one
 # Paths: no absolute path, no "..", "." or empty segment (but PRODUCT_PATHS
 # may be the lone "."; REPOS may start with ".." segments), no leading ":"
 # or "-", none of * ? [ \. A trailing "/" is dropped.
 #
-#   Conf::read(ROOT)           (values, problems) for ROOT/.claude/method.conf;
-#                              a missing file means every key is unset; a key
-#                              on a line with a problem stays unset
-#   Conf::read_text(TEXT, LABEL)  (values, problems) for a method.conf held in
-#                              TEXT (a committed one, say)
-#   Conf::requires(DIR)        (values, problems) for DIR/REQUIRES
+#   Conf::read(ROOT)           (values, problems, tags) for
+#                              ROOT/.claude/method.conf; a missing file means
+#                              every key is unset; a key on a line with a
+#                              problem stays unset; TAGS holds, for each
+#                              problem in order, its key or undef
+#   Conf::read_text(TEXT, LABEL)  (values, problems, tags) for a method.conf
+#                              held in TEXT (a committed one, say)
+#   Conf::requires(DIR)        (values, problems, tags) for DIR/REQUIRES
+#   Conf::under(PATH, LIST)    true when PATH is one of LIST's paths or lies
+#                              under one, by whole path segments ("." holds
+#                              every path)
 #   Conf::check_path(PATH, LONE_DOT_OK)  the path without a trailing "/", or
 #                              undef when it breaks the path rules
 #   Conf::ignored_inputs(ROOT) the project's config files that git ignores
@@ -48,7 +62,7 @@ use warnings;
 use File::Spec;
 
 my %CONF_KEYS = (PRODUCT_PATHS => 'list', LOCAL_ONLY => 'list', REPOS => 'list', VERDICTS_FROM => 'one',
-  MUTATE_PATHS => 'list', MUTATION_CHECKS => 'list');
+  MUTATE_PATHS => 'list', MUTATION_CHECKS => 'list', HIGH_RISK_PATHS => 'list');
 my %REQUIRES_KEYS = (claude_code_min => 'one');
 
 sub check_path {
@@ -71,16 +85,17 @@ sub check_repo_path {
   return defined check_path($rest, 0) ? $p : undef;
 }
 
-# parse FILE LABEL KEYS: (values, problems)
+# parse FILE LABEL KEYS: (values, problems, tags), TAGS each problem's key
+# or undef
 sub parse {
   my ($file, $label, $keys) = @_;
-  my (%v, @problems, %lines);
-  open my $fh, '<:raw', $file or return (\%v, ["$label: cannot read the file"]);
+  my (%v, @problems, @tags, %lines);
+  open my $fh, '<:raw', $file or return (\%v, ["$label: cannot read the file"], [undef]);
   local $/ = "\n";    # whatever the caller set
   my $n = 0;
   while (my $l = <$fh>) {
     $n++;
-    my $problem = sub { push @problems, "$label line $n: $_[0]" };
+    my $problem = sub { push @problems, "$label line $n: $_[0]"; push @tags, $_[1] };
     $l =~ s/\r?\n\z//;
     $l =~ s/\A\xEF\xBB\xBF// if $n == 1;    # a byte-order mark some editors add
     next if $l =~ /\A[ \t]*(?:#|\z)/;
@@ -96,13 +111,13 @@ sub parse {
       next;
     }
     if (!$kind) { $problem->("unknown key $k (a typo, or a key from a newer method version)"); next }
-    if ($val eq '') { $problem->("$k has no value"); next }
-    if ($val =~ /\A |[ ]\z/) { $problem->("$k: the value starts or ends with a space"); next }
-    if ($val =~ /"/ || $val =~ /\A'.*'\z/) { $problem->("$k: no quotes; write $k=value"); next }
+    if ($val eq '') { $problem->("$k has no value", $k); next }
+    if ($val =~ /\A |[ ]\z/) { $problem->("$k: the value starts or ends with a space", $k); next }
+    if ($val =~ /"/ || $val =~ /\A'.*'\z/) { $problem->("$k: no quotes; write $k=value", $k); next }
     my $ok = check_value($k, $val);
-    if (!defined $ok) { $problem->("$k: " . value_rule($k)); next }
+    if (!defined $ok) { $problem->("$k: " . value_rule($k), $k); next }
     if ($kind eq 'one') {
-      if (exists $v{$k}) { $problem->("$k is given twice"); next }
+      if (exists $v{$k}) { $problem->("$k is given twice", $k); next }
       $v{$k} = $ok;
     } else {
       push @{ $v{$k} }, $ok;
@@ -118,18 +133,19 @@ sub parse {
       my $lo = $v{LOCAL_ONLY}[$i];
       if ($lo =~ m{/} && !grep { $_ eq '.' || index($lo, "$_/") == 0 } @pp) {
         push @problems, "$label line $lines{LOCAL_ONLY}[$i]: LOCAL_ONLY: a path must lie under a PRODUCT_PATHS entry";
+        push @tags, 'LOCAL_ONLY';
         next;
       }
       push @keep, $lo;
     }
     $v{LOCAL_ONLY} = \@keep;
   }
-  return (\%v, \@problems);
+  return (\%v, \@problems, \@tags);
 }
 
 sub check_value {
   my ($k, $val) = @_;
-  if ($k eq 'PRODUCT_PATHS' || $k eq 'MUTATE_PATHS') { return check_path($val, 1) }
+  if ($k eq 'PRODUCT_PATHS' || $k eq 'MUTATE_PATHS' || $k eq 'HIGH_RISK_PATHS') { return check_path($val, 1) }
   if ($k eq 'MUTATION_CHECKS') { return $val =~ /\A[a-z][a-z0-9-]*\z/ ? $val : undef }
   if ($k eq 'REPOS') { return check_repo_path($val) }
   if ($k eq 'LOCAL_ONLY') {
@@ -156,14 +172,14 @@ sub read {
   my ($root) = @_;
   my $file = File::Spec->catfile($root, '.claude', 'method.conf');
   # a link could stand for settings that a clone does not have
-  return ({}, ['.claude/method.conf: .claude or the file is a link; settings must be in the repository itself'])
+  return ({}, ['.claude/method.conf: .claude or the file is a link; settings must be in the repository itself'], [undef])
     if -l File::Spec->catfile($root, '.claude') || -l $file;
-  return ({}, []) unless -e $file;
-  return ({}, ['.claude/method.conf: not a regular file']) unless -f $file;
+  return ({}, [], []) unless -e $file;
+  return ({}, ['.claude/method.conf: not a regular file'], [undef]) unless -f $file;
   return parse($file, '.claude/method.conf', \%CONF_KEYS);
 }
 
-# read_text TEXT LABEL: (values, problems) for a .claude/method.conf held in
+# read_text TEXT LABEL: (values, problems, tags) for a .claude/method.conf held in
 # TEXT, such as the one in a commit
 sub read_text {
   my ($text, $label) = @_;
@@ -173,6 +189,14 @@ sub read_text {
 sub requires {
   my ($dir) = @_;
   return parse(File::Spec->catfile($dir, 'REQUIRES'), 'REQUIRES', \%REQUIRES_KEYS);
+}
+
+# under PATH LIST: PATH is one of LIST's paths or lies under one, by whole
+# path segments ("." is every path); mutate-changed's MUTATE_PATHS and
+# done-check's high-risk paths
+sub under {
+  my ($p, $list) = @_;
+  return scalar grep { $_ eq '.' || $p eq $_ || index($p, "$_/") == 0 } @$list;
 }
 
 sub ignored_inputs {
