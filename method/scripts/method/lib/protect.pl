@@ -80,8 +80,10 @@ our $FOLD;
 # plans/step6.md S10). scripts/dev/lint-prompts.sh checks that it names
 # exactly the method's skill folders, each of which starts with method-.
 # Since step 7.2 G6 keeps every .claude/skills/ entry whose name starts
-# with method- (step7.md S12), so a new method- skill cannot be made in a
-# session: a deep prefix entry in set, .claude/skills in @SPECS (the
+# with method- (step7.md S12), so a new method- skill folder cannot be made
+# in a session (by folder name only: a SKILL.md naming itself method-NAME,
+# or a .claude/commands/method-NAME.md, is a known limit, RISKS #24): a
+# deep prefix entry in set, .claude/skills in @SPECS (the
 # version check) with the names kept(), a text form in text_re, and a
 # watched path in guard.pl's $WATCHED_PATH, which reads skills_re from
 # here. A project's own skills, named otherwise, stay editable.
