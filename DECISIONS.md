@@ -38,7 +38,7 @@ A17. Scope: solo people, whether they code or not, and small teams. No company-s
 
 A18. This repo is public since 25 November 2026, the owner's choice, made after a scan of every file version in its history found no secret or personal data (the only name is the owner's GitHub display name on the merges made on GitHub). MIT licence. Nothing may assume the repo is private, or that it stays public. Why public: CI on GitHub's standard runners costs no minutes for a public repository, and the monthly minutes were what held each step's CI run back (A76).
 
-A19. CI: Linux on every change; Windows (Git Bash) and macOS before each release and on demand. Why: a private repo's free CI minutes run out faster on Windows and macOS runners. Since step 7.9, while A27 holds, Windows and macOS run only on demand and no release tag starts a run, since a tag names a tree already checked as its branch's head (A76 (4)) and one tag sent to those jobs could use most of a month's minutes.
+A19. CI: Linux on every change; Windows (Git Bash) and macOS before each release and on demand. Why: a private repo's free CI minutes run out faster on Windows and macOS runners. Since step 7.9, while A27 holds, Windows and macOS run only on demand and no release tag starts a run, since a tag names a tree already checked as its branch's head (A76 (4)); while the repo was private, one tag sent to those jobs could have used most of a month's minutes (A18).
 
 A20. No head-to-head benchmark against stock Claude Code (owner decision: the design rests on good evidence). The reviewer test from the original requirements and the planted-defect proofs stay.
 
