@@ -2,11 +2,15 @@
 # Tests the safety settings in .github/workflows/ci.yml, which cannot be run
 # here: every run step first stops the runner reading workflow commands, a
 # manual run and a push run use different concurrency groups, checkout does
-# not keep the job token, and no pull_request event starts a run (a push run
-# already checks a pull request's head; DECISIONS A76). In on:, a value
-# that does not close on its line (a quote or a [ or { left open) and an
-# escape in double quotes are refused, since either could hide or spell a
-# trigger (step 6b, R17).
+# not keep the job token, no pull_request event starts a run (a push run
+# already checks a pull request's head; DECISIONS A76), no tag push starts a
+# run (a tag names a tree already checked as its branch's head, A76 (4)), and
+# a job that runs on Windows or macOS runs only when started by hand (A19,
+# A27; since step 7.9). In on:, a value that does not close on its line (a
+# quote or a [ or { left open) and an escape in double quotes are refused,
+# since either could hide or spell a trigger (step 6b, R17). Since step 7.9
+# the plants job must run exactly the parts of tests/plants/shards.txt, each
+# part's measured time within 70% of the job's limit.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=tests/lib.sh
@@ -24,6 +28,8 @@ ci_problems() {
     my @l = map { s/\r?\n\z//r } <$f>;
     my $group = 0;
     my $on = 0;    # inside the top-level on: block
+    my $branches = 0;    # on: names a branches filter
+    my ($jobs, $job, @other, %if) = (0, undef);    # the jobs: block
     # nocomment LINE: LINE without its comment, a # at the start or after a
     # space that is not inside quotes; a quote opens after a space, [, {, a
     # comma or a colon, also inside a plain value (a known limit) (step 6b'"'"'s review, R17: a quoted " #" before pull_request in
@@ -55,13 +61,32 @@ ci_problems() {
     for my $i (0 .. $#l) {
       my $n = $i + 1;
       my ($t, $open) = $nocomment->($l[$i]);    # comments do not count
+      my $ontext;
       if ($t =~ /^["\x27]?on["\x27]?\s*:\s*(.*)$/) {
         $on = 1;
-        print "line $n: a pull_request event starts a run\n" if $1 =~ /\bpull_request/;
+        $ontext = $1;
       } elsif ($t =~ /^\S/) {
         $on = 0;
-      } elsif ($on && $t =~ /\bpull_request/) {
-        print "line $n: a pull_request event starts a run\n";
+      } elsif ($on) {
+        $ontext = $t;
+      }
+      if (defined $ontext) {
+        print "line $n: a pull_request event starts a run\n" if $ontext =~ /\bpull_request/;
+        # with a branches filter and no tags filter, a tag push starts no
+        # run (the GitHub workflow syntax)
+        print "line $n: a tag push starts a run\n" if $ontext =~ /\btags/;
+        $branches = 1 if $ontext =~ /\bbranches/;
+      }
+      # a job that names a Windows or macOS runner, and its own if:
+      if ($l[$i] =~ /^jobs:\s*$/) {
+        $jobs = 1;
+      } elsif ($t =~ /^\S/) {
+        $jobs = 0;
+      } elsif ($jobs && $t =~ /^  ([A-Za-z0-9_-]+):\s*$/) {
+        $job = $1;
+      } elsif ($jobs && defined $job) {
+        push @other, $job if $t =~ /\b(?:windows|macos)-/ && !grep { $_ eq $job } @other;
+        $if{$job} = $1 if $t =~ /^    if:\s*(.*?)\s*$/;
       }
       # a quoted value or a flow collection in on: that runs onto the next
       # line is refused: the next line could hold a trigger after a # that
@@ -94,7 +119,50 @@ ci_problems() {
       }
     }
     print "the concurrency group does not include github.event_name\n" unless $group;
+    print "on: names no branches filter, so a tag push starts a run\n" unless $branches;
+    for my $j (@other) {
+      print "job $j: a Windows or macOS job runs without being started by hand\n"
+        unless defined $if{$j} && $if{$j} eq "github.event_name == \x27workflow_dispatch\x27";
+    }
   ' "$1"
+}
+
+# shard_problems CI SHARDS (since step 7.9): prints each way the plants
+# job of CI and the split in SHARDS (tests/plants/shards.txt) disagree: the
+# job must run exactly the parts 0/N to N-1/N of the split, and each part's
+# measured seconds must stay within 70% of the job's timeout-minutes, so a
+# runner up to about 40% slower than the measuring machine still finishes
+shard_problems() {
+  perl -e '
+    open my $f, "<", $ARGV[0] or die "cannot read $ARGV[0]\n";
+    my ($in, $limit, @matrix) = (0, undef);
+    while (my $l = <$f>) {
+      $l =~ s/\r?\n\z//;
+      if ($l =~ /^  ([A-Za-z0-9_-]+):\s*$/) { $in = $1 eq "plants"; next }
+      next unless $in;
+      $limit = $1 if $l =~ /^    timeout-minutes:\s*([0-9]+)\s*$/;
+      @matrix = $1 =~ /"([^"]*)"/g if $l =~ /^\s+shard:\s*\[(.*)\]\s*$/;
+    }
+    open my $s, "<", $ARGV[1] or die "cannot read $ARGV[1]\n";
+    my ($parts, %sum) = (0);
+    while (my $l = <$s>) {
+      next unless $l =~ /^([0-9]+) \S+ ([0-9]+)\s*$/;
+      $sum{$1} += $2;
+      $parts = $1 + 1 if $1 + 1 > $parts;
+    }
+    my $want = join " ", map { "$_/$parts" } 0 .. $parts - 1;
+    print "the plants job runs the shards (@matrix), not the $parts parts of the split ($want)\n"
+      if "@matrix" ne $want;
+    if (!defined $limit) {
+      print "the plants job has no timeout-minutes\n";
+    } else {
+      for my $p (0 .. $parts - 1) {
+        my $t = $sum{$p} || 0;
+        print "part $p: its plant files took $t s, over 70% of the plants job limit of $limit minutes (", $limit * 42, " s)\n"
+          if $t * 10 > $limit * 420;
+      }
+    }
+  ' "$1" "$2"
 }
 
 ci=$(repo_root)/.github/workflows/ci.yml
@@ -102,15 +170,17 @@ ci=$(repo_root)/.github/workflows/ci.yml
 # 1. the real ci.yml
 problems=$(ci_problems "$ci")
 if [ -z "$problems" ]; then
-  pass "ci.yml: every run step stops workflow commands, groups split by event, checkout keeps no token, no pull_request trigger"
+  pass "ci.yml: every run step stops workflow commands, groups split by event, checkout keeps no token, no pull_request trigger, no tag trigger, Windows and macOS only by hand"
 else
-  fail "ci.yml: every run step stops workflow commands, groups split by event, checkout keeps no token, no pull_request trigger" "$problems"
+  fail "ci.yml: every run step stops workflow commands, groups split by event, checkout keeps no token, no pull_request trigger, no tag trigger, Windows and macOS only by hand" "$problems"
 fi
 
-# 2-5. the test goes red when any one of the settings is removed, or when a
-# pull_request trigger is added back
+# 2-9. the test goes red when any one of the settings is removed, when a
+# pull_request or a tag trigger is added back, when push loses its branches
+# filter (then a tag push starts a run too), and when the Windows and macOS
+# jobs run on tags again or with no if: (since step 7.9)
 sb=$(new_sandbox_dir) || abort_sandbox
-for case in stop-commands event_name persist-credentials pull_request; do
+for case in stop-commands event_name persist-credentials pull_request tags branches other-tags other-if; do
   what="without $case"
   want=$case
   case "$case" in
@@ -121,6 +191,26 @@ for case in stop-commands event_name persist-credentials pull_request; do
       what="with a pull_request trigger"
       want="a pull_request event starts a run"
       perl -pe 's/^(  workflow_dispatch:)$/  pull_request:\n$1/' "$ci" >"$sb/ci.yml"
+      ;;
+    tags)
+      what="with a tag trigger"
+      want="a tag push starts a run"
+      perl -pe 's/^(    branches: \["\*\*"\])$/$1\n    tags: ["v*"]/' "$ci" >"$sb/ci.yml"
+      ;;
+    branches)
+      what="with no branches filter on push"
+      want="on: names no branches filter, so a tag push starts a run"
+      perl -ne 'print unless /^    branches: \["\*\*"\]$/' "$ci" >"$sb/ci.yml"
+      ;;
+    other-tags)
+      what="with the Windows and macOS jobs on tags again"
+      want="job other-systems: a Windows or macOS job runs without being started by hand"
+      perl -pe 's/^    if: github\.event_name == \x27workflow_dispatch\x27$/    if: startsWith(github.ref, \x27refs\/tags\/v\x27) || github.event_name == \x27workflow_dispatch\x27/' "$ci" >"$sb/ci.yml"
+      ;;
+    other-if)
+      what="with the Windows and macOS jobs' if: removed"
+      want="job other-systems: a Windows or macOS job runs without being started by hand"
+      perl -ne 'print unless /^    if: github\.event_name == \x27workflow_dispatch\x27$/' "$ci" >"$sb/ci.yml"
       ;;
   esac
   if cmp -s "$ci" "$sb/ci.yml"; then
@@ -134,7 +224,7 @@ done
 # 6. (step 6b's review, R17) the on: block in flow form on one line, with a
 # quoted " #" before a pull_request trigger: the # is inside quotes, not a
 # comment, so the trigger is still read
-perl -0pe 's/^on:\n  push:\n    branches: \["\*\*"\]\n    tags: \["v\*"\]\n  workflow_dispatch:\n/on: {push: {branches: ["**", "skip #"], tags: ["v*"]}, pull_request: {}, workflow_dispatch: {}}\n/m' "$ci" >"$sb/ci.yml"
+perl -0pe 's/^on:\n  push:\n    branches: \["\*\*"\]\n  workflow_dispatch:\n/on: {push: {branches: ["**", "skip #"]}, pull_request: {}, workflow_dispatch: {}}\n/m' "$ci" >"$sb/ci.yml"
 if cmp -s "$ci" "$sb/ci.yml"; then
   fail "the flow-form plant did not apply, so the result would mean nothing"
 elif ci_problems "$sb/ci.yml" | grep -q -F -- "a pull_request event starts a run"; then
@@ -144,7 +234,7 @@ else
 fi
 # 7. a comment after a quoted value is still a comment: pull_request named
 # only there is no trigger
-perl -0pe 's/^on:\n  push:\n    branches: \["\*\*"\]\n    tags: \["v\*"\]\n  workflow_dispatch:\n/on: {push: {branches: ["**", "a#b"], tags: [\x27v*\x27]}, workflow_dispatch: {}} # no pull_request\n/m' "$ci" >"$sb/ci.yml"
+perl -0pe 's/^on:\n  push:\n    branches: \["\*\*"\]\n  workflow_dispatch:\n/on: {push: {branches: ["**", "a#b"]}, workflow_dispatch: {}} # no pull_request\n/m' "$ci" >"$sb/ci.yml"
 if cmp -s "$ci" "$sb/ci.yml"; then
   fail "the flow-form comment case did not apply, so the result would mean nothing"
 elif problems=$(ci_problems "$sb/ci.yml") && [ -z "$problems" ]; then
@@ -156,7 +246,7 @@ fi
 # replaced by the text ON (perl replacement text) makes the check print a
 # problem holding WANT
 on_case() {
-  perl -0pe 's/^on:\n  push:\n    branches: \["\*\*"\]\n    tags: \["v\*"\]\n  workflow_dispatch:\n/'"$2"'/m' "$ci" >"$sb/ci.yml"
+  perl -0pe 's/^on:\n  push:\n    branches: \["\*\*"\]\n  workflow_dispatch:\n/'"$2"'/m' "$ci" >"$sb/ci.yml"
   if cmp -s "$ci" "$sb/ci.yml"; then
     fail "$1: the case did not apply, so the result would mean nothing"
   elif ci_problems "$sb/ci.yml" | grep -q -F -- "$3"; then
@@ -168,11 +258,40 @@ on_case() {
 on_case "the test goes red with a pull_request trigger after '' (a quote inside single quotes) and \" #\" in a one-line flow-form on:" \
   'on: {push: {branches: [\x27it\x27\x27s #\x27]}, pull_request: {}, workflow_dispatch: {}}\n' "a pull_request event starts a run"
 on_case "the test goes red with a quoted value in a flow-form on: that runs onto a next line starting with #, a trigger after it" \
-  'on: {push: {branches: ["**", "a\n  #b"], tags: ["v*"]}, pull_request: {}, workflow_dispatch: {}}\n' "line 7: a value in on: does not close on its line"
+  'on: {push: {branches: ["**", "a\n  #b"]}, pull_request: {}, workflow_dispatch: {}}\n' "line 10: a value in on: does not close on its line"
 on_case "the test goes red with a flow-form on: whose { runs onto a next line at the start of the line, a trigger there" \
-  'on: {push: {branches: ["**"]},\npull_request: {}, workflow_dispatch: {}}\n' "line 7: a value in on: does not close on its line"
+  'on: {push: {branches: ["**"]},\npull_request: {}, workflow_dispatch: {}}\n' "line 10: a value in on: does not close on its line"
 on_case "the test goes red with an escape in a double-quoted key in on: (\"pull_reques\\x74\")" \
   'on: {push: {branches: ["**"]}, "pull_reques\\x74": {}, workflow_dispatch: {}}\n' "a double-quoted value in on: holds an escape"
+drop_sandbox "$sb"
+
+# 12-14. (step 7.9) the plants job runs the parts of tests/plants/shards.txt,
+# each part's measured time within 70% of the job's limit; the check goes
+# red when the job drops a part, and when a part's time grows past 70%
+shards=$(repo_root)/tests/plants/shards.txt
+problems=$(shard_problems "$ci" "$shards")
+if [ -z "$problems" ]; then
+  pass "the plants job runs every part of tests/plants/shards.txt, each part's measured time within 70% of its limit"
+else
+  fail "the plants job runs every part of tests/plants/shards.txt, each part's measured time within 70% of its limit" "$problems"
+fi
+sb=$(new_sandbox_dir) || abort_sandbox
+perl -pe 's/^(\s+shard: \[.*), "[0-9]+\/[0-9]+"\]$/$1]/' "$ci" >"$sb/ci.yml"
+if cmp -s "$ci" "$sb/ci.yml"; then
+  fail "the dropped-part case did not apply, so the result would mean nothing"
+elif shard_problems "$sb/ci.yml" "$shards" | grep -q -F -- "the plants job runs the shards"; then
+  pass "the shard check goes red when the plants job drops a part"
+else
+  fail "the shard check goes red when the plants job drops a part" "$(shard_problems "$sb/ci.yml" "$shards")"
+fi
+perl -pe 's/^(0 \S+ )[0-9]+$/${1}99999/ if !$done && /^0 / && ($done = 1)' "$shards" >"$sb/shards.txt"
+if cmp -s "$shards" "$sb/shards.txt"; then
+  fail "the slow-part case did not apply, so the result would mean nothing"
+elif shard_problems "$ci" "$sb/shards.txt" | grep -q -F -- "part 0: its plant files took"; then
+  pass "the shard check goes red when a part's measured time is over 70% of the limit"
+else
+  fail "the shard check goes red when a part's measured time is over 70% of the limit" "$(shard_problems "$ci" "$sb/shards.txt")"
+fi
 drop_sandbox "$sb"
 
 echo "tests: CI settings: $tests_pass passed, $tests_fail failed, $tests_skip skipped"

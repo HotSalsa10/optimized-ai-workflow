@@ -1,13 +1,15 @@
 name: CI
 
-# Linux runs on every push. Windows (Git Bash) and macOS run on release tags
-# and when started by hand, to save the private repo's CI minutes (DECISIONS A19).
+# Linux runs on every branch push. Windows (Git Bash) and macOS run only when
+# started by hand, to save the private repo's CI minutes (DECISIONS A19, A27).
+# A tag push starts no run: a tag names a tree that was already checked as its
+# branch's head (DECISIONS A76 (4)), and one tag sent to the Windows and macOS
+# jobs could use most of a month's minutes.
 # No pull_request trigger: a push run already checks a pull request's head,
 # and this repo takes no pull requests from forks (DECISIONS A76).
 on:
   push:
     branches: ["**"]
-    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
@@ -100,7 +102,7 @@ jobs:
   # (A27 defers these systems), so each has 60 minutes.
   other-systems:
     name: ${{ matrix.os }} ${{ matrix.part }}
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
