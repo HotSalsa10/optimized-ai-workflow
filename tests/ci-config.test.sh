@@ -6,7 +6,9 @@
 # already checks a pull request's head; DECISIONS A76), no tag push starts a
 # run (a tag names a tree already checked as its branch's head, A76 (4)), and
 # a job that runs on Windows or macOS runs only when started by hand (A19,
-# A27; since step 7.9). In on:, a value that does not close on its line (a
+# A27; since step 7.9). Since step 7.9's check, no create, delete or release
+# trigger (each starts a run on a tag), the branches filter counts only
+# under push, and runner labels are read without case. In on:, a value that does not close on its line (a
 # quote or a [ or { left open) and an escape in double quotes are refused,
 # since either could hide or spell a trigger (step 6b, R17). Since step 7.9
 # the plants job must run exactly the parts of tests/plants/shards.txt, each
@@ -28,7 +30,8 @@ ci_problems() {
     my @l = map { s/\r?\n\z//r } <$f>;
     my $group = 0;
     my $on = 0;    # inside the top-level on: block
-    my $branches = 0;    # on: names a branches filter
+    my $branches = 0;    # push in on: names a branches filter
+    my ($evind, $event) = (undef, "");    # the indent of the events in on:, and the event a line is under
     my ($jobs, $job, @other, %if) = (0, undef);    # the jobs: block
     # nocomment LINE: LINE without its comment, a # at the start or after a
     # space that is not inside quotes; a quote opens after a space, [, {, a
@@ -62,20 +65,38 @@ ci_problems() {
       my $n = $i + 1;
       my ($t, $open) = $nocomment->($l[$i]);    # comments do not count
       my $ontext;
+      my $under = 0;    # the line is under an event of the block-form on:
       if ($t =~ /^["\x27]?on["\x27]?\s*:\s*(.*)$/) {
         $on = 1;
         $ontext = $1;
+        ($evind, $event) = (undef, "");
       } elsif ($t =~ /^\S/) {
         $on = 0;
       } elsif ($on) {
         $ontext = $t;
+        if ($t =~ /^(\s*)\S/) {
+          my $ind = length $1;
+          $evind = $ind unless defined $evind;
+          if ($ind <= $evind) {
+            $event = $t =~ /^\s*["\x27]?([A-Za-z_]+)/ ? $1 : "";
+          } else {
+            $under = 1;
+          }
+        }
       }
       if (defined $ontext) {
         print "line $n: a pull_request event starts a run\n" if $ontext =~ /\bpull_request/;
         # with a branches filter and no tags filter, a tag push starts no
         # run (the GitHub workflow syntax)
         print "line $n: a tag push starts a run\n" if $ontext =~ /\btags/;
-        $branches = 1 if $ontext =~ /\bbranches/;
+        # (step 7.9, its check) a create, delete or release event, named as a
+        # key, starts a run on a tag too
+        print "line $n: a $1 event starts a run on a tag\n"
+          if $ontext =~ /(?:^|[\s{,])["\x27]?(create|delete|release)["\x27]?\s*:/;
+        # the branches filter counts only under push: a filter under
+        # another event leaves a tag push starting a run
+        $branches = 1 if ($under && $event eq "push" && $ontext =~ /\bbranches/)
+          || $ontext =~ /\bpush["\x27]?\s*:\s*\{[^{}]*\bbranches/;
       }
       # a job that names a Windows or macOS runner, and its own if:
       if ($l[$i] =~ /^jobs:\s*$/) {
@@ -85,7 +106,8 @@ ci_problems() {
       } elsif ($jobs && $t =~ /^  ([A-Za-z0-9_-]+):\s*$/) {
         $job = $1;
       } elsif ($jobs && defined $job) {
-        push @other, $job if $t =~ /\b(?:windows|macos)-/ && !grep { $_ eq $job } @other;
+        # runner labels are read without case (macOS-14, [self-hosted, macOS])
+        push @other, $job if $t =~ /windows|macos/i && !grep { $_ eq $job } @other;
         $if{$job} = $1 if $t =~ /^    if:\s*(.*?)\s*$/;
       }
       # a quoted value or a flow collection in on: that runs onto the next
@@ -119,7 +141,7 @@ ci_problems() {
       }
     }
     print "the concurrency group does not include github.event_name\n" unless $group;
-    print "on: names no branches filter, so a tag push starts a run\n" unless $branches;
+    print "push in on: names no branches filter, so a tag push starts a run\n" unless $branches;
     for my $j (@other) {
       print "job $j: a Windows or macOS job runs without being started by hand\n"
         unless defined $if{$j} && $if{$j} eq "github.event_name == \x27workflow_dispatch\x27";
@@ -180,12 +202,15 @@ else
   fail "ci.yml: every run step stops workflow commands, groups split by event, checkout keeps no token, no pull_request trigger, no tag trigger, Windows and macOS only by hand" "$problems"
 fi
 
-# 2-9. the test goes red when any one of the settings is removed, when a
+# 2-14. the test goes red when any one of the settings is removed, when a
 # pull_request or a tag trigger is added back, when push loses its branches
 # filter (then a tag push starts a run too), and when the Windows and macOS
-# jobs run on tags again or with no if: (since step 7.9)
+# jobs run on tags again or with no if: (since step 7.9); and (step 7.9's
+# check) with a create or release trigger, with the branches filter under
+# another event than push, and with a runner named macOS-14 or
+# [self-hosted, macOS] in a job that runs on every push
 sb=$(new_sandbox_dir) || abort_sandbox
-for case in stop-commands event_name persist-credentials pull_request tags branches other-tags other-if; do
+for case in stop-commands event_name persist-credentials pull_request tags branches other-tags other-if create release branches-elsewhere runner-case runner-list; do
   what="without $case"
   want=$case
   case "$case" in
@@ -204,8 +229,25 @@ for case in stop-commands event_name persist-credentials pull_request tags branc
       ;;
     branches)
       what="with no branches filter on push"
-      want="on: names no branches filter, so a tag push starts a run"
+      want="push in on: names no branches filter, so a tag push starts a run"
       perl -ne 'print unless /^    branches: \["\*\*"\]$/' "$ci" >"$sb/ci.yml"
+      ;;
+    create | release)
+      what="with a $case trigger"
+      want="a $case event starts a run on a tag"
+      perl -pe 's/^(  workflow_dispatch:)$/  '"$case"':\n$1/' "$ci" >"$sb/ci.yml"
+      ;;
+    branches-elsewhere)
+      what="with the branches filter under another event than push"
+      want="push in on: names no branches filter, so a tag push starts a run"
+      perl -0pe 's/^  push:\n    branches: \["\*\*"\]\n/  push:\n  workflow_run:\n    workflows: [CI]\n    branches: ["**"]\n/m' "$ci" >"$sb/ci.yml"
+      ;;
+    runner-case | runner-list)
+      label="macOS-14"
+      [ "$case" = runner-list ] && label="[self-hosted, macOS]"
+      what="with the harness job on $label"
+      want="job harness: a Windows or macOS job runs without being started by hand"
+      perl -0pe 's/^(  harness:\n(?:    [^\n]*\n)*?    runs-on: )ubuntu-latest$/${1}'"$label"'/m' "$ci" >"$sb/ci.yml"
       ;;
     other-tags)
       what="with the Windows and macOS jobs on tags again"
@@ -226,7 +268,7 @@ for case in stop-commands event_name persist-credentials pull_request tags branc
     fail "the test goes red $what"
   fi
 done
-# 10. (step 6b's review, R17) the on: block in flow form on one line, with a
+# 15. (step 6b's review, R17) the on: block in flow form on one line, with a
 # quoted " #" before a pull_request trigger: the # is inside quotes, not a
 # comment, so the trigger is still read
 perl -0pe 's/^on:\n  push:\n    branches: \["\*\*"\]\n  workflow_dispatch:\n/on: {push: {branches: ["**", "skip #"]}, pull_request: {}, workflow_dispatch: {}}\n/m' "$ci" >"$sb/ci.yml"
@@ -237,7 +279,7 @@ elif ci_problems "$sb/ci.yml" | grep -q -F -- "a pull_request event starts a run
 else
   fail "the test goes red with a pull_request trigger after a quoted \" #\" in a one-line flow-form on:" "$(ci_problems "$sb/ci.yml")"
 fi
-# 11. a comment after a quoted value is still a comment: pull_request named
+# 16. a comment after a quoted value is still a comment: pull_request named
 # only there is no trigger
 perl -0pe 's/^on:\n  push:\n    branches: \["\*\*"\]\n  workflow_dispatch:\n/on: {push: {branches: ["**", "a#b"]}, workflow_dispatch: {}} # no pull_request\n/m' "$ci" >"$sb/ci.yml"
 if cmp -s "$ci" "$sb/ci.yml"; then
@@ -247,7 +289,7 @@ elif problems=$(ci_problems "$sb/ci.yml") && [ -z "$problems" ]; then
 else
   fail "a comment after quoted values in a flow-form on: is not read: pull_request named only there is no trigger" "$problems"
 fi
-# 12-15. (step 6b, R17) on_case NAME ON WANT: the on: block of ci.yml
+# 17-20. (step 6b, R17) on_case NAME ON WANT: the on: block of ci.yml
 # replaced by the text ON (perl replacement text) makes the check print a
 # problem holding WANT
 on_case() {
@@ -268,9 +310,18 @@ on_case "the test goes red with a flow-form on: whose { runs onto a next line at
   'on: {push: {branches: ["**"]},\npull_request: {}, workflow_dispatch: {}}\n' "line 10: a value in on: does not close on its line"
 on_case "the test goes red with an escape in a double-quoted key in on: (\"pull_reques\\x74\")" \
   'on: {push: {branches: ["**"]}, "pull_reques\\x74": {}, workflow_dispatch: {}}\n' "a double-quoted value in on: holds an escape"
+# 21. a branch filter that names release is not a release trigger
+perl -pe 's/^(    branches: \["\*\*")\]$/$1, "release\/*", "create"]/' "$ci" >"$sb/ci.yml"
+if cmp -s "$ci" "$sb/ci.yml"; then
+  fail "the release-branch case did not apply, so the result would mean nothing"
+elif problems=$(ci_problems "$sb/ci.yml") && [ -z "$problems" ]; then
+  pass "a branches filter naming release/* and create is not read as a release or create trigger"
+else
+  fail "a branches filter naming release/* and create is not read as a release or create trigger" "$problems"
+fi
 drop_sandbox "$sb"
 
-# 16-19. (step 7.9) the plants job, and the Windows and macOS jobs, run the
+# 22-25. (step 7.9) the plants job, and the Windows and macOS jobs, run the
 # parts of tests/plants/shards.txt, each part's measured time within 70% of
 # the plants job's limit; the check goes red when either drops a part, and
 # when a part's time grows past 70%

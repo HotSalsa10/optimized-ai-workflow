@@ -9,9 +9,10 @@
 # ci.yml's two shard lists too). Measured on 25 November 2026 (step 7.9, on
 # f8d78d7) as a user who is not root, on a 4-core machine running up to
 # three files side by side; ci-config.sh and test-helpers.sh were timed again
-# after step 7.9 added their plants.
+# after step 7.9 added their plants, and ci-config.sh again (alone) after
+# step 7.9's check added three more.
 0 dev-checks.sh 1154
-0 ci-config.sh 14
+0 ci-config.sh 19
 0 live-write.sh 12
 0 harness.sh 0
 1 done-check.sh 1075

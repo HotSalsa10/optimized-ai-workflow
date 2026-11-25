@@ -4,7 +4,7 @@
 # flow form on one line, with a quoted " #" before a pull_request trigger.
 # YAML reads the # as text and the trigger as a trigger, so the test's
 # check of the real file must go red for its stated reason. The test's own
-# cases plant each other setting in a copy of ci.yml (its cases 2 to 19).
+# cases plant each other setting in a copy of ci.yml (its cases 2 to 25).
 # Step 6b's extra round adds three more on: forms YAML reads as a
 # pull_request trigger: one after '' inside single quotes and " #", one after
 # a quoted value that runs onto a next line starting with #, and one spelled
@@ -15,7 +15,9 @@
 # plants job, or the Windows and macOS jobs, without the last part of
 # tests/plants/shards.txt, and a part whose measured seconds are over 70% of
 # the plants job's limit, each turn the shard check of the real files red.
-# shellcheck disable=SC2016 # the plants are literal perl text
+# Step 7.9's check added three: a create trigger in on:, the branches filter
+# moved from push to another event, and the harness job on a runner named
+# macOS-14, each turning the check of the real file red.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=tests/lib.sh
@@ -82,16 +84,33 @@ ci_edit_plant() {
   fi
   drop_sandbox "$sb"
 }
+# shellcheck disable=SC2016 # the plant is literal perl text
 ci_edit_plant "the tag trigger put back in on:" .github/workflows/ci.yml \
   's/^(    branches: \["\*\*"\]\n)/$1    tags: ["v*"]\n/m' '    tags: ["v*"]' "a tag push starts a run" "$real"
 ci_edit_plant "the Windows and macOS jobs put back to run on tags" .github/workflows/ci.yml \
   's/^    if: github\.event_name == \x27workflow_dispatch\x27$/    if: startsWith(github.ref, \x27refs\/tags\/v\x27) || github.event_name == \x27workflow_dispatch\x27/m' \
   "if: startsWith(github.ref, 'refs/tags/v')" "job other-systems: a Windows or macOS job runs without being started by hand" "$real"
+# shellcheck disable=SC2016 # the plant is literal perl text
+ci_edit_plant "a create trigger in on:" .github/workflows/ci.yml \
+  's/^(  workflow_dispatch:\n)/  create:\n$1/m' '  create:' "a create event starts a run on a tag" "$real"
+ci_edit_plant "the branches filter under another event than push" .github/workflows/ci.yml \
+  's/^  push:\n    branches: \["\*\*"\]\n/  push:\n  workflow_run:\n    workflows: [CI]\n    branches: ["**"]\n/m' \
+  '  workflow_run:' "push in on: names no branches filter" "$real"
+# shellcheck disable=SC2016 # the plant is literal perl text
+ci_edit_plant "the harness job on a runner named macOS-14" .github/workflows/ci.yml \
+  's/^(  harness:\n(?:    [^\n]*\n)*?    runs-on: )ubuntu-latest$/${1}macOS-14/m' \
+  '    runs-on: macOS-14' "job harness: a Windows or macOS job runs without being started by hand" "$real"
 split="the plants job and the Windows and macOS jobs run every part of tests/plants/shards.txt, each part's measured time within 70% of its limit"
+# the part before the last, which ends each shard list once its last part
+# is dropped (so the plants need no edit when the count of parts changes)
+n=$(perl -ne '$n = $1 + 1 if /^([0-9]+) \S+ [0-9]+\s*$/ && $1 + 1 > $n; END { print $n || 0 }' "$here/shards.txt")
+# shellcheck disable=SC2016 # the plant is literal perl text
 ci_edit_plant "the plants job without its last part" .github/workflows/ci.yml \
-  's/^(\s+shard: \[.*), "[0-9]+\/[0-9]+"\]$/$1]/m' '"4/6"]' "the plants job runs the shards" "$split"
+  's/^(\s+shard: \[.*), "[0-9]+\/[0-9]+"\]$/$1]/m' "\"$((n - 2))/$n\"]" "the plants job runs the shards" "$split"
+# shellcheck disable=SC2016 # the plant is literal perl text
 ci_edit_plant "the Windows and macOS jobs without their last plant part" .github/workflows/ci.yml \
-  's/^(\s+part: \[.*), "plants [0-9]+\/[0-9]+"\]$/$1]/m' '"plants 4/6"]' "the Windows and macOS jobs run the plant parts" "$split"
+  's/^(\s+part: \[.*), "plants [0-9]+\/[0-9]+"\]$/$1]/m' "\"plants $((n - 2))/$n\"]" "the Windows and macOS jobs run the plant parts" "$split"
+# shellcheck disable=SC2016 # the plant is literal perl text
 ci_edit_plant "a part of the split whose measured time is over 70% of the limit" tests/plants/shards.txt \
   's/^(0 \S+ )[0-9]+$/${1}99999/m' " 99999" "part 0: its plant files took" "$split"
 
