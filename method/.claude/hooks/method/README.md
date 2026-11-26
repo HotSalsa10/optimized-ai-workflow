@@ -15,7 +15,7 @@ Then nothing in the session itself stops a risky command; CI and done-check are 
 - A cloud session with several repositories, and a Projects thread.
 - A session before you accept the trust dialog for the folder.
 - A session started in a subfolder of the project (measured; the harness keeps checking it).
-- A session started with hooks switched off: `disableAllHooks` in `.claude/settings.local.json`, or `--settings '{"disableAllHooks": true}'`.
+- A session started with hooks switched off: `disableAllHooks` in `.claude/settings.local.json`, or `--settings` given `{"disableAllHooks": true}`, written out or in a file it names.
 - A session whose settings file holds one value of the wrong type: Claude Code skips the whole file, hooks included (measured; `tests/settings.test.sh` checks every value's type).
 
 In each of these, the session's first message has no `METHOD-ACTIVE` line. That is the sign the method is off.
@@ -25,15 +25,21 @@ In each of these, the session's first message has no `METHOD-ACTIVE` line. That 
 **What it does.** At every session start it adds, at most, 10 lines and 1,200 bytes to what Claude reads first:
 
 1. `METHOD-ACTIVE v0.7.0`: the release named on the first line of `scripts/method/method.lock`, which the release's sync writes (`vunreleased` with no lock, `vunknown` when that line is not a version line). It is read and printed before perl starts, so it is there even when perl or the method's scripts are missing.
-2. `status.sh --quick`'s summary line and its LOOK lines: uncommitted or unpushed work, commits missing a verdict, records, the project's own always-loaded text over 8,000 bytes, effort. CI is left to `/start`, as it waits on the network.
-3. A LOOK line for each setting that weakens the method in this session:
+2. Since step 8.4, before every other line, what your own Claude Code folder (`~/.claude`, or `$CLAUDE_CONFIG_DIR` when that is set) adds that can hide or replace the method in every project. Each kind gets a line of its own that starts `tell the owner:`, names what it found and says what you do, by hand, as the guard stops Claude from changing that folder:
+   - a personal skill (a folder holding a `SKILL.md`) named like one of the project's `method-*` skills, which runs in place of it; other personal `method-*` skills are counted, not named; `skills/synced/` and personal commands are not read, as they do not replace a project skill;
+   - in your user settings, the built-in agents-md plugin's instruction files when they come to `managed-only`, under `pluginConfigs` `"agents-md@builtin"` or `"cc-plugin-agents-md@builtin"`: `instructionFiles` at `managed-only`, or, while `instructionFiles` is absent or at its default, the older `projectInstructions` at `none` (measured: either drops CLAUDE.md, AGENTS.md and the method's rules; under the bare ids, or at other values, the client drops nothing); `claudeMdExcludes`; and a `skillOverrides` entry that switches one of the project's `method-*` skills off (`off`, `user-invocable-only`; `on` and `name-only` keep it);
+   - hooks the client would run (an entry of a known type with its own field) on the events a first install refuses (`@KEEP_EVENTS` in `scripts/method/lib/lock.pl`).
+
+   Names only, each cut to 40 bytes; a long list ends `and N more`, and what you do is never cut. Not read: your `~/.claude/CLAUDE.md` and `~/.claude/rules/`, your own words; settings given by a flag or a launcher, which no settings file shows; a hook on an event outside that list (UserPromptExpansion, for one, which runs when a slash command is typed).
+3. `status.sh --quick`'s summary line and its LOOK lines: uncommitted or unpushed work, commits missing a verdict, records, the project's own always-loaded text over 8,000 bytes, effort. CI is left to `/start`, as it waits on the network.
+4. A LOOK line for each setting that weakens the method in this session:
    - the advisor not switched off;
    - auto memory switched on by `CLAUDE_CODE_DISABLE_AUTO_MEMORY=0`;
    - a model other than the one the project's profile sets (claude-opus-5-5 for Best results and Balanced, and with no lock);
    - on Windows, the PowerShell tool not switched off;
    - hook input it cannot read (then the model is not checked);
-   - in the project's `.claude/settings.local.json`, which ranks above the project's settings: a key the method sets, `disableAllHooks`, skill shell lines switched on;
-   - in it and in your user settings (`~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR/settings.json` when that is set), what adds to every session: an env variable, a PreToolUse or PermissionRequest hook (the method's own are only in the project's settings, so a copy there counts too), an enabled plugin, an effort cap below xhigh (`maxEffortLevel`, also per model in `modelSettings`);
+   - in the project's `.claude/settings.local.json`, which ranks above the project's settings: a key the method sets, `disableAllHooks`, skill shell lines switched on, `claudeMdExcludes`, a PreToolUse or PermissionRequest hook (the method's own are only in the project's settings, so a copy there counts too);
+   - in it and in your user settings (`~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR/settings.json` when that is set), what adds to every session: an env variable, an enabled plugin, an effort cap below xhigh (`maxEffortLevel`, also per model in `modelSettings`); the user settings' line says to tell you, and their hooks are on the audit's line (2.);
    - in the project's `.claude/settings.json`, what the release's sync refuses on a first install unless it is named with `--keep`: a hook of the project's own on an event that runs beside the guard or before it, or whose output reaches the checking agents or every prompt (the list is `@KEEP_EVENTS` in `scripts/method/lib/lock.pl`; PostToolUse is on it), `claudeMdExcludes`, `enabledPlugins`, and the keys that run a program (`statusLine`, `apiKeyHelper` and the like), whether kept then or added later;
    - a settings file that is not a regular file, is over 1 MB, or is not JSON;
    - in user settings, `availableModels` (lists add up across settings files, so a model listed there can be chosen);
@@ -41,14 +47,14 @@ In each of these, the session's first message has no `METHOD-ACTIVE` line. That 
 
    The perl part ends within 20 s, so METHOD-ACTIVE always arrives; a cut-off run says so. A nested run (`METHOD_NESTED=1`, set by the method for `claude -p` inside a session) skips status but still checks the settings, so `METHOD_NESTED` set in a settings file is named.
    Names are shown, never a settings value; a model id only in the shape Anthropic's ids have, and an effort cap by its level.
-4. When more does not fit: `... N more: run bash scripts/method/status.sh`.
-5. If its perl part fails, METHOD-ACTIVE is still there, with a LOOK line saying the rest is missing.
+5. When more does not fit: `... N more: run bash scripts/method/status.sh`.
+6. If its perl part fails, METHOD-ACTIVE is still there, with a LOOK line saying the rest is missing.
 
 **What it prevents.** Working while the method is silently off or weakened, and losing track of where things stand after a compaction or `/clear`.
 
 **What it costs.** About 0.2 to 0.3 s (two perl starts and status without the network) and at most 1,200 bytes of context per session start. Status gets 5 s; past that, a LOOK line says so.
 
-**How it was seen to fire.** In the real Claude Code client against a local fake Claude (`tests/harness.test.sh`, at 2.1.316 and 2.1.319): the line and status's summary reach the first request; also with a dirty tree, after a resume (with its own status: the client does not add output identical to what the conversation already holds, so a resume with nothing new adds nothing; a compaction, /clear and a forked session each brought METHOD-ACTIVE with their own tag when 5.4's last review ran them at both versions, though no harness case runs them yet), without perl on PATH, and in a nested run. Its own tests: `tests/session-status.test.sh`.
+**How it was seen to fire.** In the real Claude Code client against a local fake Claude (`tests/harness.test.sh`, at 2.1.316 and 2.1.319): the line and status's summary reach the first request; also with a dirty tree, after a resume (with its own status: the client does not add output identical to what the conversation already holds, so a resume with nothing new adds nothing; a compaction, /clear and a forked session each brought METHOD-ACTIVE with their own tag when 5.4's last review ran them at both versions, though no harness case runs them yet), without perl on PATH, and in a nested run; since step 8.4, the audit's lines for a personal `method-start` and a user `claudeMdExcludes`. Its own tests: `tests/session-status.test.sh` and, for the audit, `tests/session-audit.test.sh`.
 
 **What it cannot do.**
 - It cannot block anything: SessionStart cannot.
@@ -134,7 +140,7 @@ A receipt says one of three words, with reason codes:
 The guard refuses rather than guesses, so now and then it will refuse something harmless. What to do, in this order:
 
 0. Ask Claude to write the command plainly: one command per line, every word written out. That is almost always enough. Or run that one command yourself, in a terminal in the project folder: the guard checks only what Claude runs.
-1. If the guard itself is wrong, switch the hooks off for one session on your own computer: start Claude Code with `claude --settings '{"disableAllHooks": true}'`.
+1. If the guard itself is wrong, switch the hooks off for one session on your own computer: save a file outside the project, for example `hooks-off.json`, holding exactly the line `{"disableAllHooks": true}`, and start Claude Code with `claude --settings` and that file's path (`claude --settings ~/hooks-off.json`). The file form needs no quoting in any shell; the same JSON written straight after `--settings` breaks in Windows cmd and PowerShell 5.1 (step 8, F15).
 2. Or, before you start the session, make a file named `settings.local.json` in the project's `.claude` folder holding exactly this line, and delete the file afterwards (it is not committed):
 
    ```json

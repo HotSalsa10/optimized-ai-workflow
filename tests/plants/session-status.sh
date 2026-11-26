@@ -46,9 +46,9 @@ push @what, "an effortLevel below xhigh for $e model"
 ---
 0 and push @what, "an effortLevel below xhigh for $e model"
 === RL2 a user availableModels not reported | method/scripts/method/lib/session.pl | availableModels in user settings is a LOOK, as lists add up across settings files
-push @what, 'availableModels (lists add up across settings files)' if $user
+push @what, 'availableModels (lists add up)' if $user
 ---
-push @what, 'availableModels (lists add up across settings files)' if 0
+push @what, 'availableModels (lists add up)' if 0
 === RL2 settings read whatever their size | method/scripts/method/lib/session.pl | a settings file over 1 MB is named, not read, so reading it cannot take the hook past its time
 return (undef, 'is over 1 MB') if -s _ > $SETTINGS_MAX;
 ---

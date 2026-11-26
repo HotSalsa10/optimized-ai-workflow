@@ -15,7 +15,8 @@
 # moved to part 5 to keep part 1 within its margin; the files the fresh
 # check's fixes grew were timed again the same way, on f322cb1. Step 8.2's
 # uninstall.sh was timed whole as root (58 s) and put in part 4; the non-root
-# run at 8.5 times it again. Step 8.3's wrappers.sh (14 s, as root) is in part 5.
+# run at 8.5 times it again. Step 8.3's wrappers.sh (14 s, as root) is in part
+# 5, and step 8.4's session-audit.sh (112 s, as root) in part 2.
 0 dev-checks.sh 1154
 0 ci-config.sh 40
 0 live-write.sh 12
@@ -25,6 +26,7 @@
 1 templates.sh 18
 2 setup.sh 628
 2 guard.sh 423
+2 session-audit.sh 112
 3 protect.sh 606
 3 session-status.sh 544
 4 outside.sh 327
