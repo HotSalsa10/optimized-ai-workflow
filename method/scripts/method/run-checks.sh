@@ -60,8 +60,9 @@
 # evidence.
 #
 # Exit codes: 0 every check that applies here ran, examined something and
-# passed; 1 something failed; 2 bad usage, a bad config file or a working
-# folder that git finds elsewhere (no check ran), or a run that could not go
+# passed; 1 something failed; 2 bad usage, a bad config file, a working
+# folder that git finds elsewhere or a start by a bare name not from its
+# own folder or not as a file of its own (M163; no check ran), or a run that could not go
 # on (git failed, say; the log ends with END and exit 2); 3 nothing failed,
 # but a check that applies here was SKIPPED, or no project check runs here.
 # A SKIPPED is never a pass.
@@ -105,9 +106,21 @@ command -v perl >/dev/null 2>&1 || {
   echo "run-checks: FAIL - perl is not installed; the run stopped"
   exit 2
 }
-# only bash, git and perl are needed, so no dirname
+# only bash, git and perl are needed, so no dirname; started by a bare
+# name, the current folder counts only when $0 and the file bash opened
+# (BASH_SOURCE) are both this script's own name and ./run-checks.sh is a
+# file: found on PATH (or sourced, or piped), the current folder is not
+# this script's and its lib/ could be the project's own, so it refuses
+# (M163; step 8.3, docs/plans/step8.md S8)
 case "$0" in
   */*) here=${0%/*} ;;
-  *) here=. ;;
+  *)
+    if [ "$0" = run-checks.sh ] && [ "${BASH_SOURCE[0]-}" = run-checks.sh ] && [ -f ./run-checks.sh ]; then
+      here=.
+    else
+      printf '%s\n' "run-checks: FAIL - run-checks.sh was started by a bare name found on PATH, or not as a file of its own; run it by its path, such as bash path/to/run-checks.sh; the run stopped"
+      exit 2
+    fi
+    ;;
 esac
 exec perl "$here/lib/checks.pl" "$@"

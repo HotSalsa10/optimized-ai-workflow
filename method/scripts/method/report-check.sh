@@ -60,7 +60,9 @@
 #
 # Exit codes: 0 nothing listed; 1 anything listed; 2 bad usage (no LOG
 # among them), a report or log that could not be read, a log that is the
-# report itself, or perl missing (the last line says could not check).
+# report itself, perl missing, or started by a bare name not from its own
+# folder or not as a file of its own (M163) (the last line says could not
+# check).
 #
 # Rules it serves:
 # - M126: the report check lists every number that appears in no log, and
@@ -89,10 +91,22 @@ command -v perl >/dev/null 2>&1 || {
   echo "report-check: FAIL - could not check: perl is not installed"
   exit 2
 }
-# only bash and perl are needed, so no dirname
+# only bash and perl are needed, so no dirname; started by a bare name, the
+# current folder counts only when $0 and the file bash opened (BASH_SOURCE)
+# are both this script's own name and ./report-check.sh is a file: found on
+# PATH (or sourced, or piped), the current folder is not this script's and
+# its lib/ could be the project's own, so it refuses (M163; step 8.3,
+# docs/plans/step8.md S8)
 case "$0" in
   */*) here=${0%/*} ;;
-  *) here=. ;;
+  *)
+    if [ "$0" = report-check.sh ] && [ "${BASH_SOURCE[0]-}" = report-check.sh ] && [ -f ./report-check.sh ]; then
+      here=.
+    else
+      printf '%s\n' "report-check: FAIL - could not check: report-check.sh was started by a bare name found on PATH, or not as a file of its own; run it by its path, such as bash path/to/report-check.sh"
+      exit 2
+    fi
+    ;;
 esac
 if [ ! -f "$here/lib/report.pl" ]; then
   echo "report-check: FAIL - could not check: lib/report.pl is not next to report-check.sh"

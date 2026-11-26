@@ -176,7 +176,9 @@
 # disk that are not the commit, no main, two merge bases, no shared
 # history, a git error or a damaged stored file, busy, run A failing, run
 # B or C not passing (results that do not repeat cannot be trusted), a
-# check that changed something, a signal, or a refusal to put a file back
+# check that changed something, a signal, started by a bare name not from
+# its own folder or not as a file of its own (M163), or a refusal to put a
+# file back
 # (the last line says FAIL and why); 3 SKIPPED (not-configured, not-here,
 # nothing-to-mutate, no-usable-check: no check is left once those SKIPPED
 # in run A and those that do not pass the control run are not used;
@@ -200,9 +202,21 @@ command -v perl >/dev/null 2>&1 || {
   echo "mutate-changed: FAIL - perl is not installed; the run stopped"
   exit 2
 }
+# started by a bare name, the current folder counts only when $0 and the
+# file bash opened (BASH_SOURCE) are both this script's own name and
+# ./mutate-changed.sh is a file: found on PATH (or sourced, or piped), the
+# current folder is not this script's and its lib/ could be the project's
+# own, so it refuses (M163; step 8.3, docs/plans/step8.md S8)
 case "$0" in
   */*) here=${0%/*} ;;
-  *) here=. ;;
+  *)
+    if [ "$0" = mutate-changed.sh ] && [ "${BASH_SOURCE[0]-}" = mutate-changed.sh ] && [ -f ./mutate-changed.sh ]; then
+      here=.
+    else
+      printf '%s\n' "mutate-changed: FAIL - mutate-changed.sh was started by a bare name found on PATH, or not as a file of its own; run it by its path, such as bash path/to/mutate-changed.sh; the run stopped"
+      exit 2
+    fi
+    ;;
 esac
 if [ ! -f "$here/lib/mutate.pl" ]; then
   echo "mutate-changed: FAIL - lib/mutate.pl is not next to mutate-changed.sh; the run stopped"

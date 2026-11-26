@@ -9,8 +9,9 @@
 #   --criteria FILE the acceptance criteria the change must meet
 #   --checks FILE   the output of the checks run on this version
 # Exit codes: 0 the packet was written; 1 refused: the working copy is not
-# the committed change; 2 bad usage, or a git or file error; 3 nothing to
-# review. Nothing is written unless the exit code is 0.
+# the committed change; 2 bad usage, a git or file error, or started by a
+# bare name not from its own folder or not as a file of its own (M163);
+# 3 nothing to review. Nothing is written unless the exit code is 0.
 #
 # Rules it serves:
 # - M038: the packet is the agent's whole input. It holds the criteria, the
@@ -53,9 +54,21 @@ command -v perl >/dev/null 2>&1 || {
   echo "review-packet: perl is not installed" >&2
   exit 2
 }
-# only bash, git and perl are needed, so no dirname
+# only bash, git and perl are needed, so no dirname; started by a bare
+# name, the current folder counts only when $0 and the file bash opened
+# (BASH_SOURCE) are both this script's own name and ./review-packet.sh is
+# a file: found on PATH (or sourced, or piped), the current folder is not
+# this script's and its lib/ could be the project's own, so it refuses
+# (M163; step 8.3, docs/plans/step8.md S8)
 case "$0" in
   */*) here=${0%/*} ;;
-  *) here=. ;;
+  *)
+    if [ "$0" = review-packet.sh ] && [ "${BASH_SOURCE[0]-}" = review-packet.sh ] && [ -f ./review-packet.sh ]; then
+      here=.
+    else
+      printf '%s\n' "review-packet: review-packet.sh was started by a bare name found on PATH, or not as a file of its own; run it by its path, such as bash path/to/review-packet.sh" >&2
+      exit 2
+    fi
+    ;;
 esac
 exec perl "$here/lib/packet.pl" "$@"

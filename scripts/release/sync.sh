@@ -29,17 +29,31 @@
 #
 # Exit codes: 0 the plan holds (written with --write); 1 refused, nothing
 # written (an error sync did not foresee too), or, after writing, the
-# installed files do not match the lock or the run failed; 2 bad usage, or
-# perl is missing.
+# installed files do not match the lock or the run failed; 2 bad usage,
+# perl missing, or started by a bare name not from its own folder or not
+# as a file of its own (M163).
 set -u
 # (an exported CDPATH would make cd print the folder it found, so here
 # would hold two lines)
 unset CDPATH
+# started by a bare name, the current folder counts only when $0 and the
+# file bash opened (BASH_SOURCE) are both this script's own name and
+# ./sync.sh is a file: found on PATH (or sourced, or piped), the current
+# folder is not this script's and its lib/ could be the project's own, so
+# it refuses (M163; step 8.3, docs/plans/step8.md S8)
 case "$0" in
   */*) here=${0%/*} ;;
-  *) here=. ;;
+  *)
+    if [ "$0" = sync.sh ] && [ "${BASH_SOURCE[0]-}" = sync.sh ] && [ -f ./sync.sh ]; then
+      here=.
+    else
+      printf '%s\n' "sync: FAIL - sync.sh was started by a bare name found on PATH, or not as a file of its own; run it by its path, such as bash path/to/sync.sh"
+      exit 2
+    fi
+    ;;
 esac
-here=$(cd "$here" && pwd) || {
+# (-- so a folder whose name starts with - is not read as an option)
+here=$(cd -- "$here" && pwd) || {
   echo "sync: FAIL - cannot find the folder this script is in"
   exit 2
 }
