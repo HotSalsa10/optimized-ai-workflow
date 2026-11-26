@@ -1,0 +1,57 @@
+# The method's MCP list (G4, M131; docs/plans/step5.md, section 6.2 and
+# D10; DECISIONS A65). An MCP tool whose name starts with get_, list_,
+# search_ or read_, or ends with _read, passes as a read. So do the tools
+# that act only on this session: send_later, subscribe_pr_activity and
+# unsubscribe_pr_activity. Every other MCP tool passes only when it is
+# named here, or in the project's own .claude/method-local/mcp-tools.txt
+# (same form). Each line names the tool after its server's name
+# (create_pull_request, not mcp__github__create_pull_request), on any
+# server:
+#   TOOL CHECK... :: REASON     a tool that writes: its owner and repo must
+#                               be this repository's origin on GitHub, and
+#                               each CHECK holds:
+#                                 FIELD        a branch it writes, which
+#                                              may not be main or master
+#                                              (nor origin's HEAD branch)
+#                                 !FIELD       must not be given
+#                                 FIELD=VALUE  must be given, as VALUE
+#   TOOL @anywhere :: REASON    a tool that only reads, or acts only on
+#                               this session: no repository check
+#
+# What stays with the owner, on every server: merging and auto-merge,
+# reviews (an approval counts toward landing), starting, messaging,
+# scheduling or changing other sessions, workflow runs, new repositories
+# and forks, and every tool not named here. The merge, auto-merge, session
+# and trigger tools are also denied in the settings (permissions.deny,
+# M139), which holds with the hooks off.
+
+# Reads whose names do not say so
+actions_list @anywhere :: lists workflows, runs, jobs and artifacts
+actions_get @anywhere :: reads a workflow, run or job
+
+# Writes to a task branch of this repository (a branch it may start from
+# can be main: create_branch's from_branch is not written)
+create_pull_request head !reviewers :: opens a pull request from a task branch; the owner merges; reviewers notify people
+update_pull_request !state !base !reviewers :: edits a pull request's title or text; never closes, retargets or asks for reviews
+push_files branch :: commits files to a task branch
+create_or_update_file branch !allow_symlink_write :: commits one file to a task branch; never re-points a link
+delete_file branch :: deletes a file on a task branch
+create_branch branch :: makes a task branch
+
+# Comments and issues on this repository
+add_issue_comment :: comments on an issue or pull request
+add_reply_to_pull_request_comment :: replies in a review thread
+issue_write method=create !assignees !parent_owner !parent_repo :: opens an issue; closing or editing one stays with the owner, and assignees notify people
+
+# Left out on purpose (the owner may add them):
+#   update_pull_request_branch: merges the base into a pull request's own
+#     branch, which its input does not name, so "not main" cannot be told
+#   update_issue_comment: rewrites any comment of the account, the owner's
+#     own words too
+#   sub_issue_write, resolve_review_thread, unresolve_review_thread: they
+#     act on a global id that owner and repo do not bind
+#   pull_request_review_write, add_comment_to_pending_review: an approval
+#     can count toward landing
+#   actions_run_trigger: runs, re-runs or cancels workflows
+#   request_copilot_review, disable_pr_auto_merge, run_secret_scanning,
+#   watch_url, report_preview_port, spawn_task: not needed by the method

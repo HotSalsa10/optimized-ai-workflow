@@ -71,6 +71,54 @@ run_check rule-map bash scripts/dev/check-rule-map.sh
 run_check workflows bash scripts/dev/lint-workflows.sh
 run_check lint-prompts bash scripts/dev/lint-prompts.sh
 
+# self-install: this repo runs the method's hooks, agents, skills and scripts
+# as installed at the root from a release tag (DECISIONS A82 (2), step 8.1),
+# so the root copy must match its lock, scripts/method/method.lock. The lock
+# is verified by the verify of method/scripts/method/lib/lock.pl, the code
+# run-checks' method-files runs (M048), never by the root copy's own
+# lib/lock.pl, so a changed root lock.pl cannot vouch for itself. verify
+# also refuses a version line that is not a v* tag. The root
+# .claude/settings.json must keep the method's rules out of this repo's
+# sessions with claudeMdExcludes "**/.claude/rules/method/**" (A82 (3)).
+self_install() {
+  # shellcheck disable=SC2016 # perl code, expanded by perl
+  perl -e '
+    use strict;
+    use warnings;
+    my $lib = "method/scripts/method/lib/lock.pl";
+    my $pattern = "**/.claude/rules/method/**";
+    my (@lines, @why);
+    my $v = eval { require "./$lib"; Lock::verify(".") };
+    if (!$v) {
+      (my $e = $@ || "no result") =~ s/\n.*//s;
+      print "self-install: $lib did not load or its verify failed: $e\n";
+      print "self-install: FAIL - the root copy of the method could not be compared with its lock\n";
+      exit 1;
+    }
+    my @f = @{ $v->{findings} };
+    push @lines, map { $_->[1] } @f;
+    if (!-e $Lock::LOCK && !-l $Lock::LOCK) {
+      push @why, "the method is not installed at the root ($Lock::LOCK is missing); install the last release tag as DECISIONS A82 (2) says";
+    } elsif (@f) {
+      push @why, "the root copy of the method does not match $Lock::LOCK (" . scalar(@f) . (@f == 1 ? " finding" : " findings") . " above)";
+    }
+    my ($s, $se) = Lock::read_json($Lock::SETTINGS, $Lock::SETTINGS);
+    my $kept = !$se && ref $s eq "HASH" && ref $s->{claudeMdExcludes} eq "ARRAY"
+      && grep { defined $_ && !ref $_ && $_ eq $pattern } @{ $s->{claudeMdExcludes} };
+    if (!$kept) {
+      push @lines, $se if $se;
+      push @why, "$Lock::SETTINGS does not list claudeMdExcludes $pattern, so the method\x27s rules would load in this repo\x27s sessions";
+    }
+    print "self-install: $_\n" for @lines;
+    if (@why) {
+      print "self-install: FAIL - ", join("; ", @why), "\n";
+      exit 1;
+    }
+    print "self-install: PASS - the root copy of the method matches $Lock::LOCK ($v->{version}, $v->{examined} entries, verified by $lib) and $Lock::SETTINGS keeps the method\x27s rules out\n";
+  '
+}
+run_check self-install self_install
+
 # perl syntax: every tracked .pl file under scripts/ and method/scripts/ must
 # compile. perl -c runs BEGIN blocks, so it is pointed only at this repo's
 # own helpers.

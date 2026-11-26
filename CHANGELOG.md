@@ -268,6 +268,7 @@ After your merge, you create the first release tag, v0.7.0, on GitHub. Claude gi
 
 ### Changed (step 8)
 
+- This repository now runs the method's hooks and checking agents itself, installed from the first release, `v0.7.0`, the same way a project of yours gets them (step 8.1). The method's rules and skills are not used here, because this repository keeps its own way of working; one setting keeps the rules out, and every session here starts with one expected note about it. A new check in the repository's checks fails if the installed copy differs from its fingerprint or that setting is missing. Nothing changes in your projects. If the guard gets in the way before step 8 is merged, the install is one commit that can be undone; after the merge, you switch the hooks off for one session.
 - Code Mode stays off in every project (step 8.0c, M165). Code Mode is an experimental Claude Code mode where Claude writes small programs that call its tools through one tool, `REPL`. The method's settings now deny `REPL`, in every profile and also with the hooks off. If you switch Code Mode on, Claude Code says a deny rule leaves it out and starts with the ordinary tools, so you lose nothing. Measured once, offline, the guard still saw and refused each risky call inside such a program, but no test of the method can reach Code Mode yet, so it stays off until one can. `v0.8.0` ships this.
 
 ### Changed (step 6)

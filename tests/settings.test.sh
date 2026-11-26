@@ -137,8 +137,19 @@ for my $file (@files) {
   check("$file sets nothing on the never-set list", @found ? "it sets @found" : undef);
 }
 
-# this repo's own settings agree with the fragment on the shared keys (D3)
+# this repo's own settings agree with the fragment on the shared keys (D3).
+# Since step 8.1 this repo runs the release installed at its root (DECISIONS
+# A82), so they are compared with that release's fragment,
+# scripts/method/settings.method.json, while method/'s fragment moves on;
+# with nothing installed, with method/'s. (validate's self-install checks
+# that root copy against its lock.)
 my ($mine, $me) = read_json('.claude/settings.json');
+my $rf = $f;
+my $installed = 'scripts/method/settings.method.json';
+if ($mine && (-e $installed || -l $installed)) {
+  ($rf, my $re) = read_json($installed);
+  if (!$rf) { ($mine, $me) = (undef, $re) }
+}
 if ($mine) {
   # every key both set (the hooks are the method's to run in a project, not
   # here, D3), each env variable both set, and the keys this repo must set
@@ -146,11 +157,11 @@ if ($mine) {
   for my $k (qw(model availableModels enforceAvailableModels effortLevel attribution)) {
     push @differ, $k unless exists $mine->{$k};
   }
-  for my $k (sort grep { exists $f->{$_} && $_ ne '$schema' && $_ ne 'env' && $_ ne 'hooks' } keys %$mine) {
-    push @differ, $k unless Json::encode($mine->{$k}) eq Json::encode($f->{$k});
+  for my $k (sort grep { exists $rf->{$_} && $_ ne '$schema' && $_ ne 'env' && $_ ne 'hooks' } keys %$mine) {
+    push @differ, $k unless Json::encode($mine->{$k}) eq Json::encode($rf->{$k});
   }
   my %me = ref $mine->{env} eq 'HASH' ? %{ $mine->{env} } : ();
-  my %fe = ref $f->{env} eq 'HASH' ? %{ $f->{env} } : ();
+  my %fe = ref $rf->{env} eq 'HASH' ? %{ $rf->{env} } : ();
   push @differ, 'env.CLAUDE_CODE_DISABLE_ADVISOR_TOOL' unless exists $me{CLAUDE_CODE_DISABLE_ADVISOR_TOOL};
   for my $v (sort grep { exists $fe{$_} } keys %me) {
     push @differ, "env.$v" unless Json::encode($me{$v}) eq Json::encode($fe{$v});

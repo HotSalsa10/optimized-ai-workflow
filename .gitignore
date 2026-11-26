@@ -49,3 +49,7 @@ Thumbs.db
 *.swp
 .idea/
 .vscode/
+# >>> method
+.method/local/
+.claude/settings.local.json
+# <<< method

@@ -1,0 +1,23 @@
+# How this project works
+
+This file is the project's guide for Claude, and the one place that says how this project works. CLAUDE.md loads it in every session.
+
+## Records
+
+- SPEC.md: what the project must do, as numbered requirements.
+- ROADMAP.md: the work, in tracks.
+- TASKS.md: the current step and what is left.
+- DECISIONS.md: choices that are settled.
+- RISKS.md: what could go wrong.
+- CHANGELOG.md: what changed, in plain words.
+- TESTS.md: every check and what runs it.
+- REVIEW.md: what a review looks for.
+
+## The project's own rules
+
+Rules that must always hold here are in `.claude/rules/pack/`. Procedures for this project are skills in `.claude/skills/pack-*/`. The method's rules are in `.claude/rules/method/`.
+
+## Commands
+
+- `bash scripts/method/status.sh` says where things stand.
+- `bash scripts/method/run-checks.sh` runs every check.

@@ -1,0 +1,55 @@
+# The one verdict vocabulary (rule M039). The words are settled in DECISIONS
+# A10 and A71. Scripts and tests read them through lib/verdicts.pl; no script
+# spells them out itself, and a test checks that.
+# Each line: KIND<TAB>WORDS<TAB>MEANING. Lines starting with # are comments.
+#   verdict           a word a checking agent opens its answer with
+#   trailer-key       the key of the commit trailer
+#   trailer           a trailer value that stands alone
+#   trailer-reason    a trailer value followed by " - " and a reason
+#   ready             a trailer value done-check takes as ready to merge;
+#                     each is also a trailer value (DECISIONS A10, SPEC R4)
+#   gate-verdict      the name of a gate, a checking agent whose report
+#   gate-diagnosis    gate-receipt checks; the kind without "gate-" is the
+#   gate-test-result  kind of word the gate's report opens with (verdict,
+#                     diagnosis or test-result). A gate stands under one
+#                     kind; its name is lower-case letters and hyphens.
+#   diagnosis         a word the diagnosing gate opens its report with
+#   test-result       a word the testing gate opens its report with
+#   receipt           a gate receipt's state, read by its place: the first
+#                     means checked and sound, the second checked the wrong
+#                     thing or the wrong way, the third not checked
+#   end-key           the word that opens a gate report's last line, before
+#                     the tree id the gate was given at its start (one line)
+# Some lines are read by their place, so their order is part of the file
+# (DECISIONS A10 and A71; Verdicts::roles reads them; tests/verdicts.test.sh
+# checks them against the records):
+#   verdict           the first word approves
+#   test-result       pass, then fail, then not run (exactly three)
+#   gate-verdict      the reviewer, then the security checker, then the
+#                     reporter (exactly three)
+#   gate-test-result  the tester (exactly one)
+verdict	APPROVE	the change may go ahead
+verdict	REQUEST CHANGES	fix the listed findings, then review again
+verdict	REJECT	wrong approach; plan again
+verdict	ESCALATE	a person must decide
+trailer-key	Review-Verdict	the commit trailer's key; the trailer is the last paragraph of the message, on one line
+trailer	approve	reviewed and approved
+trailer	request-changes-resolved	every requested change was made and checked
+trailer-reason	request-changes-open	changes are still open; the reason names them
+trailer-reason	not-required	no review was needed; the reason says why
+ready	approve	the only trailer value that lets a change merge: the review approved this version (SPEC R4)
+gate-verdict	method-reviewer	the reviewer; its report opens with a verdict word
+gate-verdict	method-security-checker	the security checker; its report opens with a verdict word
+gate-verdict	method-reporter	the reporter; its report opens with a verdict word
+gate-diagnosis	method-diagnose	the diagnosing agent; its report opens with a diagnosis word
+gate-test-result	method-tester	the tester; its report opens with a test-result word
+diagnosis	ROOT CAUSE	the cause is found, and the report shows the evidence for it
+diagnosis	SYMPTOM CHASE	the fix or the reasoning so far treats a symptom, not the cause
+diagnosis	SPEC QUESTION	the behaviour turns on what the specification means; a person must decide
+test-result	TESTS PASS	the tests ran and every one passed
+test-result	TESTS FAIL	the tests ran and at least one failed; the report names them
+test-result	TESTS NOT RUN	the tests could not be run; the report says why
+receipt	VALID	every check held: the gate finished its report on the committed files, unchanged while it worked
+receipt	INVALID	the gate checked the wrong thing or the wrong way; its report does not count
+receipt	INCOMPLETE	not checked: the report, its last line or the evidence is missing
+end-key	END-VERDICT	the word that opens a gate report's last line, followed by a space and the tree id given at its start
