@@ -72,8 +72,8 @@ my %want = (
   # the tools that merge, or start, message or schedule other sessions, on
   # every server name (5.8, M139: holds with the hooks off); nothing else
   # under permissions, as one of the wrong shape makes the client skip the
-  # whole file
-  permissions => [obj => { deny => [list => [(map { "mcp__*__$_" } qw(merge_pull_request enable_pr_auto_merge create_session send_message create_trigger fire_trigger update_trigger unarchive_session)), "RemoteTrigger"]] }],
+  # whole file; REPL, Code Mode's script tool, last (step 8.0c, M165)
+  permissions => [obj => { deny => [list => [(map { "mcp__*__$_" } qw(merge_pull_request enable_pr_auto_merge create_session send_message create_trigger fire_trigger update_trigger unarchive_session)), "RemoteTrigger", "REPL"]] }],
 );
 # hooks are checked below (from 5.4)
 my %later = (hooks => 'hooks (from 5.4)');
@@ -239,6 +239,7 @@ my $ptext;
 if (open my $ph, '<:raw', 'method/scripts/method/profiles.tsv') { local $/; $ptext = <$ph> }
 if (!defined $ptext) {
   bad("profiles.tsv passes its lint", "method/scripts/method/profiles.tsv cannot be read");
+  bad("REPL is in the merged deny list of every profile, so Code Mode stays off (M165)", "method/scripts/method/profiles.tsv cannot be read");
 } else {
   my ($rows, $names, $pp) = Lock::profiles($ptext, $f);
   check("profiles.tsv passes its lint (only model, effortLevel and availableModels; claude-opus-5-5 on every list; each model on its own list; best as the fragment)",
@@ -247,11 +248,15 @@ if (!defined $ptext) {
   my %wp = (best => ['claude-opus-5-5', 'xhigh', ['claude-opus-5-5']], balanced => ['claude-opus-5-5', 'medium', ['claude-opus-5-5']],
     budget => ['claude-sonnet-5-5', 'medium', ['claude-opus-5-5', 'claude-sonnet-5-5']]);
   my %floor;
+  my @no_repl;
   for my $p (qw(best balanced budget)) {
     my ($k, $e) = Lock::expected_from($f, $ptext, $p);
     my ($m, $ef, $l) = @{ $wp{$p} };
     my $name = "the profile ${p}'s merged keys: model $m, effortLevel $ef, availableModels " . join(',', @$l);
-    if ($e) { bad($name, $e); next }
+    if ($e) { bad($name, $e); push @no_repl, "$p ($e)"; next }
+    # Code Mode stays off in every profile (step 8.0c, M165): the client
+    # leaves Code Mode out when a deny rule names its tool, REPL
+    push @no_repl, $p unless ref $k->{deny} eq 'ARRAY' && grep { $_ eq 'REPL' } @{ $k->{deny} };
     my $got = Json::encode([@{ $k->{keys} }{qw(model effortLevel availableModels)}]);
     check($name, $got eq Json::encode([$m, $ef, $l]) ? undef : "they are $got");
     my %rest = %$k;
@@ -259,6 +264,7 @@ if (!defined $ptext) {
     delete @{ $rest{keys} }{qw(model effortLevel availableModels)};
     $floor{$p} = Json::encode(\%rest);
   }
+  check("REPL is in the merged deny list of every profile, so Code Mode stays off (M165)", @no_repl ? "it is missing for: @no_repl" : undef);
   check("every method key but model, effortLevel and availableModels is the same in all three profiles (hooks, deny list, enforceAvailableModels, disableAllHooks and the rest)",
     (3 == keys %floor && $floor{best} eq $floor{balanced} && $floor{best} eq $floor{budget}) ? undef : 'they differ');
 }

@@ -28,6 +28,7 @@ The hooks run in local sessions and in cloud sessions with one repository. Where
 | The start line | Nothing: a notice. `METHOD-ACTIVE` and status's LOOK lines show the method's state at every start where the hooks run; whether Claude then stops is not checked (below) | session-status.sh |
 | Receipts (M053, M078, M106, M116) | A review that does not count being taken for one: a checking agent's report cut off, made on files that changed, run below its effort, off the allowed models or from another definition gets an INVALID or INCOMPLETE receipt, which done-check does not count. Each receipt also records the base of the review packet its agent read | gate-receipt.sh |
 | Settings (M076, M104, M138, M139) | The advisor, auto memory and skill shell lines are off; merge tools and tools that start other sessions are denied, also with the hooks off | `.claude/settings.json` |
+| Code Mode off (M165) | Code Mode, an experimental Claude Code mode where Claude writes small programs that call its tools: the settings deny its tool, `REPL`, so it stays off, also with the hooks off. If you switch it on, Claude Code says a deny rule leaves it out and starts with the ordinary tools. It stays off until a test covers it | `.claude/settings.json` |
 
 ## Enforced by a script
 

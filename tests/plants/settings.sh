@@ -77,6 +77,8 @@ for t in merge_pull_request enable_pr_auto_merge create_session send_message cre
 done
 plant "the merge tool denied on one server name only" "$frag" "permissions.deny is not exactly" '$_ = "mcp__github__merge_pull_request" for grep { $_ eq "mcp__*__merge_pull_request" } @{ $d->{permissions}{deny} }'
 plant "the RemoteTrigger deny entry dropped" "$frag" "permissions.deny is not exactly" '$d->{permissions}{deny} = [grep { $_ ne "RemoteTrigger" } @{ $d->{permissions}{deny} }]'
+# (step 8.0c, M165: Code Mode stays off in every profile)
+plant "the REPL deny entry dropped (Code Mode could start)" "$frag" "FAIL  REPL is in the merged deny list of every profile" '(grep { $_ eq "REPL" } @{ $d->{permissions}{deny} }) or die "no REPL entry"; $d->{permissions}{deny} = [grep { $_ ne "REPL" } @{ $d->{permissions}{deny} }]'
 plant "RemoteTrigger left out of the guard's matcher" "$frag" "it is not registered so" '$_->{matcher} =~ s/\|RemoteTrigger// for @{ $d->{hooks}{PreToolUse} }'
 plant "an env variable the plan does not set" "$frag" "env has keys the plan does not set: EXTRA_X" '$d->{env}{EXTRA_X} = "1"'
 plant "a second model allowed" "$frag" "availableModels is not exactly" '$d->{availableModels} = ["claude-opus-5-5", "claude-sonnet-5-5"]'

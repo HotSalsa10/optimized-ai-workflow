@@ -266,6 +266,10 @@ After your merge, you create the first release tag, v0.7.0, on GitHub. Claude gi
 - Step 8's plan (docs/plans/step8.md) is at version 2 after three critiques: this repo runs the hooks from `v0.7.0`; uninstall keeps what was there before the install, the logs and setup's files, and runs only where the hooks are off; the check of your own Claude Code folder tells you what to change; one question for you (D1: how an uninstall merges). Nothing is built until step 7 is merged and tagged.
 - Step 8's plan is at version 3 with 8.0's measurements: this repository passes its tests and checks with the method installed; one setting keeps the method's rules out of its sessions; a personal command or an account skill named like a method skill does not replace it, so the check of your own Claude Code folder does not look for them; hooks written into a project's settings during a session apply in that session about a second later.
 
+### Changed (step 8)
+
+- Code Mode stays off in every project (step 8.0c, M165). Code Mode is an experimental Claude Code mode where Claude writes small programs that call its tools through one tool, `REPL`. The method's settings now deny `REPL`, in every profile and also with the hooks off. If you switch Code Mode on, Claude Code says a deny rule leaves it out and starts with the ordinary tools, so you lose nothing. Measured once, offline, the guard still saw and refused each risky call inside such a program, but no test of the method can reach Code Mode yet, so it stays off until one can. `v0.8.0` ships this.
+
 ### Changed (step 6)
 
 - From step 6's review (6.6, one repair loop): the prompt check and the description budget read a frontmatter value as Claude Code does. A `tools:` list wrapped onto the next line, written in quotes, or followed by a `# comment` no longer hides a tool such as Agent or Bash from the check, and `context: fork  # a note` in a skill is refused as `context: fork` is. A description wrapped onto the next line is counted whole, since Claude Code joins the lines and sends them all.

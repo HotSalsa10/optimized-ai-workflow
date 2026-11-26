@@ -619,11 +619,12 @@ outside_case() {
   perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({mcpServers => {map { $_ => {type => "stdio", command => "perl", args => [$ARGV[0], "$ARGV[1]/$_.log", qw(merge_pull_request create_pull_request)]} } qw(github plugin_github_github)}})' \
     "$HARNESS/fake-mcp.pl" "$H_DIR" >"$H_DIR/mcp.json"
 }
-# deny_loaded: the client's debug log says the nine deny rules loaded from
-# the project's settings, and that no rule was found invalid (a rule the
-# client rejects prints nothing on stderr or in the stream)
+# deny_loaded: the client's debug log says the ten deny rules (REPL the
+# tenth since step 8.0c) loaded from the project's settings, and that no
+# rule was found invalid (a rule the client rejects prints nothing on stderr
+# or in the stream)
 deny_loaded() {
-  LC_ALL=C grep -q "Adding 9 deny rule(s) to destination 'projectSettings'" "$H_DIR/debug.log" 2>/dev/null && ! LC_ALL=C grep -q 'Invalid permission rule\|Invalid setting' "$H_DIR/debug.log"
+  LC_ALL=C grep -q "Adding 10 deny rule(s) to destination 'projectSettings'" "$H_DIR/debug.log" 2>/dev/null && ! LC_ALL=C grep -q 'Invalid permission rule\|Invalid setting' "$H_DIR/debug.log"
 }
 # called LOG [TEXT]: the fake MCP server under that name was called (with
 # TEXT in the call)
@@ -658,7 +659,7 @@ if h_fake "$H_WORK/outside.json"; then
   else
     fail "outside: an MCP pull request on another repository is refused (G4); one from the task branch is made" "$(cut -f7- "$H_DIR/fake/requests.tsv")"
   fi
-  if deny_loaded; then pass "outside: the client's debug log shows the nine deny rules loaded from the project's settings, none invalid"; else fail "outside: the eight deny rules loaded, none invalid" "$(LC_ALL=C grep -i 'deny rule\|invalid' "$H_DIR/debug.log" 2>/dev/null | head -3)"; fi
+  if deny_loaded; then pass "outside: the client's debug log shows the ten deny rules loaded from the project's settings, none invalid"; else fail "outside: the ten deny rules loaded, none invalid" "$(LC_ALL=C grep -i 'deny rule\|invalid' "$H_DIR/debug.log" 2>/dev/null | head -3)"; fi
   if LC_ALL=C grep -q '	G4	mcp__github	' "$H_PROJ/.method/local/guard.log" 2>/dev/null && ! LC_ALL=C grep -q 'create_pull_request' "$H_PROJ/.method/local/guard.log"; then
     pass "outside: the MCP refusal is in guard.log under the tool's server only"
   else
