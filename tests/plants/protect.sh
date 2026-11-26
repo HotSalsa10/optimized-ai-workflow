@@ -104,6 +104,7 @@ plant "the git version check removed" "a cherry-pick of a commit that changes th
 plant "G12 warns at every call" "G12: one warning per session" 'return undef if $lines && grep { $_->[3] eq $hash } @$lines;' ''
 plant "G12 warns inside subagents" "G12: a call inside a subagent gets no warning" "return undef if defined \$in->{agent_id} && !ref \$in->{agent_id} && \$in->{agent_id} ne '';" ''
 plant "G12 warns at max" "G12: max gets no warning" '(?:xhigh|max)' '(?:xhigh)'
+plant "G12's warning ignores the profile" "G12: silent at Balanced's own effort" '($want, $name) = ($row->{effortLevel}, $n);' ''
 
 # --- review round 1 of 5.7 (repair loop 1) ---
 plant ">& not read as a write" 'a write is refused (5.7 repair loop 1): echo x >& .claude/settings.json' '|&>|&>>|>&)\z/ }' '|&>|&>>)\z/ }'
@@ -163,14 +164,18 @@ PLANT_FILE=guard.pl plant "NotebookEdit judged by file_path only" "NotebookEdit 
 
 # --- the method's skills (step 6.3, S10): each feed of @METHOD_SKILLS ---
 s="a method skill (6.3):"
-drop "the method's skills dropped from the set" "$s Write to projü/.claude/skills/method-start/SKILL.md is refused" '"$t/.claude/skills/$_"'
-plant "the method's skills dropped from the version check (@SPECS)" "$s switching to a branch whose method-start SKILL.md differs is refused" 'map { ".claude/skills/$_" } @METHOD_SKILLS);' '());'
+# (since step 7.2 every feed is the method- prefix, step7.md S12;
+# @METHOD_SKILLS feeds only lint-prompts, whose plants hold it)
+drop "G6's method- skill prefix dropped from the set" "a method skill (7.2): Write to projü/.claude/skills/method-quick/SKILL.md is refused" '"$t/.claude/skills", '"'prefix'"
+plant "the method- prefix read only for the skills folder's own entries (not deep)" "$s Write to projü/.claude/skills/method-start/SKILL.md is refused" "'method-', 1);" "'method-', 0);"
+plant "the method's skills dropped from the version check (@SPECS)" "$s switching to a branch whose method-start SKILL.md differs is refused" ' .claude/skills);' ');'
+plant "the version check keeps every skill, not only the method- ones (kept)" "a project skill (6.3): switching to a branch that changes only deploy's skill passes" 'index($k, $skills) != 0 || index($k, $method) == 0' '1'
+plant "the version check keeps only the listed skills (@METHOD_SKILLS), not every method- one" "a method skill (7.2): switching to a branch that adds a method- skill is refused" 'index($k, $skills) != 0 || index($k, $method) == 0' 'index($k, $skills) != 0 || grep { index($k, key(".claude/skills/$_/")) == 0 } @METHOD_SKILLS'
 plant "the method's skills dropped from the text forms (text_re)" "$s an interpreter's code naming" '/! . skills_re()' '/(?!)!'
 PLANT_FILE=guard.pl plant "the method's skills dropped from the watched paths (\$WATCHED_PATH)" "$s perl -e that writes method-start's SKILL.md is refused" '|\.claude/skills/@{[ Protect::skills_re() ]}' ''
 
 # --- /method-finish, and the mods and plugins folders (step 6b.4) ---
 s="mods and plugins (6b.4):"
-plant "method-finish dropped from the method's skills" "a method skill (6b.4): an Edit of method-finish's SKILL.md is refused" 'qw(method-start method-plan method-design method-finish)' 'qw(method-start method-plan method-design)'
 plant "dev-mods dropped from the home folders" "$s Write to home/.claude/dev-mods/s1/m/index.ts is refused" "['dev-mods', 'mods'], " ''
 plant "plugins dropped from the home folders" "$s Write to home/.claude/plugins/x is refused" ", ['plugins', 'plugins']" ''
 plant "CLAUDE_CONFIG_DIR not added" "$s Write to a mod under CLAUDE_CONFIG_DIR is refused" 'push @cfg, $ENV{CLAUDE_CONFIG_DIR} if' '0 && push @cfg, $ENV{CLAUDE_CONFIG_DIR} if'

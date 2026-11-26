@@ -74,6 +74,29 @@ hook "$p"
 first=$(printf '%s\n' "$out" | sed -n 1p)
 if [ "$first" = "METHOD-ACTIVE vunreleased" ] && [ "$code" -eq 0 ]; then pass "the first line is METHOD-ACTIVE vunreleased, and it exits 0"; else fail "the first line is METHOD-ACTIVE vunreleased, and it exits 0" "exit $code: $out"; fi
 has "a clean project gets status's summary, with the client's version and CI left to /start" "status: nothing needs a look" "claude-code" "ci)"
+
+# the version from the lock's first line (step 7.2): read before perl
+# starts; vunknown when that line is not a version line; vunreleased with
+# no lock (above)
+lp=$(project locked) || abort_sandbox
+printf 'version\tv0.7.0\nsource\t%s\nprofile\tbest\nsettings\t%s\n' "$(printf '%040d' 0)" "$(printf '%064d' 0)" >"$lp/scripts/method/method.lock"
+hook "$lp"
+first=$(printf '%s\n' "$out" | sed -n 1p)
+if [ "$first" = "METHOD-ACTIVE v0.7.0" ] && [ "$code" -eq 0 ]; then pass "the first line names the lock's version (METHOD-ACTIVE v0.7.0)"; else fail "the first line names the lock's version (METHOD-ACTIVE v0.7.0)" "exit $code: $out"; fi
+hook "$lp" "" METHOD_NESTED=1
+if [ "$out" = "METHOD-ACTIVE v0.7.0 (nested: status skipped)" ]; then pass "the first line names the lock's version in a nested run too"; else fail "the first line names the lock's version in a nested run too" "$out"; fi
+for bad in 'version\tv0.7.0 ; rm -rf ~' 'version\tv0.7.0\r' 'version\tlatest' 'Version\tv0.7.0' 'version\tv0.7.0.0.0.0.0.0.0.0.0.0.0' ''; do
+  # shellcheck disable=SC2059 # the line's \t and \r are printf's to read
+  printf "$bad\n" >"$lp/scripts/method/method.lock"
+  hook "$lp"
+  first=$(printf '%s\n' "$out" | sed -n 1p)
+  if [ "$first" = "METHOD-ACTIVE vunknown" ]; then pass "a lock whose first line is not a version line gives vunknown: $bad"; else fail "a lock whose first line is not a version line gives vunknown: $bad" "$first"; fi
+done
+rm -f "$lp/scripts/method/method.lock"
+mkdir "$lp/scripts/method/method.lock"
+hook "$lp"
+first=$(printf '%s\n' "$out" | sed -n 1p)
+if [ "$first" = "METHOD-ACTIVE vunreleased" ] && [ "$code" -eq 0 ]; then pass "a lock that is a folder is not read (vunreleased)"; else fail "a lock that is a folder is not read (vunreleased)" "exit $code: $out"; fi
 lacks "status's PASS lines stay out of the context" "records: PASS"
 
 # the gates' receipts for the files at HEAD (step 5b.2): one LOOK line with
@@ -104,6 +127,26 @@ hook "$p" "$(printf '{"source":"startup","cwd":"%s","model":"claude-sonnet-5-5"}
 has "a session on another model is a LOOK" "this session runs claude-sonnet-5-5, not claude-opus-5-5"
 hook "$p" "$(printf '{"source":"startup","cwd":"%s","model":"claude-opus-5-5"}' "$p")"
 lacks "a session on claude-opus-5-5 is not" "this session runs"
+
+# (step 7.3) the model is the one the project's profile sets: the lock's
+# profile line and its row in scripts/method/profiles.tsv
+bp=$(project budget) || abort_sandbox
+printf 'version\tv0.7.0\nsource\t%s\nprofile\tbudget\nsettings\t%s\n' "$(printf '%040d' 0)" "$(printf '%064d' 0)" >"$bp/scripts/method/method.lock"
+hook "$bp" "$(printf '{"source":"startup","cwd":"%s","model":"claude-sonnet-5-5"}' "$bp")"
+lacks "a Budget project's session on its own model, claude-sonnet-5-5, is not a LOOK" "this session runs"
+hook "$bp" "$(printf '{"source":"startup","cwd":"%s","model":"claude-opus-5-5"}' "$bp")"
+has "a Budget project's session on another model is a LOOK naming the profile's model" "this session runs claude-opus-5-5, not claude-sonnet-5-5, the model the project's profile (budget) sets"
+
+# (step 7.3) what a first install refuses unless kept, in the project's own
+# settings: named (kept with --keep, or added later), never its value
+perl -MJSON::PP -i -0pe 'my $d = JSON::PP->new->decode($_); push @{ $d->{hooks}{PreToolUse} }, {matcher => "Bash", hooks => [{type => "command", command => "bash tools/check-secret-token.sh"}]};
+  $d->{claudeMdExcludes} = ["docs/**"]; $_ = JSON::PP->new->canonical->pretty->encode($d)' "$bp/.claude/settings.json"
+hook "$bp"
+has "a kept PreToolUse hook and claudeMdExcludes in the project's settings are named in a LOOK line" \
+  "session-status: LOOK - .claude/settings.json keeps 1 PreToolUse hook of the project's own; claudeMdExcludes, which run or load beside the method's hooks"
+lacks "the kept hook's command is not shown" "check-secret-token"
+hook "$p"
+lacks "the method's own hooks in the project's settings are not named" ".claude/settings.json keeps"
 hook "$p" "" CLAUDE_CODE_EFFORT_LEVEL=low
 has "CLAUDE_CODE_EFFORT_LEVEL set is status's effort LOOK, also inside a hook" "effort: LOOK - CLAUDE_CODE_EFFORT_LEVEL is set"
 

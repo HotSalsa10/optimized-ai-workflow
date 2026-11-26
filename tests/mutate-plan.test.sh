@@ -14,7 +14,6 @@ echo "tests: mutate plan"
 root=$(repo_root)
 mutate="$root/method/scripts/method/mutate-changed.sh"
 work=$(new_sandbox_dir) || abort_sandbox
-repos=""
 saved_home=$HOME
 mkdir -p "$work/home"
 # a clean home and no system settings, so the owner's git settings play no part
@@ -70,10 +69,12 @@ planned() { printf '%s\n' "$out" | sed -n 's/^mutate-changed: planned: //p'; }
 # new_project: prints a folder holding remote.git (bare) and w: main with
 # checks/project.tsv (unit, any), .claude/method.conf (MUTATE_PATHS=src,
 # MUTATION_CHECKS=unit) and src/base.py, pushed, origin/HEAD set; w is on
-# branch feat
+# branch feat. It is called in $( ), whose variables the end of the file
+# never sees, so the folder goes on the list in $work/sandboxes, which the
+# end drops
 new_project() {
   b=$(new_sandbox_dir) || return 1
-  repos="$repos $b"
+  printf '%s\n' "$b" >>"$work/sandboxes"
   (
     cd "$b" || exit 1
     git init -q --bare remote.git
@@ -686,7 +687,9 @@ p7=$(new_project) || abort_sandbox
 mp "$p7/w" --list
 expect "no main branch stops it with what to do (exit 2)" 2 "mutate-changed: FAIL - no main branch here" "make a branch named main"
 
-for d in $repos; do drop_sandbox "$d"; done
+if [ -f "$work/sandboxes" ]; then
+  while IFS= read -r d; do drop_sandbox "$d"; done <"$work/sandboxes"
+fi
 export HOME="$saved_home"
 unset GIT_CONFIG_NOSYSTEM
 drop_sandbox "$work"

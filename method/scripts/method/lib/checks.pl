@@ -23,7 +23,7 @@ BEGIN { %CALLER_ENV = %ENV }
 my $lib = dirname(File::Spec->rel2abs(__FILE__));
 require File::Spec->catfile($lib, $_) for qw(git.pl esc.pl conf.pl tree.pl runstate.pl);
 
-our @RESERVED = qw(secrets fresh-clone tree-unchanged project-checks);
+our @RESERVED = qw(secrets fresh-clone method-files tree-unchanged project-checks);
 my $LOCAL = '.method/local';
 my $LOGS = "$LOCAL/logs";
 my $KEEP_LOGS = 20;
@@ -607,6 +607,67 @@ sub check_fresh_clone {
     detail => "examined $examined tracked files under PRODUCT_PATHS; $aside ignored files set aside by LOCAL_ONLY" };
 }
 
+# check_method_files: lib/lock.pl's verify, as a result (M010). run_all
+# runs it only where the method is installed (Lock::installed): a project
+# runs its own copy of run-checks, under scripts/method/, so there it
+# always runs; a run from a copy outside a project with no method file
+# and no lock has nothing to compare
+sub check_method_files {
+  my ($out) = @_;
+  my $v = Lock::verify('.');
+  # what a commit would leave out or carry to every clone: a method file or
+  # the lock that git ignores, and a tracked .claude/settings.local.json
+  # (each person's own; committed, its disableAllHooks would turn every hook
+  # off in every clone, session-status among them, so no hook could say so)
+  my ($l) = Lock::load('.');
+  # (a path with a link on the way is a link finding already, and git will
+  # not answer for it)
+  my $ignored = Git::ignored('.', grep {
+    my @parts = split m{/};
+    !grep { -l join '/', @parts[0 .. $_] } 0 .. $#parts - 1
+  } ($l ? map { $_->[1] } @{ $l->{files} } : ()), do { no warnings 'once'; $Lock::LOCK });
+  push @{ $v->{findings} }, $ignored ? map { ['ignored', 'ignored by git (' . Esc::line($_->[1]) . '), so a commit leaves it out: ' . Esc::line($_->[0])] } @$ignored
+    : ['untold', 'git cannot tell whether it ignores the method\'s files'];
+  # (in any letter case: a file system that folds case reads that file as
+  # .claude/settings.local.json)
+  my ($lst, $tracked) = Git::run('ls-files', '-z');
+  push @{ $v->{findings} }, ['local', 'git cannot tell whether .claude/settings.local.json is tracked'] if $lst;
+  push @{ $v->{findings} }, map { ['local', Esc::line($_) . ' is tracked in git, so every clone gets it'] }
+    grep { lc($_) eq '.claude/settings.local.json' } split /\0/, $tracked if !$lst;
+  write_lines($out, map { $_->[1] } @{ $v->{findings} });
+  my %n;
+  $n{ $_->[0] }++ for @{ $v->{findings} };
+  if (%n) {
+    my %say = (lock => 'problems with method.lock', changed => 'method files changed', crlf => 'method files with CRLF line ends',
+      missing => 'method files missing', extra => 'files not in method.lock', link => 'links under the method\'s paths',
+      odd => 'entries under the method\'s paths that are not regular files or cannot be read',
+      settings => 'problems with the method keys in .claude/settings.json',
+      ignored => 'method files git ignores', untold => 'questions git could not answer about the files it ignores',
+      local => 'problems with .claude/settings.local.json');
+    # what puts each kind right: a changed or missing file comes back from
+    # the commit that last wrote the lock (a plain checkout of an edit
+    # already committed changes nothing); a file the lock does not name, a
+    # link or an odd entry is removed
+    my @fix;
+    push @fix, 'put each changed or missing file back from the commit that last wrote method.lock (the owner runs:'
+      . ' git checkout $(git log -1 --format=%H -- scripts/method/method.lock) -- PATH); rules of your own go in .claude/rules/pack/' if grep { $n{$_} } qw(changed crlf missing);
+    push @fix, 'remove each file not in method.lock' if $n{extra};
+    push @fix, 'replace each link or odd entry with a plain folder or file as released' if $n{link} || $n{odd};
+    push @fix, 'put the method keys in .claude/settings.json back as scripts/method/settings.method.json has them' if $n{settings};
+    push @fix, 'change each ignore rule named (in .gitignore, .git/info/exclude or your global excludes file) so it no longer matches a method file' if $n{ignored};
+    push @fix, 'find out why git cannot answer (git status in the project says why: a repository owned by another user, or a .git that points'
+      . ' nowhere) and put that right' if $n{untold};
+    push @fix, 'take .claude/settings.local.json out of git (the owner runs: git rm --cached .claude/settings.local.json, with the path in the'
+      . ' letter case named) and commit that; the method\'s .gitignore block ignores it' if $n{local};
+    return { status => 'FAIL', kind => 'finding', examined => $v->{examined},
+      detail => join('; ', map {"$n{$_} $say{$_}"} grep { $n{$_} } qw(lock changed crlf missing extra link odd settings ignored untold local)),
+      hint => "the method's files and settings change only through the release's sync, which refuses a file changed or added by hand until it is put right: " . join('; ', @fix) };
+  }
+  return { status => 'PASS', kind => 'pass', examined => $v->{examined},
+    detail => 'the ' . ($v->{examined} - 1) . " method files match method.lock ($v->{version}), and the method keys in"
+      . ' .claude/settings.json are the release\'s' };
+}
+
 # tree_changes BEFORE AFTER: what changed between two fingerprints, as (the
 # reasons, the paths that changed, the refs that moved); tree-unchanged and
 # mutate-changed's rounds share it
@@ -935,6 +996,8 @@ sub run_all {
   };
   $run->('secrets', '-', \&check_secrets);
   $run->('fresh-clone', '-', sub { check_fresh_clone($conf, $_[0]) });
+  require File::Spec->catfile($lib, 'lock.pl');
+  $run->('method-files', '-', \&check_method_files) if Lock::installed('.');
   if (!@$checks) {
     $run->('project-checks', '-', sub {
       { status => 'SKIPPED', kind => 'not-configured', examined => '-',

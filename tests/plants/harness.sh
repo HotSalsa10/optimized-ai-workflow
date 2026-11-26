@@ -720,6 +720,91 @@ fi
 h_stop
 drop_sandbox "$sb" || true
 
+# 21. step 7.5's case for /method-setup (h_start setup, h_start_holds):
+# in one copy, method-setup made a skill the model may start (setup: its
+# description then reaches a request); in another, its write step no
+# longer names setup-write.sh --write (setup)
+sb=$(make_sandbox) || abort_sandbox
+s="$sb/method/.claude/skills/method-setup/SKILL.md"
+perl -ni -e 'print unless /^disable-model-invocation: true$/' "$s"
+if grep -q '^disable-model-invocation:' "$s"; then
+  fail "setup: the plant did not apply, so the check result would mean nothing"
+else
+  start_plant setup "setup|its description reached a request|method-setup made a skill the model may start"
+fi
+h_stop
+drop_sandbox "$sb" || true
+sb=$(make_sandbox) || abort_sandbox
+s="$sb/method/.claude/skills/method-setup/SKILL.md"
+# shellcheck disable=SC2016 # perl code; the backquotes are the skill's text
+perl -pi -e 's/`bash scripts\/method\/setup-write\.sh --write`/the same command with its write option/' "$s"
+if grep -q -F 'setup-write.sh --write' "$s"; then
+  fail "setup: the plant did not apply, so the check result would mean nothing"
+else
+  start_plant setup "setup|method-setup's SKILL.md names no \`bash scripts/method/setup-write.sh --write\`|method-setup's write step without setup-write.sh --write"
+fi
+h_stop
+drop_sandbox "$sb" || true
+
+# 22. step 7.5's F2 case (h_setup_f2, h_setup_f2_holds).
+# f2_plant QUESTION|SEEN|TEXT: with the plant already made in the copy
+# $sb, h_setup_f2 runs there; QUESTION must fail with SEEN in its H_WHY
+f2_plant() {
+  local q rest seen text
+  if ! h_setup_f2 "$sb"; then
+    fail "setup-f2: the case could not be made, or the fake did not answer"
+    return
+  fi
+  q=${1%%|*}
+  rest=${1#*|}
+  seen=${rest%%|*}
+  text=${rest#*|}
+  if h_setup_f2_holds "$q"; then
+    fail "setup-f2: $text: the question '$q' stayed green"
+  else
+    case $H_WHY in
+      *"$seen"*) pass "setup-f2: $text: the question '$q' turns red (${H_WHY%%;*})" ;;
+      *) fail "setup-f2: $text: the question '$q' turned red for another reason" "$H_WHY" ;;
+    esac
+  fi
+}
+# the guard's ConfigChange hook taken off the fragment (g16)
+sb=$(make_sandbox) || abort_sandbox
+perl -MJSON::PP -e 'my $f = shift; open my $h, "<", $f or die; my $d = JSON::PP->new->decode(do { local $/; <$h> }); close $h;
+  delete $d->{hooks}{ConfigChange} or die "no ConfigChange hook\n";
+  open $h, ">", $f or die; print $h JSON::PP->new->canonical->pretty->encode($d); close $h or die' "$sb/method/settings.fragment.json"
+if grep -q -F ConfigChange "$sb/method/settings.fragment.json"; then
+  fail "setup-f2: the plant did not apply, so the check result would mean nothing"
+else
+  f2_plant "g16|no G16 ConfigChange line in the guard's log|the guard's ConfigChange hook taken off the fragment"
+fi
+h_stop
+drop_sandbox "$sb" || true
+# the card's first line, which names .claude/settings.json, taken out of
+# setup.pl (card)
+sb=$(make_sandbox) || abort_sandbox
+s="$sb/method/scripts/method/lib/setup.pl"
+# shellcheck disable=SC2016 # perl code, expanded by perl
+perl -pi -e 's/push \@card, "Settings first: /0 and push \@card, "Settings first: /' "$s"
+if ! grep -q -F '0 and push @card, "Settings first: ' "$s"; then
+  fail "setup-f2: the plant did not apply, so the check result would mean nothing"
+else
+  f2_plant "card|the card's first line naming .claude/settings.json did not reach main|the card's line naming .claude/settings.json taken out"
+fi
+h_stop
+drop_sandbox "$sb" || true
+# setup-write.sh writing nothing inside a Claude Code session (bytes)
+sb=$(make_sandbox) || abort_sandbox
+s="$sb/method/scripts/method/setup-write.sh"
+perl -pi -e 's/^(exec perl )/[ -z "\${CLAUDECODE:-}" ] || exit 0\n$1/' "$s"
+if ! grep -q -F 'CLAUDECODE' "$s"; then
+  fail "setup-f2: the plant did not apply, so the check result would mean nothing"
+else
+  f2_plant "bytes|setup-write's last line, setup: WROTE, did not reach main|setup-write.sh writing nothing inside a session"
+fi
+h_stop
+drop_sandbox "$sb" || true
+
 # 13. get-client: a download that does not match the pinned checksum is refused
 reg="$H_WORK/registry/@anthropic-ai/claude-code-linux-x64/-"
 mkdir -p "$reg" "$H_WORK/pkg/package"

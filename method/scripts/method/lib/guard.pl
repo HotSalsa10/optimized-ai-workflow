@@ -32,7 +32,8 @@
 #      tool or Bash, and a git command that would bring one of them to
 #      another version (lib/protect.pl).
 #   G12 effort (M134, step 5.7): not a refusal; the first main-session
-#      call below xhigh gets one warning (lib/protect.pl).
+#      call below the profile's effort (xhigh with no lock) gets one
+#      warning (lib/protect.pl).
 #   G4 outside (M131, step 5.8): gh by a list, curl and wget to GitHub only
 #      reading, no nested Claude, MCP tools by a list, no SendMessage
 #      (lib/outside.pl).
@@ -76,8 +77,8 @@ our $WAY_OUT = 'if the guard is wrong, see .claude/hooks/method/README.md, "When
 # backslashes, past the hook's time limit; 5.5's round 3)
 our $WATCHED_NAME = qr{(?i:git(?:-[a-z][a-z0-9-]*)?|gh|claude|curl|wget)(?i:\.exe)?(?=\z|[\s;&|)`'"\\{},<>])};
 my $EDGE = qr{[\s;&|(`'"=\\{},<>]};
-# (the method's skills come from protect.pl's list, their one home; step
-# 6.3)
+# (the method's skills come from protect.pl, their one home; step 6.3, and
+# every method- name since step 7.2)
 our $WATCHED_PATH = qr{\.claude/(?:hooks/method|agents/method|rules/method|method-local|settings(?:\.local)?\.json)|\.claude/skills/@{[ Protect::skills_re() ]}|(?:\A|[\s/'"=])scripts/method\b|\.git/(?:hooks|config)\b|\.gitconfig\b|\.config/git\b|managed-settings}i;
 
 # does TEXT name a watched command: the name at the start, after an edge,

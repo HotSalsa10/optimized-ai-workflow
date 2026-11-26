@@ -7,7 +7,7 @@ description: Starts a session. Tells the owner the one next thing and why, then 
 
 The owner typed this to start a session or to see where things stand. Read, report, then stop. Change nothing until the owner says go: no file, no commit, no push.
 
-This session runs at effort ${CLAUDE_EFFORT}. Say so in the report. If it is not xhigh, say that first: the method's work runs at xhigh, which the project's settings set.
+This session runs at effort ${CLAUDE_EFFORT}. Say so in the report. If it is below the effort the project's profile sets, say that first: the `profile` line of `scripts/method/method.lock` names the profile, and its row in `scripts/method/profiles.tsv` gives the effort; with no lock it is xhigh.
 
 ## Is the method on
 

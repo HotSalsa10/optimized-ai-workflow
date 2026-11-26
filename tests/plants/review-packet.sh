@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Plants for the review packet's Tree line (step 5b.1): each planted break
+# Plants for the review packet's Tree line (step 5b.1) and its REVIEW
+# section (step 7.8, M157): each planted break
 # turns tests/review-packet.test.sh red for its stated reason, in a
 # throwaway copy of the repo. The breaks are data: "=== NAME | FILE |
 # REASON", the text OLD (in FILE exactly once), "---", the text NEW
@@ -26,6 +27,26 @@ cat >"$work/plants.txt" <<'PLANTS-END'
   "Tree: $head_tree",
 ---
   "Tree: $head",
+=== REVIEW.md read from HEAD, the change's own copy | method/scripts/method/lib/packet.pl | a REVIEW.md the change edits: the packet carries the merge base's copy
+  my $entry = lookup($mb, $path);
+---
+  my $entry = lookup($path eq $REVIEW ? $head : $mb, $path);
+=== REVIEW.md read from the last reviewed version | method/scripts/method/lib/packet.pl | a later round (--since) still carries REVIEW.md from the merge base
+  my $entry = lookup($mb, $path);
+---
+  my $entry = lookup($path eq $REVIEW ? $from : $mb, $path);
+=== REVIEW.md read from main's tip, not the merge base | method/scripts/method/lib/packet.pl | main changes REVIEW.md after the branch point: the packet carries the merge base's copy
+  my $entry = lookup($mb, $path);
+---
+  my $entry = lookup($base, $path);
+=== a rename away from REVIEW.md not seen as an edit | method/scripts/method/lib/packet.pl | a REVIEW.md the change renames away: the packet carries the merge base's copy and names the edit
+  my $edits = grep { $_->{path} eq $path || $_->{old} eq $path } @whole;
+---
+  my $edits = grep { $_->{path} eq $path } @whole;
+=== the REVIEW section left out | method/scripts/method/lib/packet.pl | the packet is built, with exactly the 9 markers in order
+['CRITERIA', \@criteria_lines], ['REVIEW', \@review_lines],
+---
+['CRITERIA', \@criteria_lines],
 PLANTS-END
 plant_data "$work/plants.txt" tests/review-packet.test.sh
 probe=$(new_sandbox_dir) || abort_sandbox

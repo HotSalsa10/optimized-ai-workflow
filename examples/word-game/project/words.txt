@@ -1,0 +1,5 @@
+lantern
+meadow
+pebble
+compass
+willow

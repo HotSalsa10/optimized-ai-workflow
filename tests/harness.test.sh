@@ -185,6 +185,43 @@ else
   fail "subagent: the fake did not answer; the client was not started"
 fi
 
+# --- 3b. after a subagent's tool call: PostToolUse, PostToolUseFailure and
+# PostToolBatch context reach the subagent's request (A80) ---
+h_case subagent-post
+h_fixtures
+h_settings <<EOF
+{"model":"claude-opus-5-5",
+ "hooks":{
+  "PostToolUse":[{"matcher":"Read","hooks":[{"type":"command","command":"$F/context.sh\" PostToolUse HARNESS-POST-CONTEXT"}]}],
+  "PostToolUseFailure":[{"matcher":"Read","hooks":[{"type":"command","command":"$F/context.sh\" PostToolUseFailure HARNESS-FAILURE-CONTEXT"}]}],
+  "PostToolBatch":[{"hooks":[{"type":"command","command":"$F/context.sh\" PostToolBatch HARNESS-BATCH-CONTEXT"}]}]}}
+EOF
+printf 'hello\n' >"$H_PROJ/readme.txt"
+cat >"$H_DIR/script.json" <<EOF
+{"convs":[
+  {"name":"sub","match":"HARNESS-SUBAGENT-TASK","turns":[
+    {"tool":"Read","input":{"file_path":"$H_PROJ/readme.txt"}},
+    {"tool":"Read","input":{"file_path":"$H_PROJ/no-such-file.txt"}},
+    {"text":"APPROVE\nEND-VERDICT harness"}]},
+  {"name":"main","match":"^go$","turns":[
+    {"tool":"Agent","input":{"description":"harness review","prompt":"HARNESS-SUBAGENT-TASK: review the change","subagent_type":"reviewer","run_in_background":false}},
+    {"text":"MAIN-DONE"}]}],
+ "fallback":{"text":"FAKE-FALLBACK"}}
+EOF
+if h_fake "$H_DIR/script.json"; then
+  # shellcheck disable=SC2086
+  h_client 90 -- $D
+  h_stop
+  if h_req_in sub HARNESS-POST-CONTEXT && h_req_in sub HARNESS-FAILURE-CONTEXT && h_req_in sub HARNESS-BATCH-CONTEXT; then
+    pass "subagent-post: PostToolUse, PostToolUseFailure and PostToolBatch additionalContext reach the subagent's request"
+  else
+    fail "subagent-post: PostToolUse, PostToolUseFailure and PostToolBatch additionalContext reach the subagent's request" "$(cut -f7- "$H_DIR/fake/requests.tsv")"
+  fi
+  h_safe subagent-post
+else
+  fail "subagent-post: the fake did not answer; the client was not started"
+fi
+
 # --- 4. onFailure: a hook that cannot start blocks only with "block" ---
 printf '%s\n' '{"convs":[{"name":"main","match":"^go$","turns":[{"tool":"Bash","input":{"command":"touch ran.txt","description":"Write a marker"}},{"text":"MAIN-DONE"}]}]}' >"$H_WORK/onfail.json"
 for mode in block unset; do
@@ -401,7 +438,7 @@ if h_fake "$H_WORK/ss.json"; then
   # shellcheck disable=SC2086
   h_client 60 -- $D
   sid=$(h_init session_id)
-  if h_req_has 'METHOD-ACTIVE vunreleased' && { h_req_has 'status: nothing needs a look' || h_req_has ' areas need a look ('; }; then pass "session-status: METHOD-ACTIVE and status's summary reach the first request"; else fail "session-status: METHOD-ACTIVE and status's summary reach the first request" "$(LC_ALL=C grep -h -o 'METHOD-ACTIVE[^"]*' "$H_DIR"/fake/req-*.json | head -3)"; fi
+  if h_req_has "METHOD-ACTIVE $H_TAG" && { h_req_has 'status: nothing needs a look' || h_req_has ' areas need a look ('; }; then pass "session-status: METHOD-ACTIVE, naming the release sync installed (method.lock), and status's summary reach the first request"; else fail "session-status: METHOD-ACTIVE and status's summary reach the first request" "$(LC_ALL=C grep -h -o 'METHOD-ACTIVE[^"]*' "$H_DIR"/fake/req-*.json | head -3)"; fi
   rm -f "$H_DIR"/fake/req-*.json
   # the resumed request also holds the first session's text, and the client
   # does not add output identical to what it already has: so the tree is
@@ -410,7 +447,7 @@ if h_fake "$H_WORK/ss.json"; then
   # shellcheck disable=SC2086
   H_PROMPT=again h_client 60 -- $D --resume "$sid"
   h_stop
-  if h_req_has 'SessionStart:resume hook success: METHOD-ACTIVE vunreleased' && h_req_has 'work: LOOK - 1 uncommitted'; then pass "session-status: a resumed session gets METHOD-ACTIVE and its own status again"; else fail "session-status: a resumed session gets METHOD-ACTIVE and its own status again" "$(LC_ALL=C grep -h -o 'SessionStart:[a-z]* hook success: [^"]\{0,80\}' "$H_DIR"/fake/req-*.json | sort -u | head -4)"; fi
+  if h_req_has "SessionStart:resume hook success: METHOD-ACTIVE $H_TAG" && h_req_has 'work: LOOK - 1 uncommitted'; then pass "session-status: a resumed session gets METHOD-ACTIVE and its own status again"; else fail "session-status: a resumed session gets METHOD-ACTIVE and its own status again" "$(LC_ALL=C grep -h -o 'SessionStart:[a-z]* hook success: [^"]\{0,80\}' "$H_DIR"/fake/req-*.json | sort -u | head -4)"; fi
   h_safe session-status
 else
   fail "session-status: the fake did not answer; the client was not started"
@@ -422,7 +459,7 @@ if h_fake "$H_WORK/ss.json"; then
   # shellcheck disable=SC2086
   h_client 60 -- $D
   h_stop
-  if h_req_has 'METHOD-ACTIVE vunreleased' && h_req_has 'work: LOOK - ' && h_req_has 'status: 1 areas need a look (work)'; then pass "session-status: with a dirty tree (status exits 1) the line and the LOOK still reach Claude"; else fail "session-status: with a dirty tree the line and the LOOK still reach Claude"; fi
+  if h_req_has "METHOD-ACTIVE $H_TAG" && h_req_has 'work: LOOK - ' && h_req_has 'status: 1 areas need a look (work)'; then pass "session-status: with a dirty tree (status exits 1) the line and the LOOK still reach Claude"; else fail "session-status: with a dirty tree the line and the LOOK still reach Claude"; fi
   h_safe session-status-dirty
 else
   fail "session-status-dirty: the fake did not answer; the client was not started"
@@ -437,7 +474,7 @@ if h_fake "$H_WORK/ss.json"; then
   # shellcheck disable=SC2086
   h_client 60 PATH="$H_DIR/bin" -- $D
   h_stop
-  if h_req_has 'METHOD-ACTIVE vunreleased' && h_req_has 'perl or its JSON::PP module is missing'; then pass "session-status: without perl on PATH, METHOD-ACTIVE and a LOOK saying so still reach Claude"; else fail "session-status: without perl on PATH, METHOD-ACTIVE and a LOOK saying so still reach Claude" "$(tail -3 "$H_DIR/err.txt")"; fi
+  if h_req_has "METHOD-ACTIVE $H_TAG" && h_req_has 'perl or its JSON::PP module is missing'; then pass "session-status: without perl on PATH, METHOD-ACTIVE and a LOOK saying so still reach Claude"; else fail "session-status: without perl on PATH, METHOD-ACTIVE and a LOOK saying so still reach Claude" "$(tail -3 "$H_DIR/err.txt")"; fi
   h_safe session-status-noperl
 else
   fail "session-status-noperl: the fake did not answer; the client was not started"
@@ -448,7 +485,7 @@ if h_fake "$H_WORK/ss.json"; then
   # shellcheck disable=SC2086
   h_client 60 METHOD_NESTED=1 -- $D
   h_stop
-  if h_req_has 'METHOD-ACTIVE vunreleased (nested: status skipped)'; then pass "session-status: a nested run (METHOD_NESTED=1) gets METHOD-ACTIVE without status"; else fail "session-status: a nested run gets the one short line"; fi
+  if h_req_has "METHOD-ACTIVE $H_TAG (nested: status skipped)"; then pass "session-status: a nested run (METHOD_NESTED=1) gets METHOD-ACTIVE without status"; else fail "session-status: a nested run gets the one short line"; fi
   h_safe session-status-nested
 else
   fail "session-status-nested: the fake did not answer; the client was not started"
@@ -945,6 +982,39 @@ if h_start "$root" finish; then
   h_safe finish
 else
   fail "finish: the case could not be made, or the fake did not answer; the client was not started"
+fi
+
+# --- 23. /method-setup (step 7.5): the skill typed as the owner's message
+# (-p "/method-setup", F6), with the method's fragment and its start hook;
+# the main session only answers (h_start setup, h_start_holds). A plain -p run
+# offers no AskUserQuestion (step 7.0, F5), so it is the plain-text
+# fallback the skill names that such a run takes ---
+if h_start "$root" setup; then
+  start_q expands "setup: -p \"/method-setup\" sends method-setup's SKILL.md body, with no ARGUMENTS line; its '# rules:' line reaches no request; it is in init's slash_commands"
+  start_q setup "setup: method-setup sets disable-model-invocation, its six numbered steps reach the main session, they name the answers file, setup-write.sh without and with --write, AskUserQuestion with its plain-text fallback, /reload-skills and the owner's reply, and its description reaches no request"
+  h_safe setup
+else
+  fail "setup: the case could not be made, or the fake did not answer; the client was not started"
+fi
+# F2 (step 7.0), kept as a case: setup-write --write run by the main
+# session in a session with the method's hooks, with answers that change
+# the profile (best to budget). The guard lets the call through (G6's
+# method scripts), settings.json and method.lock hold the bytes the same
+# run gives outside a session, and G16 refuses applying the settings
+# change mid-session: logged, and the next call the guard lets through
+# brings its one-time message, which names no file, so the card's own
+# first line names .claude/settings.json (S10) (h_setup_f2,
+# h_setup_f2_holds)
+f2_q() {
+  if h_setup_f2_holds "$1"; then pass "$2"; else fail "$2" "$H_WHY"; fi
+}
+if h_setup_f2 "$root"; then
+  f2_q bytes "F2: setup-write --write in a hooked session passes the guard, and settings.json and method.lock hold the bytes the same run gives outside a session"
+  f2_q g16 "F2: G16 refuses applying the settings setup-write wrote mid-session (logged), and the next call brings its one-time message"
+  f2_q card "F2: the card's first line, which reaches the main session, names .claude/settings.json; G16's one-time message names no file"
+  h_safe setup-f2
+else
+  fail "setup-f2: the case could not be made, or the fake did not answer; the client was not started"
 fi
 
 echo "harness: ${H_RUNS:-0} client runs took ${H_TOTAL_SECS:-0} s"

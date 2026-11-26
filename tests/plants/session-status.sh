@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Plants for session-status (step 5.4's last two repair loops and step 5's
 # final review, kept here since that review; since step 5b.2 its line on
-# the gates' receipts too): each planted break turns
-# tests/session-status.test.sh red for its stated reason, in a throwaway
-# copy of the repo. The breaks are data: "=== NAME | FILE | REASON", the
+# the gates' receipts too; since step 7.2 the version from the lock;
+# since step 7.3 the profile's model and the settings a first install
+# refuses unless kept): each
+# planted break turns tests/session-status.test.sh red for its stated
+# reason, in a throwaway copy of the repo. The breaks are data: "=== NAME | FILE | REASON", the
 # text OLD (in FILE exactly once), "---", the text NEW (tests/lib.sh,
 # plant_data). PLANT_SHARD=K/N runs every Nth one from the Kth.
 # shellcheck disable=SC2016 # the plants are literal perl text
@@ -75,7 +77,26 @@ $text =~ s/\A\xEF\xBB\xBF//;
     eval { require File::Spec->catfile($lib, 'watch.pl'); Watch::snapshot($in, $project) };
 ---
     { local $SIG{ALRM} = 'IGNORE'; eval { require File::Spec->catfile($lib, 'watch.pl'); Watch::snapshot($in, $project) }; }
-
+=== 7.2 the version read from the wrong line | method/.claude/hooks/method/session-status.sh | the first line names the lock's version
+  IFS= read -r line <"$lock" 2>/dev/null
+---
+  { IFS= read -r line; IFS= read -r line; } <"$lock" 2>/dev/null
+=== 7.2 the version line's characters not checked | method/.claude/hooks/method/session-status.sh | a lock whose first line is not a version line gives vunknown: version\tv0.7.0 ; rm -rf ~
+        *[!0-9A-Za-z.+-]* | ????????????????????????*) ;;
+---
+        ????????????????????????*) ;;
+=== 7.3 the model not taken from the profile | method/scripts/method/lib/session.pl | a Budget project's session on its own model, claude-sonnet-5-5, is not a LOOK
+  my ($want, $sets) = $prow ? ($prow->{model},
+---
+  my ($want, $sets) = 0 ? ($prow->{model},
+=== 7.3 kept settings in the project's settings not named | method/scripts/method/lib/session.pl | a kept PreToolUse hook and claudeMdExcludes in the project's settings are named in a LOOK line
+    my @kept = $s ? eval { map { $_->[1] } Lock::refused($s) } : ();
+---
+    my @kept = ();
+=== 7.3 the project's own hooks counted with the method's | method/scripts/method/lib/lock.pl | the method's own hooks in the project's settings are not named
+      $n += grep { !(ref $_ eq 'HASH' && defined $_->{command} && !ref $_->{command} && index($_->{command}, $HOOK_MARK) >= 0) } @{ $g->{hooks} };
+---
+      $n += @{ $g->{hooks} };
 PLANTS-END
 plant_data "$work/plants.txt" tests/session-status.test.sh
 drop_sandbox "$work" || true

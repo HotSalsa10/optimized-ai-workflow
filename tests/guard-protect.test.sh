@@ -51,6 +51,9 @@ proj="$work/projü"
   # changes only a project skill
   git switch -q task && git switch -qc skillv && printf 'other skill\n' >.claude/skills/method-start/SKILL.md && git commit -qam skillv
   git switch -q task && git switch -qc deployv && printf 'project skill 2\n' >.claude/skills/deploy/SKILL.md && git commit -qam deployv
+  # (step 7.2) a branch that adds a method- skill no list names
+  git switch -q task && git switch -qc quickv && mkdir -p .claude/skills/method-quick && printf 'quick\n' >.claude/skills/method-quick/SKILL.md \
+    && git add -A && git commit -qm quickv
   git switch -q task
 ) || abort_sandbox
 evil=$(git -C "$proj" rev-parse evil)
@@ -180,6 +183,8 @@ for p in "$proj/.claude/skills/method-start/SKILL.md" "$proj/.claude/skills/meth
   tool "a method skill (6.3): Write to ${p#"$work"/} is refused" Write "$(jpath "$p")" G6
 done
 tool "a method skill (6.3): an Edit of method-start's SKILL.md is refused" Edit "$(jpath "$proj/.claude/skills/method-start/SKILL.md")" G6
+tool "a method skill (7.5): an Edit of method-setup's SKILL.md is refused" Edit "$(jpath "$proj/.claude/skills/method-setup/SKILL.md")" G6
+judge "a method skill (7.5): a write to method-setup's SKILL.md is refused" "$proj" 'echo x > .claude/skills/method-setup/SKILL.md' G6
 for c in 'sed -i s/a/b/ .claude/skills/method-start/SKILL.md' 'echo x > .claude/skills/method-start/SKILL.md' 'echo x >> .claude/skills/method-plan/SKILL.md' \
   'cp notes.txt .claude/skills/method-start/SKILL.md' 'rm -rf .claude/skills/method-start' 'rm -rf .claude/skills' 'mv .claude/skills/method-start old-skill' \
   'cp -r x .claude/skills/method-design'; do
@@ -191,19 +196,29 @@ for c in 'cat .claude/skills/method-start/SKILL.md' 'sed -n 1,5p .claude/skills/
   judge "a method skill (6.3): a read passes: $c" "$proj" "$c" allow
 done
 tool "a project skill (6.3): an Edit of deploy's SKILL.md passes" Edit "$(jpath "$proj/.claude/skills/deploy/SKILL.md")" allow
-tool "a project skill (6.3): an Edit of a skill whose name only starts like a method skill's passes" Edit "$(jpath "$proj/.claude/skills/method-start-old/SKILL.md")" allow
+tool "a project skill (7.2): an Edit of a skill whose name starts like method but without its dash passes" Edit "$(jpath "$proj/.claude/skills/methodical/SKILL.md")" allow
 for c in 'sed -i s/a/b/ .claude/skills/deploy/SKILL.md' 'echo x > .claude/skills/deploy/SKILL.md' 'cp notes.txt .claude/skills/deploy/notes.md' \
-  'mkdir -p .claude/skills/release && echo x > .claude/skills/release/SKILL.md' 'echo x > .claude/skills/method-starter/SKILL.md'; do
+  'mkdir -p .claude/skills/release && echo x > .claude/skills/release/SKILL.md' 'echo x > .claude/skills/methodical/SKILL.md'; do
   judge "a project skill (6.3): a write passes: $c" "$proj" "$c" allow
+done
+# (step 7.2, step7.md S12: G6 keeps every .claude/skills/method-* entry, so
+# a new method- skill folder cannot be made in a session, not only the
+# listed ones; a SKILL.md naming itself method-NAME is RISKS #24's limit)
+tool "a method skill (7.2): Write to projü/.claude/skills/method-quick/SKILL.md is refused" Write "$(jpath "$proj/.claude/skills/method-quick/SKILL.md")" G6
+tool "a method skill (7.2): an Edit of a skill whose name starts with method- is refused" Edit "$(jpath "$proj/.claude/skills/method-start-old/SKILL.md")" G6
+for c in 'mkdir -p .claude/skills/method-quick && echo x > .claude/skills/method-quick/SKILL.md' 'echo x > .claude/skills/method-starter/SKILL.md' \
+  'cp -r .claude/skills/deploy .claude/skills/method-deploy'; do
+  judge "a method skill (7.2): a write is refused: $c" "$proj" "$c" G6
 done
 judge "a method skill (6.3): switching to a branch whose method-start SKILL.md differs is refused" "$proj" 'git switch skillv' G6
 judge "a method skill (6.3): a cherry-pick of a commit that changes method-start is refused" "$proj" "git cherry-pick -x $skillc" G6
 judge "a project skill (6.3): switching to a branch that changes only deploy's skill passes" "$proj" 'git switch deployv' allow
+judge "a method skill (7.2): switching to a branch that adds a method- skill is refused" "$proj" 'git switch quickv' G6
 if wanted "a method skill (6.3): an interpreter's code naming"; then
   printf '%s\n' "open('.claude/skills/method-start/SKILL.md', 'w')" "open(\".claude/skills/method-plan/x\", \"w\")" "p = '.claude/skills/method-design'" \
-    "open('.claude/skills/deploy/SKILL.md', 'w')" "open('.claude/skills/method-starter/SKILL.md', 'w')" >"$work/skill-forms.txt"
+    "open('.claude/skills/deploy/SKILL.md', 'w')" "open('.claude/skills/method-starter/SKILL.md', 'w')" "open('.claude/skills/methodical/SKILL.md', 'w')" >"$work/skill-forms.txt"
   out=$(cd "$proj" && perl -e 'require $ARGV[0]; my $re = Protect::text_re(Protect::set($ARGV[1])); open my $h, "<", $ARGV[2] or die; while (my $t = <$h>) { chomp $t; print $t =~ $re ? "y" : "n" }' "$lib/protect.pl" "$proj" "$work/skill-forms.txt")
-  if [ "$out" = "yyynn" ]; then pass "a method skill (6.3): an interpreter's code naming .claude/skills/method-start, method-plan or method-design is found, a project skill's is not"; else fail "a method skill (6.3): an interpreter's code naming a method skill is found" "$out (wanted yyynn)"; fi
+  if [ "$out" = "yyynyn" ]; then pass "a method skill (6.3): an interpreter's code naming .claude/skills/method-start, method-plan, method-design or (7.2) any method- name is found, a project skill's is not"; else fail "a method skill (6.3): an interpreter's code naming a method skill is found" "$out (wanted yyynyn)"; fi
 fi
 
 # --- the method's /method-finish skill (step 6b.4) and the folders Claude
@@ -399,6 +414,28 @@ if wanted G12; then
   if [ "$(wc -l <"$proj/.method/local/effort-warned")" -eq 3 ]; then pass "G12: its note has one line per warned session"; else fail "G12: its note has one line per warned session" "$(cat "$proj/.method/local/effort-warned")"; fi
   for n in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do effort "f$n" high ''; done
   if [ "$(wc -l <"$proj/.method/local/effort-warned")" -eq 20 ]; then pass "G12: its note keeps the last 20 sessions"; else fail "G12: its note keeps the last 20 sessions" "$(wc -l <"$proj/.method/local/effort-warned") lines"; fi
+  # (step 7.3) the threshold is the profile's effort: the lock's profile
+  # line and its row in profiles.tsv; xhigh with no lock (above) or an
+  # unknown profile
+  cp "$root/method/scripts/method/profiles.tsv" "$proj/scripts/method/profiles.tsv"
+  g12_lock() { printf 'version\tv0.7.0\nsource\t%040d\nprofile\t%s\nsettings\t%064d\n' 0 "$1" 0 >"$proj/scripts/method/method.lock"; }
+  g12_lock balanced
+  effort p1 medium ''
+  if [ ! -s "$work/out.txt" ] && [ "$code" -eq 0 ]; then pass "G12: silent at Balanced's own effort (medium)"; else fail "G12: silent at Balanced's own effort (medium)" "$(cat "$work/out.txt")"; fi
+  effort p2 low ''
+  case "$(cat "$work/out.txt")" in *"effort low, below the medium that the project's profile (balanced) sets"*"switch with /effort medium"*) pass "G12: below Balanced's effort, a warning naming the profile's effort" ;; *) fail "G12: below Balanced's effort, a warning naming the profile's effort" "$(cat "$work/out.txt")" ;; esac
+  g12_lock budget
+  effort p3 medium ''
+  if [ ! -s "$work/out.txt" ]; then pass "G12: silent at Budget's own effort (medium)"; else fail "G12: silent at Budget's own effort (medium)" "$(cat "$work/out.txt")"; fi
+  effort p4 low ''
+  case "$(cat "$work/out.txt")" in *"below the medium that the project's profile (budget) sets"*) pass "G12: below Budget's effort, a warning" ;; *) fail "G12: below Budget's effort, a warning" "$(cat "$work/out.txt")" ;; esac
+  g12_lock best
+  effort p5 high ''
+  case "$(cat "$work/out.txt")" in *"below the xhigh that the project's profile (best) sets"*) pass "G12: below Best results' effort (xhigh), a warning" ;; *) fail "G12: below Best results' effort (xhigh), a warning" "$(cat "$work/out.txt")" ;; esac
+  g12_lock turbo
+  effort p6 high ''
+  case "$(cat "$work/out.txt")" in *"below the method's xhigh"*) pass "G12: a profile the release does not know is held to xhigh" ;; *) fail "G12: a profile the release does not know is held to xhigh" "$(cat "$work/out.txt")" ;; esac
+  rm -f "$proj/scripts/method/method.lock" "$proj/scripts/method/profiles.tsv"
 
 fi
 # --- speed ---

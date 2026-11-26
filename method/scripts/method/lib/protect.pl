@@ -7,7 +7,10 @@
 # own config and hooks, never write them. The protected paths (set):
 #   in the project (each of its worktrees): .claude/hooks/method/,
 #     .claude/agents/method/, .claude/rules/method/, the method's skills
-#     (.claude/skills/NAME/ for each NAME in @METHOD_SKILLS, step 6.3),
+#     (.claude/skills/NAME/ for each NAME in @METHOD_SKILLS, step 6.3, and
+#     since step 7.2 every .claude/skills/method-* entry, so a new method-
+#     skill folder cannot be made in a session, by folder name only (RISKS
+#     #24); step7.md S12),
 #     .claude/method-local/, scripts/method/, .claude/settings.json,
 #     .claude/settings.local.json;
 #   in git's own folder: hooks/, config, config.worktree, and the method's
@@ -51,10 +54,15 @@
 #     would leave a protected file at a version that is neither HEAD's nor
 #     the remote main's.
 #   Protect::effort(IN, PROJECT) TEXT or undef (G12): the session's first
-#     main-session tool call at an effort below xhigh gets one warning.
+#     main-session tool call at an effort below the one the project's
+#     profile sets gets one warning: the lock's profile line and that row's
+#     effortLevel in scripts/method/profiles.tsv (lib/lock.pl; step 7.3,
+#     step7.md S7); xhigh when there is no lock, or when the lock or the
+#     row cannot be read.
 #   Protect::resolve(WORD, BASE) the path WORD names, as above, or undef.
 #   @Protect::METHOD_SKILLS the method's skill folders, by name;
-#     Protect::skills_re() them as a regex alternation (for guard.pl).
+#     Protect::skills_re() the names of .claude/skills/ entries G6 keeps,
+#     as a regex (for guard.pl).
 package Protect;
 use strict;
 use warnings;
@@ -70,14 +78,17 @@ require File::Spec->catfile($lib, 'git.pl');
 our $FOLD;
 
 # the method's skills, each a folder .claude/skills/NAME/ (step 6.3; docs/
-# plans/step6.md S10). A fixed list, as a method-* pattern would match only
-# a folder's direct children and git reads every path literally: each name
-# is an ordinary dir entry in set, a path in @SPECS (the version check), a
-# text form in text_re, and a watched path in guard.pl's $WATCHED_PATH,
-# which reads it from here. scripts/dev/lint-prompts.sh checks that it
-# names exactly the method's skill folders. A project's own skills stay
-# editable.
-our @METHOD_SKILLS = qw(method-start method-plan method-design method-finish);
+# plans/step6.md S10). scripts/dev/lint-prompts.sh checks that it names
+# exactly the method's skill folders, each of which starts with method-.
+# Since step 7.2 G6 keeps every .claude/skills/ entry whose name starts
+# with method- (step7.md S12), so a new method- skill folder cannot be made
+# in a session (by folder name only: a SKILL.md naming itself method-NAME,
+# or a .claude/commands/method-NAME.md, is a known limit, RISKS #24): a
+# deep prefix entry in set, .claude/skills in @SPECS (the
+# version check) with the names kept(), a text form in text_re, and a
+# watched path in guard.pl's $WATCHED_PATH, which reads skills_re from
+# here. A project's own skills, named otherwise, stay editable.
+our @METHOD_SKILLS = qw(method-start method-plan method-design method-finish method-setup);
 
 # the folders of the Claude Code folder (~/.claude, and CLAUDE_CONFIG_DIR
 # when set) that hold what a session loads: its agents, skills and
@@ -89,20 +100,16 @@ our @HOME_DIRS = (['agents', 'agents'], ['skills', 'skills'], ['commands', 'comm
 
 # the folders of @HOME_DIRS as one regex alternation, for text_re, each
 # name whole: it ends where the folder's name ends (no letter, digit, _, -
-# or . follows), as in skills_re, so ~/.claude/dev-mods-old is not one
+# or . follows), so ~/.claude/dev-mods-old is not one
 # (step 6b.4's check). A run of dots and spaces may come first, as Windows
 # drops them from the end of a folder's name: ~/.claude/agents./x opens
 # ~/.claude/agents/x there, while skills.bak stays another folder
 sub home_re { return '(?:' . join('|', map { quotemeta $_->[0] } @HOME_DIRS) . ')[. ]*(?![A-Za-z0-9_.-])' }
 
-# the method's skills as one regex alternation, each name whole: it ends
-# where the folder's name ends (no letter, digit, _, - or . follows); with
-# no name, a regex that matches nothing
-sub skills_re {
-  my @n = @METHOD_SKILLS;
-  return '(?!)' unless @n;
-  return '(?:' . join('|', map { quotemeta } @n) . ')(?![A-Za-z0-9_.-])';
-}
+# the method's skills as one regex: a name that starts with method- (every
+# name on @METHOD_SKILLS does, which lint-prompts checks), the prefix G6
+# keeps since step 7.2 (step7.md S12)
+sub skills_re { return 'method-' }
 
 # a string as the bytes a file system sees: text decoded from the hook's
 # JSON input is in characters, while paths from the environment and from
@@ -248,11 +255,13 @@ sub set {
   my @s;
   # (a relative path, as git gives a settings file's, is read from the
   # project, not from the folder the hook runs in; 5.7 repair loop 1)
+  # (DEEP, for a prefix: what lies below an entry the prefix names counts
+  # too)
   my $add = sub {
-    my ($p, $kind, $what, $name) = @_;
+    my ($p, $kind, $what, $name, $deep) = @_;
     return unless defined $p && $p ne '';
     my $r = physical(slashes($p) =~ m{\A/} ? slashes($p) : File::Spec->rel2abs(slashes($p), File::Spec->rel2abs(slashes($project))));
-    push @s, { path => $r, kind => $kind, what => $what, name => $name } if defined $r;
+    push @s, { path => $r, kind => $kind, what => $what, name => $name, deep => $deep } if defined $r;
   };
   my $proj = physical(File::Spec->rel2abs(slashes($project)));
   folds($proj) if defined $proj;
@@ -269,7 +278,7 @@ sub set {
     $add->("$t/.claude/hooks/method", 'dir', "the method's hooks (.claude/hooks/method/)");
     $add->("$t/.claude/agents/method", 'dir', "the method's agents (.claude/agents/method/)");
     $add->("$t/.claude/rules/method", 'dir', "the method's rules (.claude/rules/method/)");
-    $add->("$t/.claude/skills/$_", 'dir', "the method's skill $_ (.claude/skills/$_/)") for @METHOD_SKILLS;
+    $add->("$t/.claude/skills", 'prefix', "the method's skills (.claude/skills/method-*)", 'method-', 1);
     $add->("$t/.claude/method-local", 'dir', "the owner's own lists (.claude/method-local/)");
     $add->("$t/scripts/method", 'dir', "the method's scripts (scripts/method/)");
     $add->("$t/.claude/settings.json", 'file', "the project's settings (.claude/settings.json)");
@@ -349,8 +358,10 @@ sub protected {
     if ($e->{kind} eq 'dir') { return $e if $k eq $ek || index($k, "$ek/") == 0 }
     elsif ($e->{kind} eq 'file') { return $e if $k eq $ek }
     else {
-      next unless key(dirname($path)) eq $ek;
-      my $n = key(basename($path));
+      my $n;
+      if (key(dirname($path)) eq $ek) { $n = key(basename($path)) }
+      elsif ($e->{deep} && index($k, "$ek/") == 0) { ($n) = substr($k, length($ek) + 1) =~ m{\A([^/]+)/} }
+      next unless defined $n;
       return $e if index($n, key($e->{name})) == 0 && ($e->{name} ne 'settings' || $n =~ /\.json\z/);
     }
   }
@@ -358,7 +369,7 @@ sub protected {
 }
 
 # the protected entry that lies below the folder PATH (PATH holds it), or
-# undef
+# undef; a prefix's entries lie in the folder its path names
 sub above {
   my ($path, $set) = @_;
   return undef unless defined $path;
@@ -366,7 +377,7 @@ sub above {
   $k = '' if $k eq '/';
   for my $e (@{ $set->{list} }) {
     my $ek = key($e->{path});
-    return $e if index($ek, "$k/") == 0;
+    return $e if index($ek, "$k/") == 0 || ($e->{kind} eq 'prefix' && $ek eq $k);
   }
   return undef;
 }
@@ -585,7 +596,9 @@ sub is_write_redir { my ($op) = @_; return $op =~ /\A[0-9]*(?:>|>>|>\||<>|&>|&>>
 # the text forms of the protected paths, for code an interpreter runs
 sub text_re {
   my ($set) = @_;
-  my $abs = join '|', map { quotemeta $_->{path} } @{ $set->{list} };
+  # (a deep prefix by its path and name: the folder it is in holds other
+  # files too)
+  my $abs = join '|', map { quotemeta($_->{deep} ? "$_->{path}/$_->{name}" : $_->{path}) } @{ $set->{list} };
   my $re = q!(?:\A|[\s'"=:(/,\[{])\.claude/(?:hooks/method|agents/method|rules/method|method-local|settings(?:\.local)?\.json)!
     . q!|(?:\A|[\s'"=:(/,\[{])\.claude/skills/! . skills_re()
     . q!|(?:\A|[\s'"=:(,\[{])(?:\./)?scripts/method\b|\.git/(?:hooks|config)\b|\.gitconfig\b|\.config/git\b|managed-settings|ClaudeCode!
@@ -986,7 +999,16 @@ sub judge_mcp {
 
 # the protected paths of the project's tracked tree (Git::run reads every
 # path literally)
-my @SPECS = (qw(.claude/hooks/method .claude/agents/method .claude/rules/method .claude/method-local scripts/method .claude/settings.json .claude/settings.local.json), map { ".claude/skills/$_" } @METHOD_SKILLS);
+# (.claude/skills whole, as git reads every path literally: kept() leaves
+# out the project's own skills)
+my @SPECS = qw(.claude/hooks/method .claude/agents/method .claude/rules/method .claude/method-local scripts/method .claude/settings.json .claude/settings.local.json .claude/skills);
+
+# kept PATHS: the paths G6 keeps among PATHS from @SPECS: under
+# .claude/skills/, only the method- entries
+sub kept {
+  my ($skills, $method) = (key('.claude/skills/'), key('.claude/skills/method-'));
+  return grep { my $k = key($_); index($k, $skills) != 0 || index($k, $method) == 0 } @_;
+}
 
 # the protected files whose version differs between commits A and B, or
 # undef when that cannot be told
@@ -999,7 +1021,7 @@ sub differ {
   return undef unless defined $dir;
   my ($st, $out) = Git::run('-C', $dir, 'diff', '--no-ext-diff', '--no-textconv', '--name-only', '-z', $a, $b, '--', @specs);
   return undef unless $st == 0;
-  return [grep { $_ ne '' } split /\0/, $out];
+  return [kept(grep { $_ ne '' } split /\0/, $out)];
 }
 
 # the top folder of the worktree DIR is in, or undef
@@ -1060,7 +1082,7 @@ sub git_versions {
       # the protected files the commit changes (against no files, for a
       # first commit)
       my ($st, $out) = Git::run('-C', $top, 'diff-tree', '--root', '--no-commit-id', '--no-ext-diff', '--no-textconv', '-r', '--name-only', '-z', $cmt, '--', @SPECS);
-      my $ch = $st == 0 ? [grep { $_ ne '' } split /\0/, $out] : undef;
+      my $ch = $st == 0 ? [kept(grep { $_ ne '' } split /\0/, $out)] : undef;
       return ('G6', "whether this $sub changes the method's protected files cannot be told, so it is refused; tell the owner what you needed") unless $ch;
       next unless @$ch;
       push @targets, [$sub eq 'revert' ? "$cmt^" : $cmt, $ch];
@@ -1093,7 +1115,8 @@ sub git_versions {
   return ();
 }
 
-# G12: the warning for the session's first main-session call below xhigh
+# G12: the warning for the session's first main-session call below the
+# profile's effort
 sub effort {
   my ($in, $project) = @_;
   return undef unless ref $in eq 'HASH';
@@ -1101,7 +1124,20 @@ sub effort {
   my $e = $in->{effort};
   my $level = ref $e eq 'HASH' ? $e->{level} : $e;
   return undef unless defined $level && !ref $level && $level ne '';
+  # (no profile sets more than xhigh, Lock::profiles, so xhigh and max
+  # need no lock read)
   return undef if $level =~ /\A(?:xhigh|max)\z/;
+  my ($want, $name, $below) = ('xhigh', undef, 1);
+  if (defined $project && $project ne '' && eval { require File::Spec->catfile($lib, 'lock.pl'); 1 }) {
+    my ($n, $row) = eval { Lock::profile($project) };
+    if ($row) {
+      my %rank;
+      @rank{@Lock::EFFORTS} = 0 .. $#Lock::EFFORTS;
+      ($want, $name) = ($row->{effortLevel}, $n);
+      $below = !defined $rank{$level} || $rank{$level} < $rank{$want};
+    }
+  }
+  return undef unless $below;
   my $shown = $level =~ /\A(?:low|medium|high)\z/ ? $level : 'not one the method knows';
   my $sid = defined $in->{session_id} && !ref $in->{session_id} ? $in->{session_id} : '';
   require Digest::SHA;
@@ -1115,7 +1151,8 @@ sub effort {
     # once; 5.7 repair loop 1)
     eval { Log::append($root, '.method/local/effort-warned', 20, rule => 'G12', tool => 'effort', hash => $hash) };
   }
-  return "this session runs at effort $shown, below the method's xhigh, so its work may be shallower than the method assumes; switch with /effort xhigh";
+  my $under = defined $name ? "the $want that the project's profile ($name) sets" : "the method's xhigh";
+  return "this session runs at effort $shown, below $under, so its work may be shallower than the method assumes; switch with /effort $want";
 }
 
 1;

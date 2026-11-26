@@ -18,8 +18,14 @@ require File::Spec->catfile($lib, $_) for qw(git.pl esc.pl conf.pl verdicts.pl c
 
 # the records every project keeps (step 7's templates must match this list)
 my @RECORDS = qw(CLAUDE.md AGENTS.md SPEC.md TASKS.md DECISIONS.md ROADMAP.md RISKS.md CHANGELOG.md TESTS.md);
+# the project's own always-loaded text (M152): SPEC R12's 8,000 bytes,
+# applied to the project; only the owner raises it
+our $CONTEXT_MAX = 8000;
 my $CI_SECONDS = 15;
 my $VERSION_SECONDS = 10;
+# the reason a first install merged without a review carries, after the
+# trailer word: "first install of the method <tag>" (step7.md S16)
+our $FIRST_INSTALL = 'first install of the method';
 
 my (%look, @skipped_areas, @order);
 
@@ -291,6 +297,14 @@ sub verdicts_lines {
     @range = @{ $j->{ids} };
     $since = 'since ' . short($j->{start});
   }
+  # the first install merged without a review (docs/plans/step7.md S16):
+  # an exception allowed once per project, so status names it, and a
+  # second one is a LOOK
+  my @first = grep { (Verdicts::trailer_reason(Git::message($_)) // '') =~ /\A\Q$FIRST_INSTALL\E(?:\s|\z)/ } @range;
+  my @also = !@first ? () : ['verdicts', @first > 1 ? 'LOOK' : 'PASS', scalar(@first) . " commit" . (@first == 1 ? '' : 's')
+    . " on $ref $since merged without a review as the first install of the method, an exception to the review floor allowed once per project: "
+    . join(', ', map { short($_) . ((Verdicts::trailer_reason(Git::message($_)) =~ /\A\Q$FIRST_INSTALL\E (v[0-9][0-9A-Za-z.+-]{0,21})\z/) ? " $1" : '') } @first)
+    . (@first > 1 ? '; each one after the first needed its review' : '')];
   my @bad = grep { defined Verdicts::trailer_problem(Git::message($_)) } @range;
   if (@bad) {
     my $old = $bad[-1];
@@ -299,12 +313,12 @@ sub verdicts_lines {
       . (@bad > 5 ? ' ...' : '') . '; the oldest, ' . ($QUICK ? short($old) : '"' . subject(Git::message($old)) . '"') . ': '
       . Verdicts::trailer_problem(Git::message($old))
       . '; accept them by moving VERDICTS_FROM in .claude/method.conf through a reviewed change; never rewrite main'
-      . $shallow];
+      . $shallow], @also;
   }
   # in a shallow history the first verdict may be older than what is here
   return ['verdicts', 'SKIPPED', scalar(@range) . " commits on $ref $since carry a $key line, but the history is"
-    . ' shallow, so older commits were not read; fetch more history or set VERDICTS_FROM'] if $shallow;
-  return ['verdicts', 'PASS', scalar(@range) . " commits on $ref $since carry a $key line"];
+    . ' shallow, so older commits were not read; fetch more history or set VERDICTS_FROM'], @also if $shallow;
+  return (['verdicts', 'PASS', scalar(@range) . " commits on $ref $since carry a $key line"], @also);
 }
 
 # --- records ---
@@ -337,6 +351,68 @@ sub records_lines {
   }
   return ['records', 'LOOK', join('; ', @parts)] if @parts;
   return ['records', 'PASS', scalar(@RECORDS) . " records present; CLAUDE.md imports AGENTS.md$named"];
+}
+
+# --- context: the project's own always-loaded text (M152) ---
+
+# scoped FILE: true when FILE's frontmatter gives a paths: key a value (on
+# its line, or as a list on the lines after it), so Claude Code loads the
+# rule only for the files it names
+sub scoped {
+  my ($f) = @_;
+  open my $h, '<:raw', $f or die "cannot read $f\n";
+  my $text = do { local $/; <$h> };
+  close $h;
+  return 0 unless defined $text && $text =~ /\A---[ \t]*\r?\n(.*?)^---[ \t]*\r?$/ms;
+  my $fm = $1;
+  return $fm =~ /^(?:paths|"paths"|'paths')[ \t]*:(?:[ \t]*[^\s#]|[ \t]*(?:#[^\n]*)?\r?\n[ \t]*-)/m ? 1 : 0;
+}
+
+# always_loaded: [PATH, BYTES] for each file of the project's own that
+# Claude Code loads in every session: CLAUDE.md, .claude/CLAUDE.md and
+# AGENTS.md (which CLAUDE.md imports), and each .md file under
+# .claude/rules/ (in any folder; a link is followed, each folder read once)
+# without a paths: line, leaving out .claude/rules/method/, the method's own
+# text, which the method's budget test holds to its own 8,000, also when a
+# link leads into it (it is marked read before the walk). Bytes as stored.
+sub always_loaded {
+  my @files;
+  for my $f (qw(CLAUDE.md .claude/CLAUDE.md AGENTS.md)) { push @files, [$f, -s _] if -f $f }
+  my %seen;
+  if (my @m = stat '.claude/rules/method') { $seen{"$m[0]:$m[1]"} = 1 }
+  my $walk;
+  $walk = sub {
+    my ($dir) = @_;
+    my @st = stat $dir or die "cannot read the folder $dir\n";
+    return if $seen{"$st[0]:$st[1]"}++;
+    opendir my $d, $dir or die "cannot read the folder $dir\n";
+    my @entries = sort grep { !/\A\.\.?\z/ } readdir $d;
+    closedir $d;
+    for my $e (@entries) {
+      my $p = "$dir/$e";
+      if (-d $p) {
+        $walk->($p);
+      } elsif (-f _ && $e =~ /\.md\z/) {
+        my $bytes = -s _;
+        push @files, [$p, $bytes] unless scoped($p);
+      }
+    }
+  };
+  $walk->('.claude/rules') if -d '.claude/rules';
+  return @files;
+}
+
+sub context_lines {
+  my @files = always_loaded();
+  my $total = 0;
+  $total += $_->[1] for @files;
+  if ($total > $CONTEXT_MAX) {
+    my @big = sort { $b->[1] <=> $a->[1] || $a->[0] cmp $b->[0] } @files;
+    return ['context', 'LOOK', "$total bytes of the project's own text load in every session, over its budget of $CONTEXT_MAX: "
+      . names(map {"$_->[0] $_->[1]"} @big) . '; shorten it, give a rule a paths: line or move a procedure into a skill'];
+  }
+  return ['context', 'PASS', "$total of $CONTEXT_MAX bytes of the project's own text load in every session (" . scalar(@files)
+    . ' files; .claude/rules/method/ and rules with a paths: line not counted)'];
 }
 
 # --- Claude Code, its effort setting, perl ---
@@ -527,6 +603,7 @@ sub main {
   area('work', sub { work_lines('work', $top) });
   area('verdicts', sub { verdicts_lines($conf) });
   area('records', \&records_lines);
+  area('context', \&context_lines);
   area('claude-code', \&claude_code_lines);
   area('effort', \&effort_lines);
   area('perl', \&perl_lines);

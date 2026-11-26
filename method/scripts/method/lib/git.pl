@@ -32,6 +32,7 @@
 #   Git::run(ARGS)      (exit status, standard output); stdin and stderr on
 #                       the null device, because git's messages can quote
 #                       file names raw
+#   Git::run_input(INPUT, ARGS)  the same, with INPUT on git's standard input
 #   Git::ok(ARGS)       standard output, or dies "git <command> failed"
 #   Git::cat(TYPE, ID, ONCE, MAX)  a stored object's content, checked against
 #                       its id; ONCE: not kept for a later read; MAX: undef
@@ -69,6 +70,13 @@
 #                       git fetch moves it
 #   Git::merge_base(A, B)  ('ok', ids), ('none', what to do) or ('error')
 #   Git::message(ID)    a commit's message, checked against its id
+#   Git::ignored(DIR, PATH...)  [[PATH, WHY], ...]: each PATH (relative to
+#                       the folder DIR) that git ignores and does not track,
+#                       so a commit would leave it out; WHY names the ignore
+#                       file, its line and its pattern. [] when no .git is
+#                       found at or above DIR; undef when git cannot tell
+#                       (one is there, but git refuses the repository, for
+#                       one owned by another user, or fails)
 package Git;
 use strict;
 use warnings;
@@ -158,14 +166,39 @@ sub case_pin {
   return @$case_pin;
 }
 
-sub run {
-  my @cmd = (@GIT, case_pin(), @_);
+sub run { return run_input(undef, @_) }
+
+# run_input INPUT ARGS: INPUT (undef: none) is written to git's standard
+# input by a process of its own, so a git that writes before it has read
+# all of it cannot stall the run
+sub run_input {
+  my ($input, @args) = @_;
+  my @cmd = (@GIT, case_pin(), @args);
   my $pid = open(my $fh, '-|');
   die "cannot run git\n" unless defined $pid;
   if (!$pid) {
+    # the child leaves with POSIX::_exit, so no END block or destructor of
+    # the caller runs here and writes into git's pipe
+    require POSIX;
     open STDERR, '>', File::Spec->devnull;
-    open STDIN, '<', File::Spec->devnull;
-    exec { $cmd[0] } @cmd or exit 127;
+    if (defined $input) {
+      pipe(my $r, my $w) or POSIX::_exit(127);
+      my $wpid = fork;
+      POSIX::_exit(127) unless defined $wpid;
+      if (!$wpid) {
+        close $r;
+        close STDOUT;    # (so the caller's read ends when git's does)
+        binmode $w;
+        print {$w} $input;
+        close $w;
+        POSIX::_exit(0);
+      }
+      close $w;
+      open STDIN, '<&', $r or POSIX::_exit(127);
+    } else {
+      open STDIN, '<', File::Spec->devnull;
+    }
+    exec { $cmd[0] } @cmd or POSIX::_exit(127);
   }
   binmode $fh;
   my $out = do { local $/; <$fh> };
@@ -457,6 +490,44 @@ sub message {
   my $c = cat('commit', $_[0]);
   my $i = index $c, "\n\n";
   return $i < 0 ? '' : substr($c, $i + 2);
+}
+
+# ignored DIR PATH...: see the top of this file (a tracked file is never
+# reported: git's ignore rules do not apply to it)
+sub ignored {
+  my ($dir, @paths) = @_;
+  return [] unless @paths;
+  my ($st, $in) = run('-C', $dir, 'rev-parse', '--is-inside-work-tree');
+  if ($st || $in ne "true\n") {
+    # (git refusing a repository, one owned by another user say, fails as
+    # it does outside one: only a .git at or above DIR tells them apart)
+    my $up = Cwd::abs_path($dir);
+    return undef unless defined $up;
+    until (-e File::Spec->catfile($up, '.git')) {
+      my $next = File::Basename::dirname($up);
+      return [] if $next eq $up;
+      $up = $next;
+    }
+    return undef;
+  }
+  # (check-ignore refuses pathspec magic, --literal-pathspecs too; it reads
+  # each PATH as a path, never as a pattern. With -z its fields come
+  # NUL-separated and unquoted, so a name holding ':12:' or a non-ASCII
+  # letter is read whole; -z needs --stdin)
+  local @GIT = grep { $_ ne '--literal-pathspecs' } @GIT;
+  return undef if grep {/\0/} @paths;
+  my ($ist, $out) = run_input(join('', map {"$_\0"} @paths), '-C', $dir, 'check-ignore', '-v', '-z', '--stdin');
+  return undef if $ist && $ist != 1 << 8;    # (exit 1: none is ignored)
+  return [] if $out eq '';
+  my @f = split /\0/, $out, -1;
+  return undef unless pop(@f) eq '' && @f % 4 == 0;
+  my @r;
+  while (my ($src, $n, $pat, $path) = splice @f, 0, 4) {
+    return undef unless $n =~ /\A[0-9]+\z/;
+    next if $pat =~ /\A!/;    # (a negated pattern matched: not ignored)
+    push @r, [$path, "$src line $n: $pat"];
+  }
+  return \@r;
 }
 
 1;

@@ -628,10 +628,15 @@ sub tier_condition {
   # remove one
   %seen = ();
   my @list = grep { !$seen{$_}++ } @$main, @$mine;
-  my @high = grep { Conf::under($_, \@list) } @touched;
+  # and the built-in list of the files that steer the method (M153), added
+  # after the check above, so an entry whose path is absent is no problem
+  %seen = ();
+  my @steer = grep { !$seen{$_}++ } grep { defined } map { Conf::steers($_) } @touched;
+  my @high = grep { Conf::under($_, \@list) || defined Conf::steers($_) } @touched;
   $T{high} = \@high;
-  my $lists = @list ? '(HIGH_RISK_PATHS, main\'s and this change\'s together: ' . names(@list) . ')'
-    : '(no HIGH_RISK_PATHS on main or in this change)';
+  my $lists = @list ? '(HIGH_RISK_PATHS, main\'s and this change\'s together: ' . names(@list)
+    : '(no HIGH_RISK_PATHS on main or in this change';
+  $lists .= (@steer ? '; the built-in list of the files that steer the method: ' . names(@steer) : '') . ')';
   my $which = @high ? count(scalar(@high), 'changed path is', 'changed paths are') . ' high-risk: ' . names(@high) . " $lists"
     : "no changed path is high-risk $lists";
   $which .= '; main\'s list names ' . names(@gone) . ', which ' . (@gone == 1 ? 'is' : 'are') . ' in none of these files but'

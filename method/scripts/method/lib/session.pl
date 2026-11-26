@@ -8,13 +8,18 @@
 # - status.sh --quick's summary line and its LOOK lines, within 5 s;
 # - a LOOK line for each setting that weakens the method in this session:
 #   the advisor not off; auto memory switched on by its variable; the
-#   session's model not claude-opus-5-5; the PowerShell tool not off on
+#   session's model not the one the project's profile sets
+#   (claude-opus-5-5 with no lock; lib/lock.pl); the PowerShell tool not off on
 #   Windows; input that cannot be read; in the project's local settings, a
 #   key the method sets, disableAllHooks, skill shell lines on; in local
 #   and user settings ($CLAUDE_CONFIG_DIR's when that is set), an env
 #   variable, a PreToolUse or PermissionRequest hook (the method's are in
 #   the project's settings only), an enabled plugin, an effort cap below
-#   xhigh (also per model); a settings file that is not a regular file, is
+#   xhigh (also per model); in the project's settings, what a first
+#   install refuses unless it is kept by name (Lock::refused: a hook of the
+#   project's own on an event @Lock::KEEP_EVENTS names,
+#   claudeMdExcludes, enabledPlugins, a key that runs a
+#   program; step 7.3, step7.md S6); a settings file that is not a regular file, is
 #   over 1 MB or is not JSON; the lines a project adds to the guard's lists
 #   in .claude/method-local/ (git, gh and MCP), counted. Names only,
 #   never a settings value: a model id only in the shape Anthropic's ids
@@ -158,14 +163,19 @@ sub warnings_for {
   push @w, look('auto memory is switched on by CLAUDE_CODE_DISABLE_AUTO_MEMORY=0 (M104)')
     if defined $ENV{CLAUDE_CODE_DISABLE_AUTO_MEMORY} && $ENV{CLAUDE_CODE_DISABLE_AUTO_MEMORY} eq '0';
   my $model = ref $in eq 'HASH' ? $in->{model} : undef;
+  # the model the project's profile sets (claude-opus-5-5 with no lock, or
+  # when the lock or its row cannot be read)
+  my $project = defined $ENV{CLAUDE_PROJECT_DIR} && -d $ENV{CLAUDE_PROJECT_DIR} ? $ENV{CLAUDE_PROJECT_DIR} : $top;
+  my $lock_ok = eval { require File::Spec->catfile($lib, 'lock.pl'); 1 };
+  my ($pname, $prow) = $lock_ok ? eval { Lock::profile($project) } : ();
+  my ($want, $sets) = $prow ? ($prow->{model}, "the model the project's profile ($pname) sets") : ('claude-opus-5-5', 'the model the method sets');
   # (a model id is shown only in the shape Anthropic's ids have)
-  push @w, look('this session runs ' . ($model =~ /\Aclaude-[a-z0-9.-]{1,60}\z/ ? $model : 'a model') . ', not claude-opus-5-5, the model the method sets')
-    if defined $model && !ref $model && $model ne '' && $model ne 'claude-opus-5-5';
+  push @w, look('this session runs ' . ($model =~ /\Aclaude-[a-z0-9.-]{1,60}\z/ ? $model : 'a model') . ", not $want, $sets")
+    if defined $model && !ref $model && $model ne '' && $model ne $want;
   push @w, look('the PowerShell tool is not switched off (CLAUDE_CODE_USE_POWERSHELL_TOOL is not 0); the guard refuses it')
     if $^O =~ /\A(?:msys|MSWin32|cygwin)\z/ && ($ENV{CLAUDE_CODE_USE_POWERSHELL_TOOL} // '') ne '0';
   # local settings: the project's own, which Claude Code reads (not the
   # folder Claude moved into); user settings: where Claude Code reads them
-  my $project = defined $ENV{CLAUDE_PROJECT_DIR} && -d $ENV{CLAUDE_PROJECT_DIR} ? $ENV{CLAUDE_PROJECT_DIR} : $top;
   my @files = (['.claude/settings.local.json', File::Spec->catfile($project, '.claude', 'settings.local.json'), 0]);
   if (defined $ENV{CLAUDE_CONFIG_DIR} && $ENV{CLAUDE_CONFIG_DIR} ne '') {
     push @files, ['$CLAUDE_CONFIG_DIR/settings.json', File::Spec->catfile($ENV{CLAUDE_CONFIG_DIR}, 'settings.json'), 1];
@@ -180,6 +190,13 @@ sub warnings_for {
     my @what = weakens($s, $user);
     next unless @what;
     push @w, look($user ? "$name adds to every session: " . join('; ', @what) : "$name sets " . join('; ', @what) . "; it ranks above the method's settings");
+  }
+  # the project's settings: what runs or loads beside the method that a
+  # first install refuses unless kept by name (named, never its value)
+  if ($lock_ok) {
+    my ($s) = read_settings(File::Spec->catfile($project, '.claude', 'settings.json'));
+    my @kept = $s ? eval { map { $_->[1] } Lock::refused($s) } : ();
+    push @w, look('.claude/settings.json keeps ' . join('; ', @kept) . ", which run or load beside the method's hooks (a first install refuses each unless kept by name)") if @kept;
   }
   # the project's own lines in the guard's lists: the guard lets each
   # through (only a regular file, under the settings' size cap, is read)

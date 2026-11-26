@@ -14,13 +14,15 @@
 #
 # Rules it serves:
 # - M038: the packet is the agent's whole input. It holds the criteria, the
-#   incident checklist, the check output, the changed files and the diff of
-#   the committed change. Commit messages and pull request text, the
-#   author's account of the change, are never read. A change with nothing to
-#   review gives no packet (exit 3).
+#   project's REVIEW.md, the incident checklist, the check output, the
+#   changed files and the diff of the committed change. Commit messages and
+#   pull request text, the author's account of the change, are never read.
+#   A change with nothing to review gives no packet (exit 3).
 # - M032: it holds the project's incident checklist,
 #   docs/incident-checklist.md, from the merge base, so a change cannot
 #   weaken the list it is checked against (DECISIONS A28).
+# - M157 (its home is lib/packet.pl, from_base): REVIEW.md from the merge
+#   base too.
 # - M085: with --since, the diff holds only the changes since the last
 #   reviewed version, and FILES still lists the whole change. When that
 #   version is not between the merge base and HEAD, the packet says so and

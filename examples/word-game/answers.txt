@@ -1,0 +1,15 @@
+# The answers the word game's owner gives /method-setup (step 7.7). One
+# KEY<TAB>value per line; method/scripts/method/lib/setup.pl reads them.
+DECIDES	claude
+REPORTS	short
+PACE	small
+TOUCHES	none
+STRICT	standard
+PROFILE	budget
+PROJECT_WHAT	A word game in the terminal: each round shows a scrambled word to guess.
+NEVER_WRONG	A right guess that scores no points.
+HOW_IT_STARTS	bash game.sh --once
+TEST_COMMAND	bash test.sh
+PRODUCT_PATH	game.sh
+PRODUCT_PATH	score.sh
+PRODUCT_PATH	words.txt

@@ -229,6 +229,48 @@ under_is "under: a listed path that only ends like it" pay/a no src/pay
 under_is "under: . holds every path" deep/down/a.txt yes .
 under_is "under: an empty list holds nothing" src/a no
 
+# 2d. steers: the built-in list of the files that steer the method (M153;
+# step 7 plan, S12), which done-check adds to HIGH_RISK_PATHS
+# shellcheck disable=SC2016 # perl code: perl expands it
+steers_pl='require $ARGV[0]; my $e = Conf::steers($ARGV[1]); print defined $e ? $e : "none"'
+steers_is() {
+  got=$(perl -e "$steers_pl" "$conf_pl" "$2" 2>&1)
+  if [ "$got" = "$3" ]; then pass "$1"; else fail "$1" "got $got, wanted $3"; fi
+}
+want_steering='.claude/method.conf checks .claude/rules/pack .claude/skills/pack- .github/workflows docs/incident-checklist.md REVIEW.md CLAUDE.md .claude/CLAUDE.md AGENTS.md .claude/settings.json .claude/settings.local.json .claude/setup-answers.txt'
+# shellcheck disable=SC2016 # perl code: perl expands it
+got=$(perl -e 'require $ARGV[0]; print join(" ", Conf::steering())' "$conf_pl" 2>&1)
+if [ "$got" = "$want_steering" ]; then pass "steers: the built-in list is the plan's (S12), with .claude/CLAUDE.md and the settings files"; else fail "steers: the built-in list is the plan's (S12)" "got $got
+wanted $want_steering"; fi
+for e in $want_steering; do
+  case $e in
+    *-) steers_is "steers: $e is a name prefix ($e""x/SKILL.md)" "$e""x/SKILL.md" "$e" ;;
+    *.md | *.conf | *.json | *.txt) steers_is "steers: the file $e" "$e" "$e" ;;
+    *) steers_is "steers: a file in $e" "$e/a.tsv" "$e" ;;
+  esac
+done
+steers_is "steers: a folder entry itself" checks checks
+steers_is "steers: any letter case (claude.md, as a file system that folds case loads it)" claude.md CLAUDE.md
+steers_is "steers: Checks/project.tsv in another case" Checks/project.tsv checks
+steers_is "steers: the method's own skills are not on it (.claude/skills/method-start)" .claude/skills/method-start/SKILL.md none
+steers_is "steers: a name that only starts like a folder entry (checksum.txt)" checksum.txt none
+steers_is "steers: a CLAUDE.md in a subfolder is not on it" src/CLAUDE.md none
+steers_is "steers: .claude/skills/packer is not a pack skill" .claude/skills/packer/SKILL.md none
+steers_is "steers: .Claude/Settings.JSON in another case" .Claude/Settings.JSON .claude/settings.json
+steers_is "steers: .claude/SETTINGS.LOCAL.json in another case" .claude/SETTINGS.LOCAL.json .claude/settings.local.json
+steers_is "steers: .claude/Setup-Answers.TXT in another case" .claude/Setup-Answers.TXT .claude/setup-answers.txt
+steers_is "steers: a name that only starts like a file entry (.claude/settings.json.bak)" .claude/settings.json.bak none
+steers_is "steers: a product path" src/a.txt none
+# why.md's M153 row names the list for people (method-plan points there):
+# its paths, between "says:" and "in any letter case", read as entries
+# (a trailing / dropped, pack-* as pack-), are the list's
+# shellcheck disable=SC2016 # perl code: perl expands it
+row=$(perl -ne 'next unless /^\| M153 \|/; my ($l) = /says\W*:(.*?)in any letter case/ or next; my @p = $l =~ /`([^`]+)`/g; s{/\z}{}, s{\*\z}{} for @p; print join(" ", sort @p), "\n"' "$root/method/docs/method/why.md" 2>&1)
+# shellcheck disable=SC2016 # perl code: perl expands it
+list=$(perl -e 'require $ARGV[0]; print join(" ", sort(Conf::steering())), "\n"' "$conf_pl" 2>&1)
+if [ -n "$row" ] && [ "$row" = "$list" ]; then pass "steers: why.md's M153 row names every entry of the list"; else fail "steers: why.md's M153 row names every entry of the list" "row:  $row
+list: $list"; fi
+
 # 3. REQUIRES: read by the same parser, and the same floor as SPEC.md
 req=$(perl -e "require \$ARGV[0]; shift; $read_pl" "$conf_pl" requires "$root/method/scripts/method" 2>&1)
 spec_floor=$(sed -n 's/^| Claude Code | \([0-9][0-9.]*\) or later |.*/\1/p' "$root/SPEC.md")

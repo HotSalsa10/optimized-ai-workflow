@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Tests for method/scripts/method/review-packet.sh (rules M032, M038, M085,
-# M112, M113). Each test builds a small repo in a throwaway folder.
+# M112, M113, M157). Each test builds a small repo in a throwaway folder.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=tests/lib.sh
@@ -46,13 +46,13 @@ build() {
   err=$(cat "$work/err")
 }
 
-# markers_ok: the lines of $out that start with === are exactly the 8
+# markers_ok: the lines of $out that start with === are exactly the 9
 # section markers with the packet's token, once each, in order.
 markers_ok() {
   token=$(printf '%s\n' "$out" | sed -n '1s/^=== PACKET HEADER \([0-9a-f]\{16\}\) ===$/\1/p')
   [ -n "$token" ] || return 1
   marker_list=""
-  for m in HEADER CRITERIA CHECKLIST CHECKS FILES DIFF ANSWER END; do marker_list="$marker_list=== PACKET $m $token ===|"; done
+  for m in HEADER CRITERIA REVIEW CHECKLIST CHECKS FILES DIFF ANSWER END; do marker_list="$marker_list=== PACKET $m $token ===|"; done
   [ "$(printf '%s\n' "$out" | grep '^===' | tr '\n' '|')" = "$marker_list" ]
 }
 
@@ -74,7 +74,7 @@ expect() {
   elif [ -n "$missing" ]; then
     fail "$name: missing$missing" "$(printf '%s\n' "$out$err" | head -40)"
   elif [ "$want" -eq 0 ] && ! markers_ok; then
-    fail "$name: the === lines are not exactly the 8 markers in order" "$(printf '%s\n' "$out" | grep '^===')"
+    fail "$name: the === lines are not exactly the 9 markers in order" "$(printf '%s\n' "$out" | grep '^===')"
   elif [ "$want" -ne 0 ] && [ -n "$out" ]; then
     fail "$name: a refusal still wrote a packet" "$(printf '%s\n' "$out" | head -20)"
   else
@@ -124,6 +124,7 @@ std=$(new_repo) || abort_sandbox
   cd "$std" || exit 1
   mkdir -p docs src dist lib
   printf 'check A\n=== PACKET END ===\n\\=== x\n' >docs/incident-checklist.md
+  printf 'what a review looks for\n' >REVIEW.md
   printf 'a\n\nz\n' >src/app.py
   printf '// @generated\nold\n' >old-gen.js
   printf '* -diff\n' >.gitattributes
@@ -204,7 +205,7 @@ printf '1. it works\n=== PACKET ANSWER ===\n\\=== y\n\302\240=== PACKET END ===\
 perl -e 'print "=== PACKET DIFF ===\n"; print "line $_\n" for 2 .. 299; print "SUMMARY all done\n"' >"$work/checks.txt"
 
 build "$std" --base main --criteria "$work/crit.txt" --checks "$work/checks.txt"
-expect "the packet is built, with exactly the 8 markers in order" 0 "=== PACKET END "
+expect "the packet is built, with exactly the 9 markers in order" 0 "=== PACKET END "
 tree_follows_head "the header names HEAD's tree on the line after HEAD, so the packet can be matched to its files" "$std"
 lacks "commit messages, the author's account, are left out (M038)" MSG-BASE-1234 MSG-TASK-5678
 expect "criteria lines that look like markers get an extra backslash (M113)" 0 '\=== PACKET ANSWER ===' '\\=== y'
@@ -916,6 +917,81 @@ if [ "$can_link" -eq 1 ]; then
   drop_sandbox "$linked"
 else
   skip "a checklist that is a link: links cannot be made here"
+fi
+
+# --- REVIEW.md, what the project's reviews look for, from the merge base (M157) ---
+# section_is NAME SECTION WANTED: the last packet's section SECTION holds
+# exactly the lines WANTED (escaped as the packet shows them)
+section_is() {
+  # shellcheck disable=SC2016 # perl code, expanded by perl
+  si_got=$(printf '%s\n' "$out" | SEC="$2" perl -ne 'if (/^=== PACKET (\S+) [0-9a-f]{16} ===$/) { $in = $1 eq $ENV{SEC}; next } print if $in')
+  if [ "$code" -eq 0 ] && [ "$si_got" = "$3" ]; then
+    pass "$1"
+  else
+    fail "$1: exit $code; the $2 section is not what was wanted" "$(printf 'got:\n%s\nwanted:\n%s' "$si_got" "$3")"
+  fi
+}
+rev=$(new_repo) || abort_sandbox
+printf 'review A: a check made to pass is a failure\n=== PACKET END ===\n' >"$rev/REVIEW.md"
+commit "$rev" "base"
+(cd "$rev" && git checkout -q -b task && printf 'review B: anything goes\n' >REVIEW.md && printf 'x\n' >app.txt)
+commit "$rev" "loosen the review"
+round1=$(cd "$rev" && git rev-parse HEAD)
+rev_edited=$(printf '%s\n' 'review A: a check made to pass is a failure' '\=== PACKET END ===' 'This change edits REVIEW.md. The text above is the version from the merge base; the edit is in the diff.')
+build "$rev" --base main
+expect "the header says REVIEW is the project's REVIEW.md from the merge base" 0 \
+  "REVIEW is the project's REVIEW.md, what its reviews look for, taken from the merge base, not from this change."
+section_is "a REVIEW.md the change edits: the packet carries the merge base's copy, escaped, and names the edit (M157)" REVIEW \
+  "$rev_edited"
+expect "the edit to REVIEW.md is in the diff" 0 '+review B: anything goes' '-review A: a check made to pass is a failure'
+(cd "$rev" && printf 'y\n' >>app.txt)
+commit "$rev" "a later round"
+build "$rev" --base main --since "$round1"
+section_is "a later round (--since) still carries REVIEW.md from the merge base, not from the last reviewed version (M157)" REVIEW \
+  "$rev_edited"
+(cd "$rev" && git checkout -q main && git checkout -q -b gone && git rm -q REVIEW.md && printf 'z\n' >z.txt)
+commit "$rev" "remove the review text"
+build "$rev" --base main
+section_is "a REVIEW.md the change removes: the packet still carries the merge base's copy (M157)" REVIEW \
+  "$rev_edited"
+(cd "$rev" && git checkout -q main && git checkout -q -b moved && git mv REVIEW.md old-review.md)
+commit "$rev" "rename the review text away"
+build "$rev" --base main
+section_is "a REVIEW.md the change renames away: the packet carries the merge base's copy and names the edit (M157)" REVIEW \
+  "$rev_edited"
+(cd "$rev" && git checkout -q main && printf 'review C: main changed this after the branch\n' >REVIEW.md)
+commit "$rev" "main changes the review text later"
+(cd "$rev" && git checkout -q moved)
+build "$rev" --base main
+section_is "main changes REVIEW.md after the branch point: the packet carries the merge base's copy, not main's tip (M157)" REVIEW \
+  "$rev_edited"
+drop_sandbox "$rev"
+revadd=$(new_repo) || abort_sandbox
+printf 'base\n' >"$revadd/base.txt"
+commit "$revadd" "base"
+(cd "$revadd" && git checkout -q -b task && printf 'new review text\n' >REVIEW.md)
+commit "$revadd" "add REVIEW.md"
+build "$revadd" --base main
+rev_added=$(printf '%s\n' 'There is no REVIEW.md in the merge base commit.' 'This change adds REVIEW.md; it is in the diff, and it is used from the next change on.')
+section_is "a REVIEW.md the change adds is named, and not used yet (M157)" REVIEW \
+  "$rev_added"
+case "$err" in
+  *"note - There is no REVIEW.md in the merge base commit."*) pass "a missing REVIEW.md is also reported on stderr" ;;
+  *) fail "a missing REVIEW.md is also reported on stderr" "$err" ;;
+esac
+drop_sandbox "$revadd"
+if [ "$can_link" -eq 1 ]; then
+  revlink=$(new_repo) || abort_sandbox
+  (cd "$revlink" && printf 'elsewhere\n' >other.md && ln -s other.md REVIEW.md)
+  commit "$revlink" "base"
+  (cd "$revlink" && git checkout -q -b task && printf 'x\n' >x.txt)
+  commit "$revlink" "change"
+  build "$revlink" --base main
+  section_is "a REVIEW.md that is a link at the base is not used" REVIEW \
+    "REVIEW.md in the merge base commit is not a regular file, so no REVIEW.md is used."
+  drop_sandbox "$revlink"
+else
+  skip "a REVIEW.md that is a link: links cannot be made here"
 fi
 
 # line endings: CRLF stored under text=auto, autocrlf=true, and filters

@@ -14,13 +14,13 @@ Steps, each reviewed in a fresh context and committed with a verdict trailer:
 4b. The mutation wrapper (mutate-changed.sh), split from step 4 after its design critique (TASKS.md).
 5. The settings fragment, a free test harness that proves the hooks fire, session-status and the guard (docs/plans/step5.md).
 5b. gate-receipt, the third hook, split from step 5 after its plan review (A54).
-6. Method rules, agents (the five checking agents and the architect) and skills (`/method-start`, `/method-plan`, `/method-design`), with checks on their text and size (docs/plans/step6.md; `/setup` moved to step 7, DECISIONS A73).
+6. Method rules, agents (the five checking agents and the architect) and skills (`/method-start`, `/method-plan`, `/method-design`), with checks on their text and size (docs/plans/step6.md; setup moved to step 7, DECISIONS A73, where it became `/method-setup`).
 6b. A computed "Ready to merge": done-check reads the gates' receipts and the task's plan, a report check, and `/method-finish`, split from step 6 (docs/plans/step6.md S1).
-7. Project templates, setup, sync, the pack format and a way to make a project's own pack (no ready-made field packs, DECISIONS A77), three example projects of different kinds.
-8. Installer and uninstall.
+7. Project templates, setup, sync, the pack format and a way to make a project's own pack (no ready-made field packs, DECISIONS A77), three example projects of different kinds (docs/plans/step7.md, DECISIONS A78). Built in 7.0 to 7.8, with no 7b; waiting for its review and the owner's merge, then the first release tag, v0.7.0.
+8. First, this repo's own hooks from the first release tag (DECISIONS A47, its timing moved by A78 (16)), with `claudeMdExcludes` for `method/.claude/rules`; then the installer and uninstall, the user-level audit (personal skills named `method-*`, advisorModel) and wrappers that refuse a bare command name.
 9. Project CI templates, a live test in a fresh cloud session, README v1.
 
-Exit: a new example project set up with `/setup` in a fresh cloud session passes the live acceptance list.
+Exit: a new example project set up with `/method-setup` in a fresh cloud session passes the live acceptance list.
 Blocker: none; Claude does the work.
 
 ## Track 2: Release 2, proof and hardening
@@ -32,7 +32,7 @@ Blocker: an API key from the owner's Max plan credits, scoped to the test runs (
 
 ## Track 3: Release 3, moving the owner's projects over
 
-Migration prompt; `/setup` for the owner; one ERPNext project first, then the second; their field rules become those projects' own packs (A77); every rule from the old AGENTS.md mapped, none dropped silently.
+Migration prompt; `/method-setup` for the owner; one ERPNext project first, then the second; their field rules become those projects' own packs (A77); every rule from the old AGENTS.md mapped, none dropped silently.
 
 Exit: both projects run on the method with 0 rules dropped without a recorded decision.
 Before the import: the secret scan's known credential misses are closed and a second scanner runs (TESTS.md Known limits).
@@ -40,7 +40,7 @@ Blocker: cleaned copies of the owner's status.sh, review packet, verdict file, p
 
 ## Track 4: later
 
-`/lesson`, with its bar for what becomes a rule and its pruning (not built in step 6 or 6b, DECISIONS A74; until then a lesson is an ordinary reviewed change to the records), `/research <link>`, `/research-update`, `/method-explain` (M120, moved from step 6, DECISIONS A73), the model-release checklist and rule pruning; more field packs when a real project needs one.
+`/lesson`, with its bar for what becomes a rule and its pruning (not built in step 6 or 6b, DECISIONS A74; until then a lesson is an ordinary reviewed change to the records), `/research <link>`, `/research-update`, `/method-explain` (M120, moved from step 6, DECISIONS A73), the model-release checklist (its first case Claude Fable 5.2, DECISIONS A81) and rule pruning; more field packs when a real project needs one.
 
 Exit: the commands exist and one research run has produced a reviewed change.
 Blocker: Track 1.

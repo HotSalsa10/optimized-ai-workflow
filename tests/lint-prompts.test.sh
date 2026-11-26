@@ -2,7 +2,7 @@
 # Tests scripts/dev/lint-prompts.sh (step 6.1, M095; step 6.2, M096; step
 # 6.3, skill folders): in small throwaway repositories holding only the
 # lint and the text it reads (and, for parts two and three, the
-# vocabulary, the settings fragment, the method's agent files and G6's
+# vocabulary, the settings fragment, the method's agent files and the method's
 # skill list in protect.pl), each pattern turns it red with its file, line
 # and reason, each look-alike stays green, and its own counts are read
 # strictly. Part two: each agent-file rule red with the file and the reason,
@@ -28,7 +28,7 @@ k=0
 # passes, what part two reads (step 6.2): the vocabulary and its reader
 # (the gates), the settings fragment (the model) and the method's agent
 # files, which pass; and what part three reads (step 6.3): protect.pl with
-# G6's skill list, the git.pl it loads, and the method's skill folders
+# the method's skill list, the git.pl it loads, and the method's skill folders
 # (since step 6.4), which pass; sets m to its path (not in a
 # subshell, so k counts on)
 mini() {
@@ -50,7 +50,7 @@ mini() {
 # the method's agent files and its skill folders' .md files
 base_files=$(($(find "$root/method/.claude/agents/method" "$root/method/.claude/skills" -name '*.md' -type f | wc -l) + 1))
 
-# list_skill NAME: puts NAME on the mini repository's G6 skill list
+# list_skill NAME: puts NAME on the mini repository's skill list
 # (protect.pl's @METHOD_SKILLS)
 list_skill() {
   # shellcheck disable=SC2016 # perl code, expanded by perl
@@ -58,7 +58,7 @@ list_skill() {
     grep -q "^our @METHOD_SKILLS = qw(.* $1);\$" "$m/method/scripts/method/lib/protect.pl"
 }
 # put FILE TEXT: writes TEXT to FILE in the mini repository; a file in a
-# skill folder (method/.claude/skills/DIR/...) also puts DIR on its G6
+# skill folder (method/.claude/skills/DIR/...) also puts DIR on its
 # skill list, unless NOLIST is set (step 6.3)
 put() {
   mkdir -p "$m/$(dirname "$1")" && printf '%s' "$2" >"$m/$1" || return 1
@@ -120,7 +120,7 @@ fm() {
 }
 hdr=$(fm "name: method-x" "description: x" "model: $model" "effort: xhigh" "tools: Read, Grep, Glob")$nl
 # a skill's frontmatter that passes part three (4 lines; the case puts the
-# folder on the mini repository's G6 list)
+# folder on the mini repository's skill list)
 shdr=$'---\nname: method-x\ndescription: x\n---\n'
 
 # --- each pattern, red: the file, the line and the reason ---
@@ -254,25 +254,25 @@ skill_red "a name other than the folder's" "$(sfm "name: method-y")" "the name \
 skill_red "no name" "$(sfm "description: x")" "the name \"\" in SKILL.md is not the folder's name, method-x"
 skill_red "no frontmatter" $'A step only.\n' "no frontmatter in SKILL.md"
 skill_red "frontmatter never closed" $'---\nname: method-x\nA step.\n' "no frontmatter in SKILL.md"
-NOLIST=1 skill_red "a folder not on G6's skill list" "$shdr" "the folder is not on G6's skill list (@METHOD_SKILLS in method/scripts/method/lib/protect.pl)"
+NOLIST=1 skill_red "a folder not on the method's skill list" "$shdr" "the folder is not on the method's skill list (@METHOD_SKILLS in method/scripts/method/lib/protect.pl)"
 lint_red "skill folder: a folder whose name does not start method- (listed)" method/.claude/skills/plan/SKILL.md "$(sfm "name: plan")" \
   "lint-prompts: method/.claude/skills/plan/: the folder's name does not start method-"
 NOLIST=1 lint_red "skill folder: a folder whose name does not start method-, not listed: two problems" method/.claude/skills/plan/SKILL.md "$(sfm "name: plan")" \
-  "lint-prompts: method/.claude/skills/plan/: the folder is not on G6's skill list" 2
+  "lint-prompts: method/.claude/skills/plan/: the folder is not on the method's skill list" 2
 lint_red "skill folder: a folder with no SKILL.md" "${SD}notes.md" $'Notes.\n' "lint-prompts: $SD: no SKILL.md"
 if wanted "skill folder: a listed name with no folder"; then
   mini || abort_sandbox
   list_skill method-y || abort_sandbox
   out=$(cd "$m" && bash scripts/dev/lint-prompts.sh 2>&1)
   code=$?
-  if [ "$code" -eq 1 ] && printf '%s\n' "$out" | grep -F -q "lint-prompts: G6's skill list (@METHOD_SKILLS in method/scripts/method/lib/protect.pl) names method-y, but method/.claude/skills/method-y/ does not exist" &&
+  if [ "$code" -eq 1 ] && printf '%s\n' "$out" | grep -F -q "lint-prompts: the method's skill list (@METHOD_SKILLS in method/scripts/method/lib/protect.pl) names method-y, but method/.claude/skills/method-y/ does not exist" &&
     printf '%s\n' "$out" | grep -q "^lint-prompts: FAIL - 1 problem(s) in $base_files prompt files\$"; then
     pass "skill folder: a listed name with no folder"
   else
     fail "skill folder: a listed name with no folder: expected exit 1 and one problem; got exit $code" "$out"
   fi
 fi
-gone "G6's skill list that cannot be read is a failure, not a pass" method/scripts/method/lib/protect.pl "lint-prompts: could not read G6's skill list from method/scripts/method/lib/protect.pl"
+gone "the method's skill list that cannot be read is a failure, not a pass" method/scripts/method/lib/protect.pl "lint-prompts: could not read the method's skill list from method/scripts/method/lib/protect.pl"
 
 # --- part three, green ---
 lint_green "skill folder: a skill with a description, a comment line, a quoted name, hooks (left to G17) and a ! line (left to M138) passes" "$S" \

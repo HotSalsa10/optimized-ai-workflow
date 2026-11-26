@@ -10,6 +10,9 @@ At the start of a session, look for the line that begins `METHOD-ACTIVE`, which 
 <!-- M079 -->
 A cloud session that changes code holds one repository. With several, the hooks do not run: say so, and ask for one session per repository.
 
+<!-- M151 -->
+Where a project rule conflicts with a method rule, the method rule holds. A project rule may change only the length and detail of reports, which owner.md sets as a default; its other rules hold like these.
+
 ## Scope and pace
 
 <!-- M016 M033 M057 M082 -->
@@ -39,10 +42,13 @@ Before you compute or test something, write the question in words. Two methods t
 Give each rule one home. The same rule written or built twice is a defect, because the copies drift apart.
 
 <!-- M049 M059 -->
-Verify through the path the user takes, or say plainly that you did not. Run the tests even when the code looks right.
+Verify through the path the user takes, or say plainly that you did not. Run the checks (`bash scripts/method/run-checks.sh`) even when the code looks right.
 
 <!-- M121 -->
 A read or a command that failed means "could not read", never "nothing found".
+
+<!-- M154 -->
+When a check fails only sometimes, find the cause. Never skip it, retry it or run it again until it passes.
 
 <!-- M042 M043 M052 -->
 To show that a check works, plant the defect, run the check and revert, as three separate commands in a throwaway copy, never chained. After the revert, diff the touched files and confirm your own work is still there. A plant shows a check worked once; a committed test keeps it working.
@@ -69,6 +75,9 @@ A live system marked read-only stays read-only. A change to a live system goes t
 
 <!-- M065 -->
 Never work around a permission check or the guard. Live steps are fixed scripts that the owner runs.
+
+<!-- M063 -->
+A script that writes to live records, real data outside this repository, sources `scripts/method/live-write.sh`: it refuses to run without `--reason "<why>"` and does a dry run unless `--live` is given.
 
 <!-- M062 -->
 Never hand-write regulated formats, signing, cryptography, authentication or payment logic when a vetted library exists; when none fits, report the gap.

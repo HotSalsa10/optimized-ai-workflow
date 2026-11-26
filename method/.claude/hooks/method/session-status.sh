@@ -17,20 +17,39 @@
 # perl starts without any PERL* variable (they can change what perl runs or
 # reads; lib/hook-env.sh), through "command perl", so a shell function named
 # perl cannot stand in for it.
-version=unreleased    # step 7's method.lock gives the version
 case "$0" in
   */*) here=${0%/*} ;;
   *) here=. ;;
 esac
+# the version: the first line of scripts/method/method.lock (lib/lock.pl
+# writes it), read with the shell's read, before perl starts; vunreleased
+# with no lock, vunknown when its first line is not a version line
+version=vunreleased
+lock="$here/../../../scripts/method/method.lock"
+if [ -f "$lock" ]; then
+  version=vunknown
+  line=
+  IFS= read -r line <"$lock" 2>/dev/null
+  tab=$(printf '\t')
+  case "$line" in
+    "version${tab}v"[0-9]*)
+      v=${line#version"$tab"}
+      case "$v" in
+        *[!0-9A-Za-z.+-]* | ????????????????????????*) ;;
+        *) version=$v ;;
+      esac
+      ;;
+  esac
+fi
 # (as the shell sees it: under Git Bash a C:/ path becomes /c/..., which
 # perl reads as absolute)
 lib=$(cd "$here/../../../scripts/method/lib" 2>/dev/null && pwd) || lib="$here/../../../scripts/method/lib"
 # a nested run (claude -p inside a session) skips status, not the settings
 # checks: METHOD_NESTED set in a settings file then shows among them
 if [ "${METHOD_NESTED:-}" = 1 ]; then
-  echo "METHOD-ACTIVE v$version (nested: status skipped)"
+  echo "METHOD-ACTIVE $version (nested: status skipped)"
 else
-  echo "METHOD-ACTIVE v$version"
+  echo "METHOD-ACTIVE $version"
 fi
 if [ ! -f "$lib/session.pl" ] || [ ! -f "$lib/hook-env.sh" ]; then
   echo "session-status: LOOK - the method's scripts are missing (scripts/method/lib); run the method's sync"

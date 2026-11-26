@@ -1,0 +1,2 @@
+# The Python packages a later helper will need; none yet. The file is here
+# so setup finds Python and suggests its scanner row.

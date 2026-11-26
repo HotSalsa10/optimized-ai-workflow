@@ -15,16 +15,16 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M007 | Update the records before review, so one review covers one change | incident | method/.claude/skills/method-finish/SKILL.md | done |
 | M008 | The verdict comes before the merge | incident | method/scripts/method/done-check.sh | done |
 | M009 | Act on the verdict; at most 3 review rounds, then re-plan | incident; research: Claude Code team | method/scripts/method/done-check.sh | done |
-| M010 | When scripts change, run the guards' own tests | incident | method/scripts/method/run-checks.sh | step 7 |
+| M010 | Method scripts in a project change only through sync; a built-in check compares them with method.lock (reworded, decision A78) | incident; decision A78 | method/scripts/method/run-checks.sh | done |
 | M011 | Commit with the verdict trailer, push, show status | incident | method/.claude/skills/method-finish/SKILL.md | done |
 | M012 | Reports open with status and next step, then what changed, what is left, risks, what is uncertain, checks | incident | method/.claude/rules/method/owner.md | done |
 | M013 | If a new session cannot orient from the files, fix the files, not the handoff | incident | method/.claude/rules/method/method.md | done |
-| M014 | CLAUDE.md imports AGENTS.md; AGENTS.md is authoritative for the project | incident | templates/CLAUDE.md | step 7 |
-| M015 | SPEC holds numbered requirements with observable acceptance criteria | incident | templates/SPEC.md | step 7 |
+| M014 | CLAUDE.md imports AGENTS.md; AGENTS.md is authoritative for the project | incident | method/scripts/method/templates/CLAUDE.md.tmpl @@AGENTS.md | done |
+| M015 | SPEC holds numbered requirements with observable acceptance criteria | incident | method/scripts/method/templates/SPEC.md.tmpl | done |
 | M016 | Build nothing that no requirement covers; say so and stop | incident | method/.claude/rules/method/method.md | done |
-| M017 | Each roadmap track has one exit criterion and one named blocker | incident | templates/ROADMAP.md | step 7 |
-| M018 | Settled decisions are not reopened | incident | templates/DECISIONS.md | step 7 |
-| M019 | TESTS lists every check and what runs it; what exists is not what runs | incident | templates/TESTS.md | step 7 |
+| M017 | Each roadmap track has one exit criterion and one named blocker | incident | method/scripts/method/templates/ROADMAP.md.tmpl | done |
+| M018 | Settled decisions are not reopened | incident | method/scripts/method/templates/DECISIONS.md.tmpl | done |
+| M019 | TESTS lists every check and what runs it; what exists is not what runs | incident | method/scripts/method/templates/TESTS.md.tmpl | done |
 | M020 | No role approves its own work | incident | method/.claude/rules/method/method.md | done |
 | M021 | The planner separates known from assumed and never invents scope | incident | method/.claude/skills/method-plan/SKILL.md | done |
 | M022 | The reviewer works in a fresh context and must give a verdict | incident | method/.claude/rules/method/method.md | done |
@@ -54,7 +54,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M046 | Four questions about every claim: reach, measured counts, closed or narrowed, survives re-derivation | incident | method/.claude/agents/method/method-reporter.md | done |
 | M047 | Write the question in words before computing; two agreeing methods can answer the wrong question | incident | method/.claude/rules/method/method.md | done |
 | M048 | The same rule implemented twice is a defect | incident | method/.claude/rules/method/method.md | done |
-| M049 | Verify through the path the user takes, or say plainly that you did not | incident | method/.claude/rules/method/method.md | done |
+| M049 | Verify through the path the user takes, or say plainly that you did not (its line names `bash scripts/method/run-checks.sh` since step 7.6, the step 6b plan's P10) | incident | method/.claude/rules/method/method.md | done |
 | M050 | Check what a fresh clone gets, not only what works locally | incident | method/scripts/method/run-checks.sh | done |
 | M051 | Long runs write their log where they run | incident | method/scripts/method/run-checks.sh | done |
 | M052 | A plant shows a check worked once; a committed test keeps it working | incident | method/.claude/rules/method/method.md | done |
@@ -68,7 +68,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M060 | Stop and ask before schema changes, regulated work, destructive data changes and production | incident | method/.claude/rules/method/method.md | done |
 | M061 | A live system marked read-only stays read-only | incident | method/.claude/rules/method/method.md | done |
 | M062 | Never hand-write regulated formats, signing, crypto, auth or payment logic when a vetted library exists; report the gap | incident | method/.claude/rules/method/method.md | done |
-| M063 | A script that writes to live records refuses to run without a stated reason | incident | packs/frappe/templates/owner-script.sh | step 7 |
+| M063 | A script that writes to live records refuses to run without a stated reason, and does a dry run unless told otherwise (moved into the core in step 7.6, with its helper `method/scripts/method/live-write.sh`) | incident; decision A77 | method/.claude/rules/method/method.md | done |
 | M064 | Never edit core or third-party source in place | incident | method/.claude/rules/method/method.md | done |
 | M065 | Never work around the permission check; live steps are fixed scripts the owner runs | incident; decision A13 | method/.claude/rules/method/method.md | done |
 | M066 | No secrets or personal data in a repo | incident | method/scripts/method/run-checks.sh | done |
@@ -99,14 +99,14 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M091 | The planner checks feasibility; "impossible or contradictory" is an acceptable answer; no hard-coding to tests | research: reward hacking studies | method/.claude/skills/method-plan/SKILL.md | done |
 | M092 | A fresh agent writes an acceptance check after the build, from the spec, and runs it through the real user path | research: harness post | method/.claude/agents/method/method-reporter.md | done |
 | M093 | Never mix restructuring and behaviour changes in one commit | research: Beck, DORA | method/.claude/rules/method/method.md | done |
-| M094 | A non-AI security scanner runs alongside the security-checker | research: Anthropic security team | templates/checks/project.tsv | step 7 |
+| M094 | A non-AI security scanner runs alongside the security-checker | research: Anthropic security team | method/scripts/method/templates/checks/project.tsv.tmpl | done |
 | M095 | Method prompts carry no "think carefully" lines, no fixed-format reasoning requests and no shouting | research: claude.dev, docs | scripts/dev/lint-prompts.sh | done |
 | M096 | Checking agents have static instructions, task text last, and a fixed tool list | research: Cloudflare | scripts/dev/lint-prompts.sh | done |
-| M097 | Every change states how it was tested, its risk, how to undo it and what the checks would miss | research: Claude Code team | method/.github/pull_request_template.md | step 7 |
+| M097 | Every change states how it was tested, its risk, how to undo it and what the checks would miss | research: Claude Code team | method/scripts/method/templates/pull_request_template.md.tmpl | done |
 | M098 | Changes to live systems go to a test copy first, with a backup and a one-step undo | research: Claude Code team | method/.claude/rules/method/method.md | done |
 | M099 | New projects and big features start with a design stage; versions are checked against live registries; a walking skeleton is built first | research: harness post, Titus | method/.claude/skills/method-design/SKILL.md | done |
-| M100 | Setup answers never lower the floor | decision A14 | method/.claude/skills/method-setup/SKILL.md | step 7 |
-| M101 | Each project has a REVIEW.md: what failure looks like, a nit cap, paths to skip, file-and-line evidence, a count-first summary | research: Claude Code team | templates/REVIEW.md | step 7 |
+| M100 | Setup answers never lower the floor | decision A14 | method/scripts/method/lib/setup.pl | done |
+| M101 | Each project has a REVIEW.md: what failure looks like, a nit cap, paths to skip, file-and-line evidence, a count-first summary | research: Claude Code team | method/scripts/method/templates/REVIEW.md.tmpl | done |
 | M102 | The reviewer flags changes that leave CLAUDE.md, AGENTS.md or the architecture document out of date | research: Claude Code team | method/.claude/agents/method/method-reviewer.md | done |
 | M103 | A change to the reviewer is kept only if its score on past incidents rises; re-score on any prompt, tool or model change | research: Claude Code team | bench/README.md | R2 |
 | M104 | Auto memory is off in method projects; lessons go into the repo through /lesson | research: docs; decision A1 | method/settings.fragment.json @autoMemoryEnabled | done |
@@ -139,7 +139,7 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M131 | Claude never lands a change; gh, HTTP calls to GitHub, MCP tools and other Claude runs pass only from a list | incident; research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | done |
 | M132 | Claude only reads the method's installed files (its hooks, scripts, agents, rules and skills), its settings, git's own config and hooks, and the folders Claude Code loads mods and plugins from; it never writes them | research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | done |
 | M133 | No commit while a mutation run or its journal exists | research: decision A41 | method/.claude/hooks/method/guard.sh | done |
-| M134 | Effort below xhigh is announced at a session's first tool call | research: decision A3 | method/.claude/hooks/method/guard.sh | done |
+| M134 | Effort below the one the project's profile sets (xhigh for Best results and with no lock) is announced at a session's first tool call (reworded in step 7.3, step 7 plan S7) | research: decision A3 | method/.claude/hooks/method/guard.sh | done |
 | M135 | Secrets, personal data and Claude attribution are stopped before they leave the machine: a push, gh text and MCP writes are scanned | incident | method/.claude/hooks/method/guard.sh | R2 |
 | M136 | A settings change that switches off or weakens the hooks is refused mid-session | research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | done |
 | M137 | A skill or agent that declares its own hooks is refused (the method's own declare none) | research: measured, step 5 plan | method/.claude/hooks/method/guard.sh | done |
@@ -156,3 +156,14 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M148 | When the push did not land, stop, say so and run no pull request command; the pull request's link and state are copied from what gh printed, never typed | research: Martin and Avilla, agent automations (a write counts once the destination confirms it) | method/.claude/skills/method-finish/SKILL.md | done |
 | M149 | The report's change summary names each changed file outside the plan's Paths line, or says none | step 6b plan, section 1 item 13 (P6) | method/.claude/skills/method-finish/SKILL.md | done |
 | M150 | When done-check's history names a diagnose word, the report offers one candidate incident-checklist line as an [EYES] item; Claude never adds it | step 6b plan, section 1 item 13 (P8) | method/.claude/skills/method-finish/SKILL.md | done |
+| M151 | A project rule that conflicts with a method rule loses; a project rule may change only the length and detail of reports, which owner.md sets as a default (owner.md's other rules hold like method rules) | decision A77: a pack never weakens the core | method/.claude/rules/method/method.md | done |
+| M152 | status says when the project's own always-loaded text (rules outside `.claude/rules/method/` without `paths:`, CLAUDE.md, `.claude/CLAUDE.md`, AGENTS.md) passes 8,000 bytes | SPEC R12, applied to the project's own text (step 7 plan, S11) | method/scripts/method/lib/status.pl | done |
+| M153 | Changes to the files that steer the method (method.conf, checks, the project's pack, CI workflows, the incident checklist, REVIEW.md, CLAUDE.md and `.claude/CLAUDE.md`, AGENTS.md, the project's settings (.claude/settings.json, .claude/settings.local.json) and .claude/setup-answers.txt) are high-risk whatever method.conf says | step 5 plan's touches-method route, in its cheap form (step 7 plan, S12) | method/scripts/method/lib/conf.pl | done |
+| M154 | A flaky check: find the cause; never skip, retry or re-run it until it passes | step 6b plan, section 6 (P4) | method/.claude/rules/method/method.md | done |
+| M155 | Sync replaces nothing changed since the lock and writes nothing until its whole plan holds | SPEC R1 (step 7 plan, S3) | scripts/release/sync.sh | done |
+| M156 | Setup writes only through setup-write from an answers file and never overwrites a project file outside its block | SPEC R3 (step 7 plan, S9, S10) | method/scripts/method/lib/setup.pl | done |
+| M157 | The review packet carries the project's REVIEW.md as it stands at the merge base, so a change cannot weaken the text it is reviewed against | step 6b plan, section 6 (P3) | method/scripts/method/lib/packet.pl | done |
+| M158 | The reviewer checks every item of the project's incident checklist and says so | step 6b plan, section 6 (P8 part 3) | method/.claude/agents/method/method-reviewer.md | done |
+| M159 | The plan names the current version's outputs at a named commit as an outside source of expected results | step 6b plan, section 6 (P9) | method/.claude/skills/method-plan/SKILL.md | done |
+| M160 | A FULL plan names each hard-to-undo choice with its options and a recommendation | step 6b plan, section 6 (N2) | method/.claude/skills/method-plan/SKILL.md | done |
+| M161 | The reviewer reviews a FULL high-risk plan before the owner is asked to approve it, against the owner's request | step 6b plan, section 6 (P11) | method/.claude/skills/method-plan/SKILL.md | done |
