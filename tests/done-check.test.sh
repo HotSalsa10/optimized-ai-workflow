@@ -25,6 +25,14 @@ done_check="$root/method/scripts/method/done-check.sh"
 run_checks="$root/method/scripts/method/run-checks.sh"
 work=$(new_sandbox_dir) || abort_sandbox
 repos=""
+# drop_all: drops every project made here: those in repos, and those on
+# the list in $work/sandboxes (new_project, which runs in $( ))
+drop_all() {
+  for da_d in $repos; do drop_sandbox "$da_d"; done
+  if [ -f "$work/sandboxes" ]; then
+    while IFS= read -r da_d; do drop_sandbox "$da_d"; done <"$work/sandboxes"
+  fi
+}
 saved_home=$HOME
 mkdir -p "$work/home"
 # a clean home and no system settings, so the owner's git settings play no part
@@ -129,11 +137,13 @@ add_task() {
 # (PRODUCT_PATHS=src), files on the built-in high-risk list (M153), so a
 # change on the branch leaves them be; then w on branch feat with src/a.txt
 # and the approved plan of task t1 (add_task, Tier TIER, default LIGHT; with
-# FULL also its expected.tsv), committed with an open verdict line
+# FULL also its expected.tsv), committed with an open verdict line. It is
+# called in $( ), whose variables the end of the file never sees, so the
+# folder goes on the list in $work/sandboxes, which drop_all drops
 new_project() {
   np_tier=${1:-LIGHT}
   b=$(new_sandbox_dir) || return 1
-  repos="$repos $b"
+  printf '%s\n' "$b" >>"$work/sandboxes"
   (
     cd "$b" || exit 1
     git init -q --bare remote.git
@@ -1282,12 +1292,19 @@ fi
 # each entry names a path
 STEER='the built-in list of the files that steer the method'
 if wanted_any "M153: a LIGHT plan touching" "M153: three approving reviewers"; then
-  for what in checks pack; do
+  for what in checks pack settings; do
     f=$(floor_project) || abort_sandbox
+    slash=/
     if [ "$what" = checks ]; then
       printf '# a note on the checks\n' >>"$f/checks/project.tsv"
       p=checks/project.tsv
       e=checks
+    elif [ "$what" = settings ]; then
+      # a profile change, as setup-write makes it
+      printf '{"model":"claude-sonnet-5-5","effortLevel":"medium"}\n' >"$f/.claude/settings.json"
+      p=.claude/settings.json
+      e=.claude/settings.json
+      slash=
     else
       mkdir -p "$f/.claude/rules/pack" && printf '# Rules\n\nAlways keep the ledger balanced. Why: a test case.\n' >"$f/.claude/rules/pack/rules.md"
       p=.claude/rules/pack/rules.md
@@ -1296,7 +1313,7 @@ if wanted_any "M153: a LIGHT plan touching" "M153: three approving reviewers"; t
     recommit "$f" Steer
     approve_head "$f"
     dc "$f"
-    expect "M153: a LIGHT plan touching $e/ is judged FULL: NOT READY" 1 \
+    expect "M153: a LIGHT plan touching ${e}$slash is judged FULL: NOT READY" 1 \
       "done-check: tier: FAIL - the plan says Tier LIGHT, but 1 changed path is high-risk: $p (no HIGH_RISK_PATHS on main or in this change; $STEER: $e); judged FULL, and the plan was not made as FULL" \
       "done-check: deep review: FAIL - the change touches high-risk paths ($p)"
   done
@@ -1358,7 +1375,7 @@ fi
 # (the conditions before step 6b follow; a run that keeps only some cases
 # ends here)
 if [ -n "${TEST_ONLY:-}" ]; then
-  for d in $repos; do drop_sandbox "$d"; done
+  drop_all
   export HOME="$saved_home"
   drop_sandbox "$work"
   echo "tests: done-check: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
@@ -2455,7 +2472,7 @@ dca "$v"
 expect "a core.worktree setting that points git elsewhere cannot be checked" 2 "a core.worktree setting points git elsewhere"
 (cd "$v" && git config --unset core.worktree)
 
-for d in $repos; do drop_sandbox "$d"; done
+drop_all
 export HOME="$saved_home"
 unset GIT_CONFIG_NOSYSTEM
 drop_sandbox "$work"

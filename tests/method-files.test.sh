@@ -40,7 +40,7 @@ install() {
   printf 'unit\tany\t-\t^([0-9]+) passed\techo "3 passed"\n' >"$d/checks/main.tsv"
   # shellcheck disable=SC2016 # perl code, expanded by perl
   (cd "$d" && SRC="$SRC" perl -e 'require "./scripts/method/lib/lock.pl"; my ($t, $e) = Lock::make(".", "v0.7.0", $ENV{SRC}, "best");
-    die "$e\n" if $e; my $w = Lock::save(".", $t); die "$w\n" if $w') || return 1
+    die "$e\n" if $e; my $w = Lock::save(".", $t, ".new-$$"); die "$w\n" if $w') || return 1
   (
     cd "$d" || exit 1
     git init -q && git symbolic-ref HEAD refs/heads/main &&
@@ -173,6 +173,35 @@ mcase "an extra .claude/skills/method-quick/SKILL.md is red" 1 "mkdir -p .claude
   "not in method.lock: .claude/skills/method-quick/SKILL.md"
 mcase "an extra file ignored by git is red too" 1 "printf 'x\n' >docs/method/notes.md && mkdir -p .git/info && printf 'docs/method/notes.md\n' >>.git/info/exclude" \
   "not in method.lock: docs/method/notes.md" "until it is put right: remove each file not in method.lock"
+mcase "a method file git ignores is red" 1 "git rm -r -q --cached .claude/hooks && printf '.claude/hooks/\n' >.gitignore" \
+  "method files git ignores" "ignored by git (.gitignore line 1: .claude/hooks/), so a commit leaves it out: .claude/hooks/method/guard.sh" \
+  "change each ignore rule named"
+mcase "a method.lock git ignores is red" 1 "git rm -q --cached scripts/method/method.lock && printf '*.lock\n' >.gitignore" \
+  "1 method files git ignores" "ignored by git (.gitignore line 1: *.lock), so a commit leaves it out: scripts/method/method.lock"
+mcase "a tracked .claude/settings.local.json is red" 1 "printf '{}\n' >.claude/settings.local.json && git add .claude/settings.local.json && git commit -q -m local" \
+  "1 problems with .claude/settings.local.json" ".claude/settings.local.json is tracked in git, so every clone gets it" "git rm --cached .claude/settings.local.json"
+mcase "an untracked .claude/settings.local.json passes" 0 "printf '{}\n' >.claude/settings.local.json" \
+  "passed: secrets fresh-clone method-files unit tree-unchanged"
+mcase "a tracked .claude/Settings.Local.json is red too: a file system that folds case reads it as settings.local.json" 1 \
+  "printf '{}\n' >.claude/Settings.Local.json && git add .claude/Settings.Local.json && git commit -q -m local" \
+  "1 problems with .claude/settings.local.json" ".claude/Settings.Local.json is tracked in git, so every clone gets it"
+mcase "a tracked method file an ignore rule matches passes: git's rules do not apply to a tracked file" 0 \
+  "printf '.claude/\n*.lock\n' >.gitignore && git add .gitignore && git commit -q -m ignore" \
+  "passed: secrets fresh-clone method-files unit tree-unchanged"
+nm="in a repository git refuses, method-files says git cannot tell what it ignores, with no ignore rule to change"
+if wanted "$nm"; then
+  fresh
+  # (a .git that points nowhere: git fails there as it does on a repository
+  # owned by another user)
+  rm -rf "$d/.git" && printf 'gitdir: %s\n' "$work/nowhere" >"$d/.git"
+  # shellcheck disable=SC2016 # perl code, expanded by perl
+  r=$(cd "$d" && perl -e 'require "./scripts/method/lib/checks.pl"; require "./scripts/method/lib/lock.pl"; my $r = Checks::check_method_files($ARGV[0]); print "$r->{status}\n$r->{detail}\n$r->{hint}\n"' "$work/untold.out" 2>&1)
+  case "$r" in
+    *"change each ignore rule named"* | *"method files git ignores"*) fail "$nm: counted as ignored files" "$r" ;;
+    "FAIL"*"1 questions git could not answer about the files it ignores"*"find out why git cannot answer"*) pass "$nm" ;;
+    *) fail "$nm" "$r" ;;
+  esac
+fi
 mcase "a removed method deny entry is red" 1 "$json; json .claude/settings.json '\$d->{permissions}{deny} = [grep { \$_ ne \"RemoteTrigger\" } @{ \$d->{permissions}{deny} }]'" \
   "the method's deny entry RemoteTrigger is missing from .claude/settings.json"
 mcase "a changed method hook is red" 1 "$json; json .claude/settings.json '\$d->{hooks}{PreToolUse}[0]{hooks}[0]{timeout} = 600'" \
@@ -183,6 +212,16 @@ if [ "$can_link" -eq 1 ]; then
   mcase "a link under the method's paths is red" 1 "ln -s ../../src/a.txt docs/method/a.md" \
     "1 links under the method's paths" "a link: docs/method/a.md" "replace each link or odd entry with a plain folder or file as released"
   mcase "a linked method folder is red" 1 "mv .claude/hooks hooks-real && ln -s ../hooks-real .claude/hooks" "a link: .claude/hooks"
+  nm="a method file under a linked folder is a link finding only: git is not asked about it"
+  if wanted "$nm"; then
+    fresh
+    (cd "$d" && mv .claude/hooks hooks-real && ln -s ../hooks-real .claude/hooks)
+    run "$d"
+    case "$out" in
+      *"git cannot tell"* | *"git could not answer"* | *"git ignores"*) fail "$nm: git was asked about a path under the link" "$out" ;;
+      *) expect "$nm" 1 "1 links under the method's paths" ;;
+    esac
+  fi
 else
   skip "a link under the method's paths, and a linked method folder: this system cannot make links"
 fi

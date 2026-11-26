@@ -124,7 +124,56 @@ cat >"$work/plants.txt" <<'PLANTS-END'
     . ($a->{PROFILE} ne $lock->{profile} ?
 ---
     . (0 ?
+=== links not looked for on the way to a file | method/scripts/method/lib/setup.pl | a link on the way to a file setup writes
+    my @parts = split m{/}, $_[0];
+---
+    return undef;
+    my @parts = split m{/}, $_[0];
+=== a broken block in method.conf read as none | method/scripts/method/lib/setup.pl | a broken method-setup block
+    if ($w eq 'broken') { push @p, "$CONF: its
+---
+    if (0) { push @p, "$CONF: its
+=== a broken block in a seeded file read as none | method/scripts/method/lib/setup.pl | a broken method-setup block
+    if ($w eq 'broken') { push @p, "$target: its method-setup block is broken (\"$open\"
+---
+    if (0) { push @p, "$target: its method-setup block is broken (\"$open\"
+=== a broken block in the pack read as none | method/scripts/method/lib/setup.pl | a broken method-setup block
+    if ($w eq 'broken') { push @p, "$target: its method-setup block is broken (\"$MD_MARK[0]\"
+---
+    if (0) { push @p, "$target: its method-setup block is broken (\"$MD_MARK[0]\"
+=== a missing method.lock named as cut off (the clear refusal dropped) | method/scripts/method/lib/setup.pl | no method.lock: setup is refused
+  if (!defined $lt) {
+---
+  if (0) {
+=== a kept VERDICTS_FROM said not to come back | method/scripts/method/lib/setup.pl | a VERDICTS_FROM kept from an earlier run has a card line of its own
+      $kept_from = $v if defined
+---
+      push @kept, "VERDICTS_FROM=$v" if defined
+=== the card says to turn on a scanner row the project lacks | method/scripts/method/lib/setup.pl | a checks/project.tsv there before setup: the card gives the suggested scanner row itself
+    if ($off) { push
+---
+    if (1) { push
+=== a new checks/project.tsv named as there before setup on the scanner line | method/scripts/method/lib/setup.pl | the card's scanner line: offered off in a checks/project.tsv setup writes
+    if ($off) { push
+---
+    if (0) { push
+=== a scanner row on in a checks file advised again | method/scripts/method/lib/setup.pl | the card's scanner line: offered off in a checks/project.tsv setup writes
+    if ($on) { push
+---
+    if (0) { push
+=== a smoke row dropped without a word on the card | method/scripts/method/lib/setup.pl | a smoke row turned on goes when how it starts is left empty, and the card names it on its Dropped: line
+$smoke = "dropped $smoke_was" if $smoke_was }
+---
+$smoke = "dropped $smoke_was" if 0 }
 PLANTS-END
+# where links cannot be made (Git Bash may make a copy instead of a link),
+# the test skips its case on a link on the way to a file setup writes, so
+# that case's plant is dropped, and said so
+if ! { ln -s target "$work/link-probe" 2>/dev/null && [ -L "$work/link-probe" ]; }; then
+  perl -0pi -e 's/^=== links not looked for on the way to a file \|.*?(?=^=== |\z)//msg' "$work/plants.txt"
+  skip "the link plant (this system cannot make links)"
+fi
+rm -f "$work/link-probe"
 plant_data "$work/plants.txt" tests/setup.test.sh only
 drop_sandbox "$work" || true
 echo "plants: setup: $tests_pass passed, $tests_fail failed, $tests_skip skipped"

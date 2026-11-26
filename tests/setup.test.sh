@@ -16,11 +16,14 @@
 #   its card names;
 # - the refusals (each answer shape, a secret, a method key changed by
 #   hand, a template or method.lock's settings line changed by hand, a key
-#   set twice in method.conf, a row id used twice) run setup-write.sh itself
-#   and must write nothing;
-# - re-runs on disk: VERDICTS_FROM once main holds the method, a smoke row
-#   turned on, a named path setup writes itself, settings.json laid out
-#   otherwise;
+#   set twice in method.conf, a link on the way to a file setup writes, a
+#   broken method-setup block, no method.lock, a row id used twice) run
+#   setup-write.sh itself and must write nothing;
+# - re-runs on disk: VERDICTS_FROM once main holds the method, and kept
+#   while main moves, a smoke row turned on (and then left unanswered), a
+#   named path setup writes itself, settings.json laid out otherwise; the
+#   scanner row on the card when checks/project.tsv was there before, when
+#   setup writes it, and when a checks file holds the row on;
 # - a sample of four combinations is written to disk by setup-write.sh and
 #   read by status and done-check.
 # shellcheck disable=SC2016 # single-quoted perl code is expanded by perl
@@ -415,6 +418,59 @@ rewrite() {
   perl -pe "$2" "$1" >"$1.new" && mv "$1.new" "$1"
 }
 
+n="a link on the way to a file setup writes (.claude/rules/pack to a folder outside the project) is refused, named, and nothing is written inside or outside the project"
+if wanted "$n"; then
+  copy "$pnew" link
+  rm -rf "$c/.claude/rules/pack" "$work/outside-pack"
+  mkdir -p "$c/.claude/rules" "$work/outside-pack"
+  if ! ln -s "$work/outside-pack" "$c/.claude/rules/pack" 2>/dev/null || ! [ -L "$c/.claude/rules/pack" ]; then
+    skip "$n: this system cannot make symlinks"
+  else
+    printf '%s\n' "$good" >"$c/.claude/setup-answers.txt"
+    before=$(snap "$c")
+    setup "$c" --write
+    if [ "$code" -eq 1 ] && has ".claude/rules/pack/project.md: a link, or a file where a folder belongs, on its path (.claude/rules/pack)" \
+      "nothing was written" && [ "$(snap "$c")" = "$before" ] && [ -z "$(snap "$work/outside-pack")" ]; then
+      pass "$n"
+    else
+      no "$n" "exit $code; outside: $(snap "$work/outside-pack" | head -2 | tr '\n' ' '); $(printf '%s\n' "$out" | head -2)"
+    fi
+  fi
+fi
+
+n="a broken method-setup block (a marker doubled or out of order) in method.conf, a seeded .md file or the pack is refused, named, and nothing is written"
+if wanted "$n"; then
+  r=""
+  copy "$pnew" broken
+  printf '%s\n' "$good" >"$c/.claude/setup-answers.txt"
+  setup "$c" --write
+  c1=$code
+  for spec in ".claude/method.conf|\$_ .= \$_ if /^# >>> method-setup\$/" \
+    'TESTS.md|s/^<!-- (>>>|<<<) method-setup -->$/"<!-- " . ($1 eq ">>>" ? "<<<" : ">>>") . " method-setup -->"/e' \
+    ".claude/rules/pack/working.md|\$_ .= \$_ if /^<!-- <<< method-setup -->\$/"; do
+    f=${spec%%|*}
+    copy "$work/c-broken" "broken-${f##*/}"
+    rewrite "$c/$f" "${spec#*|}"
+    before=$(snap "$c")
+    setup "$c" --write
+    if [ "$code" -ne 1 ] || ! has "$f: its method-setup block is broken" "nothing was written" || [ "$(snap "$c")" != "$before" ]; then
+      r="$r [$f] exit $code: $(printf '%s\n' "$out" | head -2 | tr '\n' ' ')"
+    fi
+  done
+  if [ "$c1" -eq 0 ] && [ -z "$r" ]; then pass "$n (3 files)"; else fail "$n" "exit $c1;$r"; fi
+fi
+
+n="no method.lock: setup is refused, naming it, and nothing is written"
+if wanted "$n"; then
+  copy "$pnew" nolock
+  rm "$c/scripts/method/method.lock"
+  printf '%s\n' "$good" >"$c/.claude/setup-answers.txt"
+  before=$(snap "$c")
+  setup "$c" --write
+  if [ "$code" -eq 1 ] && has "scripts/method/method.lock is missing: install the method with the release's sync first" "nothing was written" &&
+    [ "$(snap "$c")" = "$before" ]; then pass "$n"; else no "$n"; fi
+fi
+
 n="a method input changed by hand (a template, method.lock's settings line): --write is refused naming it, and nothing is written"
 if wanted "$n"; then
   r=""
@@ -463,6 +519,30 @@ if wanted "$n"; then
   if [ -z "$r" ]; then pass "$n"; else fail "$n" "$r"; fi
 fi
 
+n="a VERDICTS_FROM kept from an earlier run has a card line of its own: deleted, it comes back at main's new tip while main lacks the method"
+if wanted "$n"; then
+  r=""
+  copy "$pold" verdicts
+  answers claude short small none standard budget >"$c/.claude/setup-answers.txt"
+  setup "$c" --write
+  t0=$(cd "$c" && git rev-parse main)
+  # main moves on, still without the method
+  (cd "$c" && git update-ref refs/heads/main "$(git commit-tree "main^{tree}" -p main -m "main moves")")
+  t1=$(cd "$c" && git rev-parse main)
+  setup "$c" --write
+  if [ "$code" -ne 0 ] || ! grep -q "^VERDICTS_FROM=$t0\$" "$c/.claude/method.conf" ||
+    ! has "Kept from an earlier run: VERDICTS_FROM=$t0. If its line is deleted (a reviewed change), setup writes main's current tip in its place while main lacks the method" ||
+    has "does not put it back"; then
+    r="$r [kept] exit $code; $(printf '%s\n' "$out" | grep -e Kept)"
+  fi
+  rewrite "$c/.claude/method.conf" '$_ = "" if /^VERDICTS_FROM=/'
+  setup "$c" --write
+  if [ "$code" -ne 0 ] || ! grep -q "^VERDICTS_FROM=$t1\$" "$c/.claude/method.conf" || [ "$t1" = "$t0" ]; then
+    r="$r [deleted] exit $code; $(grep '^VERDICTS_FROM=' "$c/.claude/method.conf")"
+  fi
+  if [ -z "$r" ]; then pass "$n"; else fail "$n" "$r"; fi
+fi
+
 n="a smoke row turned on stays on in a re-run with the same command, and the card says when a new command turns it off again"
 if wanted "$n"; then
   r=""
@@ -484,6 +564,27 @@ if wanted "$n"; then
   if [ -z "$r" ]; then pass "$n"; else fail "$n" "$r"; fi
 fi
 
+n="a smoke row turned on goes when how it starts is left empty, and the card names it on its Dropped: line, once"
+if wanted "$n"; then
+  r=""
+  copy "$pnew" smokegone
+  printf '%s\n' "$good" >"$c/.claude/setup-answers.txt"
+  setup "$c" --write
+  c1=$code
+  rewrite "$c/checks/project.tsv" 's/^#smoke\t/smoke\t/'
+  printf '%s\n' "$good" | sed "s/^HOW_IT_STARTS${T}.*/HOW_IT_STARTS${T}/" >"$c/.claude/setup-answers.txt"
+  setup "$c" --write
+  if [ "$c1" -ne 0 ] || [ "$code" -ne 0 ] || grep -q "^#\{0,1\}smoke${T}" "$c/checks/project.tsv" ||
+    ! has "Dropped: the smoke row (how it starts) in checks/project.tsv, which was on, as how it starts was not answered."; then
+    r="$r [left empty] exit $c1 then $code; $(printf '%s\n' "$out" | grep -e Dropped -e smoke)"
+  fi
+  setup "$c" --write
+  if [ "$code" -ne 0 ] || has "Dropped:"; then
+    r="$r [run again] exit $code; $(printf '%s\n' "$out" | grep Dropped)"
+  fi
+  if [ -z "$r" ]; then pass "$n"; else fail "$n" "$r"; fi
+fi
+
 n="a narrower re-run: the card's extra line comes from what method.conf keeps, setup's own MUTATION_CHECKS=fast-tests goes with its row, TESTS.md names smoke, and the card names the lock's profile"
 if wanted "$n"; then
   r=""
@@ -497,7 +598,7 @@ if wanted "$n"; then
   setup "$c" --write
   if [ "$code" -ne 0 ] || grep -q '^MUTATION_CHECKS=' "$c/.claude/method.conf" || ! grep -q '^HIGH_RISK_PATHS=\.$' "$c/.claude/method.conf" ||
     ! has "Extra for every change (HIGH_RISK_PATHS keeps . from an earlier run): three reviewers." "Dropped: MUTATION_CHECKS=fast-tests, as the fast-tests row it names is gone" \
-      "Kept from an earlier run (setup never removes an entry): HIGH_RISK_PATHS=." "To drop one, delete its line inside the method-setup block of .claude/method.conf"; then
+      "Kept from an earlier run (setup removes none, apart from its own MUTATION_CHECKS=fast-tests when its row goes): HIGH_RISK_PATHS=." "To drop one, delete its line inside the method-setup block of .claude/method.conf"; then
     r="$r [standard, no tests] exit $code; $(printf '%s\n' "$out" | grep -e Extra -e Dropped -e Kept)"
   fi
   printf '%s\n' "$good" | sed "s/^PROFILE${T}.*/PROFILE${T}budget/" >"$c/.claude/setup-answers.txt"
@@ -505,6 +606,44 @@ if wanted "$n"; then
   if [ "$code" -ne 0 ] || ! has "Profile: Budget (" "), in place of balanced, which method.lock names now (to keep it, answer PROFILE balanced)."; then
     r="$r [the lock's profile] exit $code; $(printf '%s\n' "$out" | grep -e 'Profile:')"
   fi
+  if [ -z "$r" ]; then pass "$n"; else fail "$n" "$r"; fi
+fi
+
+n="a checks/project.tsv there before setup: the card gives the suggested scanner row itself, to add to checks/project.tsv or checks/pack.tsv"
+if wanted "$n"; then
+  copy "$pold" ownchecks
+  mkdir -p "$c/checks"
+  printf 'own\tany\t-\t^own: (\\d+)\techo "own: 1"\n' >"$c/checks/project.tsv"
+  answers claude short small none standard budget >"$c/.claude/setup-answers.txt"
+  row=$(grep '^#deps-python' "$c/scripts/method/templates/checks/project.tsv.tmpl" | cut -c2-)
+  setup "$c"
+  if [ "$code" -eq 0 ] && [ -n "$row" ] && has "Found Python (requirements.txt): the suggested scanner row is deps-python, which checks/project.tsv does not hold (it was there before setup): install its tool, then add this row to checks/project.tsv or checks/pack.tsv: $row" &&
+    ! has "then turn it on"; then pass "$n"; else no "$n" "exit $code; $(printf '%s\n' "$out" | grep 'Found')"; fi
+fi
+
+n="the card's scanner line: offered off in a checks/project.tsv setup writes, and already on, with no advice, when a checks file holds the row on"
+if wanted "$n"; then
+  r=""
+  found="Found Python (requirements.txt): the suggested scanner row is deps-python"
+  copy "$pnew" scanner-new
+  printf 'requests==2.0\n' >"$c/requirements.txt"
+  answers claude short small none standard best >"$c/.claude/setup-answers.txt"
+  setup "$c"
+  if [ "$code" -ne 0 ] || ! has "$found, offered off in checks/project.tsv; install its tool, then turn it on."; then
+    r="$r [a new checks/project.tsv] exit $code; $(printf '%s\n' "$out" | grep 'Found')"
+  fi
+  row=$(grep '^#deps-python' "$pold/scripts/method/templates/checks/project.tsv.tmpl" | cut -c2-)
+  for f in checks/pack.tsv checks/project.tsv; do
+    copy "$pold" "scanner-${f#checks/}"
+    mkdir -p "$c/checks"
+    printf 'own\tany\t-\t^own: (\\d+)\techo "own: 1"\n' >"$c/checks/project.tsv"
+    printf '%s\n' "$row" >>"$c/$f"
+    answers claude short small none standard budget >"$c/.claude/setup-answers.txt"
+    setup "$c"
+    if [ "$code" -ne 0 ] || [ -z "$row" ] || ! has "$found, already on in $f." || has "add this row" || has "turn it on"; then
+      r="$r [on in $f] exit $code; $(printf '%s\n' "$out" | grep 'Found')"
+    fi
+  done
   if [ -z "$r" ]; then pass "$n"; else fail "$n" "$r"; fi
 fi
 

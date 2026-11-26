@@ -207,17 +207,23 @@ sub under {
 
 # The files that steer the method (M153; step 7 plan, S12): a change to one
 # is high-risk whatever HIGH_RISK_PATHS says, so a quiet change to what is
-# checked, the project's pack, CI, the incident checklist, REVIEW.md or the
-# always-loaded CLAUDE.md and AGENTS.md takes three approving reviewers.
+# checked, the project's pack, CI, the incident checklist, REVIEW.md, the
+# always-loaded CLAUDE.md and AGENTS.md, the project's settings or the setup
+# answers takes three approving reviewers.
 # done-check adds them after its check that each HIGH_RISK_PATHS entry names
 # a path, so a project without one of them has no problem. An entry that
 # ends in "-" is a name prefix (.claude/skills/pack-<name>, never the
 # method's own .claude/skills/method-*); the others match as under does.
 # Matched in any letter case, as a file system that folds case would load
-# claude.md as CLAUDE.md. The method's own files and settings.json are not
-# here: G6 and the method-files check keep them.
+# claude.md as CLAUDE.md. The method's own files are not here: G6 and the
+# method-files check keep them. The settings files and setup-answers.txt
+# are: G6 does not stop setup-write.sh, which rewrites the profile in
+# settings.json from the answers, and method-files checks only the method's
+# keys, so it passes a key of the wrong type (the client then skips the
+# whole file) and a settings.local.json that sets disableAllHooks.
 my @STEERING = ('.claude/method.conf', 'checks', '.claude/rules/pack', '.claude/skills/pack-', '.github/workflows',
-  'docs/incident-checklist.md', 'REVIEW.md', 'CLAUDE.md', '.claude/CLAUDE.md', 'AGENTS.md');
+  'docs/incident-checklist.md', 'REVIEW.md', 'CLAUDE.md', '.claude/CLAUDE.md', 'AGENTS.md', '.claude/settings.json',
+  '.claude/settings.local.json', '.claude/setup-answers.txt');
 
 sub steering { return @STEERING }
 

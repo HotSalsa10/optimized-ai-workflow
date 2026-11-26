@@ -202,7 +202,8 @@ for c in 'sed -i s/a/b/ .claude/skills/deploy/SKILL.md' 'echo x > .claude/skills
   judge "a project skill (6.3): a write passes: $c" "$proj" "$c" allow
 done
 # (step 7.2, step7.md S12: G6 keeps every .claude/skills/method-* entry, so
-# a new method- skill cannot be made in a session, not only the listed ones)
+# a new method- skill folder cannot be made in a session, not only the
+# listed ones; a SKILL.md naming itself method-NAME is RISKS #24's limit)
 tool "a method skill (7.2): Write to projü/.claude/skills/method-quick/SKILL.md is refused" Write "$(jpath "$proj/.claude/skills/method-quick/SKILL.md")" G6
 tool "a method skill (7.2): an Edit of a skill whose name starts with method- is refused" Edit "$(jpath "$proj/.claude/skills/method-start-old/SKILL.md")" G6
 for c in 'mkdir -p .claude/skills/method-quick && echo x > .claude/skills/method-quick/SKILL.md' 'echo x > .claude/skills/method-starter/SKILL.md' \

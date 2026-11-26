@@ -75,8 +75,9 @@
 #     program (@Watch::RUNS, their one home). session-status names them.
 #   Lock::k_hash(K): their SHA-256.
 #   Lock::make(ROOT, VERSION, SOURCE, PROFILE) (TEXT, PROBLEM): a lock for
-#     the method files now under ROOT; Lock::save(ROOT, TEXT) writes it
-#     (a new file renamed into place), giving a problem or undef.
+#     the method files now under ROOT; Lock::save(ROOT, TEXT, SUFFIX) writes
+#     it (a new file, the lock's path and SUFFIX, renamed into place),
+#     giving a problem or undef.
 #   Lock::installed(ROOT): 1 unless there is no lock and nothing under the
 #     method's paths (then the method is not installed there).
 #   Lock::verify(ROOT): {examined => N, findings => [[KIND, TEXT], ...],
@@ -440,9 +441,9 @@ sub make {
 }
 
 sub save {
-  my ($root, $text) = @_;
+  my ($root, $text, $suffix) = @_;
   my $path = File::Spec->catfile($root, $LOCK);
-  my $tmp = "$path.new-$$";
+  my $tmp = $path . $suffix;
   unlink $tmp;
   sysopen my $fh, $tmp, O_WRONLY | O_CREAT | O_EXCL, 0644 or return "cannot write $LOCK";
   binmode $fh;

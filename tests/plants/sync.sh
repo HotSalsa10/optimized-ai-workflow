@@ -129,6 +129,73 @@ my $proj = Cwd::realpath(File::Spec->rel2abs($to, $src_arg));
 my @also = ((defined
 ---
 my @also = (); my @x = ((defined
+=== the lock's copy named apart from sync's other copies | scripts/release/lib/sync.pl | a run cut off while writing method.lock is finished by a re-run, which removes what it left
+my $se = Lock::save($proj, $text, ".sync-$$");
+---
+my $se = Lock::save($proj, $text, ".new-$$");
+=== gcpAuthRefresh not among the keys that run a program | method/scripts/method/lib/watch.pl | a project's gcpAuthRefresh is refused on first install
+our @RUNS = qw(statusLine apiKeyHelper fileSuggestion otelHeadersHelper awsAuthRefresh awsCredentialExport gcpAuthRefresh proxyAuthHelper subagentStatusLine processWrapper);
+---
+our @RUNS = qw(statusLine apiKeyHelper fileSuggestion otelHeadersHelper awsAuthRefresh awsCredentialExport proxyAuthHelper subagentStatusLine processWrapper);
+=== proxyAuthHelper not among the keys that run a program | method/scripts/method/lib/watch.pl | a project's proxyAuthHelper is refused on first install
+our @RUNS = qw(statusLine apiKeyHelper fileSuggestion otelHeadersHelper awsAuthRefresh awsCredentialExport gcpAuthRefresh proxyAuthHelper subagentStatusLine processWrapper);
+---
+our @RUNS = qw(statusLine apiKeyHelper fileSuggestion otelHeadersHelper awsAuthRefresh awsCredentialExport gcpAuthRefresh subagentStatusLine processWrapper);
+=== subagentStatusLine not among the keys that run a program | method/scripts/method/lib/watch.pl | a project's subagentStatusLine is refused on first install
+our @RUNS = qw(statusLine apiKeyHelper fileSuggestion otelHeadersHelper awsAuthRefresh awsCredentialExport gcpAuthRefresh proxyAuthHelper subagentStatusLine processWrapper);
+---
+our @RUNS = qw(statusLine apiKeyHelper fileSuggestion otelHeadersHelper awsAuthRefresh awsCredentialExport gcpAuthRefresh proxyAuthHelper processWrapper);
+=== processWrapper not among the keys that run a program | method/scripts/method/lib/watch.pl | a project's processWrapper is refused on first install
+our @RUNS = qw(statusLine apiKeyHelper fileSuggestion otelHeadersHelper awsAuthRefresh awsCredentialExport gcpAuthRefresh proxyAuthHelper subagentStatusLine processWrapper);
+---
+our @RUNS = qw(statusLine apiKeyHelper fileSuggestion otelHeadersHelper awsAuthRefresh awsCredentialExport gcpAuthRefresh proxyAuthHelper subagentStatusLine);
+=== a repository git refuses read as no repository | method/scripts/method/lib/git.pl | a project whose repository git refuses is refused: git cannot tell which paths it ignores
+    return undef unless defined $up;
+---
+    return [];
+=== tracked files asked about as if untracked (check-ignore --no-index) | method/scripts/method/lib/git.pl | an update of a committed install whose .gitignore then ignores .claude/ is no conflict
+  my ($ist, $out) = run_input(join('', map {"$_\0"} @paths), '-C', $dir, 'check-ignore', '-v', '-z', '--stdin');
+---
+  my ($ist, $out) = run_input(join('', map {"$_\0"} @paths), '-C', $dir, 'check-ignore', '--no-index', '-v', '-z', '--stdin');
+=== check-ignore read without -z | method/scripts/method/lib/git.pl | the ignore file a rule comes from is named whole, even when its path holds :12: and a non-ASCII letter
+  my ($ist, $out) = run_input(join('', map {"$_\0"} @paths), '-C', $dir, 'check-ignore', '-v', '-z', '--stdin');
+  return undef if $ist && $ist != 1 << 8;    # (exit 1: none is ignored)
+  return [] if $out eq '';
+  my @f = split /\0/, $out, -1;
+  return undef unless pop(@f) eq '' && @f % 4 == 0;
+  my @r;
+  while (my ($src, $n, $pat, $path) = splice @f, 0, 4) {
+    return undef unless $n =~ /\A[0-9]+\z/;
+---
+  my ($ist, $out) = run('-C', $dir, 'check-ignore', '-v', '--', @paths);
+  return undef if $ist && $ist != 1 << 8;    # (exit 1: none is ignored)
+  my @r;
+  for my $l (split /\n/, $out) {
+    my ($src, $n, $pat, $path) = $l =~ /\A(.*?):([0-9]+):(.*)\t([^\t]*)\z/ or return undef;
+=== an error after the first write told as a refusal | scripts/release/lib/sync.pl | an error after the first write gives its FAIL line, not a refusal, and a re-run finishes it
+$writing = 1;
+---
+$writing = 0;
+=== the .gitattributes byte-order mark left in front of the block | scripts/release/lib/sync.pl | a .gitattributes that starts with a byte-order mark keeps it first, so its own first rule still works
+  my $bom = $t =~ s/\A\xEF\xBB\xBF// ? "\xEF\xBB\xBF" : '';
+---
+  my $bom = '';
+=== paths git ignores written all the same | scripts/release/lib/sync.pl | a path sync writes that git ignores is refused, naming the rule, nothing written
+so a commit would leave it out; change that rule so it no longer matches"] for @$ignored;
+---
+so a commit would leave it out; change that rule so it no longer matches"] for ();
+=== negated ignore patterns read as ignoring | method/scripts/method/lib/git.pl | a path sync writes that git ignores is refused, naming the rule, nothing written
+    next if $pat =~ /\A!/;
+---
+    next if 0;
+=== an error sync did not foresee ends with perl's exit 255 | scripts/release/lib/sync.pl | an error sync did not foresee is a refusal with exit 1, nothing written
+  return if $^S;
+---
+  return;
+=== the .gitignore block does not ignore settings.local.json | scripts/release/lib/sync.pl | first install: the method's files, the merged settings, the blocks and method.lock, and method-files finds nothing
+  '.gitignore' => [".method/local/", ".claude/settings.local.json"],
+---
+  '.gitignore' => [".method/local/"],
 === CDPATH left set | scripts/release/sync.sh | an exported CDPATH does not change the folder sync.sh finds itself in
 unset CDPATH
 ---
