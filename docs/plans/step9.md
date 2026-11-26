@@ -36,7 +36,7 @@ Written 25 November 2026, on 68c9b15 (branch claude/step9, made from claude/step
 - The live test runs on a pre-release tag before the review, so its findings go into the one review (S11).
 - The method opens pull requests in a cloud session through the GitHub tools there, and otherwise gives you the clicks (S15).
 
-**One question for you (D1, section 7).** Should the example project's repository be private or public? Claude recommends private: public would also publish the method's own files.
+**D1 is decided (section 7): the example project's repository is public**, the owner's choice of 25 November 2026.
 
 **Testing and timing.** Two full test runs on GitHub for this step, plus one spare, about 130 to 150 minutes each, and a few minutes for the example's own CI (section 4). Steps 6b to 9 together come to about 1,200 to 1,350 of December's 2,000 minutes at most, if no tag starts the Windows and macOS jobs and each merge into main carries `[skip ci]`. If December's minutes run short, this step's runs wait for 1 January.
 
@@ -225,7 +225,7 @@ M094 stays done; its CI part is the template's set-up place (S7). M118 stays Rel
 
 ## 4. CI budget
 
-From the minutes research (job times; GitHub's billing endpoint returns 0, F14). The allowance is 2,000 Linux minutes a month (the owner's figure, A76), reset on the 1st; about 59 are left in November, so nothing runs before 1 December. Per run [I]: 6b about 80, step 7 about 110 to 130 (its added plants), step 8 about 120 to 140, step 9 about 130 to 150.
+Since 25 November 2026 this repository is public (A18), so GitHub's standard runners cost it no minutes (A76 (6)) and this budget no longer limits the step; it is kept as written for the record, and the example's line is 0 (D1). From the minutes research (job times; GitHub's billing endpoint returns 0, F14). The allowance is 2,000 Linux minutes a month (the owner's figure, A76), reset on the 1st; about 59 are left in November, so nothing runs before 1 December. Per run [I]: 6b about 80, step 7 about 110 to 130 (its added plants), step 8 about 120 to 140, step 9 about 130 to 150.
 
 | Runs | Minutes |
 |---|---|
@@ -234,12 +234,12 @@ From the minutes research (job times; GitHub's billing endpoint returns 0, F14).
 | Step 9's push B | 130 to 150 |
 | Step 9's push C, only if the repair changes the tree | 130 to 150 |
 | Step 9's spare: a CI-only failure, "Re-run failed jobs" first, which bills only that job (10 to 21) | 130 to 150 |
-| The example's CI: about 3 a push on a private repository [I]; 0 if public (D1) | about 15 |
+| The example's CI: 0, the repository being public (D1) | 0 |
 | Merges into main (6b, 7, 8, 9) with `[skip ci]` under A76 (4) | 0; about 80 to 150 each without it |
 | Tags, once S9 is in main | 0 |
 | Backup pushes 9.0 to 9.5 (`[skip ci]` on their heads) | 0 |
 
-Step 9 alone: about 145 to 165 (push B and the example) up to 405 to 465 (with C and the spare). December in all: about 1,175 to 1,355 with every C and spare, inside 2,000. Two things break it: a tag that starts the Windows and macOS jobs (up to 2,880 minute-equivalents for one tag [I]), which S9 removes, and merges into main without `[skip ci]` (up to about 560 more). If what is left before step 9's push B is under about 300, push B waits for 1 January.
+Step 9 alone (while the repository was private): about 145 to 165 (push B and the example) up to 405 to 465 (with C and the spare). December in all: about 1,175 to 1,355 with every C and spare, inside 2,000. Two things break it: a tag that starts the Windows and macOS jobs (up to 2,880 minute-equivalents for one tag [I]), which S9 removes, and merges into main without `[skip ci]` (up to about 560 more). If what is left before step 9's push B is under about 300, push B waits for 1 January.
 
 **Before `v0.7.0`.** S9 has to be in main before the first tag; 9.0 asks step 7's close to carry it. If it is not there: each tag is created only on a merge commit whose message carries `[skip ci]` (A76 (4)), which is expected but not verified to stop a tag run (Q4), and the owner has the cancel clicks before tagging (section 7, step 1). Also for step 7: its plant shard 1/3 is estimated at 37 to 45 minutes against its 30-minute limit (the minutes research, fact 11), so its plants are timed locally before push B; and 6b, step 7 and step 8 each merged with a merge commit keep the next branch's tree as tested (F19).
 
@@ -253,7 +253,7 @@ Step 9 alone: about 145 to 165 (push B and the example) up to 405 to 465 (with C
 - **Hookless install sessions** (9.1, live session A, and every project's install or update) have write access to both repositories and no floor: no hooks, and perhaps not the project's deny list (RISKS #16). What holds them is M079's exception, which is text, keyed to the owner's message and listing the allowed writes, and the review of the install branch afterwards. Two-repository sessions load what they load (Q6).
 - **Pull requests in cloud sessions** depend on the GitHub tools the session offers (S15); without them the owner opens it by hand.
 - **The project's workflow** belongs to the project: nothing in the project lints it once seeded, a change to it takes the full route (M153), and that review is the only lock. A cloud session may not be allowed to push a workflow file (Q5). A project whose checks all run locally, or whose CI lacks a tool a row needs, is red in CI with exit 3 until it is fixed (S7).
-- **The example's CI** draws on the same monthly allowance when the repository is private (D1).
+- **The example's CI** costs no minutes: the repository is public (D1).
 - **Live results in this repository** are outcomes only (S14); a result that needs an account detail to make sense is described without it.
 - **The tested client is the newest.** A newer client can change behaviour before the next pin move (RISKS #3); the floor stays tested. The Fable marker on every main-session request at 2.1.332 is not explained (F13).
 - **Windows and macOS** are not run for Release 1 (A27); R9's three-system line waits (S12), and no tag starts them (S9).
@@ -267,11 +267,11 @@ Step 9 alone: about 145 to 165 (push B and the example) up to 405 to 465 (with C
 
 ## 7. The owner's part
 
-**D1. The example repository: private or public.** It holds invented project data (step7.md S15), and after the live test also the whole installed method as of `v0.9.0-rc.1` (its scripts, hooks, rules, agents, skills and docs), plus the sessions' commits and pull request text. Private: nobody else sees it, and its CI uses about 15 of the month's minutes. Public: anyone can see it and its CI is free [I], but that publishes the method's own files, which is part of making this repository public (A18 keeps it private for now). Claude recommends private. Making it public later is easy; making a public one private again does not undo that people could see it.
+**D1. The example repository: private or public.** It holds invented project data (step7.md S15), and after the live test also the whole installed method as of `v0.9.0-rc.1` (its scripts, hooks, rules, agents, skills and docs), plus the sessions' commits and pull request text. Private: nobody else sees it, and its CI uses about 15 of the month's minutes. Public: anyone can see it and its CI is free [I]; the method's own files are already public, since this repository went public on 25 November 2026 (A18). Decided on 25 November 2026: public (the owner: they do not mind people copying it, and free CI makes the work faster). Claude had recommended private while this repository was private; with it public that reason is gone.
 
 In order:
 1. Merge 6b, then step 7, then step 8, as their records say, each with "Create a merge commit" (F19), using the merge message Claude gives (it ends its first line with `[skip ci]` where A76 (4) allows). Then create `v0.7.0` and `v0.8.0` on GitHub as Claude says. Before `v0.7.0`, Claude tells you whether the tag fix (S9) is in main. If it is not: right after creating the tag, open the repository's Actions tab, click the run named after the tag, and click "Cancel workflow run".
-2. Create the example repository on GitHub, with the name Claude suggests, private or public as D1, and tick "Add a README file" so it has a main branch. In its Settings, under "Pull Requests", leave only "Allow squash merging" ticked and set its default message to "Default to pull request title and description". Give the Claude GitHub App access to it as well as to this repository.
+2. Create the example repository on GitHub, with the name Claude suggests, public (D1), and tick "Add a README file" so it has a main branch. In its Settings, under "Pull Requests", leave only "Allow squash merging" ticked and set its default message to "Default to pull request title and description". Give the Claude GitHub App access to it as well as to this repository.
 3. Open the session for this repo's move to `v0.8.0` (9.1), with both repositories attached.
 4. Open the session where Claude builds and closes step 9 (9.2 to 9.4 and 9.6): this repository only, on claude/step9. Keep using it for step 9 unless Claude asks for a new one.
 5. After 9.4, create the pre-release `v0.9.0-rc.1` on GitHub: Releases, "Draft a new release", type the tag name, pick branch claude/step9 as its target, tick "Set as a pre-release", publish.
