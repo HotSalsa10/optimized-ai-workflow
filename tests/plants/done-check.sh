@@ -271,6 +271,10 @@ qw(git.pl esc.pl conf.pl tree.pl verdicts.pl checks.pl receipt.pl)
 my @STEERING = ('.claude/method.conf', 'checks', '.claude/rules/pack', '.claude/skills/pack-',
 ---
 my @STEERING = ('.claude/method.conf', 'checks', '.claude/skills/pack-',
+=== the settings file dropped from the built-in list (.claude/settings.json) | method/scripts/method/lib/conf.pl | M153: a LIGHT plan touching .claude/settings.json is judged FULL
+  'docs/incident-checklist.md', 'REVIEW.md', 'CLAUDE.md', '.claude/CLAUDE.md', 'AGENTS.md', '.claude/settings.json',
+---
+  'docs/incident-checklist.md', 'REVIEW.md', 'CLAUDE.md', '.claude/CLAUDE.md', 'AGENTS.md',
 === absent built-in paths put through the existence check | method/scripts/method/lib/done.pl | M153: a project with none of the built-in paths has no tier problem
   for my $e (grep { !$seen{$_}++ } @{ $main || [] }, @{ $mine || [] }) {
 ---
@@ -297,9 +301,17 @@ cat >"$work/conf-plants.txt" <<'PLANTS-END'
 ---
     if (!$kind) { $problem->("unknown key $k (a typo, or a key from a newer method version)", $k); next }
 === one built-in path dropped (AGENTS.md) | method/scripts/method/lib/conf.pl | steers: the built-in list is the plan's
-  'docs/incident-checklist.md', 'REVIEW.md', 'CLAUDE.md', '.claude/CLAUDE.md', 'AGENTS.md');
+'REVIEW.md', 'CLAUDE.md', '.claude/CLAUDE.md', 'AGENTS.md', '.claude/settings.json',
 ---
-  'docs/incident-checklist.md', 'REVIEW.md', 'CLAUDE.md', '.claude/CLAUDE.md');
+'REVIEW.md', 'CLAUDE.md', '.claude/CLAUDE.md', '.claude/settings.json',
+=== the local settings file dropped from the built-in list | method/scripts/method/lib/conf.pl | steers: the built-in list is the plan's
+  '.claude/settings.local.json', '.claude/setup-answers.txt');
+---
+  '.claude/setup-answers.txt');
+=== the setup answers dropped from the built-in list | method/scripts/method/lib/conf.pl | steers: the file .claude/setup-answers.txt
+  '.claude/settings.local.json', '.claude/setup-answers.txt');
+---
+  '.claude/settings.local.json');
 === the pack- name prefix read as a folder | method/scripts/method/lib/conf.pl | steers: .claude/skills/pack- is a name prefix
     return $e if $le =~ /-\z/ ? index($lp, $le) == 0 : ($lp eq $le || index($lp, "$le/") == 0);
 ---
@@ -313,9 +325,9 @@ cat >"$work/conf-plants.txt" <<'PLANTS-END'
   for my $e (@STEERING) {
     my $le = $e;
 === why.md's M153 row missing one entry (.claude/CLAUDE.md) | method/docs/method/why.md | steers: why.md's M153 row names every entry of the list
-`CLAUDE.md`, `.claude/CLAUDE.md` or `AGENTS.md`, in any letter case
+`.claude/CLAUDE.md`, `AGENTS.md`, the project's settings
 ---
-`CLAUDE.md` or `AGENTS.md`, in any letter case
+`AGENTS.md`, the project's settings
 === HIGH_RISK_PATHS not read in PRODUCT_PATHS' syntax | method/scripts/method/lib/conf.pl | HIGH_RISK_PATHS is a list in PRODUCT_PATHS' syntax
   if ($k eq 'PRODUCT_PATHS' || $k eq 'MUTATE_PATHS' || $k eq 'HIGH_RISK_PATHS') { return check_path($val, 1) }
 ---

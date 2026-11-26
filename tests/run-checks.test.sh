@@ -19,10 +19,12 @@ ESC=$(printf '\033')
 repos=""
 
 # new_repo: prints the path of a new repo on main holding src/a.txt and
-# .claude/method.conf with PRODUCT_PATHS=src, committed.
+# .claude/method.conf with PRODUCT_PATHS=src, committed. It is called in
+# $( ), whose variables the end of the file never sees, so the repo goes on
+# the list in $work/sandboxes, which the end drops
 new_repo() {
   r=$(new_sandbox_dir) || return 1
-  repos="$repos $r"
+  printf '%s\n' "$r" >>"$work/sandboxes"
   (
     cd "$r" || exit 1
     git init -q
@@ -1076,6 +1078,9 @@ wait "$bg"
 if [ "$state" = "ex=busy sh=free" ]; then pass "during a run the lock is held shared"; else fail "during a run the lock is held shared: $state" "$(cat "$work/bg.out")"; fi
 
 for d in $repos; do drop_sandbox "$d"; done
+if [ -f "$work/sandboxes" ]; then
+  while IFS= read -r d; do drop_sandbox "$d"; done <"$work/sandboxes"
+fi
 drop_sandbox "$work"
 echo "tests: run-checks: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]

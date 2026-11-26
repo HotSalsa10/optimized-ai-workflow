@@ -94,6 +94,8 @@ printf '{"theme": "dark", "env": {"FOO": "1"}, "permissions": {"deny": ["Bash(rm
 change "a statusLine added to the user settings is refused (it runs a program outside the hooks)" s1 user_settings G16
 printf '{"theme": "dark", "env": {"FOO": "1"}, "permissions": {"deny": ["Bash(rm:*)"]}, "apiKeyHelper": "/tmp/x"}\n' >"$user"
 change "an apiKeyHelper added to the user settings is refused" s1 user_settings G16
+printf '{"theme": "dark", "env": {"FOO": "1"}, "permissions": {"deny": ["Bash(rm:*)"]}, "processWrapper": "/tmp/x"}\n' >"$user"
+change "a processWrapper added to the user settings is refused" s1 user_settings G16
 printf '{"theme": "dark", "env": {"FOO": "1"}, "permissions": {"deny": ["Bash(rm:*)"]}}\n' >"$user"
 printf '{"theme": "light", "disableAllHooks": true}\n' >"$local_s"
 change "disableAllHooks in the local settings is refused" s1 local_settings G16

@@ -19,8 +19,9 @@
 # each refusal means.
 #
 # Exit codes: 0 the plan holds (written with --write); 1 refused, nothing
-# written (or, after writing, the installed files do not match the lock);
-# 2 bad usage, or perl is missing.
+# written (an error sync did not foresee too), or, after writing, the
+# installed files do not match the lock or the run failed; 2 bad usage, or
+# perl is missing.
 set -u
 # (an exported CDPATH would make cd print the folder it found, so here
 # would hold two lines)

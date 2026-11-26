@@ -20,9 +20,10 @@ mkdir -p "$work/home"
 # a clean home and no system settings, so the owner's git settings play no part
 export HOME="$work/home" GIT_CONFIG_NOSYSTEM=1
 
-# new_project: prints the path of a folder holding remote.git (bare) and w,
-# a project on main with the nine records, one commit with a verdict,
-# pushed, and origin/HEAD set
+# new_project: sets np to the path of a folder holding remote.git (bare)
+# and w, a project on main with the nine records, one commit with a
+# verdict, pushed, and origin/HEAD set. Called in this shell, not in $( ),
+# so repos keeps the folder and the end of the file removes it
 new_project() {
   b=$(new_sandbox_dir) || return 1
   repos="$repos $b"
@@ -46,7 +47,7 @@ new_project() {
     git push -q -u origin main 2>/dev/null
     git remote set-head origin main
   ) || return 1
-  printf '%s\n' "$b"
+  np=$b
 }
 
 # cm DIR MESSAGE: an empty commit in DIR whose message is MESSAGE (printf format)
@@ -88,7 +89,8 @@ expect() {
 }
 
 # 1. a clean project
-p=$(new_project) || abort_sandbox
+new_project || abort_sandbox
+p=$np
 w="$p/w"
 st "$w"
 head7=$(cd "$w" && git rev-parse --short=7 HEAD)
@@ -230,7 +232,8 @@ expect "a stash is a LOOK" 1 "work: LOOK - 1 stashes (git stash list)"
 (cd "$w" && git stash drop -q)
 
 # a project with two branches that change the same line, for merges in progress
-c=$(new_project) || abort_sandbox
+new_project || abort_sandbox
+c=$np
 cw="$c/w"
 (
   cd "$cw" || exit 1
@@ -308,7 +311,8 @@ expect "a linked worktree whose folder is gone is a LOOK" 1 "worktree $p/gone: i
 st "$w"
 expect "commits with no remote at all are a LOOK" 1 "work: LOOK - no remote: nothing is backed up (1 commits)"
 (cd "$w" && git remote add origin ../remote.git && git fetch -q origin && git branch -q -u origin/main main && git remote set-head origin main)
-sub=$(new_project) || abort_sandbox
+new_project || abort_sandbox
+sub=$np
 (
   cd "$w" || exit 1
   git -c protocol.file.allow=always submodule -q add -b main "$sub/remote.git" lib 2>/dev/null
@@ -321,7 +325,8 @@ st "$w"
 expect "a submodule change is seen even when the submodule is set to be ignored" 1 "work: LOOK - 1 uncommitted entries"
 
 # 3. verdicts
-v=$(new_project) || abort_sandbox
+new_project || abort_sandbox
+v=$np
 vw="$v/w"
 cm "$vw" 'Good one\n\nReview-Verdict: approve\n'
 cm "$vw" 'No trailer here\n'
@@ -406,7 +411,8 @@ st "$vw"
 expect "VERDICTS_FROM at main's tip leaves nothing to check: SKIPPED, not a pass" 1 \
   "verdicts: SKIPPED - no commit on refs/remotes/origin/main after $(cd "$vw" && git rev-parse --short=7 origin/main) yet"
 (cd "$vw" && git checkout -q .claude/method.conf)
-n=$(new_project) || abort_sandbox
+new_project || abort_sandbox
+n=$np
 nw="$n/w"
 (cd "$nw" && git commit -q --amend -m "Records, no verdict" && git push -q -f origin main 2>/dev/null)
 st "$nw"
@@ -426,7 +432,8 @@ expect "without a remote, main is the local main branch" 1 "verdicts: SKIPPED - 
 st "$nw"
 expect "with no main branch at all the area is SKIPPED" 1 "verdicts: SKIPPED - no main branch (looked for refs/heads/main, refs/heads/master; this repository has no remote"
 
-oh=$(new_project) || abort_sandbox
+new_project || abort_sandbox
+oh=$np
 ohw="$oh/w"
 (cd "$ohw" && git checkout -q -b trunk && cm "$ohw" 'No verdict\n' && git push -q origin trunk 2>/dev/null && git checkout -q main && git remote set-head origin trunk)
 st "$ohw"
@@ -448,7 +455,8 @@ expect "commits that came in through a merge are not judged; the merge is" 0 "ve
 st "$ohw"
 expect "an origin/HEAD that points at a local branch is not taken for main" 0 "verdicts: PASS - 2 commits on refs/remotes/origin/main"
 (cd "$ohw" && git remote set-head origin main && git branch -q -D task)
-xm=$(new_project) || abort_sandbox
+new_project || abort_sandbox
+xm=$np
 xw="$xm/w"
 (cd "$xw" && git remote remove origin)
 cm "$xw" 'No verdict\n'
@@ -479,7 +487,8 @@ if ! printf '%s\n' "$out" | grep -F -q 'ghp_abcdefghij' && printf '%s\n' "$out" 
 else
   fail "a key that the 60-character cut would split is masked whole first" "$out"
 fi
-cwp=$(new_project) || abort_sandbox
+new_project || abort_sandbox
+cwp=$np
 (cd "$cwp" && git clone -q remote.git copy 2>/dev/null)
 (cd "$cwp/w" && git config core.worktree "$cwp/copy")
 st "$cwp/w"
@@ -497,7 +506,8 @@ expect "a VERDICTS_FROM older than a shallow history is SKIPPED, not a LOOK" 1 \
 rm -rf "$oh/shallow/.claude"
 
 # 4. records
-r=$(new_project) || abort_sandbox
+new_project || abort_sandbox
+r=$np
 rw="$r/w"
 for f in CLAUDE.md AGENTS.md SPEC.md TASKS.md DECISIONS.md ROADMAP.md RISKS.md CHANGELOG.md TESTS.md; do
   mv "$rw/$f" "$work/kept.md"
@@ -610,7 +620,8 @@ expect "a perl that cannot load JSON::PP is a LOOK, and every other area still r
   "perl: LOOK - cannot load JSON::PP" "work: PASS" "verdicts: PASS" "records: PASS" "ci: SKIPPED"
 
 # 7. ci, through a stand-in gh
-g=$(new_project) || abort_sandbox
+new_project || abort_sandbox
+g=$np
 gw="$g/w"
 (cd "$gw" && git config remote.origin.url https://github.com/example/project.git)
 gsha=$(cd "$gw" && git rev-parse HEAD)
@@ -716,9 +727,11 @@ fi
 rm -rf "$gw/relbin"
 
 # 8. other repositories
-o=$(new_project) || abort_sandbox
+new_project || abort_sandbox
+o=$np
 ow="$o/w"
-other=$(new_project) || abort_sandbox
+new_project || abort_sandbox
+other=$np
 mkdir -p "$ow/.claude" "$ow/inner"
 : >"$ow/inner/file"
 (cd "$o" && git clone -q "$other/remote.git" site 2>/dev/null)
@@ -764,9 +777,11 @@ else
 fi
 
 # 9. from review round 3: a submodule, and a repository made with --separate-git-dir
-sm=$(new_project) || abort_sandbox
+new_project || abort_sandbox
+sm=$np
 smw="$sm/w"
-lib=$(new_project) || abort_sandbox
+new_project || abort_sandbox
+lib=$np
 (
   cd "$smw" || exit 1
   git -c protocol.file.allow=always submodule -q add -b main "$lib/remote.git" lib 2>/dev/null
@@ -823,7 +838,8 @@ st "$lib/sep"
 expect "a clone made with --separate-git-dir is read" 0 "work: PASS - nothing uncommitted, nothing unpushed"
 
 # 10. read-only
-ro=$(new_project) || abort_sandbox
+new_project || abort_sandbox
+ro=$np
 rw2="$ro/w"
 (cd "$rw2" && git config core.trustctime false && git config core.fsmonitor "$work/fsmonitor" && git config core.untrackedCache true)
 echo change >>"$rw2/a.txt"
@@ -843,13 +859,15 @@ fi
 
 # origin/HEAD that names the task branch (a single-branch clone, or git remote
 # set-head) is not main
-om=$(new_project) || abort_sandbox
+new_project || abort_sandbox
+om=$np
 (cd "$om/w" && git checkout -q -b feat && git push -q origin feat 2>/dev/null && git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/feat)
 st "$om/w"
 expect "origin/HEAD that names the task branch is not taken as main" 0 "verdicts: PASS - 1 commits on refs/remotes/origin/main"
 # a branch made from a default branch other than main tracks it (git's
 # default), and that branch is still main
-tk=$(new_project) || abort_sandbox
+new_project || abort_sandbox
+tk=$np
 (cd "$tk/w" && git checkout -q -b trunk && git push -q origin trunk 2>/dev/null && git --git-dir=../remote.git symbolic-ref HEAD refs/heads/trunk &&
   git push -q origin --delete main 2>/dev/null && git branch -q -D main && git remote set-head origin -a >/dev/null && git fetch -q --prune origin &&
   git checkout -q -b feat origin/trunk 2>/dev/null)
@@ -857,7 +875,8 @@ st "$tk/w"
 expect "a branch that tracks the default branch trunk still has it as main" 0 "verdicts: PASS - 1 commits on refs/remotes/origin/trunk"
 
 # a filter set only inside a submodule is off when status reads it
-sf=$(new_project) || abort_sandbox
+new_project || abort_sandbox
+sf=$np
 (git init -q "$sf/subsrc" && cd "$sf/subsrc" && echo one >s.txt && git add -A && git -c user.name=Test -c user.email=test@example.invalid commit -q -m one)
 (cd "$sf/w" && git -c protocol.file.allow=always submodule add -q "$sf/subsrc" sub 2>/dev/null &&
   git commit -q -m "Sub" -m "Review-Verdict: approve" && git push -q origin main 2>/dev/null)
@@ -880,7 +899,8 @@ expect "status names a Digest::SHA that cannot load, and still reports the rest"
 # a mutate-changed run (lib/runstate.pl): one that runs (the lock held
 # exclusively) and one that was cut off (its journal left behind); the lock
 # is only looked at, never created
-mp=$(new_project) || abort_sandbox
+new_project || abort_sandbox
+mp=$np
 mw="$mp/w"
 st "$mw"
 if [ -e "$mw/.git/method-run.lock" ]; then fail "status creates no lock file"; else pass "status creates no lock file"; fi
@@ -912,7 +932,8 @@ rm -f "$mw/.git/method-run.lock"
 # .claude/CLAUDE.md, AGENTS.md and the .md files under .claude/rules/ without a paths: line,
 # .claude/rules/method/ left out, at most 8,000 bytes. The project's
 # CLAUDE.md (11 bytes) and AGENTS.md (12) start at 23.
-p=$(new_project) || abort_sandbox
+new_project || abort_sandbox
+p=$np
 cw="$p/w"
 # xs FILE N [HEAD]: FILE holds HEAD (printf format, may be empty), then x
 # up to N bytes in all, ending with a line break
@@ -966,6 +987,8 @@ if ln -s .. "$cw/.claude/rules/a/up" 2>/dev/null && [ -L "$cw/.claude/rules/a/up
     "context: PASS - 1023 of 8000 bytes $pass_line (6 files; $not_counted"
   rm -f "$cw/.claude/rules/a/up"
 else
+  # a copy made in place of the link would be counted by the cases below
+  rm -rf "$cw/.claude/rules/a/up"
   skip "context: a link that leads back up: links cannot be made here"
 fi
 xs "$cw/.claude/CLAUDE.md" 100
@@ -977,6 +1000,7 @@ if ln -s ../method "$cw/.claude/rules/pack/m" 2>/dev/null && [ -L "$cw/.claude/r
     "context: PASS - 1023 of 8000 bytes $pass_line (6 files; $not_counted"
   rm -f "$cw/.claude/rules/pack/m"
 else
+  rm -rf "$cw/.claude/rules/pack/m"
   skip "context: a link into .claude/rules/method/: links cannot be made here"
 fi
 

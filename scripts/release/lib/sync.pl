@@ -37,8 +37,12 @@
 #   and .gitattributes is replaced where it stands, or added: at the end of
 #   .gitignore, so the method's ignore wins, and at the top of
 #   .gitattributes, so the project's own later line-end rules win (git
-#   takes the last line that matches); text outside it is never touched;
-#   two openings, or one without its end, are a conflict.
+#   takes the last line that matches); text outside it is never touched,
+#   and a byte-order mark at the start stays first; two openings, or one
+#   without its end, are a conflict.
+# - what git ignores: where the project is in a git working tree, a path
+#   sync writes that git ignores (a commit would leave it out) is a
+#   conflict naming the rule (Git::ignored).
 # - method.lock, written last (Lock::make, Lock::save); then Lock::verify
 #   must find nothing. .method/local/sync-in-progress holds the tag and the
 #   profile while the files are written; .claude/settings.json is written
@@ -66,7 +70,7 @@ my $FRAG_SRC = 'method/settings.fragment.json';
 my $MARKER = '.method/local/sync-in-progress';
 my ($OPEN, $CLOSE) = ('# >>> method', '# <<< method');
 my %BLOCKS = (
-  '.gitignore' => [".method/local/"],
+  '.gitignore' => [".method/local/", ".claude/settings.local.json"],
   '.gitattributes' => ['* text=auto eol=lf', '*.cmd text eol=crlf', '*.bat text eol=crlf', '*.ps1 text eol=crlf'],
 );
 
@@ -105,6 +109,15 @@ my $proj = Cwd::realpath($to);
 my $src = Cwd::realpath($src_arg);
 refuse_now('the release checkout cannot be found') unless defined $src && -d $src;
 require File::Spec->catfile($src, 'method/scripts/method/lib', $_) for qw(esc.pl json.pl git.pl lock.pl);
+# an error sync did not foresee (git failing, a number JSON cannot write)
+# ends the run as a refusal before the first write, and with a FAIL line
+# after it, exit 1 either way
+my $writing;
+$SIG{__DIE__} = sub {
+  return if $^S;
+  (my $e = $_[0]) =~ s/\n\z//;
+  $writing ? fail_now("sync stopped on an error: $e") : refuse_now("sync stopped on an error: $e");
+};
 if (defined $source_opt) {
   my $s = Cwd::realpath($source_opt);
   refuse_now('--source names another checkout than the one this sync.sh is in; run the sync.sh of the release you install')
@@ -349,6 +362,9 @@ for my $file (sort keys %BLOCKS) {
     if ($te) { push @plan, ['conflict', $file, $te]; next }
     $t = $tt;
   }
+  # (a byte-order mark some editors write stays first: git reads past one
+  # only at the start of the file)
+  my $bom = $t =~ s/\A\xEF\xBB\xBF// ? "\xEF\xBB\xBF" : '';
   my $block = join '', "$OPEN\n", (map {"$_\n"} @{ $BLOCKS{$file} }), "$CLOSE\n";
   my @lines = split /(?<=\n)/, $t;
   my @open = grep { $lines[$_] =~ /\A\Q$OPEN\E\r?\n?\z/ } 0 .. $#lines;
@@ -364,7 +380,20 @@ for my $file (sort keys %BLOCKS) {
     next;
   }
   if ($new eq $t) { push @plan, ['unchanged', $file, 'the method block'] }
-  else { push @plan, [(-e $p ? 'update' : 'install'), $file, 'the method block']; $block_text{$file} = $new }
+  else { push @plan, [(-e $p ? 'update' : 'install'), $file, 'the method block']; $block_text{$file} = $bom . $new }
+}
+
+# --- what git ignores ---
+# a commit leaves out a path git ignores, so a clone would lack it: each
+# path sync writes that git ignores is a conflict (only .method/local/ is
+# meant to be ignored; a path under a link is a conflict above)
+my $ignored = Git::ignored($proj, grep {
+  my @parts = split m{/};
+  !grep { -l $abs->(join '/', @parts[0 .. $_]) } 0 .. $#parts - 1
+} sort(keys %rel), $Lock::SETTINGS, $Lock::LOCK, sort keys %BLOCKS);
+if (!$ignored) { push @plan, ['conflict', 'the project', 'git cannot tell which of the paths sync writes it ignores'] }
+else {
+  push @plan, ['conflict', $_->[0], "git ignores it ($_->[1]), so a commit would leave it out; change that rule so it no longer matches"] for @$ignored;
 }
 
 # --- the plan, and the refusal or the write ---
@@ -406,6 +435,7 @@ sub put {
   $ok = chmod($mode, $tmp) && $ok;
   if (!$ok || !rename $tmp, $p) { unlink $tmp; fail_now('cannot write ' . $rel) }
 }
+$writing = 1;
 put($MARKER, "$tag\n$profile\n", 0644);
 # (the settings before the method files: see the top of this file)
 put($settings_rel, $new_settings, 0644) if defined $new_settings && (!defined $cur_bytes || $cur_bytes ne $new_settings);
@@ -420,7 +450,8 @@ for my $rel (@removes) {
 put($_, $block_text{$_}, 0644) for sort keys %block_text;
 my ($text, $me) = Lock::make($proj, $tag, $commit, $profile);
 fail_now("method.lock cannot be made: $me") if $me;
-my $se = Lock::save($proj, $text);
+# (its copy named as put names one, so a re-run removes what a cut left)
+my $se = Lock::save($proj, $text, ".sync-$$");
 fail_now($se) if $se;
 my $v = Lock::verify($proj);
 if (@{ $v->{findings} }) {
