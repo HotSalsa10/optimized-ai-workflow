@@ -6,6 +6,15 @@
 #
 # Usage: bash scripts/release/sync.sh --to PROJECT [--profile best|balanced|budget]
 #          [--keep KEY]... [--write] [--source CHECKOUT]
+#        bash scripts/release/sync.sh --to PROJECT --uninstall
+#          [--keep KEY|PATH]... [--write] [--source CHECKOUT]
+#
+# With --uninstall (step 8.2; docs/plans/step8.md S7; M162) it takes the
+# method back out of the project instead, by lib/uninstall.pl: the plan
+# first, and with --write only when the whole plan holds, the settings
+# before the files and method.lock last; what stays is named. Like an
+# install, it runs where the project's hooks are off (the guard refuses a
+# sync run with --write); --profile with it is bad usage.
 #
 # It runs from a clean checkout of the method's repository at an exact v*
 # tag, so a new release always runs its own sync; --source, when given,

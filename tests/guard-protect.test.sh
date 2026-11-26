@@ -438,6 +438,20 @@ if wanted G12; then
   rm -f "$proj/scripts/method/method.lock" "$proj/scripts/method/profiles.tsv"
 
 fi
+# --- the release's sync with --write (step 8.2): an install, an update or
+# an uninstall runs where the hooks are off; a dry run passes ---
+for c in "bash $work/clone/scripts/release/sync.sh --to . --uninstall --write" "bash $work/clone/scripts/release/sync.sh --to . --write" \
+  "bash $work/clone/scripts/release/sync.sh --to . --write --profile budget --keep PreToolUse" "$work/clone/scripts/release/sync.sh --write --to ." \
+  "cd $work/clone && ./scripts/release/sync.sh --to $proj --uninstall --write" "nohup bash $work/clone/scripts/release/sync.sh --to . --write" \
+  "bash -c 'bash $work/clone/scripts/release/sync.sh --to . --uninstall --write'" "env A=1 bash -x -o posix $work/clone/scripts/release/sync.sh --to . --write" \
+  "timeout 60 perl $work/clone/scripts/release/lib/sync.pl $work/clone --to . --uninstall --write" "sh -- sync.sh --to . --write"; do
+  judge "sync with --write is refused: $c" "$proj" "$c" G6
+done
+for c in "bash $work/clone/scripts/release/sync.sh --to . --uninstall" "bash $work/clone/scripts/release/sync.sh --to ." \
+  "bash $work/clone/scripts/release/sync.sh --to . --profile budget --keep PreToolUse" "grep -- --write $work/clone/scripts/release/sync.sh" \
+  "grep -n -e --uninstall -e --write $work/clone/scripts/release/lib/sync.pl" "echo sync.sh --write" "bash $work/clone/scripts/release/other.sh --write"; do
+  judge "not a sync run with --write passes: $c" "$proj" "$c" allow
+done
 # --- speed ---
 if wanted "a call that writes"; then
   CMD='cp -r src build/ && npm test' CWD="$proj" perl -MJSON::PP -e 'print JSON::PP->new->encode({tool_name => "Bash", tool_input => {command => $ENV{CMD}}, cwd => $ENV{CWD}})' >"$work/in.json"

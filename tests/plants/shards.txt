@@ -13,7 +13,9 @@
 # step 7.9's check added three more. After step 7's review the seven plant
 # files its repair grew were timed again, one after another, and examples.sh
 # moved to part 5 to keep part 1 within its margin; the files the fresh
-# check's fixes grew were timed again the same way, on f322cb1.
+# check's fixes grew were timed again the same way, on f322cb1. Step 8.2's
+# uninstall.sh was timed whole as root (58 s) and put in part 4; the non-root
+# run at 8.5 times it again.
 0 dev-checks.sh 1154
 0 ci-config.sh 40
 0 live-write.sh 12
@@ -29,6 +31,7 @@
 4 status.sh 295
 4 gate-receipt.sh 275
 4 log.sh 195
+4 uninstall.sh 58
 5 watch.sh 169
 5 git-shapes.sh 152
 5 report-check.sh 113

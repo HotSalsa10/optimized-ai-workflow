@@ -39,7 +39,9 @@
 #     it would write. A recursive copy, rsync, tar or unzip extraction,
 #     patch, recursive delete, find -delete or -exec, or move of a folder,
 #     into or of a folder that holds a protected path (the repository's
-#     top folder too) is refused.
+#     top folder too) is refused. Since step 8.2, a call that runs the
+#     release's sync with --write (an install, an update or an uninstall)
+#     is refused wherever it points (release_write); its dry run passes.
 #   Protect::judge_file(PATH, BASE, PROJECT) () or ('G6', TEXT): an edit
 #     tool's file.
 #   Protect::judge_mcp(TOOL, INPUT, BASE, PROJECT) () or ('G6', TEXT): an
@@ -636,8 +638,43 @@ sub call_writes {
   return 0;
 }
 
+# release_write CMDS: the refusal's text when a command in CMDS runs the
+# release's sync (sync.sh, or lib/sync.pl through perl) with --write, else
+# undef. An install, an update or an uninstall writes the method's files and
+# hooks, which Claude never writes (M132), and runs where the project's
+# hooks are off (step 8.2; docs/plans/step8.md S7; A78 (16)). A dry run,
+# with or without --uninstall, passes, and so does a command that only
+# names the words (grep -- --write sync.sh). Carriers (nohup, env, bash -c
+# and the like) give commands of their own in CMDS (lib/shell.pl).
+sub release_write {
+  my ($cmds) = @_;
+  for my $c (@$cmds) {
+    my @w = @{ $c->{words} };
+    next unless @w;
+    my $n = name_of($w[0]);
+    my ($i, $also) = (0, 'sync.sh');
+    if ($n =~ /\A(?:bash|sh|dash|zsh|ksh|source|\.|perl)\z/) {
+      $also = 'sync.pl' if $n eq 'perl';
+      # (the interpreter's own options, -o and -O with their value)
+      $i = 1;
+      while ($i <= $#w && $w[$i] =~ /\A[-+]./ && $w[$i] ne '--') {
+        $i++ if $w[$i] =~ /\A[-+][oO]\z/;
+        $i++;
+      }
+      $i++ if $i <= $#w && $w[$i] eq '--';
+    }
+    next unless $i <= $#w;
+    my $s = name_of($w[$i]);
+    next unless $s eq 'sync.sh' || $s eq $also;
+    next unless grep { $_ eq '--write' } @w[$i + 1 .. $#w];
+    return "this call runs the method's sync with --write, which installs, updates or takes out the method's files and hooks: Claude never writes those, and an install, an update or an uninstall runs in a session where the project's hooks are off; run it without --write to show the owner its plan, and the owner runs it there (.claude/hooks/method/README.md says how)";
+  }
+  return undef;
+}
+
 sub judge_bash {
   my ($cmds, $dirs, $project) = @_;
+  if (defined(my $why = release_write($cmds))) { return ('G6', $why) }
   # most calls only read: nothing to look up
   return () unless writes($cmds);
   my $set = set($project);

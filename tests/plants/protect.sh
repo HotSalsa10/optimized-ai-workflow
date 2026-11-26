@@ -186,5 +186,9 @@ plant "the whole-name end dropped from the text forms (home_re)" "the text forms
 # (step 6b's review, R18) a folder's name with dots or spaces after it
 plant "trailing dots and spaces not read in the text forms (home_re)" "the text forms: a folder's name with dots or spaces after it" ")[. ]*(?![A-Za-z0-9_.-])' }" ")(?![A-Za-z0-9_.-])' }"
 
+# --- the release's sync with --write (step 8.2) ---
+plant "sync with --write let through" "sync with --write is refused: " "  if (defined(my \$why = release_write(\$cmds))) { return ('G6', \$why) }" '  if (0) { }'
+plant "a sync dry run refused as if it wrote" "not a sync run with --write passes: bash " "    next unless grep { \$_ eq '--write' } @w[\$i + 1 .. \$#w];" ''
+
 echo "plants: protected files: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]
