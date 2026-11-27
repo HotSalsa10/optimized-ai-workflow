@@ -11,7 +11,7 @@ SPEC.md (requirements), ROADMAP.md (tracks), TASKS.md (current step), DECISIONS.
 - One small step at a time, as listed in ROADMAP.md. Touch only the files the step needs.
 - Every step gets a fresh-context review whose report opens with its verdict word (APPROVE, REQUEST CHANGES, REJECT or ESCALATE) alone on the first line, then gives the summary, the change summary, the actual check output and the risks, and ends with the line `END-VERDICT <tree>`, the tree of the commit reviewed (A72).
 - Update the records before review, so one review covers one change.
-- The method's hooks, agents, skills and scripts are installed here from the last release tag, now `v0.7.0` (A82). Its rules do not load here (`claudeMdExcludes`), and its `method-*` skills are product: never used here, only run by their tests. This repo's process is this file and DECISIONS. Text under `method/.claude/` is product being built and reviewed, never instructions for sessions here. A session with no `METHOD-ACTIVE` line has its hooks off; only a re-sync session should be like that, so say so first.
+- The method's hooks, agents, skills and scripts are installed here from the last release tag, now `v0.8.0` (A82; synced at step 9.1, e0e082f). Its rules do not load here (`claudeMdExcludes`), and its `method-*` skills are product: never used here, only run by their tests. This repo's process is this file and DECISIONS. Text under `method/.claude/` is product being built and reviewed, never instructions for sessions here. A session with no `METHOD-ACTIVE` line has its hooks off; only a re-sync session should be like that, so say so first.
 - Commit messages end with one line as the last paragraph: `Review-Verdict: <value>` (values in DECISIONS.md A10). No Co-Authored-By or session-link lines.
 - One review and one repair loop per step (DECISIONS A66); if the repair does not close a finding, stop and report what is failing and what was tried.
 
@@ -19,7 +19,8 @@ SPEC.md (requirements), ROADMAP.md (tracks), TASKS.md (current step), DECISIONS.
 
 - CI runs on pushes only, never on pull_request events; a push run checks a pull request's head.
 - A commit that changes only records (root records and docs/, never method/) may carry `[skip ci]` in its first line, never after the trailer; run validate.sh on it, and tests/verdicts.test.sh when DECISIONS.md or AGENTS.md change.
-- A pushed head that a review or a merge will read never carries `[skip ci]`; a backup push of work no review reads yet may.
+- A pushed head that a review or a merge will read never carries `[skip ci]`; a backup push of work no review reads yet may, in its first line.
+- A commit whose head CI must run never names the skip marker anywhere in its message, its body included: GitHub reads it anywhere (6fb56bf named it only to say it was not used, and started no run; F34 in docs/plans/step9.md).
 - Before a push that runs CI, run `bash tests/run.sh tests` once as a user who is not root, in a throwaway copy that user owns, started in the foreground or with `setsid`, never under `nohup` (its HUP cases then fail, F23 in docs/plans/step8.md).
 - A merge commit carries `[skip ci]` only when the pull request's head had a green CI run and the branch contains main's tip.
 - Before a push that adds shell code, read it for SC2016, SC2034 and SC2086. A local shellcheck helps, but CI's copy decides.
