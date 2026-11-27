@@ -8,7 +8,11 @@
 #
 # Checks for known security problems in the libraries the project uses
 # (M094). Nothing is installed for you: install the tool, then remove the #
-# on its row.
+# on its row. In CI (.github/workflows/method-checks.yml), install it in the
+# workflow's set-up place, or the row is SKIPPED there and the run is red
+# with exit 3. A row whose second field is ci runs only in CI, and keeps
+# "Ready to merge" from READY until the method's Release 2: done-check
+# does not read CI's result yet.
 #deps-python	any	cmd:pip-audit,file:requirements.txt	^deps-python: (\d+) file	pip-audit -r requirements.txt && echo "deps-python: 1 file examined"
 #deps-node	any	cmd:npm,file:package-lock.json	^deps-node: (\d+) file	npm audit && echo "deps-node: 1 file examined"
 #deps-go	any	cmd:govulncheck,file:go.mod	^deps-go: (\d+) file	govulncheck ./... && echo "deps-go: 1 file examined"

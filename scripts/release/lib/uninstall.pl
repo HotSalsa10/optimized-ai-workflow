@@ -660,7 +660,8 @@ sub setup_files {
   for my $p (@$listed) {
     next unless $p =~ m{\Ascripts/method/templates/(.+)\.tmpl\z};
     my $t = $1;
-    $cand{ $t eq 'method.conf' ? '.claude/method.conf' : $t eq 'pull_request_template.md' ? '.github/pull_request_template.md' : $t } = 1;
+    $cand{ $t eq 'method.conf' ? '.claude/method.conf' : $t eq 'pull_request_template.md' ? '.github/pull_request_template.md'
+      : $t eq 'method-checks.yml' ? '.github/workflows/method-checks.yml' : $t } = 1;
   }
   my $walk;
   $walk = sub {

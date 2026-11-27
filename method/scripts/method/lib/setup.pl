@@ -43,7 +43,10 @@
 #   its block: the block is replaced when there is one; method.conf and
 #   checks/project.tsv get one added at the end; CLAUDE.md without the line
 #   @AGENTS.md gets one holding that line; any other existing file is kept
-#   as it is, and the card names it.
+#   as it is, and the card names it. Among them the project's CI workflow,
+#   .github/workflows/method-checks.yml (M166), from method-checks.yml.tmpl:
+#   written whole when absent and never changed after; the card names it
+#   and says what its exit 3 means.
 # - the pack's two files, .claude/rules/pack/working.md and project.md
 #   (class P): their blocks, from the closed answers and the rules.
 # - the three profile keys (model, effortLevel, availableModels) in
@@ -107,6 +110,8 @@ our $ANSWERS = '.claude/setup-answers.txt';
 our $TEMPLATES = 'scripts/method/templates';
 our $CONF = '.claude/method.conf';
 our $CHECKS = 'checks/project.tsv';
+# the project's CI workflow (M166): seeded once, then the project's own
+our $CI = '.github/workflows/method-checks.yml';
 our ($WORKING, $PROJECT) = ('.claude/rules/pack/working.md', '.claude/rules/pack/project.md');
 our %CHOICES = (DECIDES => [qw(claude owner)], REPORTS => [qw(short full)], PACE => [qw(small larger)],
   STRICT => [qw(standard strict)]);
@@ -133,6 +138,7 @@ sub template_target {
   my ($t) = @_;
   return $CONF if $t eq 'method.conf.tmpl';
   return '.github/pull_request_template.md' if $t eq 'pull_request_template.md.tmpl';
+  return $CI if $t eq 'method-checks.yml.tmpl';
   (my $to = $t) =~ s/\.tmpl\z//;
   return $to;
 }
@@ -707,6 +713,13 @@ sub plan {
     if grep { $_->[0] eq 'block' && $_->[1] eq 'CLAUDE.md' } @files;
   my @name = (($test_row ? "`$TEST_ID`" : ()), ($a->{HOW_IT_STARTS} ne '' ? "`$SMOKE_ID`" : ()));
   push @card, 'TESTS.md was there before: name ' . join(' and ', @name) . ' in it.' if @name && grep { $_->[0] eq 'kept' && $_->[1] eq 'TESTS.md' } @files;
+  my ($ci) = grep { $_->[1] eq $CI } @files;
+  if ($ci) {
+    push @card, "CI: $CI runs these checks on GitHub on every push"
+      . ($ci->[0] eq 'kept' ? '; it was there already, so setup left it as it is.' : '.');
+    push @card, "CI's exit 3 means nothing failed, but a check that applies there was SKIPPED or no row of checks/*.tsv runs there:"
+      . " install what the row needs in the workflow's set-up place, or turn on a row that runs in CI.";
+  }
   push @card, 'Takes effect: files now; the profile from your next session.';
   return $r;
 }

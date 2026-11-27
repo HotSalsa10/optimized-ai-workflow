@@ -1,0 +1,58 @@
+# The method's checks for this project on GitHub, outside any Claude session
+# (M166). /method-setup writes this file only when it is missing and never
+# changes it after: it belongs to the project. A change to it changes a file
+# that steers the method (.github/workflows), so it takes the full route,
+# with three reviewers; nothing else checks it once it is here.
+#
+# It runs on every push, to any branch, and when started by hand. Nothing
+# else starts it: a push run already checks a pull request's head, and the
+# other triggers can run with more rights or on code from outside. It reads
+# no secret and no token, and it can only read the repository.
+#
+# The run step is scripts/method/run-checks.sh with CI=true: the built-in
+# checks (method-files, that the method's files are the ones installed, and
+# secrets among them) and every row of checks/*.tsv that runs in CI (runs_in
+# any or ci).
+#
+# Red with exit 3 means nothing failed, but a check that applies in CI was
+# SKIPPED (a need it names is missing, or it examined nothing), or no row of
+# checks/*.tsv runs in CI. To fix it: install what the row needs in the
+# set-up place below, or turn on a row that runs in CI; the run's output
+# names each SKIPPED check and why.
+#
+# A row that runs only in CI (runs_in ci) keeps "Ready to merge" from READY
+# until the method's Release 2: done-check does not read CI's result yet.
+name: Method checks
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Method checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # --- set-up place: the project's own steps go below this line ---
+      # A step that installs a tool names its exact version, and its run
+      # starts with the stop-commands line, as the run step's does, so text
+      # from a file in the repository cannot reach the runner as a command.
+      # For example:
+      # - name: Install pip-audit
+      #   run: |
+      #     echo "::stop-commands::stop-$RANDOM$RANDOM$RANDOM"
+      #     python3 -m pip install pip-audit==2.7.3
+      # --- set-up place: the project's own steps go above this line ---
+      - name: Run the checks
+        run: |
+          echo "::stop-commands::stop-$RANDOM$RANDOM$RANDOM"
+          CI=true bash scripts/method/run-checks.sh

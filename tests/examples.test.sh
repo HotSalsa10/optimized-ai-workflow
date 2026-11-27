@@ -120,6 +120,14 @@ git_q() {
   (cd "$p" && git "$@") >/dev/null 2>&1
 }
 
+# ci_step FILE: the lines of FILE's last run block (a workflow's run step),
+# without their indent
+ci_step() {
+  perl -ne 'if (/^(\s*)(?:- )?run:\s*\|\s*$/) { $ind = length $1; @b = (); next }
+    if (defined $ind) { if (/^(\s*)\S/ && length $1 > $ind) { s/^\s+//; push @b, $_; next } undef $ind }
+    END { print @b }' "$1"
+}
+
 # build EX: the example EX made in $work/EX (p), with its outputs in
 # $work/EX.out (o), through every step the cases read. A step that fails
 # leaves its exit code; the steps after it still run, so each case can say
@@ -162,6 +170,9 @@ build() {
   git_q push -q origin main
   step status bash scripts/method/status.sh --quick
   step checks bash scripts/method/run-checks.sh
+  # the seeded CI workflow's run step (M166), as GitHub's runner runs it
+  ci_step "$p/.github/workflows/method-checks.yml" >"$o/ci-step.sh"
+  step ci bash -e "$o/ci-step.sh"
   # sync and setup again
   snap "$p" >"$o/before-again.snap"
   step sync2 bash "$rel/scripts/release/sync.sh" --to . --write
@@ -188,6 +199,7 @@ cases() {
     "$1: done-check on the install branch, while main has no method.conf: no tier or verdicts-start problem, and the install takes the full route (three reviewers)" \
     "$1: once the install is on main, status finds nothing that needs a look" \
     "$1: run-checks is green, with method-files and the project's own checks among those passed" \
+    "$1: the seeded CI workflow's run step, run as GitHub's runner runs it, exits 0 with CI=true" \
     "$1: done-check on a branch with one product change: no tier or verdicts-start problem" \
     "$1: sync and setup run again change nothing"
   case "$1" in
@@ -429,6 +441,16 @@ EOF
     done
     if [ "$(rc checks)" != 0 ] || ! grep -q '^run-checks: PASS - ' "$o/checks.txt"; then r="$r [exit $(rc checks)]"; fi
     if [ -z "$r" ]; then pass "$n"; else fail "$n" "$r $(tail -4 "$o/checks.txt")"; fi
+  fi
+
+  n="$ex: the seeded CI workflow's run step, run as GitHub's runner runs it, exits 0 with CI=true"
+  if wanted "$n"; then
+    if [ "$(rc ci)" = 0 ] && grep -q -x 'CI=true bash scripts/method/run-checks.sh' "$o/ci-step.sh" &&
+      grep -q '^run-checks: PASS - .*\bCI\b' "$o/ci.txt"; then
+      pass "$n"
+    else
+      fail "$n" "exit $(rc ci); step: $(tr '\n' ';' <"$o/ci-step.sh"); $(tail -3 "$o/ci.txt")"
+    fi
   fi
 
   n="$ex: done-check on a branch with one product change: no tier or verdicts-start problem"

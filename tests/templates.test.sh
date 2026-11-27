@@ -9,8 +9,9 @@
 # in general is kept by the review).
 #
 # A template's project path is its path under templates/ without .tmpl,
-# except method.conf.tmpl (.claude/method.conf) and
-# pull_request_template.md.tmpl (.github/pull_request_template.md), which
+# except method.conf.tmpl (.claude/method.conf),
+# pull_request_template.md.tmpl (.github/pull_request_template.md) and
+# method-checks.yml.tmpl (.github/workflows/method-checks.yml), which
 # sit at the top so this repo holds no .claude/ or .github/ folder there.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
@@ -28,7 +29,7 @@ work=$(new_sandbox_dir) || abort_sandbox
 mkdir -p "$work/home"
 
 # the files setup seeds besides the records, as template paths without .tmpl
-others="REVIEW.md pull_request_template.md docs/incident-checklist.md checks/project.tsv checks/scan-allow.txt method.conf"
+others="REVIEW.md pull_request_template.md method-checks.yml docs/incident-checklist.md checks/project.tsv checks/scan-allow.txt method.conf"
 # the field products the tripwire looks for, matched as whole words in any case
 products="ERPNext Frappe Odoo Salesforce Shopify Magento WooCommerce QuickBooks NetSuite Xero"
 
@@ -92,6 +93,7 @@ printf '%s\n' "$templates" | while IFS= read -r t; do
   case "$t" in
     method.conf.tmpl) to=.claude/method.conf ;;
     pull_request_template.md.tmpl) to=.github/pull_request_template.md ;;
+    method-checks.yml.tmpl) to=.github/workflows/method-checks.yml ;;
     *) to=${t%.tmpl} ;;
   esac
   mkdir -p "$p/$(dirname "$to")" && cp "$tdir/$t" "$p/$to" || exit 1

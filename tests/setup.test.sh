@@ -188,7 +188,9 @@ my $block_conf = sub {
   return \%v;
 };
 my $all_conf = sub { my ($v) = Conf::read_text($_[0] // '', 'conf'); $v };
-my @fixed = ('Every change gets: checks, an independent review, a security check.', 'Takes effect: files now; the profile from your next session.');
+my @fixed = ('Every change gets: checks, an independent review, a security check.', 'Takes effect: files now; the profile from your next session.',
+  'CI: .github/workflows/method-checks.yml runs these checks on GitHub on every push.',
+  "CI's exit 3 means nothing failed, but a check that applies there was SKIPPED or no row of checks/*.tsv runs there: install what the row needs in the workflow's set-up place, or turn on a row that runs in CI.");
 my %next = (best => 'balanced', balanced => 'budget', budget => 'best');
 my %other = (claude => 'owner', owner => 'claude', short => 'full', full => 'short', small => 'larger', larger => 'small', standard => 'strict', strict => 'standard');
 my @touch = qw(money personal outside);
@@ -672,6 +674,19 @@ if wanted "$n"; then
     pass "$n"
   else
     no "$n" "exit $c1 then $code; $missing; $(printf '%s\n' "$out" | tail -1)"
+  fi
+fi
+
+n="the seeded files include the CI workflow, .github/workflows/method-checks.yml, as the template's bytes (M166)"
+if wanted "$n"; then
+  copy "$pnew" ci
+  printf '%s\n' "$good" >"$c/.claude/setup-answers.txt"
+  setup "$c" --write
+  if [ "$code" -eq 0 ] && has "new" && printf '%s\n' "$out" | grep -q '^setup: new  *\.github/workflows/method-checks\.yml$' &&
+    cmp -s "$c/scripts/method/templates/method-checks.yml.tmpl" "$c/.github/workflows/method-checks.yml"; then
+    pass "$n"
+  else
+    no "$n" "exit $code; $(printf '%s\n' "$out" | grep -e 'method-checks' -e '^setup: WROTE')"
   fi
 fi
 

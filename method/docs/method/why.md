@@ -53,7 +53,7 @@ The hooks run in local sessions and in cloud sessions with one repository. Where
 | M145 | The lock: the plan's Tier and Paths lines and `expected.tsv` as they were at the approval; for FULL, `expected.tsv` there at the approval, a tester run that said TESTS FAIL on a commit after the approval and before the finished files, on the branch's own history, with the Tier and Paths lines and `expected.tsv` there as approved, and the tester's newest word on the finished files TESTS PASS | `scripts/method/done-check.sh` |
 | M146 | For FULL, the reporter's newest word on the finished files is APPROVE; on a high-risk path, Deep review: three VALID approving reviewer receipts for the exact files, each reviewed from the merge base or chained back to it, and no other word from the reviewer | `scripts/method/done-check.sh` |
 | M126 | Every number in the report to you is in a log the check read, exactly as written, with its sign, currency mark and percent, including numbers joined by a slash or a dash (40/44, 3-5); "What the checks would miss" is there and says more than "nothing", "none" or "n/a", in one line or in every line of a list | `scripts/method/report-check.sh` |
-| CI | The project's checks run on every change, outside the session | the project's CI (step 9) |
+| M166, CI | The project's checks run on every push to GitHub, outside the session: `scripts/method/run-checks.sh` with `CI=true`, `method-files` and `secrets` among them. `/method-setup` writes the workflow once, then it is the project's own file, and a change to it takes the full route. It is red with exit 3 when nothing failed but a check that applies there was SKIPPED, or no project check runs there | `.github/workflows/method-checks.yml` |
 
 ## Partly enforced
 

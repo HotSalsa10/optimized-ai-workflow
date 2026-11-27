@@ -282,6 +282,7 @@ You created the tag v0.8.0 on GitHub after step 8 was merged, and this repositor
 
 - This repository now runs v0.8.0 (step 9.1): its sync ran in a session whose hooks were off through a settings file you added on GitHub's website, and the file is gone again. Status no longer names the two GitHub merges whose messages lack their verdict line, because `.claude/method.conf` now says to judge only what comes after step 8's merge.
 - The test harness runs the newest Claude Code, 2.1.332, beside the oldest supported one, 2.1.316 (step 9.2): 180 of 180 at each. When it runs inside a Claude Code session, it keeps its throwaway projects out of the folder where 2.1.332 loads no project instructions.
+- A project now gets a CI file from `/method-setup` (step 9.3): `.github/workflows/method-checks.yml` runs the project's checks on GitHub on every push, outside any Claude session, the check that the method's files are the ones installed among them. It runs on pushes and when you start it by hand, reads no secret, and can only read the repository. Setup writes it once; from then on it is the project's file, and a change to it is reviewed by three reviewers. It is red when a check could not run there or none of the project's own checks runs there, and setup's card says how to fix that.
 
 ### Changed (step 8)
 

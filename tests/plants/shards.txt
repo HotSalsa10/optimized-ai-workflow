@@ -23,7 +23,8 @@
 # uninstall.sh, session-audit.sh and wrappers.sh, they were timed again the
 # same way: part 6 holds syntax-checks.sh and session-status.sh, and part 3
 # protect.sh with session-audit.sh, uninstall.sh and settings.sh, moved
-# from parts 2, 4 and 5.
+# from parts 2, 4 and 5. Step 9.3 added ci-template.sh, timed whole as a user
+# who is not root (52 s), in part 6.
 0 dev-checks.sh 758
 0 self-install.sh 269
 0 ci-config.sh 40
@@ -55,3 +56,4 @@
 5 examples.sh 72
 6 session-status.sh 544
 6 syntax-checks.sh 477
+6 ci-template.sh 52
