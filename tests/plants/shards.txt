@@ -13,11 +13,16 @@
 # step 7.9's check added three more. After step 7's review the seven plant
 # files its repair grew were timed again, one after another, and examples.sh
 # moved to part 5 to keep part 1 within its margin; the files the fresh
-# check's fixes grew were timed again the same way, on f322cb1. Step 8.2's
-# uninstall.sh was timed whole as root (58 s) and put in part 4; the non-root
-# run at 8.5 times it again. Step 8.3's wrappers.sh (14 s, as root) is in part
-# 5, and step 8.4's session-audit.sh (112 s, as root) in part 2.
-0 dev-checks.sh 1154
+# check's fixes grew were timed again the same way, on f322cb1. At step 8's
+# review (F9), on 27 November 2026, the files step 8 added or grew were timed
+# whole as a user who is not root, two or three side by side, with
+# shellcheck: dev-checks.sh had grown to 1,460 s, past any part's margin
+# alone, so its self-install cases went to self-install.sh and its
+# perl-syntax and shellcheck cases to syntax-checks.sh, and a seventh part
+# was added (part 6), with session-audit.sh, uninstall.sh and settings.sh
+# moved into it from parts 2, 4 and 5.
+0 dev-checks.sh 758
+0 self-install.sh 269
 0 ci-config.sh 40
 0 live-write.sh 12
 0 harness.sh 0
@@ -26,23 +31,24 @@
 1 templates.sh 18
 2 setup.sh 628
 2 guard.sh 423
-2 session-audit.sh 112
-3 protect.sh 606
+3 protect.sh 611
 3 session-status.sh 544
 4 outside.sh 327
 4 status.sh 295
 4 gate-receipt.sh 275
 4 log.sh 195
-4 uninstall.sh 58
 5 watch.sh 169
 5 git-shapes.sh 152
 5 report-check.sh 113
 5 review-packet.sh 108
-5 settings.sh 105
 5 sync.sh 133
 5 method-files.sh 88
 5 verdicts.sh 61
 5 budget.sh 56
 5 lint-prompts.sh 55
-5 wrappers.sh 14
+5 wrappers.sh 23
 5 examples.sh 72
+6 syntax-checks.sh 477
+6 session-audit.sh 106
+6 uninstall.sh 98
+6 settings.sh 148
