@@ -39,7 +39,9 @@
 #     it would write. A recursive copy, rsync, tar or unzip extraction,
 #     patch, recursive delete, find -delete or -exec, or move of a folder,
 #     into or of a folder that holds a protected path (the repository's
-#     top folder too) is refused.
+#     top folder too) is refused. Since step 8.2, a call that runs the
+#     release's sync with --write (an install, an update or an uninstall)
+#     is refused wherever it points (release_write); its dry run passes.
 #   Protect::judge_file(PATH, BASE, PROJECT) () or ('G6', TEXT): an edit
 #     tool's file.
 #   Protect::judge_mcp(TOOL, INPUT, BASE, PROJECT) () or ('G6', TEXT): an
@@ -636,8 +638,96 @@ sub call_writes {
   return 0;
 }
 
+# release_write CMDS: the refusal's text when a command in CMDS runs the
+# release's sync (sync.sh, or its lib/sync.pl) with --write, else undef.
+# An install, an update or an uninstall writes the method's files and
+# hooks, which Claude never writes (M132), and runs where the project's
+# hooks are off (step 8.2; docs/plans/step8.md S7; A78 (16)). The release's
+# sync always takes --to, so a run is a command, not on the read-only list,
+# with a word naming sync.sh or sync.pl (in any letter case) followed by
+# --to: whatever runs it (an interpreter and its options, a carrier, flock
+# or xargs), it is refused when a later word is --write or is made at run
+# time (a variable or a substitution, which could be --write or --to, so it
+# also stands for the --to). Code the reader keeps whole is read as text: a
+# here-document, a here-string or a pipe into a shell, an inline program, a
+# source of standard input or of a process substitution, env -S, and a word
+# of a command that holds a whole command line (script -c, su -c, watch,
+# tmux, busybox sh -c ...). Such code is refused when, with its quotes and
+# backslashes taken out, it names sync.sh or sync.pl with --to and --write,
+# a $ or a backquote standing for either (step 8's review, F5, F6, F16 to
+# F18, and its fresh check). A dry run, with or without --uninstall, passes
+# when its words are written out, and so does a project's own sync.sh, which
+# takes no --to. Known costs, refused though harmless: a dry run whose words
+# hold a variable, and a reading program whose code names sync with both
+# words; a single-quoted $ is not counted (A50 for words made at run time).
+our $SYNC_RE = qr/\Async\.(?:sh|pl)\z/i;
+my $RELEASE_NO = "the method's files and hooks: Claude never writes those, and an install, an update or an uninstall runs in a session where the project's hooks are off; run it without --write to show the owner its plan, and the owner runs it there (.claude/hooks/method/README.md says how)";
+# made_at_run WORD, RAW: WORD (RAW as written, when known) holds a $ or a
+# backquote outside single quotes
+sub made_at_run {
+  my ($w, $raw) = @_;
+  return ($w // '') =~ /[\$`]/ unless defined $raw;
+  (my $r = $raw) =~ s/'[^']*'//g;
+  return $r =~ /[\$`]/;
+}
+# code_runs_sync TEXT: TEXT, as code, names the release's sync with --to
+# and --write, a $ or a backquote standing for one of them (not both: code
+# with a $ and neither word, such as awk's '{print $1}', only reads)
+sub code_runs_sync {
+  my ($text) = @_;
+  (my $t = $text // '') =~ s/['"\\]//g;
+  return 0 unless $t =~ /sync\.(?:sh|pl)\b/i;
+  my $run = $t =~ /[\$`]/;
+  my $to = $t =~ /(?<![\w-])--to\b/;
+  my $wr = $t =~ /(?<![\w-])--write\b/;
+  return ($to && ($wr || $run)) || ($wr && $run);
+}
+# the programs that run another one given as words or as one command line
+# (the guard's %OPAQUE, which the reader does not follow), and the shells
+# busybox runs
+sub runs_line {
+  my ($n) = @_;
+  my %op = %Guard::OPAQUE ? %Guard::OPAQUE : map { $_ => 1 } qw(script watch su runuser tmux screen parallel busybox);
+  return $op{$n} || $n =~ /\A(?:sh|ash|bash|dash|ksh|mksh|zsh|env)\z/;
+}
+sub release_write {
+  my ($cmds) = @_;
+  my $code_no = "this call runs the method's sync with --write, or a word made when it runs, in code given to a shell or a program, which installs, updates or takes out $RELEASE_NO";
+  for my $c (@$cmds) {
+    my @w = @{ $c->{words} };
+    my @raw = @{ $c->{raw} || [] };
+    my $aligned = @raw == @w;
+    if (@w && !read_only($c)) {
+      for my $i (0 .. $#w) {
+        next unless name_of($w[$i]) =~ $SYNC_RE;
+        my @k = $i + 1 .. $#w;
+        my @run = grep { made_at_run($w[$_], $aligned ? $raw[$_] : undef) } @k;
+        next unless @run || grep { $w[$_] eq '--to' || $w[$_] =~ /\A--to=/ } @k;
+        return "this call runs the method's sync with --write, which installs, updates or takes out $RELEASE_NO" if grep { $w[$_] eq '--write' } @k;
+        return "this call runs the method's sync with a word made when it runs (a variable or a substitution), which could be --write; write the words out. An install, an update or an uninstall writes $RELEASE_NO"
+          if @run;
+      }
+      # (a word holding a whole command line, after a program that runs it:
+      # script -c, su -c, watch, tmux, busybox sh -c, parallel ...; a
+      # commit message that names the words is not code)
+      my ($from) = grep { runs_line(name_of($w[$_])) } 0 .. $#w;
+      if (defined $from) {
+        for my $i ($from + 1 .. $#w) {
+          return $code_no if $w[$i] =~ /\s/ && code_runs_sync($w[$i]);
+        }
+      }
+    }
+    # (code the reader keeps whole, given to a shell or a program: its text;
+    # a here-document to cat or git, which is text only, is not code)
+    next unless grep { /\A(?:an inline program for|a pipe, here-document or here-string into|a program for \S+ from) / || $_ eq 'source of a process substitution or stdin' || $_ eq 'env -S' } @{ $c->{unread} || [] };
+    return $code_no if code_runs_sync(join "\n", @w, $c->{hbody} // '', $c->{pipe_from} // '');
+  }
+  return undef;
+}
+
 sub judge_bash {
   my ($cmds, $dirs, $project) = @_;
+  if (defined(my $why = release_write($cmds))) { return ('G6', $why) }
   # most calls only read: nothing to look up
   return () unless writes($cmds);
   my $set = set($project);

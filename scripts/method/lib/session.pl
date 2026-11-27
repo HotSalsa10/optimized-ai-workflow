@@ -11,11 +11,12 @@
 #   session's model not the one the project's profile sets
 #   (claude-opus-5-5 with no lock; lib/lock.pl); the PowerShell tool not off on
 #   Windows; input that cannot be read; in the project's local settings, a
-#   key the method sets, disableAllHooks, skill shell lines on; in local
-#   and user settings ($CLAUDE_CONFIG_DIR's when that is set), an env
-#   variable, a PreToolUse or PermissionRequest hook (the method's are in
-#   the project's settings only), an enabled plugin, an effort cap below
-#   xhigh (also per model); in the project's settings, what a first
+#   key the method sets, disableAllHooks, skill shell lines on,
+#   claudeMdExcludes, a PreToolUse or PermissionRequest hook (the method's
+#   are in the project's settings only); in local and user settings
+#   ($CLAUDE_CONFIG_DIR's when that is set), an env variable, an enabled
+#   plugin, an effort cap below xhigh (also per model), the user file's
+#   line saying to tell the owner; in the project's settings, what a first
 #   install refuses unless it is kept by name (Lock::refused: a hook of the
 #   project's own on an event @Lock::KEEP_EVENTS names,
 #   claudeMdExcludes, enabledPlugins, a key that runs a
@@ -26,6 +27,12 @@
 #   have, the effort level by name.
 # It also writes G16's snapshot of the local and user settings when a
 # session starts (lib/watch.pl; step 5.9), never at clear, compact or fork.
+# Since step 8.4 (M164), before every other line, the user-level audit:
+# what the person's own Claude Code folder adds that can hide or replace
+# the method (a personal skill shadowing a method skill; claudeMdExcludes,
+# a method skill switched off, the instruction-files setting; hooks on the
+# events a first install refuses), each kind on a line of its own that
+# tells Claude to tell the owner what to do (audit_lines, below).
 # Since step 5b.2, one LOOK line names how many of the gates' receipts for
 # the files at HEAD do not say the first receipt word, and how many say
 # each other word (lib/receipt-read.pl; the words are verdicts.txt's).
@@ -84,6 +91,15 @@ sub read_settings {
   my ($d, $e) = Json::decode($text, 'plain');
   in_time();
   return (undef, 'is not JSON') if defined $e || ref $d ne 'HASH';
+  # (an integer too long for perl comes back from the plain reading as a
+  # string of digits, like a JSON string of digits: read again with big
+  # numbers, it is a number object, so is_text tells them apart; F23 and
+  # the fresh check. When that reading fails, the plain one stands)
+  if ($text =~ /[0-9]{19}/) {
+    my ($b, $be) = Json::decode($text);
+    in_time();
+    $d = $b if !defined $be && ref $b eq 'HASH';
+  }
   return ($d, undef);
 }
 
@@ -114,10 +130,11 @@ sub effort_caps {
 # what a settings file sets that weakens or overrides the method. Local
 # settings rank above the project's, so every key the method sets counts;
 # in user settings the project wins for those, so only what adds to a
-# session counts: env variables, hooks, plugins and effort caps. The method
-# registers its hooks in the project's settings only, so every PreToolUse
-# or PermissionRequest hook here is another's (a copy of the method's
-# would replace the project's, with its own fields)
+# session counts: env variables, plugins and effort caps (a user hook is
+# on the audit's own line, audit_lines). The method registers its hooks in
+# the project's settings only, so every PreToolUse or PermissionRequest
+# hook in local settings is another's (a copy of the method's would replace
+# the project's, with its own fields)
 sub weakens {
   my ($s, $user) = @_;
   my @what;
@@ -127,15 +144,18 @@ sub weakens {
     push @what, grep { exists $s->{$_} && !($skill_off && $_ eq 'disableSkillShellExecution') } @FRAGMENT_KEYS;
     push @what, 'disableAllHooks' if $s->{disableAllHooks};
     push @what, 'disableSkillShellExecution false' if $skill_off;
+    # (step 8.4: it keeps the method's rules out, F4)
+    push @what, 'claudeMdExcludes' if exists $s->{claudeMdExcludes};
   }
   # (a list is added to the project's, not replaced by it: a model listed
   # in user settings can be chosen in every session)
-  push @what, 'availableModels (lists add up across settings files)' if $user && exists $s->{availableModels};
+  push @what, 'availableModels (lists add up)' if $user && exists $s->{availableModels};
   if (ref $s->{env} eq 'HASH') {
     my @k = grep { !$user || !$FRAGMENT_ENV{$_} } keys %{ $s->{env} };
     push @what, 'env ' . env_names(@k) if @k;
   }
-  if (ref $s->{hooks} eq 'HASH') {
+  # (a user hook has the audit's own line, audit_lines, step 8.4)
+  if (!$user && ref $s->{hooks} eq 'HASH') {
     my $n = 0;
     for my $event (qw(PreToolUse PermissionRequest)) {
       next unless ref $s->{hooks}{$event} eq 'ARRAY';
@@ -148,10 +168,238 @@ sub weakens {
   }
   if (ref $s->{enabledPlugins} eq 'HASH') {
     my $n = grep { $s->{enabledPlugins}{$_} } keys %{ $s->{enabledPlugins} };
-    push @what, "$n enabled plugin" . ($n == 1 ? '' : 's') . ' (their hooks were not read)' if $n;
+    push @what, "$n enabled plugin" . ($n == 1 ? '' : 's') . ' (hooks not read)' if $n;
   }
   push @what, effort_caps($s);
   return @what;
+}
+
+# --- the user-level audit (M164; step 8.4, docs/plans/step8.md S9) ---
+# What the person's own Claude Code folder ($CLAUDE_CONFIG_DIR when that is
+# set, ~/.claude otherwise, as for settings) adds that can hide or replace
+# the method in every project: a personal skill named like a method- skill
+# the project has (it wins for a typed name and a Skill call, F5; skills/
+# synced/ is the client's own and is skipped, F27; personal commands lose
+# to the project's skill, F25; a folder counts only when it holds a
+# SKILL.md, the file the client reads); in user settings, claudeMdExcludes
+# (F4), a skillOverrides entry for one of the project's method- skills set
+# to anything but on or name-only (F6; the client's values are on,
+# name-only, which only drops the description, user-invocable-only and
+# off), the agents-md plugin's instruction files resolved to managed-only
+# (F9; its only value that drops the project's instruction files), and a
+# hook the client would run on an event a first install refuses
+# (@Lock::KEEP_EVENTS, F8). The plugin's settings key is its name or alias
+# with @builtin (pluginConfigs["cc-plugin-agents-md@builtin" or
+# "agents-md@builtin"].options, the part after @ in any letter case), and
+# its option resolves as instruction_files says (instructionFiles, or the
+# older projectInstructions, whose value none is managed-only): read from
+# the client's strings at 2.1.316 and 2.1.319, and both pinned by harness
+# cases (step 8.4). The lines
+# go to Claude's context, not to the owner's screen, and the folder is the
+# person's, which the guard stops Claude from changing (F13), so each line
+# says to tell the owner and what they do. Names only, through Esc::line,
+# each cut to $NAME_BYTES; each line within $LINE_BYTES, its names first,
+# a long list ending "and N more", what the owner does always whole; they
+# come before every other line, as a finding can also hide the text that
+# would pass a later line on.
+# (the events a first install refuses, when lib/lock.pl does not load)
+our @AUDIT_EVENTS = qw(PreToolUse PermissionRequest ConfigChange SessionStart SubagentStart SubagentStop UserPromptSubmit PostToolUse PostToolUseFailure PostToolBatch);
+our $AGENTS_MD_KEY = qr/\A(?:cc-plugin-)?agents-md\@builtin\z/i;
+our $KEEPS_OUT = 'managed-only';
+# the plugin's option as the client resolves it (its strings, the same at
+# both pins): instructionFiles is one of these, or else the default; the
+# older projectInstructions, when it is set and instructionFiles resolves
+# to the default, is read through its own values (any other: claude-md)
+our @IF_VALUES = qw(claude-md claude-md-or-agents-md claude-md-and-agents-md managed-only);
+our $IF_DEFAULT = 'claude-md-or-agents-md';
+our %PI_VALUES = (none => 'managed-only', claude => 'claude-md', 'agents-fallback' => 'claude-md-or-agents-md', both => 'claude-md-and-agents-md');
+# the skillOverrides values that leave a skill to the model and to /name
+our %SKILL_ON = map { ($_ => 1) } qw(on name-only);
+# the hook types the client runs, each with the string fields it needs; it
+# drops any other entry
+our %HOOK_TYPES = (command => ['command'], prompt => ['prompt'], agent => ['prompt'], http => ['url'], mcp_tool => ['server', 'tool']);
+our $NAME_BYTES = 40;
+my $TELL = 'tell the owner: ';
+my $BY_HAND = 'by hand (Claude cannot): give steps';
+
+# a name as a line shows it: as UTF-8 bytes, through Esc::line, a TAB
+# escaped too (Esc::line keeps one, as text may hold it; a name should
+# not), cut to $NAME_BYTES so one long name cannot crowd out the rest
+sub shown_name {
+  my $n = $_[0];
+  utf8::encode($n) if utf8::is_utf8($n);
+  $n = substr($n, 0, 4 * $NAME_BYTES) if length $n > 4 * $NAME_BYTES;
+  $n = Esc::line($n);
+  $n =~ s/([\x00-\x1F\x7F])/sprintf('\\x%02X', ord $1)/ge;
+  if (printed($n) > $NAME_BYTES) {
+    $n = substr($n, 0, $NAME_BYTES - 3);
+    $n = substr($n, 0, -1) while printed($n) > $NAME_BYTES - 3;
+    # (never half an escape: a cut \x0 would hide what the name holds)
+    $n =~ s/\\(?:x[0-9A-F]?|u(?:\{[0-9A-F]*)?)?\z//;
+    $n .= '...';
+  }
+  return $n;
+}
+
+# is_text VALUE: a JSON string (JSON::PP gives a number with no string
+# part, which the client does not take for text, and an integer too long
+# for perl as a number object, read_settings's second reading)
+sub is_text {
+  my ($v) = @_;
+  return 0 unless defined $v && !ref $v;
+  require B;
+  my $f = B::svref_2object(\$v)->FLAGS;
+  return ($f & B::SVp_POK()) || !($f & (B::SVp_IOK() | B::SVp_NOK())) ? 1 : 0;
+}
+
+# instruction_files OPTIONS: (the option the client acts on, its value as
+# written) when the agents-md plugin resolves OPTIONS to managed-only, the
+# one value that drops the project's instruction files; else ()
+sub instruction_files {
+  my ($o) = @_;
+  my $if = $o->{instructionFiles};
+  my $r = defined $if && !ref $if && grep({ $_ eq $if } @IF_VALUES) ? $if : $IF_DEFAULT;
+  if (exists $o->{projectInstructions} && defined $o->{projectInstructions} && $r eq $IF_DEFAULT) {
+    my $pi = $o->{projectInstructions};
+    my $p = !ref $pi && exists $PI_VALUES{$pi} ? $PI_VALUES{$pi} : 'claude-md';
+    return $p eq $KEEPS_OUT ? ('projectInstructions', $pi) : ();
+  }
+  return $r eq $KEEPS_OUT ? ('instructionFiles', $r) : ();
+}
+
+sub audit_events {
+  my $ok = eval { require File::Spec->catfile($lib, 'lock.pl'); 1 };
+  no warnings 'once';
+  return $ok && @Lock::KEEP_EVENTS ? @Lock::KEEP_EVENTS : @AUDIT_EVENTS;
+}
+
+# the person's folder, as (PATH, how a line names it), or ()
+sub user_dir {
+  return ($ENV{CLAUDE_CONFIG_DIR}, '$CLAUDE_CONFIG_DIR') if defined $ENV{CLAUDE_CONFIG_DIR} && $ENV{CLAUDE_CONFIG_DIR} ne '';
+  return (File::Spec->catfile($ENV{HOME}, '.claude'), '~/.claude') if defined $ENV{HOME} && $ENV{HOME} ne '';
+  return ();
+}
+
+# listed HEAD NAMES TAIL [SEP] [EXTRA]: one LOOK line, "tell the owner: "
+# HEAD, NAMES in their order as far as they fit, "and N more" for those
+# left out, EXTRA when it fits, then TAIL (what the owner does), never over
+# $LINE_BYTES and TAIL always whole. Each name is tried once, in order: one
+# that does not fit is left out and counted, and a shorter one after it
+# may still come (so a long item cannot hide the short ones), each try a
+# line of at most about $LINE_BYTES, so the work stays small whatever
+# their number. When the first name is left out, the most of it that fits
+# comes first, ending "...".
+sub listed {
+  my ($head, $names, $tail, $sep, $extra) = @_;
+  $sep = ', ' unless defined $sep;
+  $extra = '' unless defined $extra;
+  my $n = @$names;
+  my $fit = sub { printed(look("$TELL$head$_[0]$tail")) <= $LINE_BYTES };
+  my $more = sub { $_[0] ? " and $_[0] more" : '' };
+  my (@in, $out, $first_out);
+  $out = 0;
+  for my $i (0 .. $n - 1) {
+    in_time();
+    my $x = $names->[$i];
+    $x = substr($x, 0, $LINE_BYTES) if length $x > $LINE_BYTES;
+    if ($fit->(join($sep, @in, $x) . $more->($out + $n - $i - 1))) { push @in, $x; next }
+    $out++;
+    $first_out = 1 if $i == 0;
+  }
+  if ($first_out) {
+    my $c = substr($names->[0], 0, $LINE_BYTES);
+    $c = substr($c, 0, -1) while length $c && !$fit->(join($sep, "$c...", @in) . $more->($out - 1));
+    if (length $c) { unshift @in, "$c..."; $out-- }
+  }
+  my $list = join($sep, @in) . $more->($out);
+  $list .= $extra if $extra ne '' && $fit->("$list$extra");
+  return look("$TELL$head$list$tail");
+}
+
+sub audit_lines {
+  my ($project) = @_;
+  my ($dir, $shown) = user_dir();
+  return () unless defined $dir;
+  my @w;
+  # personal skills named like the project's method- skills
+  my %mine;
+  if (opendir my $d, File::Spec->catfile($project, '.claude', 'skills')) {
+    %mine = map { ($_ => 1) } grep { /\Amethod-/ } readdir $d;
+    closedir $d;
+  }
+  if (opendir my $d, File::Spec->catfile($dir, 'skills')) {
+    my @own;
+    while (defined(my $e = readdir $d)) {
+      next if $e eq '.' || $e eq '..' || $e eq 'synced' || $e !~ /\Amethod-/;
+      push @own, $e if -f File::Spec->catfile($dir, 'skills', $e, 'SKILL.md');
+      in_time() unless @own % 1000;
+    }
+    closedir $d;
+    # (method-start first: it is the skill that reports to the owner)
+    my @shadow = sort { ($b eq 'method-start') <=> ($a eq 'method-start') || $a cmp $b } grep { $mine{$_} } @own;
+    my $other = grep { !$mine{$_} } @own;
+    if (@shadow) {
+      my $one = @shadow == 1;
+      push @w, listed('personal skill' . ($one ? ' ' : 's '), [map { shown_name($_) } @shadow],
+        " in $shown/skills " . ($one ? 'runs' : 'run') . " in place of the project's; they remove or rename " . ($one ? 'it' : 'them') . " $BY_HAND",
+        undef, $other ? " (+$other other personal method-*, not named)" : undef);
+    }
+  }
+  in_time();
+  my ($s) = read_settings(File::Spec->catfile($dir, 'settings.json'));
+  return @w unless $s;
+  my $file = "$shown/settings.json";
+  # settings that keep the method's text out or switch a method skill off
+  # (the instruction files first: they drop CLAUDE.md, AGENTS.md and the
+  # method's rules at once)
+  my @out;
+  if (ref $s->{pluginConfigs} eq 'HASH') {
+    # (the client reads both keys and merges their options, agents-md@builtin
+    # first and cc-plugin-agents-md@builtin after it, the later one winning
+    # for each option, then resolves the result once; step 8's review, F7)
+    my (%merged, $any);
+    for my $key (sort { ($a =~ /\Acc-plugin-/i ? 1 : 0) <=> ($b =~ /\Acc-plugin-/i ? 1 : 0) || $a cmp $b } keys %{ $s->{pluginConfigs} }) {
+      next unless $key =~ $AGENTS_MD_KEY;
+      my $o = ref $s->{pluginConfigs}{$key} eq 'HASH' ? $s->{pluginConfigs}{$key}{options} : undef;
+      next unless ref $o eq 'HASH';
+      %merged = (%merged, %$o);
+      $any = 1;
+    }
+    if ($any) {
+      my ($opt, $v) = instruction_files(\%merged);
+      push @out, "agents-md $opt $v" if defined $opt;
+    }
+  }
+  push @out, 'claudeMdExcludes' if exists $s->{claudeMdExcludes};
+  if (ref $s->{skillOverrides} eq 'HASH') {
+    my $ov = $s->{skillOverrides};
+    # (only the project's own method- skills: an override for another
+    # skill changes nothing of the method, and its name is the person's)
+    # (a key is characters, a folder's name bytes: compared as UTF-8)
+    my $byte = sub { my $k = $_[0]; utf8::encode($k) if utf8::is_utf8($k); $k };
+    my @off = sort grep { $mine{ $byte->($_) } && !(defined $ov->{$_} && !ref $ov->{$_} && $SKILL_ON{ $ov->{$_} }) } keys %$ov;
+    push @out, map { 'skillOverrides ' . shown_name($_) } @off;
+  }
+  push @w, listed('', \@out, " in $file keep the method out; they remove " . (@out == 1 ? 'it' : 'them') . " $BY_HAND") if @out;
+  # hooks the client would run on the events a first install refuses
+  if (ref $s->{hooks} eq 'HASH') {
+    my @on;
+    for my $ev (audit_events()) {
+      next unless ref $s->{hooks}{$ev} eq 'ARRAY';
+      my $n = 0;
+      for my $g (@{ $s->{hooks}{$ev} }) {
+        next unless ref $g eq 'HASH' && ref $g->{hooks} eq 'ARRAY';
+        $n += grep {
+          my $e = $_;
+          ref $e eq 'HASH' && is_text($e->{type}) && $HOOK_TYPES{ $e->{type} }
+            && !grep { !is_text($e->{$_}) || $e->{$_} eq '' } @{ $HOOK_TYPES{ $e->{type} } }
+        } @{ $g->{hooks} };
+      }
+      push @on, "$ev ($n)" if $n;
+    }
+    push @w, listed('hooks on ', \@on, " in $file run beside the guard or reach every prompt; they remove or keep them $BY_HAND") if @on;
+  }
+  return @w;
 }
 
 sub warnings_for {
@@ -185,11 +433,14 @@ sub warnings_for {
   for my $f (@files) {
     my ($name, $path, $user) = @$f;
     my ($s, $e) = read_settings($path);
-    if (defined $e) { push @w, look("$name $e, so what it changes is not known"); next }
+    if (defined $e) { push @w, look($user ? "${TELL}$name $e, so what it changes is not known; they fix it $BY_HAND" : "$name $e, so what it changes is not known"); next }
     next unless $s;
     my @what = weakens($s, $user);
     next unless @what;
-    push @w, look($user ? "$name adds to every session: " . join('; ', @what) : "$name sets " . join('; ', @what) . "; it ranks above the method's settings");
+    # (the user's file is the person's to change, so the line says to tell
+    # them, as the audit's lines do, and keeps that whole; step 8.4)
+    push @w, $user ? listed("$name adds to every session: ", \@what, "; they change it $BY_HAND", '; ')
+      : look("$name sets " . join('; ', @what) . "; it ranks above the method's settings");
   }
   # the project's settings: what runs or loads beside the method that a
   # first install refuses unless kept by name (named, never its value)
@@ -293,6 +544,10 @@ sub main {
     # the hook; final review of step 5); a failure leaves none, and G16
     # then judges what the files hold
     eval { require File::Spec->catfile($lib, 'watch.pl'); Watch::snapshot($in, $project) };
+    in_time();
+    # (the user-level audit first: what it names can hide the text that
+    # would pass later lines on, and the caps drop lines from the end)
+    push @lines, audit_lines($project);
     in_time();
     push @lines, status_lines($top) unless ($ENV{METHOD_NESTED} // '') eq '1';
     in_time();
