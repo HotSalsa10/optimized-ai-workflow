@@ -210,6 +210,37 @@ if wanted "$n"; then
   if [ "$q" = 0 ]; then ok "$n"; else no "$n"; fi
 fi
 
+n="the plugin's two keys are merged as the client merges them, the later one winning for each option (review F7)"
+if wanted "$n"; then
+  q=0
+  # (merged, the old option's none decides: named; reversed: the files kept)
+  home
+  user '{"pluginConfigs":{"agents-md@builtin":{"options":{"instructionFiles":"claude-md","projectInstructions":"none"}},"cc-plugin-agents-md@builtin":{"options":{"instructionFiles":"claude-md-or-agents-md"}}}}'
+  hook "$pa"
+  says "agents-md projectInstructions none in ~/.claude/settings.json" || q=1
+  home
+  user '{"pluginConfigs":{"agents-md@builtin":{"options":{"instructionFiles":"managed-only"}},"cc-plugin-agents-md@builtin":{"options":{"instructionFiles":"claude-md"}}}}'
+  hook "$pa"
+  quiet || q=1
+  if [ "$q" = 0 ]; then ok "$n"; else no "$n"; fi
+fi
+
+n="a user settings file that cannot be read is named on a line that says to tell the owner (review F24)"
+if wanted "$n"; then
+  home
+  printf '{"env":' >"$HOME/.claude/settings.json"
+  hook "$pa"
+  if says "~/.claude/settings.json is not JSON, so what it changes is not known; they fix it $GIVE"; then ok "$n"; else no "$n"; fi
+fi
+
+n="a hook command that is an integer too long for perl is not text, and is not counted (review F23)"
+if wanted "$n"; then
+  home
+  user '{"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":123456789012345678901234567890}]}]}}'
+  hook "$pa"
+  if quiet; then ok "$n"; else no "$n"; fi
+fi
+
 n="a user UserPromptSubmit hook is named on its own line, with what to do, and a Stop hook is not"
 if wanted "$n"; then
   home
@@ -298,8 +329,8 @@ fi
 
 n="a name cut at 40 bytes never ends in half an escape"
 if wanted "$n"; then
-  out=$(LIBDIR="$root/method/scripts/method/lib" perl -e 'require "$ENV{LIBDIR}/session.pl"; for my $k (25 .. 40) { print Session::shown_name("method-" . ("a" x $k) . "\t\t\t\tz"), "\n" }')
-  if ! printf '%s\n' "$out" | grep -q -E '\\(x[0-9A-F]?)?\.\.\.$' && printf '%s\n' "$out" | grep -q '\.\.\.$'; then ok "$n"; else fail "$n" "$out"; fi
+  out=$(LIBDIR="$root/method/scripts/method/lib" perl -e 'require "$ENV{LIBDIR}/session.pl"; for my $k (20 .. 40) { print Session::shown_name("method-" . ("a" x $k) . "\t\t\t\tz"), "\n", Session::shown_name("method-" . ("a" x $k) . "\x{200B}\x{200B}\x{200B}z"), "\n" }')
+  if ! printf '%s\n' "$out" | grep -q -E '\\(x[0-9A-F]?|u(\{[0-9A-F]*)?)?\.\.\.$' && printf '%s\n' "$out" | grep -q '\.\.\.$'; then ok "$n"; else fail "$n" "$out"; fi
 fi
 
 n="a long shadowing name is cut, method-start is named first, and the line keeps what the owner does"

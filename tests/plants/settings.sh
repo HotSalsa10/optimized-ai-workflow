@@ -151,6 +151,10 @@ file_plant "a never-set key in a nested folder's committed settings" "sub/.claud
 file_plant "a registered script missing from the hooks folder" "missing: gate-receipt" 'rm method/.claude/hooks/method/gate-receipt.sh'
 file_plant "a gate in verdicts.txt that the fragment does not run gate-receipt for" "FAIL  the fragment runs gate-receipt.sh on SubagentStart for ^(method-reviewer|method-security-checker|method-reporter|method-diagnose|method-tester|method-planner)$" 'printf "gate-verdict\tmethod-planner\tthe planner; its report opens with a verdict word\n" >>method/scripts/method/verdicts.txt'
 file_plant "a never-set env variable in lower case in this repo's settings" "it sets env.claude_code_effort_level" 'perl -MJSON::PP -i -0pe "my \$d = decode_json(\$_); \$d->{env}{claude_code_effort_level} = q(low); \$_ = JSON::PP->new->canonical->pretty->encode(\$d)" .claude/settings.json && git add .claude/settings.json'
+# (step 8.1's branch: the release installed at the root, its fragment not
+# JSON, so the comparison is named as failed, not made with method/'s;
+# step 8's review, F30)
+file_plant "the installed release's fragment not JSON" "scripts/method/settings.method.json: " 'printf "{\n" >scripts/method/settings.method.json'
 # profile_plant NAME REASON CODE (step 7.3): perl CODE, a substitution on
 # each line ($_) of method/scripts/method/profiles.tsv, in a fresh copy,
 # must change a line; the settings test must then go red with REASON

@@ -560,6 +560,32 @@ for form in agents-md:builtin:instructionFiles:managed-only:out cc-plugin-agents
     fail "instruction-files-$n_if: the fake did not answer; the client was not started"
   fi
 done
+# (step 8's review, F7) the plugin's two keys at once: the client merges
+# their options, agents-md@builtin first and cc-plugin-agents-md@builtin
+# after it, the later winning for each option, and resolves the result
+# once; here the first key's older option at none and the second key's
+# instructionFiles at its default resolve to managed-only, so CLAUDE.md is
+# kept out, and the audit names it
+h_case instruction-files-merged
+h_method "$root"
+printf '%s\n' 'INSTRUCTION-MARK-84 from the project CLAUDE.md' '@AGENTS.md' >"$H_PROJ/CLAUDE.md"
+mkdir -p "$H_DIR/home/.claude"
+a1="agents-md@builtin"
+a2="cc-plugin-agents-md@builtin"
+printf '{"pluginConfigs":{"%s":{"options":{"instructionFiles":"claude-md","projectInstructions":"none"}},"%s":{"options":{"instructionFiles":"claude-md-or-agents-md"}}}}\n' "$a1" "$a2" >"$H_DIR/home/.claude/settings.json"
+if h_fake "$H_WORK/ss.json"; then
+  # shellcheck disable=SC2086
+  h_client 60 -- $D
+  h_stop
+  if h_req_has "METHOD-ACTIVE $H_TAG" && ! h_req_has 'INSTRUCTION-MARK-84' && h_req_has 'tell the owner: agents-md projectInstructions none'; then
+    pass "instruction files: the plugin's two keys are merged, the later winning per option, and the result (managed-only) keeps CLAUDE.md out, and the audit names it"
+  else
+    fail "instruction files: the plugin's two keys are merged, the later winning per option, and the result (managed-only) keeps CLAUDE.md out, and the audit names it" "$(LC_ALL=C grep -h -o 'INSTRUCTION-MARK-84\|tell the owner: agents-md[^"]\{0,40\}' "$H_DIR"/fake/req-*.json | sort -u | head -3)"
+  fi
+  h_safe instruction-files-merged
+else
+  fail "instruction-files-merged: the fake did not answer; the client was not started"
+fi
 
 # --- 12. the guard (step 5.5) ---
 g0='echo $(git rev-parse HEAD) > refused-ran.txt'

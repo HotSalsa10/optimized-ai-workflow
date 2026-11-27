@@ -639,35 +639,45 @@ sub call_writes {
 }
 
 # release_write CMDS: the refusal's text when a command in CMDS runs the
-# release's sync (sync.sh, or lib/sync.pl through perl) with --write, else
-# undef. An install, an update or an uninstall writes the method's files and
+# release's sync (sync.sh, or its lib/sync.pl) with --write, else undef.
+# An install, an update or an uninstall writes the method's files and
 # hooks, which Claude never writes (M132), and runs where the project's
-# hooks are off (step 8.2; docs/plans/step8.md S7; A78 (16)). A dry run,
-# with or without --uninstall, passes, and so does a command that only
-# names the words (grep -- --write sync.sh). Carriers (nohup, env, bash -c
-# and the like) give commands of their own in CMDS (lib/shell.pl).
+# hooks are off (step 8.2; docs/plans/step8.md S7; A78 (16)). The release's
+# sync always takes --to, so a run is a command, not on the read-only list,
+# with a word naming sync.sh or sync.pl (in any letter case where the file
+# system folds case) followed by --to: whatever runs it (an interpreter and
+# its options, a carrier, flock or xargs), it is refused when a later word
+# is --write or is made at run time (a variable or a substitution, which
+# could be --write); and code the reader does not split into commands (a
+# here-document, a here-string or a pipe into a shell, an inline program)
+# is refused when its text names sync.sh or sync.pl with --to and --write
+# (step 8's review, F5, F6, F16, F17, F18). A dry run, with or without
+# --uninstall, passes, and so do a command that only names the words
+# (grep -- --write sync.sh) and a project's own sync.sh, which takes no --to.
+our $SYNC_RE = qr/\Async\.(?:sh|pl)\z/;
+my $RELEASE_NO = "the method's files and hooks: Claude never writes those, and an install, an update or an uninstall runs in a session where the project's hooks are off; run it without --write to show the owner its plan, and the owner runs it there (.claude/hooks/method/README.md says how)";
 sub release_write {
   my ($cmds) = @_;
   for my $c (@$cmds) {
     my @w = @{ $c->{words} };
-    next unless @w;
-    my $n = name_of($w[0]);
-    my ($i, $also) = (0, 'sync.sh');
-    if ($n =~ /\A(?:bash|sh|dash|zsh|ksh|source|\.|perl)\z/) {
-      $also = 'sync.pl' if $n eq 'perl';
-      # (the interpreter's own options, -o and -O with their value)
-      $i = 1;
-      while ($i <= $#w && $w[$i] =~ /\A[-+]./ && $w[$i] ne '--') {
-        $i++ if $w[$i] =~ /\A[-+][oO]\z/;
-        $i++;
+    if (@w && !read_only($c)) {
+      for my $i (0 .. $#w) {
+        my $s = name_of($w[$i]);
+        $s = lc $s if $FOLD;
+        next unless $s =~ $SYNC_RE;
+        my @after = @w[$i + 1 .. $#w];
+        next unless grep { $_ eq '--to' || /\A--to=/ } @after;
+        return "this call runs the method's sync with --write, which installs, updates or takes out $RELEASE_NO" if grep { $_ eq '--write' } @after;
+        return "this call runs the method's sync with a word made when it runs (a variable or a substitution), which could be --write; write the words out. An install, an update or an uninstall writes $RELEASE_NO"
+          if grep { /[\$`]/ } @after;
       }
-      $i++ if $i <= $#w && $w[$i] eq '--';
     }
-    next unless $i <= $#w;
-    my $s = name_of($w[$i]);
-    next unless $s eq 'sync.sh' || $s eq $also;
-    next unless grep { $_ eq '--write' } @w[$i + 1 .. $#w];
-    return "this call runs the method's sync with --write, which installs, updates or takes out the method's files and hooks: Claude never writes those, and an install, an update or an uninstall runs in a session where the project's hooks are off; run it without --write to show the owner its plan, and the owner runs it there (.claude/hooks/method/README.md says how)";
+    # (code the reader keeps whole, given to a shell or a program: its text;
+    # a here-document to cat or git, which is text only, is not code)
+    next unless grep { /\A(?:an inline program for|a pipe, here-document or here-string into|a program for \S+ from) / } @{ $c->{unread} || [] };
+    my $code = join "\n", @w, $c->{hbody} // '', $c->{pipe_from} // '';
+    return "this call runs the method's sync with --write in code given to a shell or a program, which installs, updates or takes out $RELEASE_NO"
+      if $code =~ /sync\.(?:sh|pl)\b/i && $code =~ /(?<![\w-])--write\b/ && $code =~ /(?<![\w-])--to\b/;
   }
   return undef;
 }

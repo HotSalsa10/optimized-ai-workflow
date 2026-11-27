@@ -68,10 +68,11 @@ while read -r f; do
     *) bin="$work/m/method" ;;
   esac
   # each library the script names, planted in the folder it is run from
-  rm -rf "$work/evil/lib" && mkdir -p "$work/evil/lib"
+  rm -rf "$work/evil/lib" "$work/evil/ci" && mkdir -p "$work/evil/lib" "$work/evil/ci/lib"
   grep -o 'lib/[A-Za-z0-9_-]*\.pl' "$f" | sort -u >"$work/libs.txt"
   while read -r lib; do
     printf 'open my $h, ">>", "%s" or die; print $h "%s ran %s\\n"; exit 0;\n' "$mark" "$name" "$lib" >"$work/evil/$lib"
+    cp "$work/evil/$lib" "$work/evil/ci/$lib"
   done <"$work/libs.txt"
   # (a file named bash, as $0 is when the script is sourced or read from
   # standard input, and one named x\NAME)
@@ -79,7 +80,7 @@ while read -r f; do
   rm -f "$work/evil/x\\"*
   cp "$bin/$name" "$work/evil/x\\$name"
   rm -f "$mark"
-  for how in "bash" "bash --posix" "sourced" "standard input" "backslash" "sourced, \$0 chosen" "standard input, \$0 chosen" "sourced, \$0 with a newline"; do
+  for how in "bash" "bash --posix" "sourced" "standard input" "backslash" "sourced, \$0 chosen" "standard input, \$0 chosen" "sourced, \$0 with a newline" "sourced from a script elsewhere" "standard input, \$0 with a /"; do
     n="$name started by a bare name found on PATH is refused ($how), and the planted lib never runs"
     wanted "$n" || continue
     # (a $0 the caller chose: the script's own name, with a decoy file of
@@ -102,6 +103,15 @@ while read -r f; do
       "sourced, \$0 with a newline")
         nl_name=$(printf 'x\n%s: a forged last line' "$name")
         out=$(cd "$work/evil" && PATH="$bin:$PATH" bash -c ". $name --no-such-option" "$nl_name" </dev/null 2>&1)
+        ;;
+      # (a $0 with a /: sourced from a script at ci/run.sh, whose ci/lib/
+      # holds the planted copies, or read from standard input as ./x;
+      # step 8's review, F20)
+      "sourced from a script elsewhere")
+        out=$(cd "$work/evil" && PATH="$bin:$PATH" bash -c ". $name --no-such-option" ci/run.sh </dev/null 2>&1)
+        ;;
+      "standard input, \$0 with a /")
+        out=$(cd "$work/evil" && bash -c "exec -a ./x bash -s -- --no-such-option" <"$bin/$name" 2>&1)
         ;;
       *) out=$(cd "$work/evil" && PATH="$bin:$PATH" $how "$name" --no-such-option </dev/null 2>&1) ;;
     esac
@@ -133,6 +143,23 @@ while read -r f; do
     fi
     rm -f "$mark"
   done
+  # (a shell without arrays, dash, from its own folder: the file still
+  # parses, and the start is refused with the one line, not a parse error;
+  # step 8's review, F21)
+  n="$name started by dash from its own folder is refused with its line, not a parse error"
+  if wanted "$n"; then
+    if command -v dash >/dev/null 2>&1; then
+      out=$(cd "$bin" && dash "$name" --no-such-option </dev/null 2>&1)
+      code=$?
+      if [ "$code" -eq 2 ] && [ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" = 1 ] && case "$out" in *"$name was started by a bare name found on PATH, or not as a file of its own"*) true ;; *) false ;; esac; then
+        pass "$n"
+      else
+        fail "$n" "exit $code; $(printf '%s\n' "$out" | head -3)"
+      fi
+    else
+      skip "$n" "dash is not installed here"
+    fi
+  fi
 done <"$work/found.txt"
 
 cd "$here" || true

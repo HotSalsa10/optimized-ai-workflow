@@ -444,12 +444,26 @@ for c in "bash $work/clone/scripts/release/sync.sh --to . --uninstall --write" "
   "bash $work/clone/scripts/release/sync.sh --to . --write --profile budget --keep PreToolUse" "$work/clone/scripts/release/sync.sh --write --to ." \
   "cd $work/clone && ./scripts/release/sync.sh --to $proj --uninstall --write" "nohup bash $work/clone/scripts/release/sync.sh --to . --write" \
   "bash -c 'bash $work/clone/scripts/release/sync.sh --to . --uninstall --write'" "env A=1 bash -x -o posix $work/clone/scripts/release/sync.sh --to . --write" \
-  "timeout 60 perl $work/clone/scripts/release/lib/sync.pl $work/clone --to . --uninstall --write" "sh -- sync.sh --to . --write"; do
+  "timeout 60 perl $work/clone/scripts/release/lib/sync.pl $work/clone --to . --uninstall --write" "sh -- sync.sh --to . --write" \
+  "bash -euo pipefail $work/clone/scripts/release/sync.sh --to . --write" "bash --rcfile /dev/null $work/clone/scripts/release/sync.sh --to . --write" \
+  "perl -I $work/clone/scripts/release/lib $work/clone/scripts/release/lib/sync.pl $work/clone --to . --write" \
+  "flock /tmp/sync.lock bash $work/clone/scripts/release/sync.sh --to . --write" "mksh $work/clone/scripts/release/sync.sh --to . --write" \
+  "perl5.38 $work/clone/scripts/release/lib/sync.pl $work/clone --to . --write" \
+  "W=--write; bash $work/clone/scripts/release/sync.sh --to . \$W" "for x in --write; do bash $work/clone/scripts/release/sync.sh --to . \$x; done" \
+  "bash $work/clone/scripts/release/sync.sh --to . \"\$(printf %s --write)\"" \
+  "bash <<'EOF'
+bash $work/clone/scripts/release/sync.sh --to . --write
+EOF" "bash <<<\"bash $work/clone/scripts/release/sync.sh --to . --write\"" "echo \"bash $work/clone/scripts/release/sync.sh --to . --write\" | bash" \
+  "perl -e 'system qw(bash $work/clone/scripts/release/sync.sh --to . --write)'"; do
   judge "sync with --write is refused: $c" "$proj" "$c" G6
 done
 for c in "bash $work/clone/scripts/release/sync.sh --to . --uninstall" "bash $work/clone/scripts/release/sync.sh --to ." \
   "bash $work/clone/scripts/release/sync.sh --to . --profile budget --keep PreToolUse" "grep -- --write $work/clone/scripts/release/sync.sh" \
-  "grep -n -e --uninstall -e --write $work/clone/scripts/release/lib/sync.pl" "echo sync.sh --write" "bash $work/clone/scripts/release/other.sh --write"; do
+  "grep -n -e --uninstall -e --write $work/clone/scripts/release/lib/sync.pl" "echo sync.sh --write" "bash $work/clone/scripts/release/other.sh --write" \
+  "bash tools/sync.sh --write" "perl bin/sync.pl --write" "echo bash sync.sh --to . --write" \
+  "cat <<'EOF' > notes.txt
+run bash scripts/release/sync.sh --to PROJECT --write where the hooks are off
+EOF" "git log --grep 'sync.sh --to . --write' --oneline"; do
   judge "not a sync run with --write passes: $c" "$proj" "$c" allow
 done
 # --- speed ---

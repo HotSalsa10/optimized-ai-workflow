@@ -185,17 +185,31 @@ command -v perl >/dev/null 2>&1 || {
 # with no / (a name found on PATH, a sourced or piped script, a $0 the
 # caller chose, a path written with backslashes) is refused, and the line
 # does not repeat $0 (M163; step 8.3, docs/plans/step8.md S8)
+# (bash's BASH_SOURCE, read through eval only under bash, so a shell
+# without arrays still parses this file and is refused below)
+self_src=
+[ -z "${BASH_VERSION-}" ] || eval 'self_src=${BASH_SOURCE[0]-}'
+self_ok=
 case "$0" in
-  */*) here=${0%/*} ;;
+  */*)
+    # (a $0 with a / counts only when, under bash, it is the file bash
+    # opened: sourced from a script elsewhere, $0 is that script's path)
+    if [ -z "${BASH_VERSION-}" ] || [ "$self_src" = "$0" ]; then
+      here=${0%/*}
+      self_ok=1
+    fi
+    ;;
   *)
-    if [ "$0" = done-check.sh ] && [ "${BASH_SOURCE[0]-}" = done-check.sh ] && [ -f ./done-check.sh ]; then
+    if [ "$0" = done-check.sh ] && [ "$self_src" = done-check.sh ] && [ -f ./done-check.sh ]; then
       here=.
-    else
-      printf '%s\n' "done-check: NOT READY - could not check: done-check.sh was started by a bare name found on PATH, or not as a file of its own; run it by its path, such as bash path/to/done-check.sh"
-      exit 2
+      self_ok=1
     fi
     ;;
 esac
+if [ -z "$self_ok" ]; then
+  printf '%s\n' "done-check: NOT READY - could not check: done-check.sh was started by a bare name found on PATH, or not as a file of its own; run it by its path, such as bash path/to/done-check.sh"
+  exit 2
+fi
 if [ ! -f "$here/lib/done.pl" ]; then
   echo "done-check: NOT READY - could not check: lib/done.pl is not next to done-check.sh"
   exit 2

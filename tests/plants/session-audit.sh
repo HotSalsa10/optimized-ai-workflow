@@ -135,7 +135,7 @@ my $TELL = '';
 ---
   1;
 === a cut name ending in half an escape | method/scripts/method/lib/session.pl | a name cut at 40 bytes never ends in half an escape
-    $n =~ s/\\(?:x[0-9A-F]?)?\z//;
+    $n =~ s/\\(?:x[0-9A-F]?|u(?:\{[0-9A-F]*)?)?\z//;
 ---
     1;
 === every name kept, so the line runs past the cut | method/scripts/method/lib/session.pl | thousands of skillOverrides entries end in time
@@ -181,6 +181,22 @@ my $TELL = '';
   if (!$user && ref $s->{hooks} eq 'HASH') {
 ---
   if (ref $s->{hooks} eq 'HASH') {
+=== a cut name ending in half of a \u{...} escape | method/scripts/method/lib/session.pl | a name cut at 40 bytes never ends in half an escape
+    $n =~ s/\\(?:x[0-9A-F]?|u(?:\{[0-9A-F]*)?)?\z//;
+---
+    $n =~ s/\\(?:x[0-9A-F]?)?\z//;
+=== the plugin's two keys resolved one by one, not merged | method/scripts/method/lib/session.pl | the plugin's two keys are merged as the client merges them
+      %merged = (%merged, %$o);
+---
+      %merged = %$o;
+=== an integer too long for perl taken for text | method/scripts/method/lib/session.pl | a hook command that is an integer too long for perl is not text
+  return 0 if $v =~ /\A-?[0-9]{19,}\z/;
+---
+  1;
+=== a user settings file that cannot be read named without telling the owner | method/scripts/method/lib/session.pl | a user settings file that cannot be read is named on a line that says to tell the owner
+    if (defined $e) { push @w, look($user ? "${TELL}$name $e, so what it changes is not known; they fix it $BY_HAND" : "$name $e, so what it changes is not known"); next }
+---
+    if (defined $e) { push @w, look("$name $e, so what it changes is not known"); next }
 PLANTS-END
 plant_data "$work/plants.txt" tests/session-audit.test.sh only
 drop_sandbox "$work" || true

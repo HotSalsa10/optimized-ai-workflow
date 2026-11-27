@@ -1411,5 +1411,14 @@ if expect_landed "self-install plant 3" grep -q '# planted$' "$sb/scripts/method
 fi
 drop_sandbox "$sb"
 
+# 89. the root lock gone: the method is named as not installed here (step
+#     8's review, F30)
+sb=$(make_sandbox) || abort_sandbox
+rm -f "$sb/scripts/method/method.lock"
+if expect_landed "self-install plant 4" test ! -e "$sb/scripts/method/method.lock"; then
+  expect_red "self-install red with no root method.lock" "$sb" "self-install: FAIL - the method is not installed at the root (scripts/method/method.lock is missing)" bash scripts/dev/validate.sh
+fi
+drop_sandbox "$sb"
+
 echo "plants: repo checks: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]

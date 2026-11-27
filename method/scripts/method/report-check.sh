@@ -97,17 +97,31 @@ command -v perl >/dev/null 2>&1 || {
 # PATH (or sourced, or piped), the current folder is not this script's and
 # its lib/ could be the project's own, so it refuses (M163; step 8.3,
 # docs/plans/step8.md S8)
+# (bash's BASH_SOURCE, read through eval only under bash, so a shell
+# without arrays still parses this file and is refused below)
+self_src=
+[ -z "${BASH_VERSION-}" ] || eval 'self_src=${BASH_SOURCE[0]-}'
+self_ok=
 case "$0" in
-  */*) here=${0%/*} ;;
+  */*)
+    # (a $0 with a / counts only when, under bash, it is the file bash
+    # opened: sourced from a script elsewhere, $0 is that script's path)
+    if [ -z "${BASH_VERSION-}" ] || [ "$self_src" = "$0" ]; then
+      here=${0%/*}
+      self_ok=1
+    fi
+    ;;
   *)
-    if [ "$0" = report-check.sh ] && [ "${BASH_SOURCE[0]-}" = report-check.sh ] && [ -f ./report-check.sh ]; then
+    if [ "$0" = report-check.sh ] && [ "$self_src" = report-check.sh ] && [ -f ./report-check.sh ]; then
       here=.
-    else
-      printf '%s\n' "report-check: FAIL - could not check: report-check.sh was started by a bare name found on PATH, or not as a file of its own; run it by its path, such as bash path/to/report-check.sh"
-      exit 2
+      self_ok=1
     fi
     ;;
 esac
+if [ -z "$self_ok" ]; then
+  printf '%s\n' "report-check: FAIL - could not check: report-check.sh was started by a bare name found on PATH, or not as a file of its own; run it by its path, such as bash path/to/report-check.sh"
+  exit 2
+fi
 if [ ! -f "$here/lib/report.pl" ]; then
   echo "report-check: FAIL - could not check: lib/report.pl is not next to report-check.sh"
   exit 2

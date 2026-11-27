@@ -78,12 +78,20 @@ use warnings;
 use Cwd ();
 use Fcntl qw(O_WRONLY O_CREAT O_EXCL);
 use File::Basename qw(dirname basename);
+use File::Path ();
 use File::Spec;
 
 our ($OPEN, $CLOSE) = ('# >>> method', '# <<< method');
 our @BLOCK_FILES = ('.gitattributes', '.gitignore');
 our $LOCAL = '.method/local';
 our $SYNC_MARKER = '.method/local/sync-in-progress';
+# copies of the two files the method's keys are read from, written before
+# the first write and removed after the lock, so a re-run of a cut-off run
+# can still tell the method's keys once the installed ones are gone, and a
+# missing installed file with no copy is a removal by hand (step 8.5's
+# repair, review F1 and F2)
+our %SAVED = ($Lock::FRAGMENT => '.method/local/uninstall-settings.method.json', $Lock::PROFILES => '.method/local/uninstall-profiles.tsv');
+our $LOCAL_OWN = '.claude/method-local';
 # files a system makes in any folder it shows (macOS, Windows)
 our %SYSTEM_FILES = map { ($_ => 1) } qw(.DS_Store Thumbs.db desktop.ini);
 # what marks a file that mentions the method
@@ -212,27 +220,49 @@ sub run {
   my %lastset = map { ($_ => 1) } @last;
   @last = grep { $lastset{$_} } $Lock::PROFILES, $Lock::FRAGMENT;
 
-  # --- the method's keys: from the installed fragment and profile, checked
-  # against the lock ---
-  my ($k, $frag);
-  my @kmissing = grep { !$on{$_} } sort keys %$kfiles;
-  if (!@kmissing) {
-    if (!grep { $kfiles->{ $_->[1] } } @conflicts) {
-      my ($kk, $ke) = Lock::expected($proj, $lock->{profile});
-      if ($ke) { $conflict->($Lock::FRAGMENT, "the method's keys cannot be worked out: $ke") }
-      elsif (Lock::k_hash($kk) ne $lock->{settings}) { $conflict->($Lock::LOCK, "its settings line does not match $Lock::FRAGMENT and the profile $lock->{profile}; put back the method's copies") }
-      else { $k = $kk; ($frag) = Lock::read_json(abs_path($Lock::FRAGMENT), $Lock::FRAGMENT) }
+  # --- the method's keys: from the installed fragment and profile, or from
+  # the copies an earlier run of this uninstall saved, each checked against
+  # the lock's hash, and their keys against its settings line ---
+  my ($k, $frag, %ktext);
+  my $saved_used;
+  for my $path (sort keys %$kfiles) {
+    next if grep { $_->[1] eq $path } @conflicts;
+    my $src = $on{$path} ? $path : $SAVED{$path};
+    if (!$on{$path}) {
+      my $c = abs_path($SAVED{$path});
+      if (-l $c || !-f $c || (Lock::sha_file($c) // '') ne ($listed{$path} // '')) {
+        $conflict->($path, "it is missing, so the method's keys in $Lock::SETTINGS cannot be told: put back the release's copy");
+        next;
+      }
+      $saved_used = 1;
     }
-  } else {
-    # an earlier run took out the settings and the method's files (the
-    # fragment and profiles.tsv go last); anything else means a file the
-    # method's keys are read from was removed by hand
-    my @left = grep { $on{$_} && !$kfiles->{$_} } sort keys %listed;
-    my $hooks_left = @{ Lock::method_hooks(read_settings()) };
-    if (@left || $hooks_left) {
-      $conflict->($_, "it is missing, so the method's keys in $Lock::SETTINGS cannot be told: put back the release's copy") for @kmissing;
-    } else {
-      push @notes, "an earlier uninstall took out the method's settings and files; this run finishes it";
+    my ($t, $te) = Lock::read_text(abs_path($src), $src);
+    if ($te) { $conflict->($path, "$te: put back the release's copy"); next }
+    $ktext{$path} = $t;
+  }
+  if (keys %ktext == 2) {
+    my ($f, $fe) = Json::decode($ktext{$Lock::FRAGMENT}, 'plain');
+    my ($kk, $ke) = defined $fe || ref $f ne 'HASH' ? (undef, "$Lock::FRAGMENT is not a JSON object") : Lock::expected_from($f, $ktext{$Lock::PROFILES}, $lock->{profile});
+    if ($ke) { $conflict->($Lock::FRAGMENT, "the method's keys cannot be worked out: $ke; put back the release's copy") }
+    elsif (Lock::k_hash($kk) ne $lock->{settings}) { $conflict->($Lock::LOCK, "its settings line does not match $Lock::FRAGMENT and the profile $lock->{profile}; put back the method's copies") }
+    else { ($k, $frag) = ($kk, $f) }
+  }
+  push @notes, "an earlier uninstall was cut off after the method's settings files went; this run finishes it, from the copies it saved in $LOCAL" if $saved_used;
+  # (--keep names only what the uninstall would otherwise remove: a method
+  # key, or a file under the method's paths other than the lock and the two
+  # files its keys are read from)
+  if ($k) {
+    my %onpath = map { ($_ => 1) } @$disk;
+    for my $key (sort keys %keep_key) {
+      (my $pk = $key) =~ s/\Apermissions\.//;
+      next if $key =~ /\Apermissions\./ ? exists $k->{permissions}{$pk} : exists $k->{keys}{$key};
+      say_line('usage - --keep ' . Esc::line($key) . ' is not one of the method\'s keys, so there is nothing to keep (' . join(' ', sort(keys %{ $k->{keys} }), map {"permissions.$_"} sort keys %{ $k->{permissions} }) . ')');
+      exit 2;
+    }
+    for my $path (sort keys %keep_path) {
+      next if !$kfiles->{$path} && $path ne $Lock::LOCK && (exists $listed{$path} || $onpath{$path});
+      say_line('usage - --keep ' . Esc::line($path) . ($kfiles->{$path} || $path eq $Lock::LOCK ? ' cannot be kept: uninstall reads the method\'s keys and files from it' : ' names no file of the method\'s in this project'));
+      exit 2;
     }
   }
 
@@ -242,7 +272,8 @@ sub run {
   if (defined $lp_link) { $conflict->($LOCAL, 'a link on its path (' . Esc::line($lp_link) . '): replace the link with a plain file or remove it') }
   elsif (-d abs_path($LOCAL)) {
     opendir my $dh, abs_path($LOCAL) or refuse_now("cannot read the folder $LOCAL");
-    my @in = grep { $_ ne '.' && $_ ne '..' && !/\A\.gitignore\Q$SUFFIX\E[0-9]+\z/ } readdir $dh;
+    my %ours = map { (basename($_) => 1) } values %SAVED;
+    my @in = grep { $_ ne '.' && $_ ne '..' && !$ours{$_} && !/\Q$SUFFIX\E[0-9]+\z/ } readdir $dh;
     closedir $dh;
     if (!@in) { $local_empty = 1 }
     else {
@@ -295,6 +326,7 @@ sub run {
             push @notes, "$Lock::SETTINGS is kept, holding only " . ($empty && %$s ? '$schema' : 'nothing') . ': with no before commit, whether the project had it cannot be told' if $empty && !defined $before;
           }
         }
+        push @keeps, [$Lock::SETTINGS, "the project's own: " . join('; ', @{ $r->{own} })] if @{ $r->{own} } && !$set_remove;
       }
     }
   }
@@ -306,7 +338,7 @@ sub run {
     my $p = abs_path($file);
     next unless -e $p;
     my ($t, $te) = Lock::read_text($p, $file);
-    if ($te) { $conflict->($file, $te); next }
+    if ($te) { $conflict->($file, "$te: replace it with a plain file or remove it"); next }
     my $bom = $t =~ s/\A\xEF\xBB\xBF// ? "\xEF\xBB\xBF" : '';
     my @lines = split /(?<=\n)/, $t;
     my @open = grep { $lines[$_] =~ /\A\Q$OPEN\E\r?\n?\z/ } 0 .. $#lines;
@@ -324,6 +356,15 @@ sub run {
       # (the newline sync put before a block it added at the end)
       $new =~ s/\n\z// if $at_end && $bt ne '' && $bt !~ /\n\z/ && $new =~ /\n\z/;
     }
+    # (the .gitignore block ignores .claude/settings.local.json; once it goes,
+    # a local settings file that is there may be committed: say so, as it
+    # may hold tokens or a hooks-off switch; review F14)
+    # (by the common forms of a line that ignores it; another form only
+    # brings this note when it is not needed)
+    my $still = grep { /\A\s*\/?(?:\.claude\/)?(?:settings\.local\.json|\*\.local\.json|\*\.json)\s*\z|\A\s*\/?\.claude\/?\**\s*\z/ } split /\n/, $new;
+    if ($file eq '.gitignore' && -e abs_path('.claude/settings.local.json') && !$still) {
+      push @keeps, ['.claude/settings.local.json', 'git no longer ignores it once the method\'s .gitignore block goes: delete it, or add it to .gitignore, before a commit picks it up'];
+    }
     if ($new eq '' && defined $before && !$bhas) {
       $block_out{$file} = undef;
       push @s4, ['remove', $file, 'the method block was all it held, and the before commit lacks it'];
@@ -336,7 +377,7 @@ sub run {
 
   # --- what a cut-off run left: TARGET.uninstall-<digits> ---
   my @leftovers;
-  for my $t ($Lock::SETTINGS, "$LOCAL/.gitignore", @BLOCK_FILES) {
+  for my $t ($Lock::SETTINGS, "$LOCAL/.gitignore", @BLOCK_FILES, values %SAVED) {
     my ($dir, $base) = $t =~ m{\A(?:(.*)/)?([^/]+)\z};
     next if defined link_on_way($t);
     opendir my $dh, abs_path(defined $dir ? $dir : '.') or next;
@@ -351,12 +392,22 @@ sub run {
 
   # --- what stays: setup's files, the run state in git's folder ---
   for my $f (setup_files([keys %listed])) { push @keeps, [$f, 'it mentions the method: remove or edit it with Claude on the same branch'] }
-  my ($gst, $gdir) = Git::run('rev-parse', '--absolute-git-dir');
-  if (!$gst && $gdir =~ s/\n\z// && opendir my $gh, $gdir) {
-    my @m = sort grep { /\Amethod-/ } readdir $gh;
+  # (in git's own folder and, from a linked worktree, its common one, where
+  # the receipts and snapshots are; review F11)
+  my %gm;
+  for my $q (['--absolute-git-dir'], ['--git-common-dir']) {
+    my ($gst, $gdir) = Git::run('rev-parse', @$q);
+    next if $gst || $gdir !~ s/\n\z//;
+    $gdir = File::Spec->rel2abs($gdir, $proj);
+    opendir my $gh, $gdir or next;
+    $gm{$_} = 1 for grep { /\Amethod-/ } readdir $gh;
     closedir $gh;
-    push @keeps, ['git\'s own folder', 'the method\'s run state there (' . join(', ', map { Esc::line($_) } @m) . '), inert without the scripts'] if @m;
   }
+  my @m = sort keys %gm;
+  push @keeps, ['git\'s own folder', 'the method\'s run state there (' . join(', ', map { Esc::line($_) } @m) . '), inert without the scripts'] if @m;
+  # (the project's own lines for the guard's lists; review F12)
+  push @keeps, ["$LOCAL_OWN/", 'the project\'s own lines for the guard\'s lists, which do nothing once the guard is gone; delete the folder when you no longer need it']
+    if -d abs_path($LOCAL_OWN) && !-l abs_path($LOCAL_OWN);
 
   # --- the plan, and the refusal or the write ---
   my @files_plan = map { ['remove', $_] } @removes, @last;
@@ -387,6 +438,13 @@ sub run {
 
   # --- the write ---
   $writing = 1;
+  # (first, the copies of the files the method's keys are read from, unless
+  # this run already reads them from copies an earlier run saved)
+  my $made_local = !-d abs_path($LOCAL);
+  if (!$saved_used) {
+    eval { File::Path::make_path(abs_path($LOCAL)); 1 } or fail_now("cannot make the folder $LOCAL");
+    put($SAVED{$_}, $ktext{$_}) for sort keys %SAVED;
+  }
   put("$LOCAL/.gitignore", "*\n") if $write_local;
   if ($set_remove) { unlink abs_path($Lock::SETTINGS) or fail_now("cannot remove $Lock::SETTINGS") }
   elsif (defined $set_bytes) { put($Lock::SETTINGS, $set_bytes) }
@@ -402,7 +460,9 @@ sub run {
   unlink abs_path($Lock::LOCK) or fail_now("cannot remove $Lock::LOCK");
   prune(dirname($Lock::LOCK));
   prune(dirname($Lock::SETTINGS));
-  if ($local_empty) { rmdir abs_path($LOCAL) and prune(dirname($LOCAL)) }
+  # (the copies go after the lock: until then a re-run needs them)
+  for my $c (sort values %SAVED) { unlink abs_path($c) if -f abs_path($c) && !-l abs_path($c) }
+  if ($local_empty || $made_local) { rmdir abs_path($LOCAL) and prune(dirname($LOCAL)) }
   say_line('WROTE - the method ' . $lock->{version} . ' taken out: ' . (@removes + @last) . ' method file' . (@removes + @last == 1 ? '' : 's')
     . ' removed, then method.lock; what stays is named above. Review the change before it is merged: its pull request carries'
     . " \"Review-Verdict: not-required - uninstall of the method $lock->{version}\", merged on its plan and this output (RISKS #21)");
@@ -430,15 +490,6 @@ sub put {
 sub prune {
   my ($d) = @_;
   while ($d ne '.' && $d ne '' && rmdir abs_path($d)) { $d = dirname($d) }
-}
-
-# read_settings: the project's settings as data, or {} when they cannot be read
-sub read_settings {
-  my ($t) = Lock::read_text(abs_path($Lock::SETTINGS), $Lock::SETTINGS);
-  return {} unless defined $t;
-  $t =~ s/\A\xEF\xBB\xBF//;
-  my ($d, $e) = Json::decode($t, 'plain');
-  return defined $e || ref $d ne 'HASH' ? {} : $d;
 }
 
 # before_commit: (COMMIT, undef) or (undef, WHY there is none)
@@ -525,7 +576,29 @@ sub take_out {
     delete $s->{'$schema'};
   }
   my $changed = Json::encode($s) ne Json::encode($cur);
-  return { settings => $s, changed => $changed, conflicts => \@conf, kept => \@kept, named => $changed ? \@named : [] };
+  # what of the project's own stays, by kind (S7: each kind named): its own
+  # keys and permissions keys by name, its hook entries and deny entries by
+  # number, and $schema (review F3)
+  my (@own, %mkey);
+  %mkey = map { ($_ => 1) } keys %{ $k->{keys} };
+  push @own, map { Esc::line($_) } grep { !$mkey{$_} && $_ ne '$schema' && $_ ne 'hooks' && $_ ne 'permissions' } sort keys %$s;
+  if (ref $s->{permissions} eq 'HASH') {
+    my %mperm = map { ($_ => 1) } keys %{ $k->{permissions} };
+    push @own, map { 'permissions.' . Esc::line($_) } grep { $_ ne 'deny' && !$mperm{$_} } sort keys %{ $s->{permissions} };
+    my %method = map { ($_ => 1) } @{ $k->{deny} };
+    my $nd = ref $s->{permissions}{deny} eq 'ARRAY' ? grep { !defined || ref || !$method{$_} } @{ $s->{permissions}{deny} } : 0;
+    push @own, "$nd deny entr" . ($nd == 1 ? 'y' : 'ies') if $nd;
+  }
+  if (ref $s->{hooks} eq 'HASH') {
+    my $nh = 0;
+    for my $ev (values %{ $s->{hooks} }) {
+      next unless ref $ev eq 'ARRAY';
+      $nh += ref $_ eq 'HASH' && ref $_->{hooks} eq 'ARRAY' ? scalar @{ $_->{hooks} } : 0 for @$ev;
+    }
+    push @own, "$nh hook" . ($nh == 1 ? '' : 's') if $nh;
+  }
+  push @own, '$schema' if exists $s->{'$schema'};
+  return { settings => $s, changed => $changed, conflicts => \@conf, kept => \@kept, named => $changed ? \@named : [], own => \@own };
 }
 
 # same_data A B: equal as data, each permissions.deny compared as a set

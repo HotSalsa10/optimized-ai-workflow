@@ -319,6 +319,106 @@ if wanted "$n"; then
   if [ "$code" -eq 0 ] && has "v0.7.1 (" "takes out the method v0.7.0" && same_tree "$b"; then ok "$n"; else no "$n"; fi
 fi
 
+# --- step 8's review, its repair loop (F1 to F4, F10 to F14) ---
+n="a run cut off after its third stage with --keep PATH is finished by a re-run with the same --keep (review F1)"
+if wanted "$n"; then
+  adopt keepcut
+  install --keep claudeMdExcludes && commit install
+  cut .gitattributes --keep docs/method/why.md
+  c1=$code
+  un --write --keep docs/method/why.md
+  if [ "$c1" -eq 9 ] && [ "$code" -eq 0 ] && [ -f "$p/docs/method/why.md" ] && [ ! -e "$p/scripts/method/method.lock" ] && [ -z "$(missing_hooks "$p")" ]; then ok "$n"; else no "$n" "cut: exit $c1; re-run: exit $code; $(printf '%s\n' "$out" | grep -E 'conflict|REFUSED' | head -3)"; fi
+fi
+
+n="the method's settings files removed by hand, with no copy saved by an earlier run, are refused and nothing is written (review F2)"
+if wanted "$n"; then
+  proj byhand
+  install && commit install
+  rm -f "$p/scripts/method/settings.method.json" "$p/scripts/method/profiles.tsv"
+  before=$(snap "$p")
+  un --write
+  if [ "$code" -eq 1 ] && has "conflict  scripts/method/settings.method.json (it is missing, so the method's keys in .claude/settings.json cannot be told: put back the release's copy)" "nothing was written" && [ "$(snap "$p")" = "$before" ]; then ok "$n"; else no "$n"; fi
+fi
+
+n="what of the project's own stays in its settings is named, by kind (review F3)"
+if wanted "$n"; then
+  adopt ownnamed
+  install --keep claudeMdExcludes && commit install
+  un
+  if [ "$code" -eq 0 ] && has "keep      .claude/settings.json (the project's own: claudeMdExcludes; cleanupPeriodDays; permissions.allow; 1 deny entry; 1 hook)"; then ok "$n"; else no "$n"; fi
+fi
+
+# check NAME SETUP TEXT [ARG]: a committed install, SETUP run in p, then
+# the uninstall (with ARG) is refused naming TEXT, nothing written, exit
+# CODE (1 unless SETUP sets want_code)
+refused() {
+  r_name=$1
+  wanted "$r_name" || return 0
+  proj "r$((r_n = ${r_n:-0} + 1))"
+  install && commit install
+  want_code=1
+  (cd "$p" && eval "$2")
+  r_before=$(snap "$p")
+  if [ -n "${4:-}" ]; then un --write --keep "$4"; else un --write; fi
+  case "$r_name" in *"(exit 2)"*) want_code=2 ;; esac
+  if [ "$code" -eq "$want_code" ] && has "$3" && [ "$(snap "$p")" = "$r_before" ]; then ok "$r_name"; else no "$r_name"; fi
+}
+refused "a changed installed settings.method.json is refused, as uninstall reads the method's keys from it (review F4)" \
+  "printf ' ' >>scripts/method/settings.method.json" \
+  "conflict  scripts/method/settings.method.json (changed since method.lock; uninstall reads the method's keys from it, so it cannot be kept: put back the method's copy)"
+refused "a changed installed profiles.tsv is refused the same way (review F4)" \
+  "printf '# x\n' >>scripts/method/profiles.tsv" \
+  "conflict  scripts/method/profiles.tsv (changed since method.lock; uninstall reads the method's keys from it"
+refused "--keep of the installed profiles.tsv, which the keys are read from, is bad usage (exit 2) (review F4, F10)" ":" \
+  "--keep scripts/method/profiles.tsv cannot be kept" scripts/method/profiles.tsv
+refused "a lock whose settings line does not match the installed fragment and profile is refused (review F4)" \
+  "perl -pi -e 's/^settings\t[0-9a-f]{64}\$/\"settings\t\" . (\"0\" x 64)/e' scripts/method/method.lock" \
+  "conflict  scripts/method/method.lock (its settings line does not match scripts/method/settings.method.json and the profile best"
+refused "a lock that cannot be read is refused (review F4)" \
+  "printf 'version\tv0.7.0\nnot a lock\n' >scripts/method/method.lock" \
+  "method.lock cannot be read, so what the method put there cannot be told"
+refused "a sync run that was cut off is refused until sync finishes it (review F4)" \
+  "mkdir -p .method/local && printf 'v0.7.0\nbest\n' >.method/local/sync-in-progress" \
+  "a sync run was cut off here (.method/local/sync-in-progress is there); finish it with the same sync first"
+refused "--keep of a key that is not the method's is bad usage (exit 2) (review F10)" ":" \
+  "--keep foo is not one of the method's keys" foo
+refused "--keep of method.lock is bad usage (exit 2) (review F10)" ":" \
+  "--keep scripts/method/method.lock cannot be kept" scripts/method/method.lock
+refused "--keep of a file the method does not have is bad usage (exit 2) (review F10)" ":" \
+  "--keep docs/method/none.md names no file of the method's in this project" docs/method/none.md
+refused "a .gitignore that is a folder is a conflict with its action (review F13)" \
+  "mv .gitignore gi.keep && mkdir .gitignore" \
+  ".gitignore (.gitignore is a link or not a regular file: replace it with a plain file or remove it)"
+
+n="the guard's own lists in .claude/method-local/ stay and are named (review F12)"
+if wanted "$n"; then
+  proj ownlists
+  install && commit install
+  mkdir -p "$p/.claude/method-local" && printf 'stash :: kept aside\n' >"$p/.claude/method-local/git-shapes.txt"
+  un --write
+  if [ "$code" -eq 0 ] && has "keep      .claude/method-local/ (the project's own lines for the guard's lists" && [ -f "$p/.claude/method-local/git-shapes.txt" ]; then ok "$n"; else no "$n"; fi
+fi
+
+n="a local settings file git no longer ignores once the .gitignore block goes is named (review F14)"
+if wanted "$n"; then
+  proj localsettings
+  install && commit install
+  printf '{"disableAllHooks": true}\n' >"$p/.claude/settings.local.json"
+  un --write
+  if [ "$code" -eq 0 ] && has "keep      .claude/settings.local.json (git no longer ignores it once the method's .gitignore block goes"; then ok "$n"; else no "$n"; fi
+fi
+
+n="from a linked worktree, the run state in git's common folder is named (review F11)"
+if wanted "$n"; then
+  proj worktree
+  install && commit install
+  git -C "$p" worktree add -q "$work/wt-linked" HEAD 2>/dev/null
+  printf 'x\n' >"$p/.git/method-receipt-test.json"
+  out=$(bash "$rel/scripts/release/sync.sh" --to "$work/wt-linked" --uninstall 2>&1)
+  code=$?
+  if [ "$code" -eq 0 ] && has "keep      git's own folder (the method's run state there (method-receipt-test.json)"; then ok "$n"; else no "$n"; fi
+fi
+
 # --- the source checks and usage ---
 n="an untagged release checkout is refused"
 n2="a dirty release checkout is refused"

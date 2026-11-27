@@ -226,7 +226,7 @@ sub shown_name {
     $n = substr($n, 0, $NAME_BYTES - 3);
     $n = substr($n, 0, -1) while printed($n) > $NAME_BYTES - 3;
     # (never half an escape: a cut \x0 would hide what the name holds)
-    $n =~ s/\\(?:x[0-9A-F]?)?\z//;
+    $n =~ s/\\(?:x[0-9A-F]?|u(?:\{[0-9A-F]*)?)?\z//;
     $n .= '...';
   }
   return $n;
@@ -239,6 +239,8 @@ sub is_text {
   return 0 unless defined $v && !ref $v;
   require B;
   my $f = B::svref_2object(\$v)->FLAGS;
+  # (an integer too long for perl comes as a string: still a number)
+  return 0 if $v =~ /\A-?[0-9]{19,}\z/;
   return ($f & B::SVp_POK()) || !($f & (B::SVp_IOK() | B::SVp_NOK())) ? 1 : 0;
 }
 
@@ -342,14 +344,22 @@ sub audit_lines {
   # settings that keep the method's text out or switch a method skill off
   # (the instruction files first: they drop CLAUDE.md, AGENTS.md and the
   # method's rules at once)
-  my (@out, %said);
+  my @out;
   if (ref $s->{pluginConfigs} eq 'HASH') {
-    for my $key (sort keys %{ $s->{pluginConfigs} }) {
+    # (the client reads both keys and merges their options, agents-md@builtin
+    # first and cc-plugin-agents-md@builtin after it, the later one winning
+    # for each option, then resolves the result once; step 8's review, F7)
+    my (%merged, $any);
+    for my $key (sort { ($a =~ /\Acc-plugin-/i ? 1 : 0) <=> ($b =~ /\Acc-plugin-/i ? 1 : 0) || $a cmp $b } keys %{ $s->{pluginConfigs} }) {
       next unless $key =~ $AGENTS_MD_KEY;
       my $o = ref $s->{pluginConfigs}{$key} eq 'HASH' ? $s->{pluginConfigs}{$key}{options} : undef;
       next unless ref $o eq 'HASH';
-      my ($opt, $v) = instruction_files($o);
-      push @out, "agents-md $opt $v" if defined $opt && !$said{"$opt $v"}++;
+      %merged = (%merged, %$o);
+      $any = 1;
+    }
+    if ($any) {
+      my ($opt, $v) = instruction_files(\%merged);
+      push @out, "agents-md $opt $v" if defined $opt;
     }
   }
   push @out, 'claudeMdExcludes' if exists $s->{claudeMdExcludes};
@@ -415,7 +425,7 @@ sub warnings_for {
   for my $f (@files) {
     my ($name, $path, $user) = @$f;
     my ($s, $e) = read_settings($path);
-    if (defined $e) { push @w, look("$name $e, so what it changes is not known"); next }
+    if (defined $e) { push @w, look($user ? "${TELL}$name $e, so what it changes is not known; they fix it $BY_HAND" : "$name $e, so what it changes is not known"); next }
     next unless $s;
     my @what = weakens($s, $user);
     next unless @what;

@@ -188,7 +188,19 @@ plant "trailing dots and spaces not read in the text forms (home_re)" "the text 
 
 # --- the release's sync with --write (step 8.2) ---
 plant "sync with --write let through" "sync with --write is refused: " "  if (defined(my \$why = release_write(\$cmds))) { return ('G6', \$why) }" '  if (0) { }'
-plant "a sync dry run refused as if it wrote" "not a sync run with --write passes: bash " "    next unless grep { \$_ eq '--write' } @w[\$i + 1 .. \$#w];" ''
+plant "a sync dry run refused as if it wrote" "not a sync run with --write passes: bash " \
+  "with --write, which installs, updates or takes out \$RELEASE_NO\" if grep { \$_ eq '--write' } @after;" "with --write, which installs, updates or takes out \$RELEASE_NO\" if 1;"
+# (step 8's review, its repair: F5, F6, F17, F18)
+plant "a project's own sync.sh, which takes no --to, refused" "not a sync run with --write passes: bash tools/sync.sh" \
+  "        next unless grep { \$_ eq '--to' || /\\A--to=/ } @after;" '        1;'
+plant "a word made at run time after the sync let through" "sync with --write is refused: W=--write" \
+  "          if grep { /[\\\$\`]/ } @after;" '          if 0;'
+plant "code given to a shell not read for the sync" "sync with --write is refused: bash <<" \
+  "      if \$code =~ /sync\\.(?:sh|pl)\\b/i &&" "      if 0 && \$code =~ /sync\\.(?:sh|pl)\\b/i &&"
+plant "a read-only command naming the words refused" "not a sync run with --write passes: echo bash sync.sh" \
+  "    if (@w && !read_only(\$c)) {" '    if (@w) {'
+plant "a here-document to cat read as code" "not a sync run with --write passes: cat <<" \
+  "    next unless grep { /\\A(?:an inline program for|a pipe, here-document or here-string into|a program for \\S+ from) / } @{ \$c->{unread} || [] };" '    1;'
 
 echo "plants: protected files: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]

@@ -74,9 +74,9 @@ cat >"$work/plants.txt" <<'PLANTS-END'
   if ($set_remove) { unlink abs_path($Lock::SETTINGS) or fail_now("cannot remove $Lock::SETTINGS") }
   elsif (defined $set_bytes) { put($Lock::SETTINGS, $set_bytes) }
 === it deletes .method/local/ | scripts/release/lib/uninstall.pl | .method/local/ with a log and a stray file stays, is ignored after, and is named
-  if ($local_empty) {
+  if ($local_empty || $made_local) {
 ---
-  File::Path::rmtree(abs_path($LOCAL)) if do { require File::Path; 1 }; if ($local_empty) {
+  File::Path::rmtree(abs_path($LOCAL)); if ($local_empty || $made_local) {
 === it removes a seeded file | scripts/release/lib/uninstall.pl | after /method-setup, its files stay
   for my $f (setup_files([keys %listed])) { push @keeps,
 ---
@@ -89,18 +89,61 @@ cat >"$work/plants.txt" <<'PLANTS-END'
           } elsif ($bs && same_data($s, $bs)) {
 ---
           } elsif (0) {
-=== a re-run without the fragment refused even when the earlier run took out the rest | scripts/release/lib/uninstall.pl | a run cut off in its third stage
-    if (@left || $hooks_left) {
----
-    if (1) {
 === what a cut-off write left beside a file it writes not removed | scripts/release/lib/uninstall.pl | a run cut off after its first stage
     for my $e (sort grep { /\A\Q$base$SUFFIX\E[0-9]+\z/ } readdir $dh) {
 ---
     for my $e (()) {
-=== the profiles.tsv and fragment removed among the other files | scripts/release/lib/uninstall.pl | a run cut off in its third stage
-      elsif ($kfiles->{$path}) { push @last, $path }
+=== the copies of the keys' files not saved before the first write | scripts/release/lib/uninstall.pl | a run cut off after its third stage with --keep PATH is finished by a re-run
+    put($SAVED{$_}, $ktext{$_}) for sort keys %SAVED;
 ---
-      elsif ($kfiles->{$path}) { push @removes, $path }
+    1;
+=== a missing settings file with no saved copy let through | scripts/release/lib/uninstall.pl | the method's settings files removed by hand, with no copy saved by an earlier run, are refused
+        $conflict->($path, "it is missing, so the method's keys in $Lock::SETTINGS cannot be told: put back the release's copy");
+        next;
+---
+        next;
+=== what of the project's own stays not named | scripts/release/lib/uninstall.pl | what of the project's own stays in its settings is named, by kind
+        push @keeps, [$Lock::SETTINGS, "the project's own: " . join('; ', @{ $r->{own} })] if @{ $r->{own} } && !$set_remove;
+---
+        1;
+=== a changed installed fragment not refused as the keys' source | scripts/release/lib/uninstall.pl | a changed installed settings.method.json is refused, as uninstall reads the method's keys from it
+    if ($kfiles->{$path}) { $conflict->($path, 'changed since method.lock; uninstall reads
+---
+    if (0) { $conflict->($path, 'changed since method.lock; uninstall reads
+=== the lock's settings line not checked | scripts/release/lib/uninstall.pl | a lock whose settings line does not match the installed fragment and profile is refused
+    elsif (Lock::k_hash($kk) ne $lock->{settings}) {
+---
+    elsif (0) {
+=== a lock that cannot be read taken as not installed | scripts/release/lib/uninstall.pl | a lock that cannot be read is refused
+    refuse_now('method.lock cannot be read, so what the method put there cannot be told');
+---
+    1;
+=== a cut-off sync run not refused | scripts/release/lib/uninstall.pl | a sync run that was cut off is refused until sync finishes it
+    if -e abs_path($SYNC_MARKER) || -l abs_path($SYNC_MARKER);
+---
+    if 0;
+=== --keep not checked against what the uninstall would remove | scripts/release/lib/uninstall.pl | --keep of a key that is not the method's is bad usage
+  if ($k) {
+    my %onpath
+---
+  if (0) {
+    my %onpath
+=== the guard's own lists not named | scripts/release/lib/uninstall.pl | the guard's own lists in .claude/method-local/ stay and are named
+    if -d abs_path($LOCAL_OWN) && !-l abs_path($LOCAL_OWN);
+---
+    if 0;
+=== a block file's conflict without its action | scripts/release/lib/uninstall.pl | a .gitignore that is a folder is a conflict with its action
+    if ($te) { $conflict->($file, "$te: replace it with a plain file or remove it"); next }
+---
+    if ($te) { $conflict->($file, $te); next }
+=== a local settings file left unignored without a word | scripts/release/lib/uninstall.pl | a local settings file git no longer ignores once the .gitignore block goes is named
+    if ($file eq '.gitignore' && -e abs_path('.claude/settings.local.json') && !$still) {
+---
+    if (0) {
+=== git's common folder not read from a linked worktree | scripts/release/lib/uninstall.pl | from a linked worktree, the run state in git's common folder is named
+  for my $q (['--absolute-git-dir'], ['--git-common-dir']) {
+---
+  for my $q (['--absolute-git-dir']) {
 PLANTS-END
 plant_data "$work/plants.txt" tests/uninstall.test.sh only
 drop_sandbox "$work" || true
