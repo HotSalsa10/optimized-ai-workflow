@@ -1,6 +1,6 @@
 # Example projects
 
-Three small projects of different kinds, each shown as it stands before the method, with the answers its owner gives `/method-setup`. All their data is invented.
+Three small projects of different kinds, each shown as it stands before the method, with the answers its owner gives `/method-setup`. All their data is invented. To install, update or take the method out of a project of your own, follow the routes in the repository's [README.md](../README.md); this page shows what the tests do with the examples.
 
 | Example | What it is | Answers |
 |---|---|---|

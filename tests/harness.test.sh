@@ -818,6 +818,20 @@ for deny in yes no; do
   fi
 done
 
+# a pull request from a cloud session (step 9.4, docs/plans/step9.md S15):
+# there gh's pull-request commands are refused (a stand-in gh fails as the
+# cloud's does, with its advice to write through gh api), so method-start
+# reads with a GET and method-finish opens the pull request with the
+# session's GitHub tool; the guard lets the GET and the tool on the task
+# branch through, and refuses the advice's write
+h_pr_cloud "$root"
+if [ -z "$H_PR" ]; then
+  pass "pr-cloud: the GET read runs, gh pr create runs and fails as in a cloud session, the advice's gh api write is refused (G4), and create_pull_request from the task branch is made"
+  h_safe pr-cloud
+else
+  fail "pr-cloud: the GET read runs, gh pr create fails as in a cloud session, the advice's write is refused, and create_pull_request is made:$H_PR" "$(cat "$H_PROJ/gh-ran.txt" 2>&1; cut -f7- "$H_DIR/fake/requests.tsv" 2>&1)"
+fi
+
 # the owner's way out (README, "When the guard blocks something it should not")
 for way in local flag; do
   h_case "way-out-$way"

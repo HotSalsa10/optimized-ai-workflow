@@ -816,6 +816,23 @@ fi
 h_stop
 drop_sandbox "$sb" || true
 
+# 23. step 9.4's pull request from a cloud session (h_pr_cloud): with
+# create_pull_request taken off the method's MCP list, the guard refuses
+# the session's GitHub tool, and the case goes red for that reason
+sb=$(make_sandbox) || abort_sandbox
+perl -ni -e 'print unless /^create_pull_request /' "$sb/method/.claude/hooks/method/mcp-tools.txt"
+if grep -q '^create_pull_request ' "$sb/method/.claude/hooks/method/mcp-tools.txt"; then
+  fail "pr-cloud (create_pull_request off the MCP list): the plant did not apply, so the check result would mean nothing"
+else
+  h_pr_cloud "$sb"
+  case "$H_PR" in
+    *"create_pull_request on the task branch was not made"*) pass "pr-cloud: with create_pull_request off the MCP list, the case goes red ($H_PR)" ;;
+    *) fail "pr-cloud: with create_pull_request off the MCP list, the case went red for another reason, or stayed green" "${H_PR:-green}" ;;
+  esac
+fi
+h_stop
+drop_sandbox "$sb" || true
+
 # 13. get-client: a download that does not match the pinned checksum is refused
 reg="$H_WORK/registry/@anthropic-ai/claude-code-linux-x64/-"
 mkdir -p "$reg" "$H_WORK/pkg/package"

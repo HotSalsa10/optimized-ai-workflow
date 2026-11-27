@@ -70,6 +70,8 @@
 # Step 7.5's cases: h_start ROOT setup types /method-setup; h_setup_f2
 # ROOT runs setup-write --write in a hooked session (step 7.0's F2) and
 # h_setup_f2_holds QUESTION judges it (below).
+# Step 9.4's case: h_pr_cloud ROOT opens a pull request as in a cloud
+# session, where gh's pull-request commands are refused (below).
 # req-001 is h_fake's own alive probe.
 
 # settings a caller's environment must not carry into every case
@@ -177,6 +179,50 @@ h_holds_start() {
   [ ! -e "$H_PROJ/bashenv-ran.txt" ] || H_HOLD="$H_HOLD a method hook's bash ran BASH_ENV;"
   [ ! -e "$H_PROJ/perlfunc-ran.txt" ] || H_HOLD="$H_HOLD a method hook ran the function named perl;"
   [ ! -e "$H_PROJ/commandfunc-ran.txt" ] || H_HOLD="$H_HOLD a method hook ran the function named command;"
+  return 0
+}
+
+# h_pr_cloud ROOT: step 9.4's pull request from a cloud session
+# (docs/plans/step9.md S15), with the method from the repository at ROOT
+# (a planted copy in tests/plants/harness.sh): a project whose origin names
+# a GitHub repository (never contacted), on branch task, with a stand-in gh
+# that logs each call and fails its pull-request commands as a cloud
+# session's gh does (with its advice to write through gh api), answering
+# anything else with [], and the fake MCP server as github, serving
+# create_pull_request. The main session reads the open pull requests with
+# a GET, runs gh pr create, tries the advice's write, then calls
+# create_pull_request from the task branch. H_PR says what went wrong, or
+# is empty
+h_pr_cloud() {
+  H_PR=""
+  if ! { h_case pr-cloud && h_method "$1"; }; then H_PR="the case could not be made;"; return 0; fi
+  if ! { HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git -C "$H_PROJ" remote add origin https://github.com/example-owner/example-repo.git &&
+    HOME="$H_DIR/home" GIT_CONFIG_NOSYSTEM=1 git -C "$H_PROJ" switch -q -c task; }; then
+    H_PR="the case's origin could not be set;"
+    return 0
+  fi
+  mkdir -p "$H_DIR/bin"
+  # shellcheck disable=SC2016 # the stand-in's own $1 and $*
+  printf '%s\n' '#!/bin/sh' 'printf "%s\n" "$*" >>gh-ran.txt' \
+    'if [ "$1" = pr ]; then echo "GitHub GraphQL is not available from Claude Code sessions; use the REST API: gh api repos/OWNER/REPO/pulls -f title=... -f head=... -f base=..." >&2; exit 1; fi' \
+    'echo "[]"' >"$H_DIR/bin/gh" && chmod +x "$H_DIR/bin/gh"
+  perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({mcpServers => {github => {type => "stdio", command => "perl", args => [$ARGV[0], "$ARGV[1]/github.log", "create_pull_request"]}}})' \
+    "$HARNESS/fake-mcp.pl" "$H_DIR" >"$H_DIR/mcp.json"
+  perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({convs => [{name => "main", match => "^go\$", turns => [
+    {tool => "Bash", input => {command => "gh api \x27repos/{owner}/{repo}/pulls?state=open\x27 --jq \x27.[] | .number\x27", description => "open pull requests"}},
+    {tool => "Bash", input => {command => "gh pr create --head task --title t --body-file .method/local/pr-body.md", description => "a pull request"}},
+    {tool => "Bash", input => {command => "gh api repos/{owner}/{repo}/pulls -f title=t -f head=task -f base=main", description => "the advice"}},
+    {tool => "mcp__github__create_pull_request", input => {owner => "example-owner", repo => "example-repo", head => "task", base => "main", title => "PR-FALLBACK"}},
+    {text => "MAIN-DONE"}]}]})' >"$H_DIR/pr-cloud.json"
+  h_fake "$H_DIR/pr-cloud.json" || { H_PR="the fake did not answer;"; return 0; }
+  h_client 60 PATH="$H_DIR/bin:/usr/bin:/bin" -- --permission-mode default --allowedTools Bash mcp__github__create_pull_request --mcp-config "$H_DIR/mcp.json"
+  h_stop
+  LC_ALL=C grep -q -x -F "api repos/{owner}/{repo}/pulls?state=open --jq .[] | .number" "$H_PROJ/gh-ran.txt" 2>/dev/null || H_PR="$H_PR the GET read did not run;"
+  LC_ALL=C grep -q '^pr create --head task' "$H_PROJ/gh-ran.txt" 2>/dev/null || H_PR="$H_PR gh pr create did not run;"
+  h_req_in main 'GitHub GraphQL is not available from Claude Code sessions' || H_PR="$H_PR gh's cloud refusal did not reach the session;"
+  h_req_in main '"gh api" in this form is not on the method' || H_PR="$H_PR the advice's gh api write was not refused (G4);"
+  ! LC_ALL=C grep -q -- '-f title' "$H_PROJ/gh-ran.txt" 2>/dev/null || H_PR="$H_PR the advice's gh api write ran;"
+  LC_ALL=C grep '^CALLED' "$H_DIR/github.log" 2>/dev/null | LC_ALL=C grep -q PR-FALLBACK || H_PR="$H_PR create_pull_request on the task branch was not made;"
   return 0
 }
 

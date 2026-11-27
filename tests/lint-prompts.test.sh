@@ -343,5 +343,35 @@ if wanted "outside a git repository the lint fails"; then
   if [ "$code" -eq 2 ] && printf '%s\n' "$out" | grep -F -q 'not inside a git repository'; then pass "outside a git repository the lint fails"; else fail "outside a git repository the lint fails: exit $code" "$out"; fi
 fi
 
+# --- part four (step 9.4, docs/plans/step9.md S15): the method's own
+# skills read and open pull requests where a cloud session refuses gh's
+# pull-request commands ("GitHub GraphQL is not available"), never follow
+# that refusal's advice to write through gh api, and never make up a link
+start="$root/method/.claude/skills/method-start/SKILL.md"
+finish="$root/method/.claude/skills/method-finish/SKILL.md"
+# missing FILE TEXT...: prints each TEXT that FILE does not hold as written
+missing() {
+  m_file=$1
+  shift
+  for m_t in "$@"; do grep -q -F -e "$m_t" "$m_file" || printf '[%s] ' "$m_t"; done
+}
+n="cloud: method-start reads the open pull requests with a GET, and the merged ones with a GET where gh refuses"
+# shellcheck disable=SC2016 # backquotes as the skill writes them
+if wanted "$n"; then
+  miss=$(missing "$start" "gh api 'repos/{owner}/{repo}/pulls?state=open'" "gh api 'repos/{owner}/{repo}/pulls?state=closed&head={owner}:<branch>'" 'GitHub GraphQL is not available')
+  if [ -z "$miss" ] && ! grep -q -F '4. `gh pr list`: the open pull requests' "$start"; then pass "$n"; else fail "$n" "missing: $miss"; fi
+fi
+n="cloud: method-finish's pull request falls back to the session's create_pull_request, then the owner's clicks, never a link it made up"
+# shellcheck disable=SC2016 # backquotes as the skill writes them
+if wanted "$n"; then
+  miss=$(missing "$finish" "gh api 'repos/{owner}/{repo}/pulls?state=open&head={owner}:<branch>'" '`create_pull_request` with head <branch>' 'give the owner the clicks' '`.method/local/pr-body.md`' 'never a link you made up')
+  if [ -z "$miss" ]; then pass "$n"; else fail "$n" "missing: $miss"; fi
+fi
+n="cloud: both skills say never to follow the refusal's advice to write with gh api -f"
+if wanted "$n"; then
+  miss="$(missing "$start" "Never follow that refusal's advice to write with \`gh api ... -f\`")$(missing "$finish" "never follow its advice to write with \`gh api ... -f\`")"
+  if [ -z "$miss" ]; then pass "$n"; else fail "$n" "missing: $miss"; fi
+fi
+
 echo "tests: lint-prompts: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]

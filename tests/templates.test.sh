@@ -189,6 +189,27 @@ else
   pass "$name ($examined files)"
 fi
 
+# 8. no file under method/ promises this repository's step 9 (step 9.4;
+# DECISIONS A74 (3)): what a project receives names no step of this
+# repository's plan still to come; Release 1 ends with step 9
+# shellcheck disable=SC2016 # perl code, expanded by perl
+step_scan='
+  chomp; my $f = $_; $n++;
+  open my $h, "<", $f or do { print "cannot read $f\n"; next };
+  { local $/ = "\n"; while (my $l = <$h>) { print "$f line $.: $1\n" while $l =~ /(?<![A-Za-z0-9])(steps?[ -]9)(?![0-9])/gi } }
+  close $h;
+  END { print "EXAMINED ", $n + 0, "\n" }'
+found=$(cd "$root" && find method -type f -print0 | perl -0ne "$step_scan")
+examined=$(printf '%s\n' "$found" | sed -n 's/^EXAMINED //p')
+name="no file under method/ names step 9 of this repository's plan"
+if [ -z "$examined" ] || [ "$examined" -eq 0 ]; then
+  fail "$name: examined no file"
+elif [ "$(printf '%s\n' "$found" | grep -c -v '^EXAMINED ')" -ne 0 ]; then
+  fail "$name" "$(printf '%s\n' "$found" | grep -v '^EXAMINED ')"
+else
+  pass "$name ($examined files)"
+fi
+
 drop_sandbox "$work"
 echo "tests: templates: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]

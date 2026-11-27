@@ -84,8 +84,8 @@ Sources: `incident` means the rule came from something that went wrong in the ow
 | M076 | The server-side advisor is off | research: advisor docs; decision A5 | method/settings.fragment.json @CLAUDE_CODE_DISABLE_ADVISOR_TOOL | done |
 | M077 | Never set CLAUDE_CODE_EFFORT_LEVEL | research: measured; decision A4 | method/scripts/method/status.sh | done |
 | M078 | A refusal or a missing verdict means "not checked" | research: model fallback docs | method/.claude/hooks/method/gate-receipt.sh | done |
-| M079 | One repo per code-changing cloud session | research: cloud docs | method/.claude/rules/method/method.md | done |
-| M080 | Check /permissions on each new clone | research: untrusted folders | README.md | step 9 |
+| M079 | One repo per code-changing cloud session; the one exception, an install or update that the owner's own message in that session asks for, writes only by sync, setup-write and the install branch's commit and push, only reads the method's repository, and merges, tags and opens nothing | research: cloud docs; step 9 plan S10 | method/.claude/rules/method/method.md | done |
+| M080 | Check /permissions on each new clone, before the first task | research: untrusted folders | README.md @before the first task and check that nothing is allowed | done |
 | M081 | Nested claude -p runs use < /dev/null, an explicit effort and METHOD_NESTED=1 | research: measured | method/.claude/skills/method-checks/SKILL.md | later |
 | M082 | When the work is done and its checks pass, stop and report; no unrequested changes | research: scope creep at high effort | method/.claude/rules/method/method.md | done |
 | M083 | Every finding gets a disposition: fixed with its proving test, wrong, intentional, or not worth it | research: Claude Code team | method/.claude/agents/method/method-reviewer.md | done |

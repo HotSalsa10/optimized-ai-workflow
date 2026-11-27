@@ -72,5 +72,9 @@ plant "a field product's name in a template (AGENTS.md.tmpl)" \
   "no file under method/ names a field product" \
   "printf 'Use the ERPNext list view for records.\n' >>$t/AGENTS.md.tmpl" "grep -q ERPNext $t/AGENTS.md.tmpl"
 
+plant "step 9 put back in docs/method/why.md, as a promise" \
+  "no file under method/ names step 9 of this repository's plan" \
+  "printf 'CI compares the files with the release (step 9).\n' >>method/docs/method/why.md" "grep -q '(step 9)' method/docs/method/why.md"
+
 echo "plants: templates: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]

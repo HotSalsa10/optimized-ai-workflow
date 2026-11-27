@@ -67,8 +67,8 @@ plant "MUST in a new skill file" "method/.claude/skills/method-x/SKILL.md" "You 
 # an ID comment moved onto its sentence's line
 sb=$(make_sandbox) || abort_sandbox
 perl -0pi -e 's/<!-- M079 -->\n(A cloud session[^\n]*)/$1 <!-- M079 -->/' "$sb/$rules"
-if expect_landed "an ID comment on its sentence's line" grep -q 'repository\. <!-- M079 -->$' "$sb/$rules"; then
-  line=$(grep -n 'repository\. <!-- M079 -->$' "$sb/$rules" | cut -d: -f1)
+if expect_landed "an ID comment on its sentence's line" grep -q '\. <!-- M079 -->$' "$sb/$rules"; then
+  line=$(grep -n '\. <!-- M079 -->$' "$sb/$rules" | cut -d: -f1)
   expect_red "an ID comment on its sentence's line in method.md" "$sb" "$rules:$line: a comment not alone on its line" bash scripts/dev/lint-prompts.sh
 fi
 drop_sandbox "$sb"
@@ -195,6 +195,39 @@ if expect_landed "method-setup dropped from the list" sh -c '! grep -q "^our @ME
   expect_red "method-setup dropped from the method's skill list" "$sb" "method/.claude/skills/method-setup/: the folder is not on the method's skill list" bash scripts/dev/lint-prompts.sh
 fi
 drop_sandbox "$sb"
+
+# step 9.4 (docs/plans/step9.md S15): the skills' cloud routes, each taken
+# out in a copy, turn tests/lint-prompts.test.sh's part four red for its
+# reason (with only that case kept)
+lp_test=tests/lint-prompts.test.sh
+start=method/.claude/skills/method-start/SKILL.md
+finish=method/.claude/skills/method-finish/SKILL.md
+# lp_plant NAME FILE PERL LANDED REASON: PERL (perl -pi code) applied to
+# FILE in a copy, LANDED (grep -F text that must be gone) confirmed gone,
+# then the test must go red with REASON
+lp_plant() {
+  sb=$(make_sandbox) || abort_sandbox
+  if plant_control "$1" "$sb" "$lp_test" "$5"; then
+    perl -pi -e "$3" "$sb/$2"
+    # shellcheck disable=SC2016 # the inner sh's own $1 and $2
+    if expect_landed "$1" sh -c '! grep -q -F -e "$1" "$2"' sh "$4" "$sb/$2"; then
+      plant_judge "$1" "$sb" "$lp_test" "$5" only
+    fi
+  fi
+  drop_sandbox "$sb"
+}
+lp_plant "method-start's GET read of the open pull requests put back to gh pr list" "$start" \
+  's/^4\. \x60gh api \x27repos\/\{owner\}\/\{repo\}\/pulls\?state=open\x27 --jq \x27[^\x27]*\x27\x60: the open pull requests, read with a GET[^.]*\./4. \x60gh pr list\x60: the open pull requests./' \
+  "gh api 'repos/{owner}/{repo}/pulls?state=open'" \
+  "cloud: method-start reads the open pull requests with a GET"
+lp_plant "method-finish's fallback to the session's create_pull_request dropped" "$finish" \
+  's/use the GitHub tool the session offers, \x60create_pull_request\x60 with head <branch>, base <main>, that title and the file\x27s text as its body \(with one open, \x60update_pull_request\x60 for its text\)\. When the session offers no such tool, //' \
+  "create_pull_request" \
+  "cloud: method-finish's pull request falls back to the session's create_pull_request"
+lp_plant "method-start no longer saying not to follow the refusal's gh api -f advice" "$start" \
+  's/ Never follow that refusal\x27s advice to write with \x60gh api \.\.\. -f\x60: the guard refuses it, and this skill writes nothing\.//' \
+  "Never follow that refusal" \
+  "cloud: both skills say never to follow the refusal's advice"
 
 echo "plants: lint-prompts: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]
