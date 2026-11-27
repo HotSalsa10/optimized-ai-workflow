@@ -39,6 +39,17 @@ fi
 
 HARNESS="$here/harness"
 H_CLIENT=$client
+# From 2.1.332 the client loads no CLAUDE.md or rules file under
+# /tmp/claude-UID (step 8.0c), so the case folders must not sit there: a
+# TMPDIR inside it, as a Claude Code session can set, is moved to /tmp
+tmp_real=$(cd -P "${TMPDIR:-/tmp}" 2>/dev/null && pwd -P)
+claude_tmp=$(cd -P /tmp 2>/dev/null && pwd -P)/claude-$(id -u)
+case "$tmp_real/" in
+  "$claude_tmp"/*)
+    TMPDIR=/tmp
+    export TMPDIR
+    ;;
+esac
 H_WORK=$(new_sandbox_dir) || abort_sandbox
 # shellcheck source=tests/harness/lib.sh
 . "$HARNESS/lib.sh"

@@ -278,6 +278,11 @@ You created the tag v0.8.0 on GitHub after step 8 was merged, and this repositor
 
 - Step 9's plan (docs/plans/step9.md) is at version 3. It finishes Release 1: this repository moves to v0.8.0 in a session you open with its hooks off, and the warning line about two GitHub merges without their verdict line is cleared; the test harness moves to the newest Claude Code; a project gets a CI file from `/method-setup`; pull requests open from a cloud session; README v1; a new example project is set up and reviewed in two cloud sessions you open; then `v1.0.0`. Your question, whether the method beats plain Claude Code, is measured first thing in Release 2, by an automated test with an API key: a fair answer needs about 120 runs, far more than you could open by hand (docs/plans/release2-compare.md). One finding for you now: in a cloud session, pick effort xhigh when you open it, because the picker's choice outranks the method's Best results setting.
 
+### Changed (step 9)
+
+- This repository now runs v0.8.0 (step 9.1): its sync ran in a session whose hooks were off through a settings file you added on GitHub's website, and the file is gone again. Status no longer names the two GitHub merges whose messages lack their verdict line, because `.claude/method.conf` now says to judge only what comes after step 8's merge.
+- The test harness runs the newest Claude Code, 2.1.332, beside the oldest supported one, 2.1.316 (step 9.2): 180 of 180 at each. When it runs inside a Claude Code session, it keeps its throwaway projects out of the folder where 2.1.332 loads no project instructions.
+
 ### Changed (step 8)
 
 - This repository now runs the method's hooks and checking agents itself, installed from the first release, `v0.7.0`, the same way a project of yours gets them (step 8.1). The method's rules and skills are not used here, because this repository keeps its own way of working; one setting keeps the rules out, and every session here starts with one expected note about it. A new check in the repository's checks fails if the installed copy differs from its fingerprint or that setting is missing. Nothing changes in your projects. If the guard gets in the way before step 8 is merged, the install is one commit that can be undone; after the merge, you switch the hooks off for one session.
