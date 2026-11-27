@@ -8,7 +8,15 @@ Each release has a "What changes for you" section in plain words.
 
 Nothing yet. Release 1 is being built. Release 1 will ship no ready-made packs for one field (such as ERPNext): the method fits any project, and each project can make its own pack (DECISIONS A77).
 
-Step 7 (built, waiting for its review and your merge) is the first step you will use in a project of your own:
+Step 8 (built, waiting for its review, CI and your merge, then the tag v0.8.0):
+- This repository now runs the method's own hooks, from the first release, so any friction shows up here before it reaches your projects.
+- The method can be taken back out of a project: `sync.sh --uninstall` shows its plan first, removes only what the method put there and nobody changed, and gives back your project as it was before the install. It names what stays. You run it in a session where the project's hooks are off, as you do an install; Claude can show you the plan but cannot write it.
+- The method's scripts refuse to run when they were started by a bare name found elsewhere on your computer, because then they could have run the checked project's own helper code.
+- Each session start now checks your own Claude Code folder for things that can quietly hide or replace the method in every project, and Claude tells you what to change and how, as only you can change that folder.
+- Code Mode stays off in every project.
+- The way to switch the hooks off for one session on your computer is a small settings file, which works in every shell.
+
+Step 7 (merged on 26 November, released as v0.7.0) is the first step you will use in a project of your own:
 - The method can now be put into a project. A tool called sync copies one release of the method in and keeps a fingerprint of every method file. If someone changes a method file by hand, the checks turn red and sync will not overwrite it.
 - You set the project up by typing `/method-setup`. It asks six choice questions and a few short ones in your own words, shows you one screen of what your answers change, and writes the files only when you reply `write`. The same answers always give the same files.
 - No answer can weaken the checks. Every change still gets the checks, an independent review and a security check.
@@ -20,7 +28,7 @@ Step 7 (built, waiting for its review and your merge) is the first step you will
 - The first install is reviewed like any other change, in a fresh session on its own branch. If that session cannot start, you may merge it without a review, once per project, as you decided on 23 November. Status names that commit.
 - Three made-up example projects show it working: a word game, a small website and a records keeper.
 
-After your merge, you create the first release tag, v0.7.0, on GitHub. Claude gives you the exact steps.
+After step 8 is merged, you create the tag v0.8.0 on GitHub, as you did v0.7.0. Claude gives you the exact steps.
 
 ### Added
 
