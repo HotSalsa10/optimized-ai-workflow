@@ -48,7 +48,7 @@ jobs:
           echo "::stop-commands::stop-$RANDOM$RANDOM$RANDOM"
           bash tests/run.sh tests
 
-  # The planted defects run beside the tests, in the six parts that
+  # The planted defects run beside the tests, in the seven parts that
   # tests/plants/shards.txt gives the plant files by measured time (each part
   # within 70% of the 30-minute limit; tests/ci-config.test.sh checks this
   # list against that file), each plant with only the test cases that can
@@ -60,7 +60,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: ["0/6", "1/6", "2/6", "3/6", "4/6", "5/6"]
+        shard: ["0/7", "1/7", "2/7", "3/7", "4/7", "5/7", "6/7"]
     env:
       REQUIRE_SHELLCHECK: "1"
       SHARD: ${{ matrix.shard }}
@@ -114,7 +114,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest, macos-latest]
-        part: ["tests", "plants 0/6", "plants 1/6", "plants 2/6", "plants 3/6", "plants 4/6", "plants 5/6"]
+        part: ["tests", "plants 0/7", "plants 1/7", "plants 2/7", "plants 3/7", "plants 4/7", "plants 5/7", "plants 6/7"]
     env:
       PART: ${{ matrix.part }}
     defaults:
