@@ -132,9 +132,14 @@ no_secret() {
 }
 each "outside comments it names no secret and no token, and holds no \${{ }} expression" no_secret
 
+# perm_lines FILE: each permissions: key with its indent and value, and the
+# lines listed under it
+perm_lines() {
+  code "$1" | perl -ne 'if (/^(\s*)permissions:\s*(.*)$/) { $p = length $1; print "permissions at $p: $2\n"; $in = 1; next }
+    if ($in && /^(\s*)(\S.*)$/ && length $1 > $p) { print "  $2\n"; next } $in = 0'
+}
 perms() {
-  p_got=$(code "$1" | perl -ne 'if (/^(\s*)permissions:\s*(.*)$/) { $p = length $1; print "permissions at $p: $2\n"; $in = 1; next }
-    if ($in && /^(\s*)(\S.*)$/ && length $1 > $p) { print "  $2\n"; next } $in = 0')
+  p_got=$(perm_lines "$1")
   [ "$p_got" = "$(printf '%s\n' 'permissions at 0: ' '  contents: read')" ] || {
     printf '%s\n' "$p_got"
     return 1
