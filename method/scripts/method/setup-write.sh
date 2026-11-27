@@ -43,9 +43,10 @@ self_src=
 self_ok=
 case "$0" in
   */*)
-    # (a $0 with a / counts only when, under bash, it is the file bash
-    # opened: sourced from a script elsewhere, $0 is that script's path)
-    if [ -z "${BASH_VERSION-}" ] || [ "$self_src" = "$0" ]; then
+    # (a $0 with a / counts only under bash, when it is the file bash opened:
+    # sourced from a script elsewhere, $0 is that script's path; another
+    # shell cannot tell, so it is refused)
+    if [ -n "${BASH_VERSION-}" ] && [ "$self_src" = "$0" ]; then
       here=${0%/*}
       self_ok=1
     fi

@@ -43,17 +43,20 @@
 #      empties (hooks, permissions, deny) goes unless the before commit
 #      holds it;
 #   3. every file the lock lists, while it matches the lock's hash (the
-#      installed profiles.tsv and settings.method.json last, so a re-run
-#      can still work out the method's keys until the settings are done),
+#      installed profiles.tsv and settings.method.json last: a re-run reads
+#      the method's keys from the copies saved under .method/local/ before
+#      the first write, and these two stay as a fallback while they can),
 #      then each folder left empty;
 #   4. the two "# >>> method" blocks;
-#   5. the lock, last; then the folders left empty, and .method/local/ when
-#      it is empty.
+#   5. the lock, last; then the saved copies, the folders left empty, and
+#      .method/local/ when it is empty.
 # Settings go before files, so no cut-off run leaves a hook entry naming a
 # missing script. A re-run finishes a cut-off run: a listed file, a method
 # key, deny entry or hook entry, or a block that is already absent counts
 # as removed, and a TARGET.uninstall-<digits> file a cut write left is
-# removed. With no lock it says "not installed" and exits 1.
+# removed. With no lock it says "not installed" and exits 1, unless the
+# saved copies are still there: then a run was cut off at its very end,
+# and this one removes them (step 8's fresh check).
 #
 # Conflicts (nothing is written), each naming its one action: a changed
 # method file (keep it with --keep PATH, or put back the method's copy); a
@@ -134,7 +137,7 @@ sub run {
   for my $k (@{ $opt->{keep} }) {
     if (index($k, '/') >= 0) {
       if (!Lock::good_path($k) || !Lock::method_path($k)) {
-        say_line('usage - --keep with --uninstall names a method key (such as model or permissions.defaultMode) or a file under the method\'s paths; ' . Esc::line($k) . ' is neither');
+        say_line('usage - --keep with --uninstall names a method key (such as model or effortLevel) or a file under the method\'s paths; ' . Esc::line($k) . ' is neither');
         exit 2;
       }
       $keep_path{$k} = 1;
@@ -160,6 +163,21 @@ sub run {
     refuse_now('method.lock cannot be read, so what the method put there cannot be told');
   }
   if (!$lock) {
+    # (a run cut off after the lock went and before its saved copies did:
+    # they are its last files, so this run finishes it; the fresh check)
+    my @left = grep { -f abs_path($_) && !-l abs_path($_) && !defined link_on_way($_) } sort values %SAVED;
+    if (@left) {
+      say_line("remove    $_ (left by an uninstall cut off at its end)") for @left;
+      if (!$opt->{write}) { say_line('dry run - nothing written; run it again with --write, where the project\'s hooks are off, to finish the earlier uninstall'); exit 0 }
+      $writing = 1;
+      for my $c (@left) { unlink abs_path($c) or fail_now('cannot remove ' . Esc::line($c)) }
+      opendir my $dh, abs_path($LOCAL);
+      my @in = $dh ? grep { $_ ne '.' && $_ ne '..' } readdir $dh : ('?');
+      closedir $dh if $dh;
+      rmdir abs_path($LOCAL) and prune(dirname($LOCAL)) if !@in;
+      say_line('WROTE - finished an earlier uninstall that was cut off at its end');
+      exit 0;
+    }
     say_line('not installed - this project has no ' . $Lock::LOCK . ', so there is nothing of the method to take out (a run that already finished leaves none)');
     exit 1;
   }
@@ -283,6 +301,9 @@ sub run {
       push @keeps, ["$LOCAL/", "the method's logs and review receipts, which git does not keep; delete the folder when you no longer need them"];
     }
   }
+  # (a file where the method's folder belongs: the write first saves the
+  # keys' files there, so it could not start; the fresh check)
+  elsif (-e abs_path($LOCAL)) { $conflict->($LOCAL, 'a file where the method\'s folder belongs: move it out of the way') }
 
   # --- stage 2: the settings ---
   my ($set_bytes, $set_remove);
@@ -359,11 +380,18 @@ sub run {
     # (the .gitignore block ignores .claude/settings.local.json; once it goes,
     # a local settings file that is there may be committed: say so, as it
     # may hold tokens or a hooks-off switch; review F14)
-    # (by the common forms of a line that ignores it; another form only
-    # brings this note when it is not needed)
+    # (by the common forms of a line that ignores it in what stays of the
+    # root .gitignore, or by git itself when the rule that ignores it now is
+    # not in the root .gitignore: a nested .gitignore, .git/info/exclude or
+    # core.excludesFile; another form in the root file only brings this
+    # note when it is not needed, so it says "may"; the fresh check)
     my $still = grep { /\A\s*\/?(?:\.claude\/)?(?:settings\.local\.json|\*\.local\.json|\*\.json)\s*\z|\A\s*\/?\.claude\/?\**\s*\z/ } split /\n/, $new;
     if ($file eq '.gitignore' && -e abs_path('.claude/settings.local.json') && !$still) {
-      push @keeps, ['.claude/settings.local.json', 'git no longer ignores it once the method\'s .gitignore block goes: delete it, or add it to .gitignore, before a commit picks it up'];
+      my $r = Git::ignored($proj, '.claude/settings.local.json');
+      $still = $r && @$r && $r->[0][1] !~ /\A\.gitignore line /;
+    }
+    if ($file eq '.gitignore' && -e abs_path('.claude/settings.local.json') && !$still) {
+      push @keeps, ['.claude/settings.local.json', 'git may no longer ignore it once the method\'s .gitignore block goes: delete it, or add it to .gitignore, before a commit picks it up'];
     }
     if ($new eq '' && defined $before && !$bhas) {
       $block_out{$file} = undef;
@@ -579,12 +607,21 @@ sub take_out {
   # what of the project's own stays, by kind (S7: each kind named): its own
   # keys and permissions keys by name, its hook entries and deny entries by
   # number, and $schema (review F3)
+  # (a key's name as UTF-8 bytes, as Esc::line reads them, and in quotes
+  # when it holds a ; or starts or ends with a space, so one name cannot
+  # read as two; the fresh check)
+  my $key_name = sub {
+    my ($n) = @_;
+    utf8::encode($n) if utf8::is_utf8($n);
+    my $e = Esc::line($n);
+    return $e =~ /;|\A\s|\s\z|\A\z/ ? qq("$e") : $e;
+  };
   my (@own, %mkey);
   %mkey = map { ($_ => 1) } keys %{ $k->{keys} };
-  push @own, map { Esc::line($_) } grep { !$mkey{$_} && $_ ne '$schema' && $_ ne 'hooks' && $_ ne 'permissions' } sort keys %$s;
+  push @own, map { $key_name->($_) } grep { !$mkey{$_} && $_ ne '$schema' && $_ ne 'hooks' && $_ ne 'permissions' } sort keys %$s;
   if (ref $s->{permissions} eq 'HASH') {
     my %mperm = map { ($_ => 1) } keys %{ $k->{permissions} };
-    push @own, map { 'permissions.' . Esc::line($_) } grep { $_ ne 'deny' && !$mperm{$_} } sort keys %{ $s->{permissions} };
+    push @own, map { 'permissions.' . $key_name->($_) } grep { $_ ne 'deny' && !$mperm{$_} } sort keys %{ $s->{permissions} };
     my %method = map { ($_ => 1) } @{ $k->{deny} };
     my $nd = ref $s->{permissions}{deny} eq 'ARRAY' ? grep { !defined || ref || !$method{$_} } @{ $s->{permissions}{deny} } : 0;
     push @own, "$nd deny entr" . ($nd == 1 ? 'y' : 'ies') if $nd;

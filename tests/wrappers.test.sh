@@ -145,21 +145,31 @@ while read -r f; do
   done
   # (a shell without arrays, dash, from its own folder: the file still
   # parses, and the start is refused with the one line, not a parse error;
-  # step 8's review, F21)
-  n="$name started by dash from its own folder is refused with its line, not a parse error"
-  if wanted "$n"; then
+  # step 8's review, F21. By a path too: a shell other than bash cannot
+  # tell the file it opened, so a script sourcing this one from ci/run.sh,
+  # whose ci/lib/ holds the planted copies, would pass; its fresh check)
+  for at in "from its own folder" "by a path, sourced from a script elsewhere"; do
+    n="$name started by dash $at is refused with its line, not a parse error"
+    wanted "$n" || continue
     if command -v dash >/dev/null 2>&1; then
-      out=$(cd "$bin" && dash "$name" --no-such-option </dev/null 2>&1)
+      case "$at" in
+        "from its own folder") out=$(cd "$bin" && dash "$name" --no-such-option </dev/null 2>&1) ;;
+        *)
+          printf '. %s --no-such-option\n' "$bin/$name" >"$work/evil/ci/run.sh"
+          out=$(cd "$work/evil" && dash ci/run.sh </dev/null 2>&1)
+          ;;
+      esac
       code=$?
-      if [ "$code" -eq 2 ] && [ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" = 1 ] && case "$out" in *"$name was started by a bare name found on PATH, or not as a file of its own"*) true ;; *) false ;; esac; then
+      if [ "$code" -eq 2 ] && [ ! -e "$mark" ] && [ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" = 1 ] && case "$out" in *"$name was started by a bare name found on PATH, or not as a file of its own"*) true ;; *) false ;; esac; then
         pass "$n"
       else
-        fail "$n" "exit $code; $(printf '%s\n' "$out" | head -3)"
+        fail "$n" "exit $code; mark: $(cat "$mark" 2>/dev/null); $(printf '%s\n' "$out" | head -3)"
       fi
+      rm -f "$mark"
     else
       skip "$n" "dash is not installed here"
     fi
-  fi
+  done
 done <"$work/found.txt"
 
 cd "$here" || true

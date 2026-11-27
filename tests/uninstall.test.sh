@@ -72,7 +72,7 @@ cut() {
   c_at=$1
   shift
   c_prog='BEGIN {
-      *CORE::GLOBAL::rename = sub { exit 9 if $_[1] =~ /\Q$ENV{CUT_AT}\E\z/; CORE::rename($_[0], $_[1]) };
+      *CORE::GLOBAL::rename = sub { exit 9 if !$ENV{CUT_UNLINK_ONLY} && $_[1] =~ /\Q$ENV{CUT_AT}\E\z/; CORE::rename($_[0], $_[1]) };
       *CORE::GLOBAL::unlink = sub { for (@_) { exit 9 if /\Q$ENV{CUT_AT}\E\z/ } CORE::unlink(@_) } }
     my $f = shift; do $f; die $@ if $@'
   out=$(CUT_AT="$c_at" perl -e "$c_prog" "$rel/scripts/release/lib/sync.pl" "$rel" --to "$p" --uninstall --write "$@" 2>&1)
@@ -405,7 +405,52 @@ if wanted "$n"; then
   install && commit install
   printf '{"disableAllHooks": true}\n' >"$p/.claude/settings.local.json"
   un --write
-  if [ "$code" -eq 0 ] && has "keep      .claude/settings.local.json (git no longer ignores it once the method's .gitignore block goes"; then ok "$n"; else no "$n"; fi
+  if [ "$code" -eq 0 ] && has "keep      .claude/settings.local.json (git may no longer ignore it once the method's .gitignore block goes"; then ok "$n"; else no "$n"; fi
+fi
+
+# --- step 8's fresh check of the repair ---
+n="a local settings file a nested .gitignore still ignores brings no note"
+if wanted "$n"; then
+  proj nestedignore
+  install && commit install
+  printf 'settings.local.json\n' >"$p/.claude/.gitignore" && commit "its own ignore"
+  printf '{"disableAllHooks": true}\n' >"$p/.claude/settings.local.json"
+  un
+  if [ "$code" -eq 0 ] && ! has "keep      .claude/settings.local.json"; then ok "$n"; else no "$n"; fi
+fi
+
+n="a run cut off after the lock went, before its saved copies, is finished by a re-run"
+if wanted "$n"; then
+  proj cutend
+  b=$(git -C "$p" rev-parse HEAD)
+  install && commit install
+  CUT_UNLINK_ONLY=1 cut uninstall-profiles.tsv
+  c1=$code
+  un --write
+  if [ "$c1" -eq 9 ] && [ "$code" -eq 0 ] && has "remove    .method/local/uninstall-profiles.tsv (left by an uninstall cut off at its end)" "WROTE - finished an earlier uninstall" &&
+    same_tree "$b" && [ ! -e "$p/.method" ]; then ok "$n"; else no "$n" "cut: exit $c1; re-run: exit $code; $(cd "$p" && git status --short | head -3)"; fi
+fi
+
+refused "a file where .method/local belongs is a conflict with its action" \
+  "rm -rf .method && mkdir .method && printf 'x\n' >.method/local" \
+  "conflict  .method/local (a file where the method's folder belongs: move it out of the way)"
+
+n="a key's name in the project's own line is shown as written, in quotes when it holds a ;"
+if wanted "$n"; then
+  proj keynames
+  install && commit install
+  perl -MJSON::PP -0pi -e 'my $j = JSON::PP->new->utf8->canonical->pretty; my $d = $j->decode($_); $d->{"caf\x{e9}"} = 1; $d->{"x; y"} = 2; $_ = $j->encode($d)' "$p/.claude/settings.json"
+  un
+  e_acute=$(printf '\303\251')
+  if [ "$code" -eq 0 ] && has "the project's own: caf$e_acute; \"x; y\"" && ! has 'caf\xE9'; then ok "$n"; else no "$n"; fi
+fi
+
+n="a run cut off late in its third stage still has profiles.tsv and the fragment, the last files to go"
+if wanted "$n"; then
+  proj lastfiles
+  install && commit install
+  cut scripts/method/status.sh
+  if [ "$code" -eq 9 ] && [ -f "$p/scripts/method/profiles.tsv" ] && [ -f "$p/scripts/method/settings.method.json" ] && [ ! -e "$p/.claude/agents/method/method-architect.md" ]; then ok "$n"; else no "$n" "cut: exit $code"; fi
 fi
 
 n="from a linked worktree, the run state in git's common folder is named (review F11)"

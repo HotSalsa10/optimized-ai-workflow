@@ -58,19 +58,32 @@ case $0 in
     if [ "$0" = review-packet.sh ] && [ "$self_src" = review-packet.sh ] && [ -f ./review-packet.sh ]; then
 ---
     if false; then
+=== done-check's $0 with a / taken as it is (as first built), so a script that sources it from elsewhere counts | method/scripts/method/done-check.sh | done-check.sh started by a bare name found on PATH is refused (sourced from a script elsewhere)
+    if [ -n "${BASH_VERSION-}" ] && [ "$self_src" = "$0" ]; then
+---
+    if true; then
+=== sync.sh takes an empty BASH_SOURCE for its own file, so standard input with a $0 holding a / counts | scripts/release/sync.sh | sync.sh started by a bare name found on PATH is refused (standard input, $0 with a /)
+    if [ -n "${BASH_VERSION-}" ] && [ "$self_src" = "$0" ]; then
+---
+    if [ -n "${BASH_VERSION-}" ] && { [ "$self_src" = "$0" ] || [ -z "$self_src" ]; }; then
+PLANTS-END
+# (the plants that only dash can show: where it is not installed, such as
+# Git Bash, their cases skip, so the plants would stay green for no fault
+# of their own; step 8's fresh check)
+if command -v dash >/dev/null 2>&1; then
+  cat >>"$work/plants.txt" <<'PLANTS-END'
 === BASH_SOURCE read without the eval, so dash cannot parse the file | method/scripts/method/status.sh | status.sh started by dash from its own folder is refused with its line, not a parse error
 [ -z "${BASH_VERSION-}" ] || eval 'self_src=${BASH_SOURCE[0]-}'
 ---
 self_src=${BASH_SOURCE[0]-}
-=== done-check's $0 with a / taken as it is (as first built), so a script that sources it from elsewhere counts | method/scripts/method/done-check.sh | done-check.sh started by a bare name found on PATH is refused (sourced from a script elsewhere)
-    if [ -z "${BASH_VERSION-}" ] || [ "$self_src" = "$0" ]; then
+=== status.sh trusts a $0 with a / under a shell other than bash | method/scripts/method/status.sh | status.sh started by dash by a path, sourced from a script elsewhere is refused
+    if [ -n "${BASH_VERSION-}" ] && [ "$self_src" = "$0" ]; then
 ---
-    if true; then
-=== sync.sh takes an empty BASH_SOURCE for its own file, so standard input with a $0 holding a / counts | scripts/release/sync.sh | sync.sh started by a bare name found on PATH is refused (standard input, $0 with a /)
     if [ -z "${BASH_VERSION-}" ] || [ "$self_src" = "$0" ]; then
----
-    if [ -z "${BASH_VERSION-}" ] || [ "$self_src" = "$0" ] || [ -z "$self_src" ]; then
 PLANTS-END
+else
+  skip "the plants for a start by dash" "dash is not installed here"
+fi
 plant_data "$work/plants.txt" tests/wrappers.test.sh only
 drop_sandbox "$work" || true
 echo "plants: scripts that refuse a bare name: $tests_pass passed, $tests_fail failed, $tests_skip skipped"

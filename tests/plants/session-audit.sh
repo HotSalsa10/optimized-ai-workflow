@@ -185,14 +185,23 @@ my $TELL = '';
     $n =~ s/\\(?:x[0-9A-F]?|u(?:\{[0-9A-F]*)?)?\z//;
 ---
     $n =~ s/\\(?:x[0-9A-F]?)?\z//;
-=== the plugin's two keys resolved one by one, not merged | method/scripts/method/lib/session.pl | the plugin's two keys are merged as the client merges them
+=== only the last of the plugin's two keys used, not both merged | method/scripts/method/lib/session.pl | the plugin's two keys are merged as the client merges them
       %merged = (%merged, %$o);
 ---
       %merged = %$o;
-=== an integer too long for perl taken for text | method/scripts/method/lib/session.pl | a hook command that is an integer too long for perl is not text
-  return 0 if $v =~ /\A-?[0-9]{19,}\z/;
+=== the plugin's two keys merged in the other order, the cc-plugin- key first | method/scripts/method/lib/session.pl | the plugin's two keys are merged as the client merges them
+    for my $key (sort { ($a =~ /\Acc-plugin-/i ? 1 : 0) <=> ($b =~ /\Acc-plugin-/i ? 1 : 0) || $a cmp $b } keys %{ $s->{pluginConfigs} }) {
 ---
-  1;
+    for my $key (sort { ($b =~ /\Acc-plugin-/i ? 1 : 0) <=> ($a =~ /\Acc-plugin-/i ? 1 : 0) || $a cmp $b } keys %{ $s->{pluginConfigs} }) {
+=== an integer too long for perl taken for text | method/scripts/method/lib/session.pl | a hook command that is an integer too long for perl is not text
+    my ($b, $be) = Json::decode($text);
+---
+    my ($b, $be) = Json::decode($text, 'plain');
+=== a JSON string of digits taken for a number | method/scripts/method/lib/session.pl | a hook command that is a JSON string of digits is text
+  my $f = B::svref_2object(\$v)->FLAGS;
+---
+  my $f = B::svref_2object(\$v)->FLAGS;
+  return 0 if $v =~ /\A-?[0-9]{19,}\z/;
 === a user settings file that cannot be read named without telling the owner | method/scripts/method/lib/session.pl | a user settings file that cannot be read is named on a line that says to tell the owner
     if (defined $e) { push @w, look($user ? "${TELL}$name $e, so what it changes is not known; they fix it $BY_HAND" : "$name $e, so what it changes is not known"); next }
 ---

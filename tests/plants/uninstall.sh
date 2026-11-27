@@ -55,8 +55,10 @@ cat >"$work/plants.txt" <<'PLANTS-END'
 ---
   for my $file (grep { $_ ne '.gitignore' } @BLOCK_FILES) {
 === it removes the lock first | scripts/release/lib/uninstall.pl | a run cut off after its first stage
+  # --- the write ---
   $writing = 1;
 ---
+  # --- the write ---
   $writing = 1;
   unlink abs_path($Lock::LOCK);
 === it removes files before settings | scripts/release/lib/uninstall.pl | a run cut off after its first stage
@@ -136,14 +138,38 @@ cat >"$work/plants.txt" <<'PLANTS-END'
     if ($te) { $conflict->($file, "$te: replace it with a plain file or remove it"); next }
 ---
     if ($te) { $conflict->($file, $te); next }
-=== a local settings file left unignored without a word | scripts/release/lib/uninstall.pl | a local settings file git no longer ignores once the .gitignore block goes is named
-    if ($file eq '.gitignore' && -e abs_path('.claude/settings.local.json') && !$still) {
----
-    if (0) {
 === git's common folder not read from a linked worktree | scripts/release/lib/uninstall.pl | from a linked worktree, the run state in git's common folder is named
   for my $q (['--absolute-git-dir'], ['--git-common-dir']) {
 ---
   for my $q (['--absolute-git-dir']) {
+=== a local settings file left unignored without a word | scripts/release/lib/uninstall.pl | a local settings file git no longer ignores once the .gitignore block goes is named
+      push @keeps, ['.claude/settings.local.json', 'git may no longer ignore it
+---
+      0 && push @keeps, ['.claude/settings.local.json', 'git may no longer ignore it
+=== the rule git ignores the local settings file by not asked for | scripts/release/lib/uninstall.pl | a local settings file a nested .gitignore still ignores brings no note
+      $still = $r && @$r && $r->[0][1] !~ /\A\.gitignore line /;
+---
+      $still = 0;
+=== a run cut off after the lock went left as not installed | scripts/release/lib/uninstall.pl | a run cut off after the lock went, before its saved copies, is finished by a re-run
+    if (@left) {
+---
+    if (0) {
+=== a file where .method/local belongs not named in the plan | scripts/release/lib/uninstall.pl | a file where .method/local belongs is a conflict with its action
+  elsif (-e abs_path($LOCAL)) { $conflict->($LOCAL, 'a file where the method\'s folder belongs: move it out of the way') }
+---
+  elsif (0) { }
+=== a key's name escaped as characters, not as UTF-8 bytes | scripts/release/lib/uninstall.pl | a key's name in the project's own line is shown as written
+    utf8::encode($n) if utf8::is_utf8($n);
+---
+    1;
+=== a key's name holding a ; not put in quotes | scripts/release/lib/uninstall.pl | a key's name in the project's own line is shown as written
+    return $e =~ /;|\A\s|\s\z|\A\z/ ? qq("$e") : $e;
+---
+    return $e;
+=== the profiles.tsv and fragment removed among the other files | scripts/release/lib/uninstall.pl | a run cut off late in its third stage still has profiles.tsv and the fragment
+      elsif ($kfiles->{$path}) { push @last, $path }
+---
+      elsif ($kfiles->{$path}) { push @removes, $path }
 PLANTS-END
 plant_data "$work/plants.txt" tests/uninstall.test.sh only
 drop_sandbox "$work" || true

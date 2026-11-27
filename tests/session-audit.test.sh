@@ -241,6 +241,16 @@ if wanted "$n"; then
   if quiet; then ok "$n"; else no "$n"; fi
 fi
 
+# (a JSON string of digits is text, long or not: the client runs it;
+# step 8's fresh check)
+n="a hook command that is a JSON string of digits is text, and is counted"
+if wanted "$n"; then
+  home
+  user '{"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"123456789012345678901234567890"},{"type":"command","command":"12345678901234567890"}]}]}}'
+  hook "$pa"
+  if holds "hooks on UserPromptSubmit (2)"; then ok "$n"; else no "$n"; fi
+fi
+
 n="a user UserPromptSubmit hook is named on its own line, with what to do, and a Stop hook is not"
 if wanted "$n"; then
   home

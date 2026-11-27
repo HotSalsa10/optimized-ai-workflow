@@ -454,7 +454,18 @@ for c in "bash $work/clone/scripts/release/sync.sh --to . --uninstall --write" "
   "bash <<'EOF'
 bash $work/clone/scripts/release/sync.sh --to . --write
 EOF" "bash <<<\"bash $work/clone/scripts/release/sync.sh --to . --write\"" "echo \"bash $work/clone/scripts/release/sync.sh --to . --write\" | bash" \
-  "perl -e 'system qw(bash $work/clone/scripts/release/sync.sh --to . --write)'"; do
+  "perl -e 'system qw(bash $work/clone/scripts/release/sync.sh --to . --write)'" \
+  "script -qc \"bash $work/clone/scripts/release/sync.sh --to . --write\" /dev/null" "watch \"bash $work/clone/scripts/release/sync.sh --to . --write\"" \
+  "su -c \"bash $work/clone/scripts/release/sync.sh --to . --write\" root" "busybox sh -c \"bash $work/clone/scripts/release/sync.sh --to . --write\"" \
+  "tmux new-session -d \"bash $work/clone/scripts/release/sync.sh --to . --write\"" "parallel ::: \"bash $work/clone/scripts/release/sync.sh --to . --write\"" \
+  "env -S \"bash $work/clone/scripts/release/sync.sh --to . --write\"" "source /dev/stdin <<<\"bash $work/clone/scripts/release/sync.sh --to . --write\"" \
+  ". <(echo \"bash $work/clone/scripts/release/sync.sh --to . --write\")" \
+  "W=--write; bash <<EOF
+bash $work/clone/scripts/release/sync.sh --to . \$W
+EOF" "bash <<'EOF'
+bash $work/clone/scripts/release/sync.sh --to . --wri''te
+EOF" "T=--to; bash $work/clone/scripts/release/sync.sh \$T . --write" "bash $work/clone/scripts/release/sync.sh \"\$@\" --write" \
+  "bash $work/clone/scripts/release/SYNC.SH --to . --write" "perl $work/clone/scripts/release/lib/Sync.pl $work/clone --to . --write"; do
   judge "sync with --write is refused: $c" "$proj" "$c" G6
 done
 for c in "bash $work/clone/scripts/release/sync.sh --to . --uninstall" "bash $work/clone/scripts/release/sync.sh --to ." \
@@ -463,7 +474,8 @@ for c in "bash $work/clone/scripts/release/sync.sh --to . --uninstall" "bash $wo
   "bash tools/sync.sh --write" "perl bin/sync.pl --write" "echo bash sync.sh --to . --write" \
   "cat <<'EOF' > notes.txt
 run bash scripts/release/sync.sh --to PROJECT --write where the hooks are off
-EOF" "git log --grep 'sync.sh --to . --write' --oneline"; do
+EOF" "git log --grep 'sync.sh --to . --write' --oneline" "awk '{print \$1}' $work/clone/scripts/release/sync.sh" \
+  "bash $work/clone/scripts/release/sync.sh --to '/tmp/a\$b'" "git commit -m \"Run bash scripts/release/sync.sh --to . --write where the hooks are off\""; do
   judge "not a sync run with --write passes: $c" "$proj" "$c" allow
 done
 # --- speed ---

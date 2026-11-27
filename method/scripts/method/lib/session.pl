@@ -91,6 +91,15 @@ sub read_settings {
   my ($d, $e) = Json::decode($text, 'plain');
   in_time();
   return (undef, 'is not JSON') if defined $e || ref $d ne 'HASH';
+  # (an integer too long for perl comes back from the plain reading as a
+  # string of digits, like a JSON string of digits: read again with big
+  # numbers, it is a number object, so is_text tells them apart; F23 and
+  # the fresh check. When that reading fails, the plain one stands)
+  if ($text =~ /[0-9]{19}/) {
+    my ($b, $be) = Json::decode($text);
+    in_time();
+    $d = $b if !defined $be && ref $b eq 'HASH';
+  }
   return ($d, undef);
 }
 
@@ -233,14 +242,13 @@ sub shown_name {
 }
 
 # is_text VALUE: a JSON string (JSON::PP gives a number with no string
-# part, which the client does not take for text)
+# part, which the client does not take for text, and an integer too long
+# for perl as a number object, read_settings's second reading)
 sub is_text {
   my ($v) = @_;
   return 0 unless defined $v && !ref $v;
   require B;
   my $f = B::svref_2object(\$v)->FLAGS;
-  # (an integer too long for perl comes as a string: still a number)
-  return 0 if $v =~ /\A-?[0-9]{19,}\z/;
   return ($f & B::SVp_POK()) || !($f & (B::SVp_IOK() | B::SVp_NOK())) ? 1 : 0;
 }
 
