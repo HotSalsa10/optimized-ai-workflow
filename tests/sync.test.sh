@@ -189,7 +189,7 @@ if wanted "$n"; then
   out1=$out
   s="$p/.claude/settings.json"
   got=$(jget "$s" '[$d->{cleanupPeriodDays}, $d->{permissions}{allow}, $d->{hooks}{PostToolUse}, scalar(grep { $_ eq "Bash(rm -rf /)" } @{ $d->{permissions}{deny} }), scalar(grep { $_ eq "mcp__*__merge_pull_request" } @{ $d->{permissions}{deny} }), scalar @{ $d->{permissions}{deny} }, $d->{permissions}{deny}[0], scalar @{ $d->{hooks}{PreToolUse} }]')
-  want='[30,["Bash(npm test)"],[{"hooks":[{"command":"bash tools/format.sh","type":"command"}],"matcher":"Write"}],1,1,10,"mcp__*__merge_pull_request",3]'
+  want='[30,["Bash(npm test)"],[{"hooks":[{"command":"bash tools/format.sh","type":"command"}],"matcher":"Write"}],1,1,11,"mcp__*__merge_pull_request",3]'
   f=$(findings "$p")
   sync "$rel71" "$p" --write
   got71=$(jget "$s" '[$d->{cleanupPeriodDays}, $d->{permissions}{allow}, $d->{hooks}{PostToolUse}, scalar(grep { $_ eq "Bash(rm -rf /)" } @{ $d->{permissions}{deny} }), scalar(grep { $_ eq "mcp__*__merge_pull_request" } @{ $d->{permissions}{deny} }), scalar @{ $d->{permissions}{deny} }, $d->{permissions}{deny}[0], scalar @{ $d->{hooks}{PreToolUse} }]')
@@ -205,7 +205,7 @@ if wanted "$n"; then
   sync "$rel71" "$p" --write
   got=$(jget "$p/.claude/settings.json" '[exists $d->{autoMemoryEnabled} ? 1 : 0, scalar(grep { $_ eq "mcp__*__unarchive_session" } @{ $d->{permissions}{deny} }), scalar(grep { $_ eq "Bash(added in v0.7.1)" } @{ $d->{permissions}{deny} }), scalar(grep { $_ eq "Bash(own)" } @{ $d->{permissions}{deny} }), scalar @{ $d->{permissions}{deny} }]')
   f=$(findings "$p")
-  if [ "$c1" -eq 0 ] && [ "$code" -eq 0 ] && [ "$got" = '[0,0,1,1,10]' ] && [ -z "$f" ]; then ok "$n"; else no "$n" "exit $c1 then $code; got $got; findings: $f"; fi
+  if [ "$c1" -eq 0 ] && [ "$code" -eq 0 ] && [ "$got" = '[0,0,1,1,11]' ] && [ -z "$f" ]; then ok "$n"; else no "$n" "exit $c1 then $code; got $got; findings: $f"; fi
 fi
 n="a settings.json that starts with a byte-order mark is read"
 if wanted "$n"; then

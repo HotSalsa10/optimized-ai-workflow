@@ -30,7 +30,8 @@
       "mcp__*__fire_trigger",
       "mcp__*__update_trigger",
       "mcp__*__unarchive_session",
-      "RemoteTrigger"
+      "RemoteTrigger",
+      "REPL"
     ]
   },
   "hooks": {

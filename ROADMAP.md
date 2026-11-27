@@ -16,9 +16,9 @@ Steps, each reviewed in a fresh context and committed with a verdict trailer:
 5b. gate-receipt, the third hook, split from step 5 after its plan review (A54).
 6. Method rules, agents (the five checking agents and the architect) and skills (`/method-start`, `/method-plan`, `/method-design`), with checks on their text and size (docs/plans/step6.md; setup moved to step 7, DECISIONS A73, where it became `/method-setup`).
 6b. A computed "Ready to merge": done-check reads the gates' receipts and the task's plan, a report check, and `/method-finish`, split from step 6 (docs/plans/step6.md S1).
-7. Project templates, setup, sync, the pack format and a way to make a project's own pack (no ready-made field packs, DECISIONS A77), three example projects of different kinds (docs/plans/step7.md, DECISIONS A78). Built in 7.0 to 7.8, with no 7b; waiting for its review and the owner's merge, then the first release tag, v0.7.0.
-8. First, this repo's own hooks from the first release tag (DECISIONS A47, its timing moved by A78 (16)), with `claudeMdExcludes` for `method/.claude/rules`; then the installer and uninstall, the user-level audit (personal skills named `method-*`, advisorModel) and wrappers that refuse a bare command name.
-9. Project CI templates, a live test in a fresh cloud session, README v1.
+7. Project templates, setup, sync, the pack format and a way to make a project's own pack (no ready-made field packs, DECISIONS A77), three example projects of different kinds (docs/plans/step7.md, DECISIONS A78). Built in 7.0 to 7.8, with no 7b; merged (pull request #5), and released as the first tag, v0.7.0.
+8. First, this repo's own hooks from the first release tag (DECISIONS A47, its timing moved by A78 (16)), with `claudeMdExcludes` for `method/.claude/rules`; then the installer and uninstall, the user-level audit (personal skills named `method-*`, advisorModel) and wrappers that refuse a bare command name (docs/plans/step8.md, DECISIONS A82). Built in 8.0 to 8.4; waiting for its review, CI and the owner's merge, then the tag v0.8.0.
+9. First, this repo's move to v0.8.0, in a session where its hooks are off (docs/plans/step8.md S5); then project CI templates, a live test in a fresh cloud session, README v1.
 
 Exit: a new example project set up with `/method-setup` in a fresh cloud session passes the live acceptance list.
 Blocker: none; Claude does the work.

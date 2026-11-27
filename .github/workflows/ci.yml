@@ -25,13 +25,13 @@ concurrency:
 # starting with ::) in its output, so text from a file in the repo cannot
 # fake an annotation or hide later output.
 jobs:
-  # The repo checks and the tests: about 20 minutes as a user who is not root
-  # (step 7.9), so 30 minutes keeps them within 70% of the limit. Nothing
-  # checks this margin by machine (TESTS.md, Where CI runs).
+  # The repo checks and the tests: about 21 minutes as a user who is not root
+  # (step 8.5, 69% of the old 30), so 40 minutes keeps them near 52% of the
+  # limit. Nothing checks this margin by machine (TESTS.md, Where CI runs).
   linux:
     name: Linux
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     env:
       REQUIRE_SHELLCHECK: "1"
     steps:
@@ -48,7 +48,7 @@ jobs:
           echo "::stop-commands::stop-$RANDOM$RANDOM$RANDOM"
           bash tests/run.sh tests
 
-  # The planted defects run beside the tests, in the six parts that
+  # The planted defects run beside the tests, in the seven parts that
   # tests/plants/shards.txt gives the plant files by measured time (each part
   # within 70% of the 30-minute limit; tests/ci-config.test.sh checks this
   # list against that file), each plant with only the test cases that can
@@ -60,7 +60,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: ["0/6", "1/6", "2/6", "3/6", "4/6", "5/6"]
+        shard: ["0/7", "1/7", "2/7", "3/7", "4/7", "5/7", "6/7"]
     env:
       REQUIRE_SHELLCHECK: "1"
       SHARD: ${{ matrix.shard }}
@@ -82,7 +82,7 @@ jobs:
   harness:
     name: Harness (real Claude Code, fake API)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -114,7 +114,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest, macos-latest]
-        part: ["tests", "plants 0/6", "plants 1/6", "plants 2/6", "plants 3/6", "plants 4/6", "plants 5/6"]
+        part: ["tests", "plants 0/7", "plants 1/7", "plants 2/7", "plants 3/7", "plants 4/7", "plants 5/7", "plants 6/7"]
     env:
       PART: ${{ matrix.part }}
     defaults:

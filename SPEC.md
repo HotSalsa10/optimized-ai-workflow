@@ -22,6 +22,7 @@ R1. Portable core. One domain-neutral core plus optional field packs, copied int
 R2. Install and uninstall. The per-machine layer is optional. The installer backs up what exists, merges instead of overwriting, can be run twice safely, has a dry run, and can be undone.
 - Running the installer twice in a temporary home gives identical files and one backup.
 - Uninstall restores the backed-up files.
+- Read for a project (DECISIONS A82 (5), (6)): Release 1 has no per-machine layer; the installer is the release's sync, "a temporary home" is a temporary project, "one backup" is the parent of the commit that installed the method, and `sync.sh --uninstall` gives that commit's files back.
 
 R3. Setup (`/method-setup`, DECISIONS A78 (18)). The first use in a project asks plain questions about the person and the project, detects what it can, writes the configuration and plays the consequences back. Answers change who does what, the pace and how strict checks are; they never lower the floor.
 - A test runs every answer combination and confirms the floor holds in each.

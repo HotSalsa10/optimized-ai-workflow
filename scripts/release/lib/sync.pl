@@ -2,6 +2,10 @@
 # The release's sync, run by scripts/release/sync.sh (step 7.3; docs/plans/
 # step7.md S2, S3, S6; DECISIONS A78; M155). Usage, from sync.sh:
 #   perl sync.pl SOURCE --to PROJECT [--profile NAME] [--keep KEY]... [--write] [--source DIR]
+#   perl sync.pl SOURCE --to PROJECT --uninstall [--keep KEY|PATH]... [--write] [--source DIR]
+# With --uninstall (step 8.2; M162) the source and project checks below run
+# as for an install, and then lib/uninstall.pl takes the method out of the
+# project instead (its header says how); --profile with it is bad usage.
 #
 # SOURCE is the checkout sync.sh sits in. It must be a clean checkout at an
 # exact v* tag; the tag is the version, HEAD the source commit. The
@@ -76,7 +80,8 @@ my %BLOCKS = (
 
 sub say_line { print 'sync: ', Esc::line(join '', @_), "\n" }
 sub usage {
-  print "sync: usage: bash scripts/release/sync.sh --to PROJECT [--profile NAME] [--keep KEY]... [--write] [--source CHECKOUT]\n";
+  print "sync: usage: bash scripts/release/sync.sh --to PROJECT [--profile NAME] [--keep KEY]... [--write] [--source CHECKOUT]\n",
+    "sync: usage: bash scripts/release/sync.sh --to PROJECT --uninstall [--keep KEY|PATH]... [--write] [--source CHECKOUT]\n";
   exit 2;
 }
 sub refuse_now {
@@ -91,7 +96,7 @@ sub fail_now {
 
 my $src_arg = shift @ARGV;
 usage() unless defined $src_arg;
-my ($to, $profile_arg, $write, $source_opt, @keep);
+my ($to, $profile_arg, $write, $source_opt, $uninstall, @keep);
 while (@ARGV) {
   my $a = shift @ARGV;
   if ($a eq '--to' && @ARGV) { $to = shift @ARGV }
@@ -99,9 +104,12 @@ while (@ARGV) {
   elsif ($a eq '--keep' && @ARGV) { push @keep, shift @ARGV }
   elsif ($a eq '--source' && @ARGV) { $source_opt = shift @ARGV }
   elsif ($a eq '--write') { $write = 1 }
+  elsif ($a eq '--uninstall') { $uninstall = 1 }
   else { usage() }
 }
 usage() unless defined $to;
+# (an uninstall takes the project's own profile; lib/uninstall.pl)
+usage() if $uninstall && defined $profile_arg;
 # (read before the chdir into the release below, so a relative --to is the
 # folder sync was run from)
 my $proj = Cwd::realpath($to);
@@ -124,7 +132,7 @@ if (defined $source_opt) {
     unless defined $s && $s eq $src;
 }
 my %keepable = map { ($_ => 1) } @Lock::KEEP_EVENTS, @Lock::KEEP_KEYS, do { require File::Spec->catfile($src, 'method/scripts/method/lib/watch.pl'); no warnings 'once'; @Watch::RUNS };
-for my $k (@keep) {
+for my $k ($uninstall ? () : @keep) {
   next if $keepable{$k};
   say_line('usage - --keep names one of: ' . join(' ', sort keys %keepable));
   exit 2;
@@ -169,6 +177,10 @@ refuse_now("the release's settings fragment is not a JSON object") if defined $f
 # --- the project ---
 refuse_now('the project folder ' . Esc::line($to) . ' does not exist') unless defined $proj && -d $proj;
 refuse_now('the project is the release checkout itself, or inside it') if $proj eq $src || index($proj, "$src/") == 0;
+$uninstall and do {
+  require File::Spec->catfile($src, 'scripts/release/lib/uninstall.pl');
+  Uninstall::run({ proj => $proj, tag => $tag, commit => $commit, keep => \@keep, write => $write });
+};
 my $abs = sub { File::Spec->catfile($proj, split m{/}, $_[0]) };
 
 # a link on a path sync would write, or on the way to it

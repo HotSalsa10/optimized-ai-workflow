@@ -20,7 +20,8 @@
 #
 # Exit codes: 0 the card holds (written with --write); 1 refused, nothing
 # written (or a write failed: run it again with --write to finish); 2 bad
-# usage, or perl or one of its modules is missing.
+# usage, perl or one of its modules missing, or started by a bare name not
+# from its own folder or not as a file of its own (M163).
 set -u
 # perl reads bytes; these settings would change how it reads and writes
 # them, and the library paths would let modules from elsewhere run inside it
@@ -29,9 +30,36 @@ if ! command perl -MJSON::PP -MDigest::SHA -e 1 >/dev/null 2>&1; then
   echo "setup: FAIL - perl, or its JSON::PP or Digest::SHA module, is missing"
   exit 2
 fi
-# only bash and perl are needed, so no dirname
+# only bash and perl are needed, so no dirname; started by a bare name, the
+# current folder counts only when $0 and the file bash opened (BASH_SOURCE)
+# are both this script's own name and ./setup-write.sh is a file: found on
+# PATH (or sourced, or piped), the current folder is not this script's and
+# its lib/ could be the project's own, so it refuses (M163; step 8.3,
+# docs/plans/step8.md S8)
+# (bash's BASH_SOURCE, read through eval only under bash, so a shell
+# without arrays still parses this file and is refused below)
+self_src=
+[ -z "${BASH_VERSION-}" ] || eval 'self_src=${BASH_SOURCE[0]-}'
+self_ok=
 case "$0" in
-  */*) here=${0%/*} ;;
-  *) here=. ;;
+  */*)
+    # (a $0 with a / counts only under bash, when it is the file bash opened:
+    # sourced from a script elsewhere, $0 is that script's path; another
+    # shell cannot tell, so it is refused)
+    if [ -n "${BASH_VERSION-}" ] && [ "$self_src" = "$0" ]; then
+      here=${0%/*}
+      self_ok=1
+    fi
+    ;;
+  *)
+    if [ "$0" = setup-write.sh ] && [ "$self_src" = setup-write.sh ] && [ -f ./setup-write.sh ]; then
+      here=.
+      self_ok=1
+    fi
+    ;;
 esac
+if [ -z "$self_ok" ]; then
+  printf '%s\n' "setup: FAIL - setup-write.sh was started by a bare name found on PATH, or not as a file of its own; run it by its path, such as bash path/to/setup-write.sh"
+  exit 2
+fi
 exec perl "$here/lib/setup.pl" "$@"

@@ -159,7 +159,7 @@ EOF
 hook "$p"
 # (the second hook is a copy of the method's own command: in local settings
 # it would replace the project's entry with its own fields, so it counts)
-has "local settings that weaken the method are named, key by key, a copy of the method's hook included" ".claude/settings.local.json sets effortLevel; disableAllHooks; env MY_TOKEN; 2 PreToolUse or PermissionRequest hooks (the method's are in the project's settings only); 1 enabled plugin (their hooks were not read)"
+has "local settings that weaken the method are named, key by key, a copy of the method's hook included" ".claude/settings.local.json sets effortLevel; disableAllHooks; env MY_TOKEN; 2 PreToolUse or PermissionRequest hooks (the method's are in the project's settings only); 1 enabled plugin (hooks not read)"
 lacks "a value from the settings is never printed, only names" "$key"
 printf '{"effortLevel":' >"$p/.claude/settings.local.json"
 hook "$p"
@@ -202,7 +202,7 @@ has "an effortLevel below xhigh for one model in local settings is a LOOK" "an e
 rm -f "$p/.claude/settings.local.json"
 printf '{"availableModels":["claude-sonnet-5-5"]}\n' >"$HOME/.claude/settings.json"
 hook "$p"
-has "availableModels in user settings is a LOOK, as lists add up across settings files" "availableModels (lists add up across settings files)"
+has "availableModels in user settings is a LOOK, as lists add up across settings files" "availableModels (lists add up)"
 rm -f "$HOME/.claude/settings.json"
 printf '{"env":{"METHOD_NESTED":"1"}}\n' >"$p/.claude/settings.local.json"
 hook "$p" "" METHOD_NESTED=1
@@ -275,10 +275,18 @@ lines=$(printf '%s\n' "$out" | wc -l | tr -d ' ')
 bytes=$(printf '%s\n' "$out" | wc -c | tr -d ' ')
 long_line=$(printf '%s\n' "$out" | awk 'length($0) > 240' | wc -l | tr -d ' ')
 if [ "$lines" -le 10 ] && [ "$bytes" -le 1200 ] && [ "$long_line" -eq 0 ]; then pass "the output keeps to 10 lines, 1,200 bytes and 240 bytes a line ($lines lines, $bytes bytes)"; else fail "the output keeps to 10 lines, 1,200 bytes and 240 bytes a line" "$lines lines, $bytes bytes, $long_line long: $out"; fi
-cut_line=$(printf '%s\n' "$out" | grep '^session-status: LOOK - ~/.claude/settings.json adds to every session: env Vxxx' || true)
+cut_line=$(printf '%s\n' "$out" | grep '^session-status: LOOK - tell the owner: ~/.claude/settings.json adds to every session: env Vxxx' || true)
+# (since step 8.4 the user-settings line is built item by item: the cut
+# falls inside its list, marked with ..., and what the owner does stays)
 case "$cut_line" in
-  *' ...') if [ "$(printf '%s' "$cut_line" | wc -c | tr -d ' ')" -le 240 ]; then pass "a line that is too long is cut to 240 bytes and marked, not dropped"; else fail "a line that is too long is cut to 240 bytes" "$cut_line"; fi ;;
+  *'...; they change it by hand (Claude cannot): give steps') if [ "$(printf '%s' "$cut_line" | wc -c | tr -d ' ')" -le 240 ]; then pass "a line that is too long is cut to 240 bytes and marked, not dropped"; else fail "a line that is too long is cut to 240 bytes" "$cut_line"; fi ;;
   *) fail "a line that is too long is cut to 240 bytes and marked, not dropped" "$out" ;;
+esac
+# (a line no list builds is still cut by the caps, at its end)
+out=$(LIBDIR="$root/method/scripts/method/lib" perl -e 'require "$ENV{LIBDIR}/session.pl"; print "$_\n" for Session::capped("session-status: LOOK - " . ("w" x 300))')
+case "$out" in
+  *' ...') if [ "$(printf '%s' "$out" | wc -c | tr -d ' ')" -le 240 ]; then pass "a line no list builds is cut to 240 bytes at its end and marked"; else fail "a line no list builds is cut to 240 bytes" "$out"; fi ;;
+  *) fail "a line no list builds is cut to 240 bytes at its end and marked" "$out" ;;
 esac
 rm -f "$HOME/.claude/settings.json" "$p/.claude/settings.local.json"
 # more than 1,200 bytes in fewer than 10 lines: the byte cap ends it

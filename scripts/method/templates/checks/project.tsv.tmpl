@@ -1,0 +1,15 @@
+# The project's own checks, one per line. The top of scripts/method/run-checks.sh
+# explains the five fields, which are separated by TAB characters. A line
+# that starts with # is off. Name each check in TESTS.md.
+#
+# Does the project start? Put a command that starts it, checks it once and
+# stops, then remove the # to turn the row on.
+#smoke	any	-	^smoke: (\d+) start	{{HOW_IT_STARTS}} && echo "smoke: 1 start passed"
+#
+# Checks for known security problems in the libraries the project uses
+# (M094). Nothing is installed for you: install the tool, then remove the #
+# on its row.
+#deps-python	any	cmd:pip-audit,file:requirements.txt	^deps-python: (\d+) file	pip-audit -r requirements.txt && echo "deps-python: 1 file examined"
+#deps-node	any	cmd:npm,file:package-lock.json	^deps-node: (\d+) file	npm audit && echo "deps-node: 1 file examined"
+#deps-go	any	cmd:govulncheck,file:go.mod	^deps-go: (\d+) file	govulncheck ./... && echo "deps-go: 1 file examined"
+#deps-rust	any	cmd:cargo-audit,file:Cargo.lock	^deps-rust: (\d+) file	cargo audit && echo "deps-rust: 1 file examined"

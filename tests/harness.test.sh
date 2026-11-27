@@ -490,6 +490,102 @@ if h_fake "$H_WORK/ss.json"; then
 else
   fail "session-status-nested: the fake did not answer; the client was not started"
 fi
+# (step 8.4, M164) the user-level audit: a home with a personal skill named
+# like the project's method-start and a user claudeMdExcludes; the first
+# request carries the audit's two lines, each saying to tell the owner
+h_case session-status-audit
+h_method "$root"
+mkdir -p "$H_PROJ/.claude/skills" "$H_DIR/home/.claude/skills/method-start"
+cp -R "$root/method/.claude/skills/method-start" "$H_PROJ/.claude/skills/method-start"
+printf -- '---\nname: method-start\ndescription: a personal copy\n---\nPersonal text.\n' >"$H_DIR/home/.claude/skills/method-start/SKILL.md"
+printf '{"claudeMdExcludes":["**/nothing-here/**"]}\n' >"$H_DIR/home/.claude/settings.json"
+if h_fake "$H_WORK/ss.json"; then
+  # shellcheck disable=SC2086
+  h_client 60 -- $D
+  h_stop
+  # shellcheck disable=SC2088 # the ~ is the text the hook prints, not a path
+  if h_req_has "METHOD-ACTIVE $H_TAG" && h_req_has "LOOK - tell the owner: personal skill method-start in ~/.claude/skills runs in place of the project's" &&
+    h_req_has "LOOK - tell the owner: claudeMdExcludes in ~/.claude/settings.json keep the method out"; then
+    pass "session-status: the user-level audit's lines, a personal method-start and a user claudeMdExcludes, each saying to tell the owner, reach the first request"
+  else
+    fail "session-status: the user-level audit's lines reach the first request" "$(LC_ALL=C grep -h -o 'LOOK - tell the owner[^"]\{0,120\}' "$H_DIR"/fake/req-*.json | sort -u | head -4)"
+  fi
+  h_safe session-status-audit
+else
+  fail "session-status-audit: the fake did not answer; the client was not started"
+fi
+# (step 8.4) where and how the agents-md plugin's option is read: a user
+# setting that resolves to managed-only, under a @builtin key, keeps the
+# project's CLAUDE.md out of the first request, and the audit names it;
+# under a bare id, or at a value that does not resolve to managed-only,
+# CLAUDE.md arrives and the audit is silent. Each form: ID:AT:OPTION:VALUE:
+# out or in (the keys and values read from the client's strings, pinned
+# here; the older option's none is its managed-only)
+n_if=0
+for form in agents-md:builtin:instructionFiles:managed-only:out cc-plugin-agents-md:builtin:instructionFiles:managed-only:out \
+  agents-md::instructionFiles:managed-only:in cc-plugin-agents-md::instructionFiles:managed-only:in \
+  agents-md:builtin:projectInstructions:none:out agents-md:builtin:projectInstructions:managed-only:in; do
+  n_if=$((n_if + 1))
+  # (the key is ID@AT, or the bare ID; put together here)
+  rest=$form
+  key=${rest%%:*} && rest=${rest#*:}
+  at=${rest%%:*} && rest=${rest#*:}
+  opt=${rest%%:*} && rest=${rest#*:}
+  val=${rest%%:*} && want=${rest#*:}
+  [ -z "$at" ] || key="$key@$at"
+  what="$opt $val under pluginConfigs $key"
+  h_case "instruction-files-$n_if"
+  h_method "$root"
+  printf '%s\n' 'INSTRUCTION-MARK-84 from the project CLAUDE.md' '@AGENTS.md' >"$H_PROJ/CLAUDE.md"
+  mkdir -p "$H_DIR/home/.claude"
+  printf '{"pluginConfigs":{"%s":{"options":{"%s":"%s"}}}}\n' "$key" "$opt" "$val" >"$H_DIR/home/.claude/settings.json"
+  if h_fake "$H_WORK/ss.json"; then
+    # shellcheck disable=SC2086
+    h_client 60 -- $D
+    h_stop
+    seen=$(LC_ALL=C grep -h -o 'INSTRUCTION-MARK-84\|tell the owner: agents-md[^"]\{0,40\}' "$H_DIR"/fake/req-*.json | sort -u | head -3)
+    if [ "$want" = out ]; then
+      if h_req_has "METHOD-ACTIVE $H_TAG" && ! h_req_has 'INSTRUCTION-MARK-84' && h_req_has "tell the owner: agents-md $opt $val"; then
+        pass "instruction files: $what keeps the project's CLAUDE.md out, and the audit names it"
+      else
+        fail "instruction files: $what keeps the project's CLAUDE.md out, and the audit names it" "$seen"
+      fi
+    elif h_req_has "METHOD-ACTIVE $H_TAG" && h_req_has 'INSTRUCTION-MARK-84' && ! h_req_has 'tell the owner: agents-md'; then
+      pass "instruction files: with $what the client drops nothing, CLAUDE.md arrives, and the audit is silent"
+    else
+      fail "instruction files: with $what the client drops nothing, CLAUDE.md arrives, and the audit is silent" "$seen"
+    fi
+    h_safe "instruction-files-$n_if"
+  else
+    fail "instruction-files-$n_if: the fake did not answer; the client was not started"
+  fi
+done
+# (step 8's review, F7) the plugin's two keys at once: the client merges
+# their options, agents-md@builtin first and cc-plugin-agents-md@builtin
+# after it, the later winning for each option, and resolves the result
+# once; here the first key's older option at none and the second key's
+# instructionFiles at its default resolve to managed-only, so CLAUDE.md is
+# kept out, and the audit names it
+h_case instruction-files-merged
+h_method "$root"
+printf '%s\n' 'INSTRUCTION-MARK-84 from the project CLAUDE.md' '@AGENTS.md' >"$H_PROJ/CLAUDE.md"
+mkdir -p "$H_DIR/home/.claude"
+a1="agents-md@builtin"
+a2="cc-plugin-agents-md@builtin"
+printf '{"pluginConfigs":{"%s":{"options":{"instructionFiles":"claude-md","projectInstructions":"none"}},"%s":{"options":{"instructionFiles":"claude-md-or-agents-md"}}}}\n' "$a1" "$a2" >"$H_DIR/home/.claude/settings.json"
+if h_fake "$H_WORK/ss.json"; then
+  # shellcheck disable=SC2086
+  h_client 60 -- $D
+  h_stop
+  if h_req_has "METHOD-ACTIVE $H_TAG" && ! h_req_has 'INSTRUCTION-MARK-84' && h_req_has 'tell the owner: agents-md projectInstructions none'; then
+    pass "instruction files: the plugin's two keys are merged, the later winning per option, and the result (managed-only) keeps CLAUDE.md out, and the audit names it"
+  else
+    fail "instruction files: the plugin's two keys are merged, the later winning per option, and the result (managed-only) keeps CLAUDE.md out, and the audit names it" "$(LC_ALL=C grep -h -o 'INSTRUCTION-MARK-84\|tell the owner: agents-md[^"]\{0,40\}' "$H_DIR"/fake/req-*.json | sort -u | head -3)"
+  fi
+  h_safe instruction-files-merged
+else
+  fail "instruction-files-merged: the fake did not answer; the client was not started"
+fi
 
 # --- 12. the guard (step 5.5) ---
 g0='echo $(git rev-parse HEAD) > refused-ran.txt'
@@ -619,11 +715,12 @@ outside_case() {
   perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({mcpServers => {map { $_ => {type => "stdio", command => "perl", args => [$ARGV[0], "$ARGV[1]/$_.log", qw(merge_pull_request create_pull_request)]} } qw(github plugin_github_github)}})' \
     "$HARNESS/fake-mcp.pl" "$H_DIR" >"$H_DIR/mcp.json"
 }
-# deny_loaded: the client's debug log says the nine deny rules loaded from
-# the project's settings, and that no rule was found invalid (a rule the
-# client rejects prints nothing on stderr or in the stream)
+# deny_loaded: the client's debug log says the ten deny rules (REPL the
+# tenth since step 8.0c) loaded from the project's settings, and that no
+# rule was found invalid (a rule the client rejects prints nothing on stderr
+# or in the stream)
 deny_loaded() {
-  LC_ALL=C grep -q "Adding 9 deny rule(s) to destination 'projectSettings'" "$H_DIR/debug.log" 2>/dev/null && ! LC_ALL=C grep -q 'Invalid permission rule\|Invalid setting' "$H_DIR/debug.log"
+  LC_ALL=C grep -q "Adding 10 deny rule(s) to destination 'projectSettings'" "$H_DIR/debug.log" 2>/dev/null && ! LC_ALL=C grep -q 'Invalid permission rule\|Invalid setting' "$H_DIR/debug.log"
 }
 # called LOG [TEXT]: the fake MCP server under that name was called (with
 # TEXT in the call)
@@ -658,7 +755,7 @@ if h_fake "$H_WORK/outside.json"; then
   else
     fail "outside: an MCP pull request on another repository is refused (G4); one from the task branch is made" "$(cut -f7- "$H_DIR/fake/requests.tsv")"
   fi
-  if deny_loaded; then pass "outside: the client's debug log shows the nine deny rules loaded from the project's settings, none invalid"; else fail "outside: the eight deny rules loaded, none invalid" "$(LC_ALL=C grep -i 'deny rule\|invalid' "$H_DIR/debug.log" 2>/dev/null | head -3)"; fi
+  if deny_loaded; then pass "outside: the client's debug log shows the ten deny rules loaded from the project's settings, none invalid"; else fail "outside: the ten deny rules loaded, none invalid" "$(LC_ALL=C grep -i 'deny rule\|invalid' "$H_DIR/debug.log" 2>/dev/null | head -3)"; fi
   if LC_ALL=C grep -q '	G4	mcp__github	' "$H_PROJ/.method/local/guard.log" 2>/dev/null && ! LC_ALL=C grep -q 'create_pull_request' "$H_PROJ/.method/local/guard.log"; then
     pass "outside: the MCP refusal is in guard.log under the tool's server only"
   else

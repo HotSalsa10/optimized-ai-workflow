@@ -186,5 +186,39 @@ plant "the whole-name end dropped from the text forms (home_re)" "the text forms
 # (step 6b's review, R18) a folder's name with dots or spaces after it
 plant "trailing dots and spaces not read in the text forms (home_re)" "the text forms: a folder's name with dots or spaces after it" ")[. ]*(?![A-Za-z0-9_.-])' }" ")(?![A-Za-z0-9_.-])' }"
 
+# --- the release's sync with --write (step 8.2) ---
+plant "sync with --write let through" "sync with --write is refused: " "  if (defined(my \$why = release_write(\$cmds))) { return ('G6', \$why) }" '  if (0) { }'
+plant "a sync dry run refused as if it wrote" "not a sync run with --write passes: bash " \
+  "with --write, which installs, updates or takes out \$RELEASE_NO\" if grep { \$w[\$_] eq '--write' } @k;" "with --write, which installs, updates or takes out \$RELEASE_NO\" if 1;"
+# (step 8's review, its repair: F5, F6, F16 to F18; and its fresh check)
+plant "a project's own sync.sh, which takes no --to, refused" "not a sync run with --write passes: bash tools/sync.sh" \
+  "        next unless @run || grep { \$w[\$_] eq '--to' || \$w[\$_] =~ /\\A--to=/ } @k;" '        1;'
+plant "a word made at run time after the sync let through" "sync with --write is refused: for x in" \
+  "          if @run;" '          if 0;'
+plant "a word made at run time not taken for the --to" "sync with --write is refused: T=--to" \
+  "        next unless @run || grep {" "        next unless grep {"
+plant "a single-quoted \$ taken for a word made at run time" "not a sync run with --write passes: bash " \
+  "  (my \$r = \$raw) =~ s/'[^']*'//g;" '  my $r = $raw;'
+plant "code given to a shell not read for the sync" "sync with --write is refused: bash <<" \
+  "    return \$code_no if code_runs_sync(join \"\\n\", @w, \$c->{hbody} // '', \$c->{pipe_from} // '');" '    1;'
+plant "quotes in code not taken out before it is read" "sync with --write is refused: bash <<'EOF'" \
+  "  (my \$t = \$text // '') =~ s/['\"\\\\]//g;" "  my \$t = \$text // '';"
+plant "a \$ in code not taken for the --write" "sync with --write is refused: W=--write; bash <<" \
+  "  return (\$to && (\$wr || \$run)) || (\$wr && \$run);" '  return $to && $wr;'
+plant "a \$ in code taken for both words, so awk's \$1 is refused" "not a sync run with --write passes: awk" \
+  "  return (\$to && (\$wr || \$run)) || (\$wr && \$run);" '  return ($to || $run) && ($wr || $run);'
+plant "a command line given as one word not read" "sync with --write is refused: script -qc" \
+  "          return \$code_no if \$w[\$i] =~ /\\s/ && code_runs_sync(\$w[\$i]);" '          1;'
+plant "every command's words read as command lines, a commit message's too" "not a sync run with --write passes: git commit" \
+  "      my (\$from) = grep { runs_line(name_of(\$w[\$_])) } 0 .. \$#w;" '      my $from = 0;'
+plant "a source of standard input not read for the sync" "sync with --write is refused: source /dev/stdin" \
+  " || \$_ eq 'source of a process substitution or stdin' || \$_ eq 'env -S' }" ' }'
+plant "the sync's name read with its letter case" "sync with --write is refused: " \
+  "our \$SYNC_RE = qr/\\Async\\.(?:sh|pl)\\z/i;" 'our $SYNC_RE = qr/\Async\.(?:sh|pl)\z/;'
+plant "a read-only command naming the words refused" "not a sync run with --write passes: echo bash sync.sh" \
+  "    if (@w && !read_only(\$c)) {" '    if (@w) {'
+plant "a here-document to cat read as code" "not a sync run with --write passes: cat <<" \
+  "    next unless grep { /\\A(?:an inline program for|a pipe, here-document or here-string into|a program for \\S+ from) / ||" '    next unless 1 || grep { 0 ||'
+
 echo "plants: protected files: $tests_pass passed, $tests_fail failed, $tests_skip skipped"
 [ "$tests_fail" -eq 0 ]

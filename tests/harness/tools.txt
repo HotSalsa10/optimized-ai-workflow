@@ -37,3 +37,4 @@ TaskGet	not	reads an item of the session's own task list
 TaskList	not	lists the session's own task list
 TaskUpdate	not	changes an item of the session's own task list; writes nothing in the project
 AskUserQuestion	not	asks the person a question with choices (/method-setup); offered in interactive sessions, not in a -p run unless --permission-prompt-tool is given (step 7.0, F5)
+REPL	not	Code Mode's script tool, offered only when the person opts in and only on Anthropic's own API, never to this harness; denied in the settings so Code Mode stays off; when on, its inner calls reach the guard under their own names

@@ -1,0 +1,1042 @@
+#!/usr/bin/env perl
+# Runs the method's built-in checks and the project's own checks, and keeps
+# their whole output in a log (M002, M050, M051, M066). Started by
+# run-checks.sh, which documents the checks file, the results, the screen,
+# the log and the exit codes. Checks::read_tsv is the one reader of
+# checks/*.tsv (M048): status.pl loads this file with require for it, and
+# then nothing runs.
+package Checks;
+use strict;
+use warnings;
+use Fcntl qw(O_WRONLY O_CREAT O_EXCL);
+use File::Basename qw(dirname);
+use File::Spec;
+use POSIX ();
+use Time::HiRes ();
+
+# The caller's environment, taken before git.pl cleans it: the project's
+# checks run in it, with the caller's perl settings put back (run-checks.sh
+# passes them on as METHOD_CALLER_*).
+our %CALLER_ENV;
+BEGIN { %CALLER_ENV = %ENV }
+
+my $lib = dirname(File::Spec->rel2abs(__FILE__));
+require File::Spec->catfile($lib, $_) for qw(git.pl esc.pl conf.pl tree.pl runstate.pl);
+
+our @RESERVED = qw(secrets fresh-clone method-files tree-unchanged project-checks);
+my $LOCAL = '.method/local';
+my $LOGS = "$LOCAL/logs";
+my $KEEP_LOGS = 20;
+my $LOG_NAME = qr/\Arun-checks-[0-9]{8}T[0-9]{6}Z-[0-9]{10}\.log\z/;
+
+# --- checks/*.tsv ---
+
+# read_tsv ROOT: (checks, problems). Each check is a hash: file, line, id,
+# runs_in, needs ([KIND, NAME] pairs), count (compiled), command. Each
+# problem is "checks/FILE line N: reason"; the reason never quotes a field.
+sub read_tsv {
+  my ($root) = @_;
+  my (@checks, @problems, %seen);
+  my $dir = File::Spec->catdir($root, 'checks');
+  # a link could stand for checks that a clone does not have
+  return (\@checks, ['checks: a link, so its checks would not run everywhere']) if -l $dir;
+  return (\@checks, \@problems) unless -d $dir;
+  opendir my $dh, $dir or return (\@checks, ['checks: cannot read the folder']);
+  my @files = sort grep { /\A[^.].*\.tsv\z/s } readdir $dh;
+  closedir $dh;
+  for my $name (@files) {
+    my $label = 'checks/' . Esc::line($name);
+    # a link or a folder could stand for checks that a clone does not have
+    my $path = File::Spec->catfile($dir, $name);
+    if (-l $path || !-f $path) { push @problems, "$label: not a regular file, so its checks would not run everywhere"; next }
+    my $fh;
+    if (!open $fh, '<:raw', File::Spec->catfile($dir, $name)) { push @problems, "$label: cannot read the file"; next }
+    my $n = 0;
+    while (my $l = <$fh>) {
+      $n++;
+      my $problem = sub { push @problems, "$label line $n: $_[0]" };
+      $l =~ s/\r?\n\z//;
+      $l =~ s/\A\xEF\xBB\xBF// if $n == 1;    # a byte-order mark some editors add
+      next if $l =~ /\A[ \t]*(?:#|\z)/;
+      if ($l =~ /[\x00-\x08\x0A-\x1F\x7F]/) { $problem->('holds a control character'); next }
+      my @f = split /\t/, $l, -1;
+      if (@f != 5) {
+        my $hint = (@f == 1 && $l =~ / /) ? '; fields are separated by TAB characters and this line has none' : '';
+        $problem->('expected 5 TAB-separated fields (id, runs_in, needs, count, command), found ' . scalar(@f) . $hint);
+        next;
+      }
+      my ($id, $runs_in, $needs, $count, $command) = @f;
+      if ($id !~ /\A[a-z][a-z0-9-]*\z/) { $problem->('the id must be lower-case letters, digits and -, starting with a letter'); next }
+      if (grep { $_ eq $id } @RESERVED) { $problem->("the id $id is the name of a built-in check"); next }
+      if ($seen{$id}) { $problem->("the id $id is already used at $seen{$id}"); next }
+      if ($runs_in !~ /\A(?:any|ci|local)\z/) { $problem->('runs_in must be any, ci or local'); next }
+      my @needs;
+      if ($needs ne '-') {
+        my $bad;
+        for my $need (split /,/, $needs, -1) {
+          my ($kind, $what) = $need =~ /\A(cmd|env|file):(.*)\z/;
+          if (!defined $kind) { $bad = 'each need must be cmd:NAME, env:NAME or file:PATH, or the field is -'; last }
+          if ($kind eq 'cmd' && $what !~ /\A[A-Za-z0-9][A-Za-z0-9._+-]*\z/) { $bad = 'a cmd: need names one command'; last }
+          if ($kind eq 'env' && $what !~ /\A[A-Za-z_][A-Za-z0-9_]*\z/) { $bad = 'an env: need names one variable'; last }
+          if ($kind eq 'file') {
+            $what = Conf::check_path($what, 0);
+            if (!defined $what) { $bad = 'a file: need is a relative path with no ., .. or empty part, no leading : or -, and none of * ? [ \\'; last }
+          }
+          push @needs, [$kind, $what];
+        }
+        if ($bad) { $problem->($bad); next }
+      }
+      # perl's warnings would quote the pattern's bytes raw, so they are dropped
+      local $SIG{__WARN__} = sub { };
+      my $re = eval { qr/$count/ };
+      if (!$re) { $problem->('the count pattern does not compile (code inside a pattern is not allowed)'); next }
+      # with the empty line ruled out, only the empty branch of the second
+      # match can match, and every capture group comes back undefined; a
+      # pattern can also fail when it is matched (endless recursion, say)
+      my ($empty, @caps);
+      if (!eval { $empty = '' =~ $re; @caps = ('' =~ /$re|/); 1 }) { $problem->('the count pattern fails when it is matched'); next }
+      if ($empty) { $problem->('the count pattern matches an empty line'); next }
+      if (@caps != 1 || defined $caps[0]) { $problem->('the count pattern needs exactly one capture group, around the number'); next }
+      if ($command !~ /\S/) { $problem->('the command is empty'); next }
+      $seen{$id} = "$label line $n";
+      push @checks, { file => $label, line => $n, id => $id, runs_in => $runs_in, needs => \@needs,
+        count => $re, command => $command };
+    }
+    close $fh;
+  }
+  return (\@checks, \@problems);
+}
+
+# --- running ---
+
+my ($LOG, $log_path, @temps, $parent_pid, $RUN_LOCK);
+
+# stop REASON [LINES]: end the run with exit 2
+sub stop {
+  my ($reason) = @_;
+  my $last = "run-checks: FAIL - $reason; the run stopped";
+  print "$last\n";
+  if ($LOG) {
+    print {$LOG} "$last\nEND\texit 2\n";
+    close $LOG;
+  }
+  exit 2;
+}
+
+# temp_file: a new private file under .method/local for one output
+my $temp_n = 0;
+sub temp_file {
+  my $path = sprintf '%s/run-checks-%d-%d.out', $LOCAL, $$, ++$temp_n;
+  unlink $path;
+  sysopen my $fh, $path, O_WRONLY | O_CREAT | O_EXCL, 0600
+    or die "cannot create an output file in .method/local (did a check delete the folder, with git clean -x say?)\n";
+  close $fh;
+  push @temps, $path;
+  return $path;
+}
+
+END { unlink @temps if defined $parent_pid && $$ == $parent_pid }
+
+# run_to_file ENV ARGV OUT: runs ARGV with stdin from the null device and
+# stdout and stderr into the file OUT (ENV: a hash, or undef for this
+# process's own). Waits for that process only, not for the end of its
+# output, so a server a check leaves running does not hold the run up.
+sub run_to_file {
+  my ($env, $argv, $out) = @_;
+  my $pid = fork;
+  die "cannot start a process\n" unless defined $pid;
+  if (!$pid) {
+    %ENV = %$env if $env;
+    open STDIN, '<', File::Spec->devnull or POSIX::_exit(127);
+    open STDOUT, '>>', $out or POSIX::_exit(127);
+    open STDERR, '>&', \*STDOUT or POSIX::_exit(127);
+    exec { $argv->[0] } @$argv or POSIX::_exit(127);
+  }
+  waitpid $pid, 0;
+  return $?;
+}
+
+# --- the limited runner: a check in its own process group, under a
+# watchdog and a time limit (mutate-changed's checks; run-checks uses
+# run_to_file) ---
+
+my $MONO = eval { Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC()); 1 };
+sub now { return $MONO ? Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC()) : Time::HiRes::time() }
+
+# a group a signal may go to: a process id of 2 or more, below 2^31 (a
+# larger one could wrap to -1, every process), that is not this process's
+# own group (kill with 0 or 1 would reach this group, or every process)
+sub group_ok {
+  my ($g) = @_;
+  return defined $g && $g =~ /\A[0-9]{1,10}\z/ && $g >= 2 && $g < 2147483648 && $g != getpgrp();
+}
+
+# default_signals: every signal back to its default, none blocked, and no
+# __WARN__ or __DIE__ handler (a handler, an ignored signal or a mask a
+# process inherited from its caller, whose code must not run here)
+sub default_signals {
+  for my $s (keys %SIG) {
+    next unless defined $SIG{$s};
+    $SIG{$s} = $s =~ /\A__/ ? undef : 'DEFAULT';
+  }
+  POSIX::sigprocmask(POSIX::SIG_SETMASK(), POSIX::SigSet->new);
+}
+
+# close_others KEEP...: closes every descriptor above 2 of this process but
+# the numbers KEEP, listed in /dev/fd (or 3 to 1023 where it cannot be read)
+sub close_others {
+  my %keep = map { ($_ => 1) } 0, 1, 2, @_;
+  my @fds;
+  if (opendir my $d, '/dev/fd') {
+    @fds = grep { /\A[0-9]+\z/ } readdir $d;
+    closedir $d;
+  } else {
+    @fds = 3 .. 1023;
+  }
+  POSIX::close($_) for grep { !$keep{$_} } @fds;
+}
+
+# start_limited ENV ARGV OUT KEEP: starts ARGV as run_to_file does, but as
+# the leader of a process group of its own, under a watchdog: a fork of
+# this process, in a process group of its own too (so a KILL to the
+# caller's group does not reach it), named "method check watchdog", that
+# ignores INT, TERM, HUP, QUIT and PIPE, sets every other signal back to its
+# default, and keeps no descriptor of the caller's but the handles KEEP
+# (the lock it holds). When the caller closes its pipe, or ends in any way
+# (kill -9 included: the pipe closes, or the watchdog's parent changes),
+# the watchdog sends TERM to the check's group, KILL 2 s later when any of
+# it is left, and exits; so a cut-off run's lock stays held until its checks
+# are stopped. Returns a run {pgid, ...} once the group exists. The check
+# gets every signal back at its default, none blocked.
+sub start_limited {
+  my ($env, $argv, $out, @keep) = @_;
+  # descriptors 0 to 2 must be open, or the pipes below would take one of
+  # them, and the check would read or write the watchdog's pipe
+  for my $fd (0 .. 2) {
+    my $d = POSIX::dup($fd);
+    if (defined $d) { POSIX::close($d); next }
+    my $null = POSIX::open(File::Spec->devnull, POSIX::O_RDWR());
+    next unless defined $null;
+    if ($null != $fd) { POSIX::dup2($null, $fd); POSIX::close($null) }
+  }
+  pipe(my $keep_r, my $keep_w) or die "cannot make a pipe\n";
+  pipe(my $st_r, my $st_w) or die "cannot make a pipe\n";
+  my $caller = $$;
+  my $w = fork;
+  die "cannot start a process\n" unless defined $w;
+  if (!$w) {
+    # the watchdog: it never returns into the caller's code
+    eval {
+      POSIX::setpgid(0, 0);
+      $0 = 'method check watchdog';
+      default_signals();
+      $SIG{$_} = 'IGNORE' for qw(INT TERM HUP QUIT PIPE);
+      close_others(fileno($keep_r), fileno($st_w), map { fileno($_) } grep {defined} @keep);
+      # descriptors 0 to 2 by number: perl's own handles may be closed
+      my $null = POSIX::open(File::Spec->devnull, POSIX::O_RDWR());
+      if (defined $null) {
+        POSIX::dup2($null, $_) for 0 .. 2;
+        POSIX::close($null) if $null > 2;
+      }
+      my $c = fork;
+      if (!defined $c) { syswrite $st_w, "error cannot start a process\n"; POSIX::_exit(1) }
+      if (!$c) {
+        eval {
+          POSIX::setpgid(0, 0);
+          default_signals();
+          %ENV = %$env if $env;
+          # descriptors 0 to 2 by number, as exec hands them on
+          my $in = POSIX::open(File::Spec->devnull, POSIX::O_RDONLY());
+          my $o = POSIX::open($out, POSIX::O_WRONLY() | POSIX::O_CREAT() | POSIX::O_APPEND(), 0666);
+          POSIX::_exit(127) unless defined $in && defined $o;
+          POSIX::dup2($in, 0) // POSIX::_exit(127);
+          POSIX::dup2($o, 1) // POSIX::_exit(127);
+          POSIX::dup2($o, 2) // POSIX::_exit(127);
+          POSIX::close($_) for grep { $_ > 2 } $in, $o;
+          no warnings 'exec';
+          exec { $argv->[0] } @$argv;
+        };
+        POSIX::_exit(127);
+      }
+      # both set the group, so it exists whichever runs first
+      POSIX::setpgid($c, $c);
+      syswrite $st_w, "pgid $c\n";
+      my ($status, $sel) = (undef, '');
+      vec($sel, fileno($keep_r), 1) = 1;
+      while (1) {
+        if (!defined $status && waitpid($c, POSIX::WNOHANG()) == $c) {
+          $status = $?;
+          syswrite $st_w, "status $status\n";
+        }
+        last if getppid() != $caller;
+        last if select(my $rout = $sel, undef, undef, 0.2) > 0 && !sysread $keep_r, my $buf, 64;
+      }
+      # the caller is done or gone: stop the check's group (KILL only to a
+      # group that is still there: its number could be taken again once it
+      # is gone)
+      kill 'TERM', -$c if kill 0, -$c;
+      my ($until, $gone) = (now() + 2, 0);
+      while (now() < $until) {
+        waitpid($c, POSIX::WNOHANG()) unless defined $status;
+        if (!kill 0, -$c) { $gone = 1; last }
+        Time::HiRes::sleep(0.1);
+      }
+      kill 'KILL', -$c unless $gone;
+    };
+    POSIX::_exit(0);
+  }
+  close $keep_r;
+  close $st_w;
+  my $r = { w => $w, keep => $keep_w, st => $st_r, buf => '', started => now() };
+  my $until = now() + 10;
+  while (!defined $r->{pgid}) {
+    read_status($r, 0.1);
+    if (defined $r->{error} || $r->{eof} || now() > $until) {
+      finish_limited($r, 1);
+      die 'cannot start a check: ' . ($r->{error} || 'its watchdog did not answer') . "\n";
+    }
+  }
+  return $r;
+}
+
+# read_status RUN WAIT: reads what the watchdog has written, waiting at most
+# WAIT seconds for something: "pgid N", "status N" or "error ..."
+sub read_status {
+  my ($r, $wait) = @_;
+  my $sel = '';
+  vec($sel, fileno($r->{st}), 1) = 1;
+  if (select(my $rout = $sel, undef, undef, $wait) > 0) {
+    my $got = sysread $r->{st}, my $buf, 4096;
+    if ($got) { $r->{buf} .= $buf } elsif (defined $got) { $r->{eof} = 1 }
+  }
+  while ($r->{buf} =~ s/\A([^\n]*)\n//) {
+    my $l = $1;
+    if ($l =~ /\Apgid ([0-9]+)\z/) { $r->{pgid} = $1 if group_ok($1) }
+    elsif ($l =~ /\Astatus ([0-9]+)\z/) { $r->{status} = $1 }
+    elsif ($l =~ /\Aerror (.*)\z/) { $r->{error} = $1 }
+  }
+}
+
+# wait_limited RUN SECONDS INTERRUPTED: waits until the check ends (how
+# 'exit', status its wait status), until SECONDS have passed since it started
+# (how 'time'), or until INTERRUPTED->() is true (how 'interrupted'). The
+# check's group is left as it is: finish_limited stops it.
+sub wait_limited {
+  my ($r, $seconds, $interrupted) = @_;
+  while (1) {
+    read_status($r, 0.1);
+    return $r->{how} = 'exit' if defined $r->{status};
+    die "the check's watchdog ended without its result\n" if $r->{eof};
+    return $r->{how} = 'interrupted' if $interrupted && $interrupted->();
+    return $r->{how} = 'time' if now() - $r->{started} >= $seconds;
+  }
+}
+
+# finish_limited RUN FAST INTERRUPTED: stops what is left of the check's
+# group and reaps the watchdog: closing the pipe makes the watchdog stop
+# the group (TERM, then KILL 2 s later) and exit. FAST (the signal path)
+# sends KILL to the group and to the watchdog at once, so it never waits for
+# the group to be gone (a killed check's children can stay zombies until the
+# system reaps them); so does INTERRUPTED->() becoming true while it waits.
+# After 3 s, KILL goes to the watchdog and the group. A group still there
+# once the watchdog is gone (killed on its own) gets KILL. A finished run
+# is inert: a second call does nothing, as its numbers may be taken again.
+sub finish_limited {
+  my ($r, $fast, $interrupted) = @_;
+  return unless $r->{w};    # finished already: its numbers may be taken again
+  my $g = group_ok($r->{pgid}) ? $r->{pgid} : undef;
+  close $r->{keep} if $r->{keep};
+  undef $r->{keep};
+  my ($until, $sent) = (now() + 3, 0);
+  while (1) {
+    $fast = 1 if !$fast && $interrupted && $interrupted->();
+    if ($fast && !$sent) {
+      kill 'KILL', -$g if $g && kill 0, -$g;
+      kill 'KILL', $r->{w};
+      $sent = 1;
+    }
+    my $p = waitpid($r->{w}, POSIX::WNOHANG());
+    last if $p == $r->{w} || $p < 0;
+    if (now() > $until) {
+      kill 'KILL', $r->{w};
+      waitpid $r->{w}, 0;
+      last;
+    }
+    Time::HiRes::sleep(0.05);
+  }
+  kill 'KILL', -$g if $g && kill 0, -$g;
+  close $r->{st} if $r->{st};
+  delete @$r{qw(st w pgid)};
+}
+
+sub write_lines {
+  my ($path, @lines) = @_;
+  open my $fh, '>>:raw', $path or die "cannot write an output file in .method/local\n";
+  print {$fh} map { "$_\n" } @lines;
+  close $fh or die "cannot write an output file in .method/local\n";
+}
+
+# mask_file FILE SUB: each line of FILE (split at LF or CRLF), masked by
+# secrets.pl --mask (keys, credentials and personal data masked, control
+# characters escaped, indented by two spaces), then through Esc::line,
+# passed to SUB
+sub mask_file {
+  my ($file, $each) = @_;
+  my $pid = open(my $fh, '-|');
+  stop('cannot run the masking step') unless defined $pid;
+  if (!$pid) {
+    open STDIN, '<', $file or POSIX::_exit(2);
+    open STDERR, '>', File::Spec->devnull;
+    exec { $^X } $^X, File::Spec->catfile($lib, 'secrets.pl'), '--mask' or POSIX::_exit(127);
+  }
+  binmode $fh;
+  while (my $l = <$fh>) {
+    $l =~ s/\n\z//;
+    $each->(Esc::line($l));
+  }
+  close $fh;
+  stop('the masking step failed') if $?;
+}
+
+# masked LINES: the lines masked and escaped as mask_file does
+sub masked {
+  my @in = @_;
+  return () unless @in;
+  my $tmp = temp_file();
+  write_lines($tmp, @in);
+  my @out;
+  mask_file($tmp, sub { push @out, $_[0] });
+  unlink $tmp;
+  return @out;
+}
+
+# tail_lines FILE: (the lines of FILE's last 64 KB, split at LF, CRLF or
+# CR; a line cut by that window is left out, so a key cut in half is never
+# shown; whether a line was left out that way)
+sub tail_lines {
+  my ($file) = @_;
+  open my $fh, '<:raw', $file or return ([], 0);
+  my $size = -s $fh;
+  my $start = $size > 65536 ? $size - 65536 : 0;
+  seek $fh, $start, 0;
+  my $buf = do { local $/; <$fh> };
+  close $fh;
+  $buf = '' unless defined $buf;
+  my @l = split /\r\n|\r|\n/, $buf, -1;
+  pop @l if @l && $l[-1] eq '';
+  my $cut = 0;
+  if ($start > 0 && @l) { shift @l; $cut = !@l }
+  return (\@l, $cut);
+}
+
+# cut LINE MAX: LINE cut to MAX bytes, never inside a UTF-8 character or
+# an escape, saying how much was cut
+sub cut {
+  my ($s, $max) = @_;
+  return $s if length $s <= $max;
+  my $c = substr $s, 0, $max;
+  $c =~ s/[\xC0-\xFF][\x80-\xBF]*\z//;
+  $c =~ s/\\(?:x[0-9A-F]?|u(?:\{[0-9A-F]*)?)?\z//;
+  return $c . ' (' . (length($s) - length($c)) . ' bytes cut)';
+}
+
+# count_in FILE RE: the capture of the last output line RE matches (lines
+# split at LF, CRLF or CR, terminal colour and cursor codes removed);
+# (matched, capture)
+sub count_in {
+  my ($file, $re) = @_;
+  local $SIG{__WARN__} = sub { };    # a warning could quote the pattern raw
+  open my $fh, '<:raw', $file or return (0, undef);
+  my ($matched, $value) = (0, undef);
+  while (my $chunk = <$fh>) {
+    $chunk =~ s/\n\z//;
+    for my $line (split /\r/, $chunk, -1) {
+      $line = Esc::plain($line);
+      if ($line =~ $re) { $matched = 1; $value = $1 }
+    }
+  }
+  close $fh;
+  return ($matched, $value);
+}
+
+# the environment a project check runs in
+sub check_env {
+  my %e = %CALLER_ENV;
+  for my $v (qw(PERL_UNICODE PERL5OPT PERL5LIB PERLLIB PERL_USE_UNSAFE_INC PERLIO)) {
+    delete $e{$v};
+    $e{$v} = $e{"METHOD_CALLER_$v"} if exists $e{"METHOD_CALLER_$v"};
+    delete $e{"METHOD_CALLER_$v"};
+  }
+  return \%e;
+}
+
+# fingerprint: what a check must leave as it found it. HEAD's commit and the
+# branch it is on, the commit of every branch and tag, and every path git
+# does not ignore that is changed, untracked, or marked so git does not
+# compare it (assume-unchanged, or skip-worktree, also with the file gone
+# from disk: a sparse checkout, or a deletion hidden that way; also inside
+# submodules, Git::flagged), every submodule folder whose changes git cannot
+# see (Git::submodules), and every tracked file, also inside checked-out
+# submodules, whose bytes on disk are not the commit's (lib/tree.pl's
+# Tree::differences: a CR that git status does not see, because a line-end
+# setting converts it, counts), each with its mode and the SHA-256 of what
+# is on disk (untracked files in .method/local left out: the method's own).
+# git status runs with no filter program, a submodule's own included, and
+# no stat shortcut (Git::status_options_all). Also returns kinds (path => {kind => 1}, for
+# plain reports), converted, lfs and no_conversion (from Tree::differences).
+sub fingerprint {
+  require Digest::SHA;    # loaded here, so status.pl can load this file without it
+  my ($st, $head) = Git::run('rev-parse', '-q', '--verify', 'HEAD^{commit}');
+  $head = $st ? 'none' : (split /\n/, $head)[0];
+  my ($bst, $branch) = Git::run('symbolic-ref', '-q', 'HEAD');
+  $branch = $bst ? 'detached' : (split /\n/, $branch)[0];
+  my $refs = Git::ok('for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads/', 'refs/tags/');
+  my @subs = Git::submodules('.');
+  my $out = Git::ok(Git::status_options_all('.', \@subs), 'status', '--porcelain=v1', '-z', '--no-renames',
+    '--untracked-files=all', '--ignore-submodules=none');
+  my @paths;
+  for my $rec (split /\0/, $out) {
+    push @paths, [substr($rec, 3), substr($rec, 0, 2)] if length $rec >= 4;
+  }
+  push @paths, map { [$_->[0], "submodule: $_->[2]"] } grep { defined $_->[2] } @subs;
+  push @paths, [$_->[0], "flag $_->[1]"] for Git::flagged('.', \@subs);
+  my $d = $head eq 'none' ? { list => [], converted => [] } : Tree::differences($head, { submodules => 1 });
+  push @paths, map { [$_->[0], "differs: $_->[1]"] } @{ $d->{list} };
+  my (%e, %kinds);
+  for my $p (@paths) {
+    my ($path, $why) = @$p;
+    next if index($path, "$LOCAL/") == 0 && $why eq '??';    # the method's own files; a tracked one counts
+    my $kind = $why =~ /\Adiffers: (.*)\z/s ? $1 : $why =~ /\Asubmodule: / ? 'submodule' : $why =~ /\Aflag / ? 'flag'
+      : $why eq '??' ? 'untracked' : 'changed';
+    $kinds{$path}{$kind} = 1;
+    my $h = '-';
+    my @s = lstat $path;
+    if (-l _) {
+      my $t = readlink $path;
+      $h = 'link ' . (defined $t ? Digest::SHA::sha256_hex($t) : '?');
+    } elsif (-f _) {
+      $h = eval { Digest::SHA->new(256)->addfile($path, 'b')->hexdigest };
+      $h = 'unreadable' unless defined $h;
+    }
+    $e{$path} = join ' ', grep { defined } $e{$path}, $why, (@s ? sprintf('%o', $s[2]) : '-'), $h;
+  }
+  return { head => $head, branch => $branch, refs => $refs, e => \%e, kinds => \%kinds,
+    converted => $d->{converted}, lfs => $d->{lfs} || [], no_conversion => $d->{no_conversion} };
+}
+
+sub tracked_count {
+  my $out = Git::ok('ls-files', '-z');
+  return scalar(() = $out =~ /\0/g);
+}
+
+# --- the built-in checks; each fills OUT and returns its result ---
+
+sub check_secrets {
+  my ($out) = @_;
+  my $raw = temp_file();
+  my $st = run_to_file(undef, [$^X, File::Spec->catfile($lib, 'secrets.pl'), '--repo', '--ids', 'checks/scan-allow.txt'], $raw);
+  open my $fh, '<:raw', $raw or stop('cannot read the secret scan output');
+  my (%n, $result, @lines);
+  while (my $l = <$fh>) {
+    $l =~ s/\n\z//;
+    if ($l =~ /\A(EXAMINED|STAGED|BAD|ALLOWED|SKIPPED) ([0-9]+)\z/) { $n{$1} = $2; next }
+    next if $l =~ /\ASKIPPED_NAMES /;
+    if ($l =~ /\ARESULT (PASS|FAIL|SKIPPED) (.*)\z/) { $result = [$1, $2]; next }
+    push @lines, $l;
+  }
+  close $fh;
+  unlink $raw;
+  write_lines($out, @lines);
+  if ($st || !$result || !defined $n{EXAMINED}) {
+    my $why = $st & 127 ? 'killed by signal ' . ($st & 127) : 'exit ' . ($st >> 8);
+    return { status => 'FAIL', kind => 'exit', examined => '-',
+      detail => $st ? "the scan itself did not run ($why)" : 'the scan ran, but its output could not be read' };
+  }
+  my ($status, $detail) = @$result;
+  return { status => 'PASS', kind => 'pass', examined => $n{EXAMINED}, detail => $detail } if $status eq 'PASS';
+  return { status => 'SKIPPED', kind => 'examined-nothing', examined => 0, detail => $detail } if $status eq 'SKIPPED';
+  return { status => 'FAIL', kind => 'finding', examined => $n{EXAMINED}, detail => $detail,
+    hint => 'to accept a false positive, add PATH<TAB>ID<TAB>a real reason to checks/scan-allow.txt' };
+}
+
+# local_only CONF: patterns for LOCAL_ONLY. A bare name matches any path
+# segment (* and ? stay inside one segment); a path matches itself and
+# everything under it.
+sub local_only {
+  my ($list) = @_;
+  my @re;
+  for my $e (@{ $list || [] }) {
+    if ($e =~ m{/}) { push @re, qr/\A\Q$e\E(?:\/|\z)/; next }
+    my $g = join '', map { $_ eq '*' ? '[^/]*' : $_ eq '?' ? '[^/]' : quotemeta } split /([*?])/, $e;
+    push @re, qr/(?:\A|\/)$g(?:\/|\z)/;
+  }
+  return @re;
+}
+
+sub check_fresh_clone {
+  my ($conf, $out) = @_;
+  my @pp = @{ $conf->{PRODUCT_PATHS} || [] };
+  return { status => 'SKIPPED', kind => 'not-configured', examined => '-',
+    detail => 'PRODUCT_PATHS is not set in .claude/method.conf, so nothing says which files make up the product' }
+    unless @pp;
+  my (%tracked, @typo);
+  for my $p (@pp) {
+    my @t = split /\0/, Git::ok('ls-files', '-z', '--', $p);
+    push @typo, $p unless @t;
+    $tracked{$_} = 1 for @t;
+  }
+  my @lo = local_only($conf->{LOCAL_ONLY});
+  my ($aside, @left) = (0);
+  for my $f (sort split /\0/, Git::ok('ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--', @pp)) {
+    next if index($f, "$LOCAL/") == 0 || $f =~ m{(?:\A|/)\.claude/settings\.local\.json\z} || $f =~ m{(?:\A|/)CLAUDE\.local\.md\z};
+    if (grep { $f =~ $_ } @lo) { $aside++; next }
+    push @left, $f;
+  }
+  # a name may hold a line break, which would make it look like two lines
+  write_lines($out, (map { 'ignored by git, so not in a clone: ' . Esc::line($_) } @left),
+    (map {"a PRODUCT_PATHS entry that matches no tracked file: $_"} @typo));
+  my $examined = keys %tracked;
+  if (@left || @typo) {
+    my @why;
+    push @why, scalar(@left) . ' ignored files under PRODUCT_PATHS are here but not in a clone, so a check that passes here'
+      . ' may fail there; add the name or path to LOCAL_ONLY in .claude/method.conf if a clone is meant to lack it' if @left;
+    push @why, scalar(@typo) . ' PRODUCT_PATHS entries match no tracked file (a typo?)' if @typo;
+    return { status => 'FAIL', kind => 'finding', examined => $examined, detail => join('; ', @why) };
+  }
+  return { status => 'PASS', kind => 'pass', examined => $examined,
+    detail => "examined $examined tracked files under PRODUCT_PATHS; $aside ignored files set aside by LOCAL_ONLY" };
+}
+
+# check_method_files: lib/lock.pl's verify, as a result (M010). run_all
+# runs it only where the method is installed (Lock::installed): a project
+# runs its own copy of run-checks, under scripts/method/, so there it
+# always runs; a run from a copy outside a project with no method file
+# and no lock has nothing to compare
+sub check_method_files {
+  my ($out) = @_;
+  my $v = Lock::verify('.');
+  # what a commit would leave out or carry to every clone: a method file or
+  # the lock that git ignores, and a tracked .claude/settings.local.json
+  # (each person's own; committed, its disableAllHooks would turn every hook
+  # off in every clone, session-status among them, so no hook could say so)
+  my ($l) = Lock::load('.');
+  # (a path with a link on the way is a link finding already, and git will
+  # not answer for it)
+  my $ignored = Git::ignored('.', grep {
+    my @parts = split m{/};
+    !grep { -l join '/', @parts[0 .. $_] } 0 .. $#parts - 1
+  } ($l ? map { $_->[1] } @{ $l->{files} } : ()), do { no warnings 'once'; $Lock::LOCK });
+  push @{ $v->{findings} }, $ignored ? map { ['ignored', 'ignored by git (' . Esc::line($_->[1]) . '), so a commit leaves it out: ' . Esc::line($_->[0])] } @$ignored
+    : ['untold', 'git cannot tell whether it ignores the method\'s files'];
+  # (in any letter case: a file system that folds case reads that file as
+  # .claude/settings.local.json)
+  my ($lst, $tracked) = Git::run('ls-files', '-z');
+  push @{ $v->{findings} }, ['local', 'git cannot tell whether .claude/settings.local.json is tracked'] if $lst;
+  push @{ $v->{findings} }, map { ['local', Esc::line($_) . ' is tracked in git, so every clone gets it'] }
+    grep { lc($_) eq '.claude/settings.local.json' } split /\0/, $tracked if !$lst;
+  write_lines($out, map { $_->[1] } @{ $v->{findings} });
+  my %n;
+  $n{ $_->[0] }++ for @{ $v->{findings} };
+  if (%n) {
+    my %say = (lock => 'problems with method.lock', changed => 'method files changed', crlf => 'method files with CRLF line ends',
+      missing => 'method files missing', extra => 'files not in method.lock', link => 'links under the method\'s paths',
+      odd => 'entries under the method\'s paths that are not regular files or cannot be read',
+      settings => 'problems with the method keys in .claude/settings.json',
+      ignored => 'method files git ignores', untold => 'questions git could not answer about the files it ignores',
+      local => 'problems with .claude/settings.local.json');
+    # what puts each kind right: a changed or missing file comes back from
+    # the commit that last wrote the lock (a plain checkout of an edit
+    # already committed changes nothing); a file the lock does not name, a
+    # link or an odd entry is removed
+    my @fix;
+    push @fix, 'put each changed or missing file back from the commit that last wrote method.lock (the owner runs:'
+      . ' git checkout $(git log -1 --format=%H -- scripts/method/method.lock) -- PATH); rules of your own go in .claude/rules/pack/' if grep { $n{$_} } qw(changed crlf missing);
+    push @fix, 'remove each file not in method.lock' if $n{extra};
+    push @fix, 'replace each link or odd entry with a plain folder or file as released' if $n{link} || $n{odd};
+    push @fix, 'put the method keys in .claude/settings.json back as scripts/method/settings.method.json has them' if $n{settings};
+    push @fix, 'change each ignore rule named (in .gitignore, .git/info/exclude or your global excludes file) so it no longer matches a method file' if $n{ignored};
+    push @fix, 'find out why git cannot answer (git status in the project says why: a repository owned by another user, or a .git that points'
+      . ' nowhere) and put that right' if $n{untold};
+    push @fix, 'take .claude/settings.local.json out of git (the owner runs: git rm --cached .claude/settings.local.json, with the path in the'
+      . ' letter case named) and commit that; the method\'s .gitignore block ignores it' if $n{local};
+    return { status => 'FAIL', kind => 'finding', examined => $v->{examined},
+      detail => join('; ', map {"$n{$_} $say{$_}"} grep { $n{$_} } qw(lock changed crlf missing extra link odd settings ignored untold local)),
+      hint => "the method's files and settings change only through the release's sync, which refuses a file changed or added by hand until it is put right: " . join('; ', @fix) };
+  }
+  return { status => 'PASS', kind => 'pass', examined => $v->{examined},
+    detail => 'the ' . ($v->{examined} - 1) . " method files match method.lock ($v->{version}), and the method keys in"
+      . ' .claude/settings.json are the release\'s' };
+}
+
+# tree_changes BEFORE AFTER: what changed between two fingerprints, as (the
+# reasons, the paths that changed, the refs that moved); tree-unchanged and
+# mutate-changed's rounds share it
+sub tree_changes {
+  my ($before, $after) = @_;
+  my %all = (%{ $before->{e} }, %{ $after->{e} });
+  my @changed = sort grep { ($before->{e}{$_} || '') ne ($after->{e}{$_} || '') } keys %all;
+  my %refs_before = map { split / /, $_, 2 } split /\n/, $before->{refs};
+  my %refs_after = map { split / /, $_, 2 } split /\n/, $after->{refs};
+  # a branch that moved, appeared or went, or a tag that moved or went (a
+  # fetch may bring new tags, which is allowed)
+  my %all_refs = (%refs_before, %refs_after);
+  my @moved = sort grep { ($refs_before{$_} || '') ne ($refs_after{$_} || '') && (exists $refs_before{$_} || m{\Arefs/heads/}) }
+    keys %all_refs;
+  my @why;
+  push @why, 'HEAD moved during the run' if $before->{head} ne $after->{head};
+  push @why, 'HEAD is on another branch than before the run' if $before->{branch} ne $after->{branch};
+  push @why, scalar(@moved) . ' branches or tags moved during the run' if @moved;
+  push @why, 'the checks changed ' . scalar(@changed) . ' files' if @changed;
+  return (\@why, \@changed, \@moved);
+}
+
+sub check_tree_unchanged {
+  my ($before, $out) = @_;
+  my ($why, $changed, $moved) = tree_changes($before, fingerprint());
+  write_lines($out, map { 'changed during the run: ' . Esc::line($_) } @$changed);
+  write_lines($out, map {"moved during the run: $_"} @$moved);
+  my @why = @$why;
+  my $examined = tracked_count();
+  return { status => 'FAIL', kind => 'finding', examined => $examined, detail => join('; ', @why) } if @why;
+  return { status => 'SKIPPED', kind => 'examined-nothing', examined => 0,
+    detail => 'the repository tracks no file, so there was nothing to compare' } unless $examined;
+  return { status => 'PASS', kind => 'pass', examined => $examined,
+    detail => "HEAD, its branch, the branches and tags, and the files on disk are as they were before the checks ran" };
+}
+
+# check_project CHECK HERE ENV OUT: one project check, run by run-checks
+sub check_project {
+  my ($c, $here, $env, $out) = @_;
+  my $skip = applies($c, $here, $env);
+  return $skip if $skip;
+  return judge($c, run_to_file($env, ['bash', '-o', 'pipefail', '-c', $c->{command}], $out), $out);
+}
+
+# applies CHECK HERE ENV: the SKIPPED result when CHECK is not for this place
+# (not-here) or lacks what it needs (needs), else undef
+sub applies {
+  my ($c, $here, $env) = @_;
+  my $at = "$c->{file} line $c->{line}";
+  if ($c->{runs_in} ne 'any' && $c->{runs_in} ne $here) {
+    my $only = $c->{runs_in} eq 'ci' ? 'in CI only' : 'locally only';
+    return { status => 'SKIPPED', kind => 'not-here', examined => '-', detail => "runs $only ($at)" };
+  }
+  for my $need (@{ $c->{needs} }) {
+    my ($kind, $what) = @$need;
+    my $met = $kind eq 'cmd' ? !run_to_file($env, ['bash', '-c', 'command -v "$1"', 'bash', $what], File::Spec->devnull)
+      : $kind eq 'env' ? defined $env->{$what} && $env->{$what} ne ''
+      : -e $what;
+    next if $met;
+    my $why = $kind eq 'cmd' ? 'is not on PATH' : $kind eq 'env' ? 'is not set' : 'does not exist';
+    return { status => 'SKIPPED', kind => 'needs', examined => '-', detail => "needs $kind:$what, which $why ($at)" };
+  }
+  return undef;
+}
+
+# judge CHECK STATUS OUT: the result of a check that ended with wait STATUS
+# and wrote OUT: a signal or a non-zero exit fails; exit 0 passes only with
+# a count of 1 or more (the last output line its pattern matches)
+sub judge {
+  my ($c, $st, $out) = @_;
+  my $at = "$c->{file} line $c->{line}";
+  return { status => 'FAIL', kind => 'exit', examined => '-', detail => 'killed by signal ' . ($st & 127) . " ($at)" }
+    if $st & 127;
+  return { status => 'FAIL', kind => 'exit', examined => '-', detail => 'exit ' . ($st >> 8) . " ($at)" } if $st;
+  # a pattern that is fine on an empty line can still fail on an output line
+  my ($matched, $v) = eval { count_in($out, $c->{count}) };
+  return { status => 'SKIPPED', kind => 'no-count', examined => '-',
+    detail => "it passed, but its count pattern failed when it was matched on its output ($at)" }
+    unless defined $matched;
+  return { status => 'SKIPPED', kind => 'no-count', examined => '-',
+    detail => "it passed, but no output line matched its count pattern, so nothing shows it examined anything ($at)" }
+    unless $matched;
+  return { status => 'SKIPPED', kind => 'no-count', examined => '-',
+    detail => "it passed, but its count pattern caught something that is not a number ($at)" }
+    unless defined $v && $v =~ /\A[0-9]+\z/;
+  (my $n = $v) =~ s/\A0+(?=.)//;
+  return { status => 'SKIPPED', kind => 'examined-nothing', examined => 0,
+    detail => "it passed, but its count is 0, so it examined nothing ($at)" } if $n eq '0';
+  return { status => 'PASS', kind => 'pass', examined => $n, detail => "examined $n ($at)" };
+}
+
+# --- the log ---
+
+sub open_log {
+  for my $d ('.method', $LOCAL, $LOGS) {
+    stop("$d is a symbolic link; run-checks writes its log only into a real folder") if -l $d;
+    next if -d _;
+    mkdir $d, 0700 or stop("cannot create the folder $d");
+  }
+  chmod 0700, $LOGS;
+  my @t = gmtime;
+  my $stamp = sprintf '%04d%02d%02dT%02d%02d%02dZ', $t[5] + 1900, $t[4] + 1, @t[3, 2, 1, 0];
+  $log_path = sprintf '%s/run-checks-%s-%010d.log', $LOGS, $stamp, $$;
+  sysopen $LOG, $log_path, O_WRONLY | O_CREAT | O_EXCL, 0600 or do { undef $LOG; stop("cannot create the log $log_path") };
+  binmode $LOG;
+  select((select($LOG), $| = 1)[0]);
+  return sprintf '%04d-%02d-%02dT%02d:%02d:%02dZ', $t[5] + 1900, $t[4] + 1, @t[3, 2, 1, 0];
+}
+
+# ignore_local: writes .method/local/.gitignore holding * when git does not
+# ignore the new log yet, never over an existing file; says what it did.
+# (git check-ignore takes no literal paths, so ls-files answers instead.)
+sub ignore_local {
+  my ($st, $out) = Git::run('ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--', $log_path);
+  return 'git ls-files did not answer, so .method/local/.gitignore was not written' if $st;
+  return undef if $out ne '';
+  my $gi = "$LOCAL/.gitignore";
+  return '.method/local/.gitignore exists but does not make git ignore the folder; it was left as it is' if -e $gi || -l $gi;
+  sysopen my $fh, $gi, O_WRONLY | O_CREAT | O_EXCL, 0600 or return 'cannot write .method/local/.gitignore';
+  print {$fh} "*\n";
+  close $fh or return 'cannot write .method/local/.gitignore';
+  return 'wrote .method/local/.gitignore, so git ignores the folder';
+}
+
+# prune_logs: keeps the newest run-checks logs; deletes only untracked
+# regular files named exactly like a log, never the current one
+sub prune_logs {
+  my @logs = eval { log_files() };    # (it dies when git fails: then nothing is pruned)
+  return if $@;
+  for my $p (@logs[0 .. $#logs - $KEEP_LOGS]) {
+    unlink $p unless $p eq $log_path;
+  }
+}
+
+# log_files: the run-checks logs, oldest first by name (the writer's UTC time,
+# then its process id, the order prune_logs keeps): untracked regular files
+# named exactly like a log; none when a folder on the way is a link, which
+# run-checks never writes through (open_log)
+sub log_files {
+  for my $f ('.method', $LOCAL, $LOGS) { return () if -l $f }
+  opendir my $d, $LOGS or return ();
+  my @logs = sort grep { $_ =~ $LOG_NAME } readdir $d;
+  closedir $d;
+  my %tracked = map { $_ => 1 } split /\0/, Git::ok('ls-files', '-z', '--', $LOGS);
+  return grep { !$tracked{$_} && !-l $_ && -f _ } map {"$LOGS/$_"} @logs;
+}
+
+# read_log PATH: a run-checks log as {started, commit, tree (clean or
+# uncommitted changes), where (CI or local), system, results => [{id,
+# status, kind, runs_in, examined, detail}], last (the screen's last line),
+# end (the exit code; undef when the log has no END line: the run was cut
+# off)}, or {problem => why}. The one reader of the log, next to its writer
+# (M048). A check's output is indented and escaped in the log, so no line of
+# it can pass for one of these.
+sub read_log {
+  my ($path) = @_;
+  open my $fh, '<:raw', $path or return { problem => 'it cannot be read' };
+  local $/ = "\n";
+  my @lines = <$fh>;
+  close $fh;
+  my $cut = @lines && $lines[-1] !~ /\n\z/;    # written up to the moment it was cut off
+  pop @lines if $cut;
+  s/\n\z// for @lines;
+  my %log = (results => []);
+  my @head = (['', qr/\Arun-checks log\z/], ['started', qr/\Astarted ([0-9T:Z-]+)\z/],
+    ['commit', qr/\Acommit ([0-9a-f]{40}|[0-9a-f]{64}|none)\z/], ['tree', qr/\Atree at start (clean|uncommitted changes)\z/],
+    ['where', qr/\Awhere (CI|local)\z/], ['system', qr/\Asystem (.*)\z/s]);
+  for my $i (0 .. $#head) {
+    my ($name, $re) = @{ $head[$i] };
+    return { problem => 'it is not a run-checks log (its header is not one)' } unless defined $lines[$i] && $lines[$i] =~ $re;
+    $log{$name} = $1 if length $name;
+  }
+  for my $n ($#head + 1 .. $#lines) {
+    my $l = $lines[$n];
+    return { problem => 'a line follows its END line' } if defined $log{end};
+    next if $l =~ /\A  / || $l =~ /\A=== CHECK [a-z0-9-]+ ===\z/ || ($l =~ /\Anote / && !@{ $log{results} });
+    if ($l =~ /\ARESULT\t/) {
+      my @f = split /\t/, $l, -1;
+      return { problem => "line " . ($n + 1) . ' is not a RESULT line' }
+        unless @f == 7 && $f[2] =~ /\A(?:PASS|FAIL|SKIPPED)\z/;
+      push @{ $log{results} }, { id => $f[1], status => $f[2], kind => $f[3], runs_in => $f[4], examined => $f[5], detail => $f[6] };
+      next;
+    }
+    if ($l =~ /\Arun-checks: (?:PASS|FAIL|SKIPPED) - /) { $log{last} = $l; next }
+    if ($l =~ /\AEND\texit ([0-9]+)\z/ && defined $log{last}) { $log{end} = $1; next }
+    return { problem => "line " . ($n + 1) . ' is not a run-checks log line' };
+  }
+  return \%log;
+}
+
+# place: where the checks run, ('ci', 'CI') when CI=true, else ('local',
+# 'local'); the one rule for it (run-checks and done-check)
+sub place { return ($ENV{CI} || '') eq 'true' ? ('ci', 'CI') : ('local', 'local') }
+
+# --- main ---
+
+my (@results, @skipped_lines, @passed);
+
+# finish ID RUNS_IN RESULT OUT: the check's masked output and RESULT line go
+# to the log; a FAIL goes to the screen at once, with its last output lines
+sub finish {
+  my ($id, $runs_in, $r, $out) = @_;
+  mask_file($out, sub { print {$LOG} "$_[0]\n" }) if -s $out;
+  # a detail is this file's own text with counts and checks/ file names
+  my $detail = Esc::line($r->{detail});
+  $detail =~ s/\t/\\x09/g;
+  print {$LOG} join("\t", 'RESULT', $id, $r->{status}, $r->{kind}, $runs_in, $r->{examined}, $detail), "\n";
+  push @results, { %$r, id => $id, project => $runs_in ne '-' };
+  if ($r->{status} eq 'FAIL') {
+    print "$id: FAIL - $detail\n";
+    # the whole window is masked, so a private key whose BEGIN line is
+    # above the last 10 lines is still masked; then the last 10 are shown
+    my ($tail, $cut) = tail_lines($out);
+    my @shown = masked(@$tail);
+    splice @shown, 0, @shown - 10 if @shown > 10;
+    if (@shown) { print cut($_, 300), "\n" for @shown }
+    elsif ($cut) { print "  (its last output line is longer than 64 KB; see the log)\n" }
+    else { print "  (no output)\n" }
+    print "  $r->{hint}\n" if $r->{hint};
+  } elsif ($r->{status} eq 'SKIPPED') {
+    push @skipped_lines, "$id: SKIPPED - $detail";
+  } else {
+    push @passed, $id;
+  }
+}
+
+sub passed_lines {
+  my @ids = @_;
+  return () unless @ids;
+  my @lines = ('passed:');
+  for my $id (@ids) {
+    if (length("$lines[-1] $id") > 100) { push @lines, '       ' }
+    $lines[-1] .= " $id";
+  }
+  return @lines if @lines <= 3;
+  my @words = split ' ', join(' ', @lines[0 .. 2]);
+  shift @words;
+  my $more = @ids - @words;
+  my $last = $lines[2];
+  while (length("$last and $more more") > 100) {
+    $last =~ s/ \S+\z//;
+    $more++;
+  }
+  return (@lines[0 .. 1], "$last and $more more");
+}
+
+sub main {
+  binmode STDOUT, ':raw';
+  binmode STDERR, ':raw';
+  $| = 1;
+  $parent_pid = $$;
+  if (@ARGV) {
+    print "run-checks: usage: run-checks.sh (it takes no arguments)\n";
+    exit 2;
+  }
+  my ($top, $elsewhere) = Git::top();
+  stop('not inside a git working tree (or git refuses this one: owned by another user, or a damaged .git)')
+    unless defined $top;
+  stop("git's working folder is not this folder: a core.worktree setting points git elsewhere (or a .git here is"
+    . ' damaged); run the checks in the working folder itself') if $elsewhere;
+  chdir $top or stop('cannot enter the top folder of the repository');
+
+  my ($conf, $cp) = Conf::read('.');
+  if (@$cp) {
+    print 'run-checks: ' . Esc::line($_) . "\n" for @$cp;
+    stop('.claude/method.conf has problems (above); fix them first');
+  }
+  my @ign = eval { Conf::ignored_inputs('.') };
+  if ($@) {
+    (my $err = $@) =~ s/\n\z//;
+    stop(Esc::line($err));
+  }
+  if (@ign) {
+    print 'run-checks: ' . Esc::line($_) . " is ignored by git, so a clone would not have it; track it with git add -f\n"
+      for @ign;
+    stop('a config file is ignored by git');
+  }
+  my ($checks, $tp) = read_tsv('.');
+  if (@$tp) {
+    print 'run-checks: ' . Esc::line($_) . "\n" for @$tp;
+    stop('checks/*.tsv has problems (above); no check was run');
+  }
+  my ($here, $where) = place();
+  # held shared until the run ends (lib/runstate.pl): mutate-changed holds
+  # it exclusively, so neither runs while the other does
+  my ($kind, $why, $journal);
+  if (!eval { ($RUN_LOCK, $kind, $why) = RunState::take('shared'); $journal = (RunState::paths())[1]; 1 }) {
+    (my $err = $@) =~ s/\n\z//;
+    stop(Esc::line($err));
+  }
+  stop('busy: mutate-changed is running here; wait for it to end') if !$RUN_LOCK && $kind eq 'busy';
+  stop(Esc::line($why)) unless $RUN_LOCK;
+  stop('a mutate-changed run was cut off and left its journal, so a file may hold a mutant; run'
+    . ' mutate-changed.sh --recover') if -e $journal || -l $journal;
+
+  my $started = open_log();
+  print "run-checks: log $log_path\n";
+  # from here on, an error (git failing, say) still ends the log with END
+  my $exit = eval { run_all($conf, $checks, $here, $where, $started) };
+  if (!defined $exit) {
+    (my $err = $@) =~ s/\n\z//;
+    stop(Esc::line($err));
+  }
+  prune_logs();
+  exit $exit;
+}
+
+# run_all CONF CHECKS HERE WHERE STARTED: runs every check after the log is
+# open, writes the end of the screen and the log; the exit code
+sub run_all {
+  my ($conf, $checks, $here, $where, $started) = @_;
+  my $note = ignore_local();
+  my $before = fingerprint();
+  my $dirty = %{ $before->{e} } ? 1 : 0;
+  print {$LOG} "run-checks log\nstarted $started\ncommit $before->{head}\n",
+    'tree at start ' . ($dirty ? 'uncommitted changes' : 'clean') . "\nwhere $where\nsystem " . (POSIX::uname())[0] . "\n";
+  print {$LOG} "note $note\n" if $note;
+
+  my $env = check_env();
+  my $run = sub {
+    my ($id, $runs_in, $code) = @_;
+    print {$LOG} "=== CHECK $id ===\n";
+    my $out = temp_file();
+    finish($id, $runs_in, $code->($out), $out);
+    unlink $out;
+  };
+  $run->('secrets', '-', \&check_secrets);
+  $run->('fresh-clone', '-', sub { check_fresh_clone($conf, $_[0]) });
+  require File::Spec->catfile($lib, 'lock.pl');
+  $run->('method-files', '-', \&check_method_files) if Lock::installed('.');
+  if (!@$checks) {
+    $run->('project-checks', '-', sub {
+      { status => 'SKIPPED', kind => 'not-configured', examined => '-',
+        detail => "checks/*.tsv lists no checks, so the project's own tests were not run" } });
+  }
+  for my $c (@$checks) {
+    $run->($c->{id}, $c->{runs_in}, sub { check_project($c, $here, $env, $_[0]) });
+  }
+  $run->('tree-unchanged', '-', sub { check_tree_unchanged($before, $_[0]) });
+
+  my @failed = map { $_->{id} } grep { $_->{status} eq 'FAIL' } @results;
+  my @skipped = grep { $_->{status} eq 'SKIPPED' } @results;
+  my $not_here = grep { $_->{kind} eq 'not-here' } @skipped;
+  my $applies = grep { $_->{kind} ne 'not-here' } @skipped;
+  my $none_here = @$checks && !grep { $_->{project} && $_->{kind} ne 'not-here' } @results;
+  my $tail = "where $where" . ($dirty ? '; on uncommitted changes' : '');
+  my ($exit, $last);
+  if (@failed) {
+    $exit = 1;
+    $last = 'run-checks: FAIL - ' . scalar(@failed) . ' failed (' . join(' ', @failed) . '), ' . scalar(@passed)
+      . ' passed, ' . scalar(@skipped) . " skipped; $tail";
+  } elsif ($applies || $none_here) {
+    $exit = 3;
+    $last = 'run-checks: SKIPPED - ' . scalar(@skipped) . ' checks did not run here or examined nothing, this is not a pass'
+      . ($none_here ? '; no project check runs here' : '') . '; ' . scalar(@passed) . " passed; $tail";
+  } else {
+    $exit = 0;
+    $last = 'run-checks: PASS - ' . scalar(@passed) . ' passed' . ($not_here ? ", $not_here not for here" : '') . "; $tail";
+  }
+  my @show = @skipped_lines > 10 ? @skipped_lines[0 .. 9] : @skipped_lines;
+  print "$_\n" for @show;
+  print 'and ' . (@skipped_lines - 10) . " more SKIPPED, see the log\n" if @skipped_lines > 10;
+  print "$_\n" for passed_lines(@passed);
+  print "$last\n";
+  print {$LOG} "$last\nEND\texit $exit\n";
+  close $LOG;
+  undef $LOG;
+  return $exit;
+}
+
+main() unless caller;
+1;

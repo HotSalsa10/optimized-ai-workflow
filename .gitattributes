@@ -1,3 +1,9 @@
+# >>> method
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+# <<< method
 # LF everywhere so scripts behave the same on Windows, macOS, Linux and cloud sessions.
 * text=auto eol=lf
 

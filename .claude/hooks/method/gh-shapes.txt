@@ -1,0 +1,79 @@
+# The method's gh list (G4, M131; docs/plans/step5.md, section 6.2;
+# DECISIONS A50, A65). The guard lets a gh command through only when it
+# matches a shape here, or in the project's own
+# .claude/method-local/gh-shapes.txt (same form). `gh`, `gh --version`,
+# `gh version` and `gh help` always pass, and so does --help (or -h,
+# except under auth, where it names a host) on one of gh's own commands;
+# on an alias or an extension it would run a program.
+#
+# The form is git-shapes.txt's (read by lib/gitlist.pl). Each line:
+# SHAPE :: REASON. After the command's words, a shape lists:
+#   -x --long     a flag it allows; -x= --long= one that takes a value
+#                 (the next word, or -xVALUE, --long=VALUE)
+#   +--long=      an option that must be there
+#   -*            any other option, except those marked with ! (!-w,
+#                 !--web: a long one is also refused when abbreviated)
+#   REFNAME       a number or a branch name, never a URL (which could
+#                 name another repository); REFNAME? at most one
+#   ARG           one word; ARG... any number of words
+# Words may come in any order; after "--" every word is an ARG.
+#
+# What stays with the owner: merging (pr merge), an api call that writes,
+# gists, releases, secrets and variables, labels, repository settings,
+# workflow runs, reviews, closing or editing issues, aliases, extensions
+# and every gh command not named here. The commands that write here name
+# their options one by one, so an option gh adds later is refused until
+# it is listed; none of them takes -R or --repo. Reviewers and assignees
+# are left out: they notify people. --web is refused on the reads: it
+# runs the browser program gh is set to.
+# The guard also refuses a gh call that sets GH_REPO, GH_HOST, a token,
+# gh's config folder, or a program gh runs (editor, browser, pager).
+
+# Pull requests: open one, read them, comment. Without --head, gh pushes
+# the branch itself when it is not pushed and up to date, a push G3 never
+# judges; so the guard lets `gh pr create` without --head through only
+# when the branch is pushed and up to date (as of the last fetch)
+pr create -H= --head= -B= --base= -b= --body= -F= --body-file= -d --draft --dry-run -f --fill --fill-first --fill-verbose -l= --label= -m= --milestone= --no-maintainer-edit -p= --project= -T= --template= -t= --title= :: opens a pull request from a task branch; the owner merges
+pr comment -b= --body= -F= --body-file= REFNAME? :: comments on a pull request of this repository
+pr edit -t= --title= -b= --body= -F= --body-file= REFNAME? :: edits a pull request's title or text; never its base, state or reviewers
+pr view -* !-w !--web ARG... :: reads a pull request
+pr list -* !-w !--web ARG... :: lists pull requests
+pr diff -* !-w !--web ARG... :: reads a pull request's changes
+pr checks -* !-w !--web ARG... :: reads a pull request's checks
+pr status -* ARG... :: reads the pull requests that concern you
+
+# Issues
+issue create -b= --body= -F= --body-file= -l= --label= -m= --milestone= -p= --project= -T= --template= -t= --title= :: opens an issue in this repository
+issue comment -b= --body= -F= --body-file= REFNAME :: comments on an issue of this repository
+issue view -* !-w !--web ARG... :: reads an issue
+issue list -* !-w !--web ARG... :: lists issues
+issue status -* ARG... :: reads the issues that concern you
+
+# CI runs: read and wait, never start, cancel or re-run (on run list, -w
+# is --workflow)
+run list -* ARG... :: lists workflow runs
+run view -* !-w !--web ARG... :: reads a workflow run and its log
+run watch -* ARG... :: waits for a workflow run
+workflow list -* ARG... :: lists workflows
+workflow view -* !-w !--web ARG... :: reads a workflow
+
+# Search and read
+search repos -* !-w !--web ARG... :: searches repositories
+search code -* !-w !--web ARG... :: searches code
+search issues -* !-w !--web ARG... :: searches issues
+search prs -* !-w !--web ARG... :: searches pull requests
+search commits -* !-w !--web ARG... :: searches commits
+repo view -* !-w !--web ARG... :: reads a repository
+release list -* ARG... :: lists releases
+release view -* !-w !--web ARG... :: reads a release
+label list -* !-w !--web ARG... :: lists labels
+auth status -a --active -h= --hostname= --json= -q= --jq= --template= :: says which account gh uses; --show-token (-t) is left out, as it prints the token
+
+# The REST and GraphQL API: reading only. Each option is named, so an
+# option gh adds later is refused. -X and --method, -f and --raw-field,
+# -F and --field, and --input can each make a request that writes, so
+# none is here. A GET or HEAD method named with -X or --method is dropped
+# before the match, and with it -f and --raw-field, which gh then puts in
+# the query string (gh api --help); -F (which can read a file) and --input
+# stay refused. GraphQL needs -f, so it is refused.
+api -H= --header= -q= --jq= -t= --template= --hostname= --cache= -p= --preview= -i --include --paginate --slurp --silent --verbose ARG :: reads the API (GET only)
