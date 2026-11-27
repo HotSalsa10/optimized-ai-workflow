@@ -25,13 +25,13 @@ concurrency:
 # starting with ::) in its output, so text from a file in the repo cannot
 # fake an annotation or hide later output.
 jobs:
-  # The repo checks and the tests: about 20 minutes as a user who is not root
-  # (step 7.9), so 30 minutes keeps them within 70% of the limit. Nothing
-  # checks this margin by machine (TESTS.md, Where CI runs).
+  # The repo checks and the tests: about 21 minutes as a user who is not root
+  # (step 8.5, 69% of the old 30), so 40 minutes keeps them near 52% of the
+  # limit. Nothing checks this margin by machine (TESTS.md, Where CI runs).
   linux:
     name: Linux
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     env:
       REQUIRE_SHELLCHECK: "1"
     steps:
