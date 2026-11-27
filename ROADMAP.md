@@ -21,7 +21,7 @@ Steps, each reviewed in a fresh context and committed with a verdict trailer:
 9. First, this repo's move to v0.8.0, in a session where its hooks are off (docs/plans/step8.md S5); then project CI templates, a live test in a fresh cloud session, README v1.
 
 Exit: a new example project set up with `/method-setup` in a fresh cloud session passes the live acceptance list.
-Blocker: none; Claude does the work.
+Blocker: the owner's part of step 9: the example repository, four sessions he opens, the pre-release and `v1.0.0` tags, and the merge (docs/plans/step9.md, section 7).
 
 ## Track 2: Release 2, proof and hardening
 

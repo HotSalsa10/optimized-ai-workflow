@@ -462,6 +462,18 @@ Plan: docs/plans/step8.md, version 3 (after three critiques and 8.0's measuremen
   - [x] The commit that recorded run 165, 6fb56bf, started no run: its message's body named the skip marker while saying it did not use one, and GitHub reads the marker anywhere in a message, not only on its first line (A76 (2) asks for the first line only, and AGENTS.md's rule against it after the trailer is not enough). So the head the merge reads is the commit after it, whose message holds no marker, and its own run is the one to read before the merge.
   - [ ] The owner merges step 8; then the owner creates tag `v0.8.0` on GitHub (Claude gives the exact steps).
 
+## Step 9: this repo on v0.8.0, project CI templates, README v1, the live cloud test and Release 1
+
+Plan: docs/plans/step9.md, version 3 (27 November), on claude/step9-compare, made from main at ecefab8; version 2 is at 6d82bb5 on claude/step9. The owner asked on 27 November whether the method beats plain Claude Code; research and a simulation of a fixed win rule found a fair answer needs about 120 automated runs with an API key, and the owner chose "Finish v1, then test": the comparison is Release 2's first item (docs/plans/release2-compare.md; S19). One review and one repair loop at 9.6 (A66).
+
+- [ ] 9.0 Records: plan version 3, the Release 2 design note, RISKS #29 (in a cloud session the picker's effort outranks Best results' xhigh), TASKS, CHANGELOG, ROADMAP's step 9 blocker line. Backup push.
+- [ ] 9.1 This repo to `v0.8.0` in the owner's two-repository session where its hooks are off (Q6 and Q8 first); then the verdicts setting (`VERDICTS_FROM`, S17), the skip-marker rule (S18), the stale lines, A83 into DECISIONS.
+- [ ] 9.2 The tested client moves to 2.1.332 (the floor stays 2.1.316).
+- [ ] 9.3 The project CI template seeded by setup (M166).
+- [ ] 9.4 README v1 (M080), pull requests from a cloud session, M079's exception and the shipped words; then the pre-release `v0.9.0-rc.1`.
+- [ ] 9.5 The live test, L1 to L12, in two sessions the owner opens.
+- [ ] 9.6 Close: records, the non-root run, CI push B, one review, one repair loop, CI push C only if the repair changed the tree, the owner's merge, then tag `v1.0.0`.
+
 ## Next
 
 Steps 6 and 6b are merged (pull requests #3, 3172399, and #4, cb6d79c). 6b's CI push C (run 159 on 61d6a81) was green; the repo went public on 25 November (A18), so CI minutes no longer wait for the monthly reset (A76 (6)).
